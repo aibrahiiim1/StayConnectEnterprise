@@ -69,7 +69,7 @@ const revisions = [
 function mockPage(over: Record<string, any> = {}) {
   get.mockImplementation((path: string) => {
     if (path === "/auth/whoami") return Promise.resolve({ roles: ["site_admin"] });
-    if (path === "/pms-interfaces") return Promise.resolve({ interfaces: [iface] });
+    if (path === "/pms-interfaces" || path === "/pms-interfaces?include=retired") return Promise.resolve({ interfaces: [iface] });
     if (path.endsWith("/health")) return Promise.resolve({ health });
     if (path.endsWith("/connection-settings")) {
       if (over.recoveryFails) return Promise.reject(new Error("nope"));

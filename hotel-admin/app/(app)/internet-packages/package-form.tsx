@@ -5,6 +5,7 @@
 // lib/package-save. Plan fields are read-only context here and edited on Service Plans, since other packages
 // share the plan.
 
+import { PmsConnectionPicker } from "@/components/pms/pms-connection-picker";
 import { NetworkPicker } from "@/components/network/network-picker";
 import { useEffect, useId, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -611,7 +612,7 @@ export function PackageForm({
               </Select>
             )}
             {r.type === "TRAVEL_AGENT" && <TravelAgentPicker testId={`rule-travel-agents-${vi}`} label={`${n}: travel agents`} value={r.travel_agents} onChange={(v) => setRule(i, { travel_agents: v })} />}
-            {r.type === "PMS_INTERFACE" && <Input data-testid={`rule-pms-interfaces-${vi}`} aria-label={`${n}: PMS interfaces`} placeholder="interface id" value={r.pms_interface_ids} onChange={(e) => setRule(i, { pms_interface_ids: e.target.value })} />}
+            {r.type === "PMS_INTERFACE" && <PmsConnectionPicker testId={`rule-pms-interfaces-${vi}`} label={`${n}: PMS connections`} value={r.pms_interface_ids} onChange={(v) => setRule(i, { pms_interface_ids: v })} />}
             <Button type="button" variant="ghost" data-testid={`remove-rule-${vi}`} aria-label={`Remove condition ${vi + 1}`} onClick={() => setRules((rs) => rs.filter((_, j) => j !== i))}><Trash2 size={14} /></Button>
           </div>
           );

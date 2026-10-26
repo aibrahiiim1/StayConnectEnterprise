@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,6 +19,9 @@ import (
 )
 
 type reconciliationCaseOut struct {
+	// A case key is unique only within one PMS connection: the connection is part of a case's identity.
+	InterfaceID     string     `json:"pms_interface_id"`
+	InterfaceLabel  string     `json:"pms_interface_label,omitempty"`
 	CaseKey         string     `json:"case_key"`
 	Reservation     string     `json:"reservation,omitempty"`
 	Room            string     `json:"room,omitempty"`
@@ -53,7 +57,7 @@ func (s *server) pmsReconciliationRoutes() http.Handler {
 	return r
 }
 
-const reconciliationCaseCols = `case_key, COALESCE(reservation,''), COALESCE(room,''),
+const reconciliationCaseCols = `pms_interface_id::text, COALESCE((SELECT i.display_label FROM iam_v2.pms_interfaces i WHERE i.id = pms_interface_id),''), case_key, COALESCE(reservation,''), COALESCE(room,''),
        repeat_count, generations, first_seen_at, last_seen_at, event_at,
        latest_event_id::text, COALESCE(latest_review_code,''),
        candidate_stays, candidate_stay_id::text, roster_present, resolution_state`
@@ -79,7 +83,7 @@ func (s *server) scanReconciliationCases(w http.ResponseWriter, r *http.Request,
 	out := []reconciliationCaseOut{}
 	for rows.Next() {
 		var c reconciliationCaseOut
-		if err := rows.Scan(&c.CaseKey, &c.Reservation, &c.Room, &c.RepeatCount, &c.Generations,
+		if err := rows.Scan(&c.InterfaceID, &c.InterfaceLabel, &c.CaseKey, &c.Reservation, &c.Room, &c.RepeatCount, &c.Generations,
 			&c.FirstSeenAt, &c.LastSeenAt, &c.EventAt, &c.LatestEventID, &c.ReviewCode,
 			&c.CandidateStays, &c.CandidateStayID, &c.RosterPresent, &c.ResolutionState); err != nil {
 			slog.Error("pms reconciliation: read failed", "code", "cases_unreadable", "err", err)
@@ -99,8 +103,12 @@ func (s *server) listReconciliationCases(w http.ResponseWriter, r *http.Request)
 	extra := ""
 	args := []any{}
 	if st := strings.TrimSpace(r.URL.Query().Get("state")); st != "" {
-		extra = "AND resolution_state = $3"
 		args = append(args, st)
+		extra += "AND resolution_state = $" + strconv.Itoa(len(args)+2) + " "
+	}
+	if id := strings.TrimSpace(r.URL.Query().Get("pms_interface_id")); uuidRe.MatchString(id) {
+		args = append(args, id)
+		extra += "AND pms_interface_id = $" + strconv.Itoa(len(args)+2) + "::uuid "
 	}
 	out, ok := s.scanReconciliationCases(w, r, extra, args...)
 	if !ok {
@@ -167,10 +175,10 @@ func (s *server) listMultiOccupancyRooms(w http.ResponseWriter, r *http.Request)
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	rows, err := s.db.Query(ctx, `
-		SELECT room, stays_in_room, earliest_arrival, latest_planned_departure
+		SELECT pms_interface_id::text, COALESCE((SELECT i.display_label FROM iam_v2.pms_interfaces i WHERE i.id = pms_interface_id),''), room, stays_in_room, earliest_arrival, latest_planned_departure
 		  FROM iam_v2.pms_rooms_multi_occupancy
 		 WHERE tenant_id=$1 AND site_id=$2
-		 ORDER BY stays_in_room DESC, room LIMIT 500`, s.tenantID, s.siteID)
+		 ORDER BY stays_in_room DESC, 2, room LIMIT 500`, s.tenantID, s.siteID)
 	if err != nil {
 		slog.Error("pms reconciliation: read failed", "code", "rooms_unreadable", "err", err)
 		jsonErr(w, http.StatusInternalServerError, "rooms_unreadable", "the reconciliation data could not be read")
@@ -178,6 +186,8 @@ func (s *server) listMultiOccupancyRooms(w http.ResponseWriter, r *http.Request)
 	}
 	defer rows.Close()
 	type roomOut struct {
+		InterfaceID            string     `json:"pms_interface_id"`
+		InterfaceLabel         string     `json:"pms_interface_label,omitempty"`
 		Room                   string     `json:"room"`
 		StaysInRoom            int        `json:"stays_in_room"`
 		EarliestArrival        *time.Time `json:"earliest_arrival,omitempty"`
@@ -186,7 +196,7 @@ func (s *server) listMultiOccupancyRooms(w http.ResponseWriter, r *http.Request)
 	out := []roomOut{}
 	for rows.Next() {
 		var o roomOut
-		if err := rows.Scan(&o.Room, &o.StaysInRoom, &o.EarliestArrival, &o.LatestPlannedDeparture); err != nil {
+		if err := rows.Scan(&o.InterfaceID, &o.InterfaceLabel, &o.Room, &o.StaysInRoom, &o.EarliestArrival, &o.LatestPlannedDeparture); err != nil {
 			slog.Error("pms reconciliation: read failed", "code", "rooms_unreadable", "err", err)
 			jsonErr(w, http.StatusInternalServerError, "rooms_unreadable", "the reconciliation data could not be read")
 			return
@@ -200,11 +210,11 @@ func (s *server) listStaysPastDeparture(w http.ResponseWriter, r *http.Request) 
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	rows, err := s.db.Query(ctx, `
-		SELECT stay_id::text, COALESCE(room,''), COALESCE(reservation,''),
+		SELECT stay_id::text, pms_interface_id::text, COALESCE((SELECT i.display_label FROM iam_v2.pms_interfaces i WHERE i.id = pms_interface_id),''), COALESCE(room,''), COALESCE(reservation,''),
 		       arrival, departure, days_past_departure, roster_present, room_now_holds_another_stay
 		  FROM iam_v2.pms_stays_past_departure
 		 WHERE tenant_id=$1 AND site_id=$2
-		 ORDER BY days_past_departure DESC, room LIMIT 500`, s.tenantID, s.siteID)
+		 ORDER BY days_past_departure DESC, 3, room LIMIT 500`, s.tenantID, s.siteID)
 	if err != nil {
 		slog.Error("pms reconciliation: read failed", "code", "stays_unreadable", "err", err)
 		jsonErr(w, http.StatusInternalServerError, "stays_unreadable", "the reconciliation data could not be read")
@@ -212,13 +222,15 @@ func (s *server) listStaysPastDeparture(w http.ResponseWriter, r *http.Request) 
 	}
 	defer rows.Close()
 	type stayOut struct {
-		StayID        string     `json:"stay_id"`
-		Room          string     `json:"room,omitempty"`
-		Reservation   string     `json:"reservation,omitempty"`
-		Arrival       *time.Time `json:"arrival,omitempty"`
-		Departure     *time.Time `json:"departure,omitempty"`
-		DaysPast      int        `json:"days_past_departure"`
-		RosterPresent bool       `json:"roster_present"`
+		StayID         string     `json:"stay_id"`
+		InterfaceID    string     `json:"pms_interface_id"`
+		InterfaceLabel string     `json:"pms_interface_label,omitempty"`
+		Room           string     `json:"room,omitempty"`
+		Reservation    string     `json:"reservation,omitempty"`
+		Arrival        *time.Time `json:"arrival,omitempty"`
+		Departure      *time.Time `json:"departure,omitempty"`
+		DaysPast       int        `json:"days_past_departure"`
+		RosterPresent  bool       `json:"roster_present"`
 		// "Not listed" and "someone else is in that room now" differ: the second means the room was re-let.
 		RoomReLet bool `json:"room_now_holds_another_stay"`
 		// The reservation number was withheld.
@@ -228,7 +240,7 @@ func (s *server) listStaysPastDeparture(w http.ResponseWriter, r *http.Request) 
 	out := []stayOut{}
 	for rows.Next() {
 		var o stayOut
-		if err := rows.Scan(&o.StayID, &o.Room, &o.Reservation, &o.Arrival, &o.Departure,
+		if err := rows.Scan(&o.StayID, &o.InterfaceID, &o.InterfaceLabel, &o.Room, &o.Reservation, &o.Arrival, &o.Departure,
 			&o.DaysPast, &o.RosterPresent, &o.RoomReLet); err != nil {
 			slog.Error("pms reconciliation: read failed", "code", "stays_unreadable", "err", err)
 			jsonErr(w, http.StatusInternalServerError, "stays_unreadable", "the reconciliation data could not be read")

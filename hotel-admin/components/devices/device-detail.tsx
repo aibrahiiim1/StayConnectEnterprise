@@ -2,6 +2,7 @@
 
 // Device actions affect sessions or places; none resets quota or restores one-time free-package eligibility.
 
+import { usePmsConnections } from "@/lib/pms-scope";
 import { reasonOk as reasonWithinBounds } from "@/lib/reason";
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError, type ClientDeviceDetail, type DevicePackage } from "@/lib/api";
@@ -50,11 +51,11 @@ const ACTIONS: Record<ActionKind, { title: string; does: string; keeps: string; 
   },
 };
 
-function subject(p: DevicePackage): string {
+function subject(p: DevicePackage, multi = false): string {
   switch (p.subject_kind) {
     case "ACCOUNT": return p.subject_label ? `Account ${p.subject_label}` : "Account";
     case "VOUCHER": return "Voucher";
-    case "ROOM": return p.subject_label ? `Room ${p.subject_label}` : "Room";
+    case "ROOM": return p.subject_label ? `Room ${p.subject_label}${multi && p.pms_interface_label ? ` · ${p.pms_interface_label}` : ""}` : "Room";
     case "CLIENT": return "Client sign-in (code or social)";
     default: return "Open selection";
   }
@@ -68,6 +69,7 @@ export function DeviceDetailDialog({ deviceId, mayWrite, onClose, onChanged }: {
   onClose: () => void;
   onChanged: () => void;
 }) {
+  const { multi } = usePmsConnections();
   const toast = useToast();
   const [data, setData] = useState<ClientDeviceDetail | null>(null);
   const [err, setErr] = useState<unknown>(null);
@@ -189,7 +191,7 @@ export function DeviceDetailDialog({ deviceId, mayWrite, onClose, onChanged }: {
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
                         <div className="font-medium">{p.package_name || "Package"}{p.free ? " (free)" : ""}</div>
-                        <div className="text-caption text-muted-foreground">{subject(p)}</div>
+                        <div className="text-caption text-muted-foreground">{subject(p, multi)}</div>
                       </div>
                       <div className="flex flex-wrap items-center gap-1.5">
                         <Badge tone={LIVE.has(p.status) ? "ok" : "neutral"}>{LIVE.has(p.status) ? "Live" : "Ended"}</Badge>

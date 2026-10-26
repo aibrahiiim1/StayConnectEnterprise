@@ -34,6 +34,9 @@ export type OverviewNetwork = {
   pms_interfaces: string[];
   health_known: boolean;
   attention: string[];
+  archived?: boolean;
+  /** serving | off | archived: whether the network is a place clients can be served. */
+  service_state?: "serving" | "off" | "archived";
   /** What room sign-in does on this network, from the one assessment the dashboard and PMS screens read. Absent when it could not be assessed. */
   room_sign_in?: RoomSignInBrief;
 };

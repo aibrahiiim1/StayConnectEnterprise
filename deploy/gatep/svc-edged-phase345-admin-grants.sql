@@ -529,3 +529,6 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON iam_v2.network_archive TO svc_edged;
 
 -- 0155: the explicit room sign-in policy of each client network (NONE / DEDICATED / SHARED_STRICT). edged writes it with the mapping in one transaction.
 GRANT SELECT, INSERT, UPDATE, DELETE ON iam_v2.guest_network_pms_policy TO svc_edged;
+
+-- 0157: removing a PMS connection that was never used (the only path that deletes one).
+GRANT EXECUTE ON FUNCTION iam_v2.delete_unused_pms_interface(uuid,uuid,uuid) TO svc_edged;

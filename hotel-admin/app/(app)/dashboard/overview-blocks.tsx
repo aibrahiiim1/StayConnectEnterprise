@@ -476,11 +476,14 @@ export function NetworksCard({ snap }: { snap: OverviewSnapshot | null }) {
                   <TD>
                     <div className="flex items-center gap-2">
                       <span className="font-medium">{n.name}</span>
-                      {!n.enabled && <Badge tone="default">Off</Badge>}
+                      {!n.enabled && <Badge tone="default">Switched off</Badge>}
                     </div>
                     <div className="mt-0.5 font-mono text-2xs text-muted-foreground">
-                      {n.subnet_cidr}{n.vlan_id != null && ` · VLAN ${n.vlan_id}`}
+                      {n.subnet_cidr} · {n.network_type === "vlan" ? `VLAN ${n.vlan_id ?? "?"} (tagged)` : "untagged (native)"}
                     </div>
+                    {n.room_sign_in_policy && n.room_sign_in_policy !== "NONE" && (n.room_sign_in_connections?.length ?? 0) > 0 && (
+                      <div className="mt-0.5 text-2xs text-muted-foreground">Room sign-in: {n.room_sign_in_connections!.join(", ")}</div>
+                    )}
                   </TD>
                   <TD>
                     {n.dhcp_mode !== "local" ? (

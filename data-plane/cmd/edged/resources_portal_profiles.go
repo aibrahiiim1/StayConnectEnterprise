@@ -121,20 +121,55 @@ func (s *server) listPortalProfiles(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "portal profiles could not be read")
 		return
 	}
+	archived := s.archivedSet(ctx)
+	owner := map[string]string{}
+	for _, p := range out {
+		for _, n := range p.Networks {
+			owner[n] = p.ID
+		}
+	}
 	rest := []string{}
-	nrows, err := s.db.Query(ctx, `SELECT id::text FROM guest_networks WHERE tenant_id=$1::uuid ORDER BY name`, s.tenantID)
+	nets := []portalNetworkOut{}
+	nrows, err := s.db.Query(ctx, `SELECT id::text, name, enabled, network_type, COALESCE(vlan_id,0), COALESCE(ssid_label,''), parent_interface
+		FROM guest_networks WHERE tenant_id=$1::uuid ORDER BY name, id`, s.tenantID)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "portal profiles could not be read")
 		return
 	}
 	defer nrows.Close()
 	for nrows.Next() {
-		var id string
-		if nrows.Scan(&id) == nil && !assigned[id] {
-			rest = append(rest, id)
+		var n portalNetworkOut
+		var enabled bool
+		if nrows.Scan(&n.ID, &n.Name, &enabled, &n.NetworkType, &n.VLANID, &n.SSID, &n.Port) != nil {
+			continue
 		}
+		n.ServiceState = networkServiceState(enabled, archived[n.ID])
+		n.ProfileID = "default"
+		if p, ok := owner[n.ID]; ok {
+			n.ProfileID = p
+		}
+		if !assigned[n.ID] {
+			rest = append(rest, n.ID)
+		}
+		nets = append(nets, n)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"default": portalProfileOut{ID: "default", Name: "Site default", Networks: rest, Default: true}, "profiles": out})
+	if nrows.Err() != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "portal profiles could not be read")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"default": portalProfileOut{ID: "default", Name: "Site default", Networks: rest, Default: true}, "profiles": out, "networks": nets})
+}
+
+// portalNetworkOut is one client network as the design screen needs it: where it stands in the inventory and which design it shows.
+type portalNetworkOut struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	ServiceState string `json:"service_state"`
+	NetworkType  string `json:"network_type"`
+	VLANID       int    `json:"vlan_id,omitempty"`
+	SSID         string `json:"ssid_label,omitempty"`
+	Port         string `json:"parent_interface"`
+	ProfileID    string `json:"profile_id"`
 }
 
 func cleanProfileName(n string) (string, bool) {

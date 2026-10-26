@@ -30,6 +30,7 @@ import { AddConnectionWizard } from "./add-connection-wizard";
 import { HelpList, HelpSection } from "@/components/help";
 import { ChevronDown, ChevronRight, Hotel, Plus, RefreshCw } from "lucide-react";
 import { usePoll } from "@/lib/use-poll";
+import { RemoveConnectionDialog } from "@/components/pms/remove-connection-dialog";
 
 type Filter = "all" | "attention" | "working";
 
@@ -51,10 +52,11 @@ export default function PMSInterfacesPage() {
   const [adding, setAdding] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
   const [showInactive, setShowInactive] = useState(false);
+  const [removing, setRemoving] = useState<{ id: string; display_label: string } | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const r = await api.get<{ interfaces: PmsConnection[] }>("/pms-interfaces");
+      const r = await api.get<{ interfaces: PmsConnection[] }>("/pms-interfaces?include=retired");
       const list = r.interfaces ?? [];
       setRows(list);
       setErr(null);
@@ -133,7 +135,7 @@ export default function PMSInterfacesPage() {
                   <><strong>Room sign-in</strong> says whether guests can sign in with a room number right now, per client network where the routing is known.</>,
                   <><strong>Guests in house</strong> is the guest list mirrored from the PMS.</>,
                   <>Each card shows one connection: which system, whether it is on, which check room sign-in depends on is failing, which Wi-Fi networks use it and what configuration is live. Open a card for details.</>,
-                  <>Connections that were started but never configured, or retired, are kept apart under <strong>Inactive / not configured</strong> so a half-finished setup is never read as a PMS link that is down.</>,
+                  <>Connections that were started but never configured, or retired, are kept apart under <strong>Not configured or retired</strong> so a half-finished setup is never read as a PMS link that is down. A connection that was only ever set up can be deleted from there; one that was used is retired and its history is kept.</>,
                 ]}
               />
             </HelpSection>
@@ -285,7 +287,7 @@ export default function PMSInterfacesPage() {
                 {showInactive
                   ? <ChevronDown className="size-4 text-muted-foreground" aria-hidden />
                   : <ChevronRight className="size-4 text-muted-foreground rtl:rotate-180" aria-hidden />}
-                Inactive / not configured
+                Not configured or retired
                 <Badge tone="neutral" size="sm">{inactive.length}</Badge>
                 <span className="ms-auto hidden text-xs font-normal text-muted-foreground sm:inline">
                   Not connected to any PMS
@@ -310,6 +312,12 @@ export default function PMSInterfacesPage() {
                           onClick={() => open(i.id, retired ? "overview" : "configuration")}>
                           {retired ? "View" : writable ? "Continue setup" : "View"}
                         </Button>
+                        {!retired && writable && (
+                          <Button size="sm" variant="ghost" aria-label={`Remove ${i.display_label || "this connection"}`}
+                            onClick={() => setRemoving({ id: i.id, display_label: i.display_label })}>
+                            Remove…
+                          </Button>
+                        )}
                       </li>
                     );
                   })}
@@ -332,6 +340,13 @@ export default function PMSInterfacesPage() {
         tab={tab}
         onTab={setTab}
         onChanged={load}
+      />
+
+      <RemoveConnectionDialog
+        open={removing !== null}
+        onOpenChange={(v) => { if (!v) setRemoving(null); }}
+        connection={removing}
+        onDone={load}
       />
 
       <AddConnectionWizard

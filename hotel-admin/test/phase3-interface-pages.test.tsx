@@ -61,7 +61,7 @@ const revisions = [
 function mockInterfacePage(overrides: Record<string, any> = {}) {
   get.mockImplementation((path: string) => {
     if (path === "/auth/whoami") return Promise.resolve({ roles: overrides.roles ?? ["site_admin"] });
-    if (path === "/pms-interfaces") return Promise.resolve({ interfaces: [overrides.iface ?? iface] });
+    if (path === "/pms-interfaces" || path === "/pms-interfaces?include=retired") return Promise.resolve({ interfaces: [overrides.iface ?? iface] });
     if (path.endsWith("/health")) return Promise.resolve({ health: overrides.health ?? health });
     if (path.endsWith("/revisions")) return Promise.resolve({ revisions: overrides.revisions ?? revisions });
     if (path === "/pms-providers") {
@@ -289,7 +289,7 @@ describe("Guest network routing page", () => {
   const routingMock = (over: Record<string, any> = {}) =>
     get.mockImplementation((path: string) => {
       if (path === "/auth/whoami") return Promise.resolve({ roles: over.roles ?? ["site_admin"] });
-      if (path === "/pms-interfaces") return Promise.resolve({ interfaces: over.interfaces ?? [{ ...iface }] });
+      if (path === "/pms-interfaces" || path === "/pms-interfaces?include=retired") return Promise.resolve({ interfaces: over.interfaces ?? [{ ...iface }] });
       if (path === "/pms-routing/readiness") return Promise.resolve(over.assessment ?? assessment([]));
       if (path === "/pms-routing") return Promise.resolve({ routes: [], policies: over.policies ?? [], unmapped_guest_networks: [] });
       return Promise.resolve({});

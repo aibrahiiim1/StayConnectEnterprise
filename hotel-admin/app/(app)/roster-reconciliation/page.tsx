@@ -4,6 +4,7 @@
 // Opening the page must run nothing (a READ must not write a run row); figures come from the last recorded run.
 // Stays with newer PMS events than the snapshot are held back so a just-arrived guest is never disconnected.
 
+import { usePmsConnections } from "@/lib/pms-scope";
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { DialogForm } from "@/components/ui/dialog";
@@ -58,6 +59,7 @@ export default function RosterReconciliationPage() {
   const [dryBusy, setDryBusy] = useState(false);
   const [dryErr, setDryErr] = useState<unknown>(null);
   const [runOpen, setRunOpen] = useState<ReconcileRunRecord | null>(null);
+  const { multi } = usePmsConnections();
   const roles = useOperatorRoles();
   const writable = roles ? canWrite("pms-roster-reconciliation", roles) : false;
 
@@ -68,7 +70,7 @@ export default function RosterReconciliationPage() {
       const q = iface ? "?pms_interface_id=" + encodeURIComponent(iface) : "";
       const [s, r] = await Promise.all([
         api.get<RosterReconciliationState>("/pms-roster-reconciliation" + q),
-        api.get<{ runs: ReconcileRunRecord[] }>("/pms-roster-reconciliation/runs"),
+        api.get<{ runs: ReconcileRunRecord[] }>("/pms-roster-reconciliation/runs" + q),
       ]);
       setState(s);
       setRuns(r.runs ?? []);
@@ -317,7 +319,7 @@ export default function RosterReconciliationPage() {
         )}
       </SectionCard>
 
-      <SectionCard flush title="Every run, including the refusals">
+      <SectionCard flush title="Every run, including the refusals" description={multi ? (iface ? "Runs of the selected PMS connection." : "Runs of every PMS connection.") : undefined}>
         {runs.length === 0 ? (
           <EmptyState size="sm" icon={<History />} title="No runs yet" hint="A run is recorded each time the PMS publishes a complete guest list." />
         ) : (
@@ -325,6 +327,7 @@ export default function RosterReconciliationPage() {
             <THead>
               <TR>
                 <TH>When</TH>
+                {multi && <TH>PMS</TH>}
                 <TH className="hidden sm:table-cell">Mode</TH>
                 <TH>Outcome</TH>
                 <TH numeric className="hidden md:table-cell">Rooms</TH>
@@ -339,6 +342,7 @@ export default function RosterReconciliationPage() {
               {runs.map((r, i) => (
                 <TR key={i} onClick={() => setRunOpen(r)} selected={runOpen === r}>
                   <TD nowrap>{formatDate(r.run_at)}</TD>
+                  {multi && <TD nowrap>{r.pms_interface_label || "—"}</TD>}
                   <TD nowrap className="hidden sm:table-cell">{r.mode === "APPLY" ? "Applied" : "Dry run"}</TD>
                   <TD nowrap>
                     <StatusBadge tone={r.outcome === "COMPLETED" ? "ok" : "warn"}>

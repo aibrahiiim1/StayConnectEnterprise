@@ -8,6 +8,8 @@
 //   4. An empty room does not prove an old departure was handled ("nothing outstanding", never "resolved").
 // A case with no answer stays on the list, saying which evidence it waits for.
 
+import { usePmsConnections } from "@/lib/pms-scope";
+import { PmsTag } from "@/components/pms/pms-tag";
 import { useCallback, useEffect, useState } from "react";
 import { ClipboardCheck, DoorOpen, Users } from "lucide-react";
 import {
@@ -127,7 +129,9 @@ export default function PMSReconciliationPage() {
     void load();
   }, [load]);
 
-  const selectedCase = cases?.find((c) => c.case_key === viewing) ?? null;
+  const caseId = (c: { pms_interface_id: string; case_key: string }) => `${c.pms_interface_id}:${c.case_key}`;
+  const { multi } = usePmsConnections();
+  const selectedCase = cases?.find((c) => caseId(c) === viewing) ?? null;
   const selectedWords = selectedCase ? STATE_WORDS[selectedCase.resolution_state] : undefined;
 
   return (
@@ -243,6 +247,7 @@ export default function PMSReconciliationPage() {
                   <THead>
                     <TR>
                       <TH>Room</TH>
+                      {multi && <TH>PMS</TH>}
                       <TH>Reservation</TH>
                       <TH>Departure raised</TH>
                       <TH numeric>Recorded copies</TH>
@@ -253,8 +258,9 @@ export default function PMSReconciliationPage() {
                     {cases.map((c) => {
                       const w = STATE_WORDS[c.resolution_state];
                       return (
-                        <TR key={c.case_key} onClick={() => setViewing(c.case_key)} selected={viewing === c.case_key}>
+                        <TR key={caseId(c)} onClick={() => setViewing(caseId(c))} selected={viewing === caseId(c)}>
                           <TD nowrap className="font-mono text-xs">{c.room || "—"}</TD>
+                          {multi && <TD nowrap><PmsTag label={c.pms_interface_label} /></TD>}
                           <TD nowrap className="font-mono text-xs">{c.reservation || "—"}</TD>
                           <TD nowrap muted>
                             {c.event_at ? formatDate(c.event_at) : formatDate(c.last_seen_at)}
@@ -286,6 +292,7 @@ export default function PMSReconciliationPage() {
                   <THead>
                     <TR>
                       <TH>Room</TH>
+                      {multi && <TH>PMS</TH>}
                       <TH numeric>Stays in the room</TH>
                       <TH>Earliest arrival</TH>
                       <TH>Latest planned departure</TH>
@@ -293,8 +300,9 @@ export default function PMSReconciliationPage() {
                   </THead>
                   <TBody>
                     {rooms.map((r) => (
-                      <TR key={r.room}>
+                      <TR key={`${r.pms_interface_id}:${r.room}`}>
                         <TD nowrap className="font-mono text-xs">{r.room}</TD>
+                        {multi && <TD nowrap><PmsTag label={r.pms_interface_label} /></TD>}
                         <TD numeric>{r.stays_in_room}</TD>
                         <TD nowrap muted>{r.earliest_arrival ? formatDate(r.earliest_arrival) : "—"}</TD>
                         <TD nowrap muted>{r.latest_planned_departure ? formatDate(r.latest_planned_departure) : "—"}</TD>
@@ -315,6 +323,7 @@ export default function PMSReconciliationPage() {
                   <THead>
                     <TR>
                       <TH>Room</TH>
+                      {multi && <TH>PMS</TH>}
                       <TH>Reservation</TH>
                       <TH>Planned departure</TH>
                       <TH numeric>Days past</TH>
@@ -325,6 +334,7 @@ export default function PMSReconciliationPage() {
                     {stays.map((s) => (
                       <TR key={s.stay_id}>
                         <TD nowrap className="font-mono text-xs">{s.room || "—"}</TD>
+                        {multi && <TD nowrap><PmsTag label={s.pms_interface_label} /></TD>}
                         <TD nowrap className="font-mono text-xs">{s.reservation || "—"}</TD>
                         <TD nowrap muted>{s.departure ? formatDate(s.departure) : "—"}</TD>
                         <TD numeric>{s.days_past_departure}</TD>
@@ -352,7 +362,7 @@ export default function PMSReconciliationPage() {
         open={selectedCase !== null}
         onOpenChange={(v) => { if (!v) setViewing(null); }}
         eyebrow="Unresolved departure"
-        title={selectedCase ? `Room ${selectedCase.room || "—"}` : ""}
+        title={selectedCase ? `Room ${selectedCase.room || "—"}${multi && selectedCase.pms_interface_label ? ` · ${selectedCase.pms_interface_label}` : ""}` : ""}
         description={selectedCase?.reservation ? `Reservation ${selectedCase.reservation}` : undefined}
         badges={selectedCase ? (
           <StatusBadge tone={selectedWords?.tone ?? "neutral"}>{selectedWords?.label ?? selectedCase.resolution_state}</StatusBadge>
@@ -367,6 +377,7 @@ export default function PMSReconciliationPage() {
               <DescriptionList
                 items={[
                   { label: "Room", value: selectedCase.room || "—" },
+                  { label: "PMS connection", value: selectedCase.pms_interface_label || "—" },
                   { label: "Reservation", value: selectedCase.reservation || "—" },
                   { label: "Departure raised", value: selectedCase.event_at ? formatDate(selectedCase.event_at) : "—" },
                   { label: "Last seen", value: formatDate(selectedCase.last_seen_at) },

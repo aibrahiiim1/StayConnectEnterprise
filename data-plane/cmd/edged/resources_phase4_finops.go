@@ -62,6 +62,8 @@ type settlementRow struct {
 	At            *time.Time `json:"at"`
 	Source        string     `json:"source"`
 	Room          *string    `json:"room"`
+	// The PMS connection a room payment belongs to: a room number only identifies a room together with it.
+	PMSConnection *string `json:"pms_interface_label,omitempty"`
 }
 
 const settlementSelect = `
@@ -73,7 +75,8 @@ SELECT v.settlement_id::text, v.purchase_id::text, v.method, v.status, v.purchas
             WHEN e.guest_account_id IS NOT NULL THEN 'ACCOUNT'
             WHEN e.anonymous_subject_id IS NOT NULL THEN 'OPEN'
             ELSE '' END,
-       st.normalized_room_number
+       st.normalized_room_number,
+       (SELECT NULLIF(pi.display_label,'') FROM iam_v2.pms_interfaces pi WHERE pi.id = st.pms_interface_id)
   FROM iam_v2.v_financial_settlements v
   JOIN iam_v2.purchases p ON p.id = v.purchase_id
   LEFT JOIN iam_v2.internet_package_revisions r ON r.id = p.package_revision_id
@@ -85,7 +88,7 @@ SELECT v.settlement_id::text, v.purchase_id::text, v.method, v.status, v.purchas
 
 func scanSettlement(row interface{ Scan(...any) error }, e *settlementRow) error {
 	return row.Scan(&e.SettlementID, &e.PurchaseID, &e.Method, &e.Status, &e.PurchaseState,
-		&e.AmountMinor, &e.Currency, &e.Exponent, &e.PackageName, &e.At, &e.Source, &e.Room)
+		&e.AmountMinor, &e.Currency, &e.Exponent, &e.PackageName, &e.At, &e.Source, &e.Room, &e.PMSConnection)
 }
 
 // Applied in SQL so a view pages over every payment, not just the page on screen.

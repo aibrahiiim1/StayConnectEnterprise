@@ -3,6 +3,7 @@
 // Reset rotates the PIN without ending access; revoke ends access for this stay episode irreversibly.
 // Plaintext PINs are never stored, so a reset response can reveal its new PIN only once.
 
+import { usePmsConnections } from "@/lib/pms-scope";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CalendarClock } from "lucide-react";
 import { api } from "@/lib/api";
@@ -29,6 +30,7 @@ type Profile = {
   origin_lifecycle_version: number;
   external_reservation_id: string;
   normalized_room_number: string | null;
+  pms_interface_label?: string;
   stay_status: string;
   status: "ACTIVE" | "REVOKED";
   pin_generation: number;
@@ -63,6 +65,7 @@ function stateOf(row: Profile): StateWords {
 /** Wait for role loading before showing a read-only notice. */
 export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; rolesKnown?: boolean }) {
   const toast = useToast();
+  const { multi } = usePmsConnections();
   const [rows, setRows] = useState<Profile[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -122,7 +125,7 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
       if (dialog.kind === "reset" && res.pin) {
         setRevealed({ profileId: dialog.row.id, pin: res.pin, validUntil: res.valid_until ?? "" });
       } else if (dialog.kind === "revoke") {
-        toast.success("Post-stay access ended", `Room ${dialog.row.normalized_room_number ?? "—"} can no longer reconnect with a PIN.`);
+        toast.success("Post-stay access ended", `Room ${dialog.row.normalized_room_number ?? "—"}${multi && dialog.row.pms_interface_label ? ` at ${dialog.row.pms_interface_label}` : ""} can no longer reconnect with a PIN.`);
       }
       closeDialog();
       load();
@@ -213,6 +216,7 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
                   <TR key={row.id} onClick={() => setDetail(row)}>
                     <TD nowrap className="font-medium">
                       {row.normalized_room_number ? `Room ${row.normalized_room_number}` : "No room"}
+                      {multi && row.pms_interface_label && <div className="text-xs font-normal text-muted-foreground">{row.pms_interface_label}</div>}
                     </TD>
                     <TD truncate title={row.external_reservation_id || undefined} className="hidden max-w-[12rem] md:table-cell">{row.external_reservation_id || "—"}</TD>
                     <TD muted className="hidden lg:table-cell">
@@ -256,7 +260,7 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
         open={detail !== null}
         onOpenChange={(v) => !v && setDetail(null)}
         eyebrow="Post-stay access"
-        title={detail?.normalized_room_number ? `Room ${detail.normalized_room_number}` : "Post-stay access"}
+        title={detail?.normalized_room_number ? `Room ${detail.normalized_room_number}${multi && detail.pms_interface_label ? ` · ${detail.pms_interface_label}` : ""}` : "Post-stay access"}
         description={detail ? `Reservation ${detail.external_reservation_id || "—"}` : undefined}
         badges={detail ? (
           <>

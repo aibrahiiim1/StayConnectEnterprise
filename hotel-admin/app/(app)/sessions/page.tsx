@@ -1,5 +1,6 @@
 "use client";
 
+import { usePmsConnections } from "@/lib/pms-scope";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { api, Session } from "@/lib/api";
@@ -75,6 +76,7 @@ export default function SessionsPage() {
   const [actionErr, setActionErr] = useState<unknown>(null);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const toast = useToast();
+  const { multi } = usePmsConnections();
 
   // Disconnect is offered only to roles edged accepts it from; fails closed while roles load.
   const roles = useOperatorRoles();
@@ -114,7 +116,7 @@ export default function SessionsPage() {
     setBusy(true); setActionErr(null);
     try {
       await api.post(`/sessions/${s.id}/disconnect`, { reason: "admin" });
-      toast.success(`${identifySession(s).title} — device disconnected.`);
+      toast.success(`${identifySession(s, multi).title} — device disconnected.`);
       setConfirm(null);
       setDetail(null);
       // scd enforces asynchronously; reloading immediately would still show the session active.
@@ -328,8 +330,8 @@ export default function SessionsPage() {
         open={detail !== null}
         onOpenChange={(v) => !v && setDetail(null)}
         eyebrow="Session"
-        title={detail ? identifySession(detail).title : ""}
-        description={detail ? identifySession(detail).subtitle : undefined}
+        title={detail ? identifySession(detail, multi).title : ""}
+        description={detail ? identifySession(detail, multi).subtitle : undefined}
         actions={
           detail?.state === "active" && mayDisconnect ? (
             <>
@@ -347,10 +349,10 @@ export default function SessionsPage() {
       <ConfirmDialog
         open={confirm !== null}
         onOpenChange={(v) => !v && setConfirm(null)}
-        title={confirm ? `Disconnect ${identifySession(confirm).title}'s device?` : "Disconnect this device?"}
+        title={confirm ? `Disconnect ${identifySession(confirm, multi).title}'s device?` : "Disconnect this device?"}
         description={
           confirm
-            ? `${identifySession(confirm).title} will lose internet access on this device immediately. ${
+            ? `${identifySession(confirm, multi).title} will lose internet access on this device immediately. ${
                 typeof confirm.active_devices === "number" && confirm.active_devices > 1
                   ? `Their ${confirm.active_devices - 1} other device${confirm.active_devices - 1 === 1 ? "" : "s"} stay online`
                   : "They have no other device online"
@@ -396,7 +398,8 @@ const SessionRow = memo(function SessionRow({
   onOpen: (s: Session) => void;
   onDisconnect: (s: Session) => void;
 }) {
-  const id = identifySession(s);
+  const { multi } = usePmsConnections();
+  const id = identifySession(s, multi);
   const Icon = KIND_ICON[(s.subject_kind ?? "") as keyof typeof KIND_ICON] ?? Monitor;
   const st = stateWords(s.state);
   return (
@@ -525,7 +528,8 @@ function AllowanceCell({ s }: { s: Session }) {
 }
 
 function SessionDetail({ s }: { s: Session }) {
-  const id = identifySession(s);
+  const { multi } = usePmsConnections();
+  const id = identifySession(s, multi);
   const st = stateWords(s.state);
   return (
     <>

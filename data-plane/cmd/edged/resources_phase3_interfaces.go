@@ -66,6 +66,8 @@ func (s *server) pmsInterfacesRoutes() http.Handler {
 	// publishing decides what the connector would dial and activating decides whether it dials at all. pmsd selects
 	// `WHERE lifecycle_state='ACTIVE'`.
 	r.Post("/{id}/lifecycle", s.setPMSInterfaceLifecycle)
+	r.Get("/{id}/removal", s.previewPMSRemoval)
+	r.Post("/{id}/removal", s.removePMSInterface)
 	return r
 }
 
@@ -217,8 +219,8 @@ func (s *server) listPMSInterfaces(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	rows, err := s.db.Query(ctx, `SELECT `+pmsInterfaceCols+`
 		FROM iam_v2.pms_interfaces i
-		WHERE i.tenant_id=$1 AND i.site_id=$2
-		ORDER BY i.display_label, i.id`, s.tenantID, s.siteID)
+		WHERE i.tenant_id=$1 AND i.site_id=$2 AND ($3::bool OR i.lifecycle_state <> 'DECOMMISSIONED')
+		ORDER BY i.display_label, i.id`, s.tenantID, s.siteID, r.URL.Query().Get("include") == "retired")
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 		return

@@ -43,6 +43,7 @@ func (s *server) networkRoutes() http.Handler {
 	s.mountArchive(r)
 	r.Get("/guest-networks/{id}/sign-in", s.getNetworkSignin)
 	r.Put("/guest-networks/{id}/sign-in", s.putNetworkSignin)
+	r.Get("/sign-in-overrides", s.listNetworkSigninOverrides)
 	r.Get("/guest-networks/{id}/diagnostics", s.networkDiagnostics)
 	r.Get("/overview", s.networkOverview)
 	r.Get("/factory", s.getFactory)
@@ -149,6 +150,8 @@ type guestNetworkRow struct {
 	Reservations    []reservationRow `json:"reservations,omitempty"`
 	Archived        bool             `json:"archived"`
 	IsDefault       bool             `json:"is_default"`
+	// serving | off | archived: the one reading of whether a network is a place a client can be served, used by every list and selector.
+	ServiceState string `json:"service_state"`
 }
 
 type reservationRow struct {
@@ -202,6 +205,7 @@ func (s *server) listGuestNetworks(w http.ResponseWriter, r *http.Request) {
 	for i := range out {
 		out[i].Pools = s.loadPoolsFor(ctx, out[i].ID)
 		out[i].Archived, out[i].IsDefault = archived[out[i].ID], out[i].ID == def
+		out[i].ServiceState = networkServiceState(out[i].Enabled, out[i].Archived)
 	}
 	writeList(w, out)
 }
@@ -221,6 +225,8 @@ func (s *server) getGuestNetwork(w http.ResponseWriter, r *http.Request) {
 	}
 	g.Pools = s.loadPoolsFor(ctx, id)
 	g.Reservations = s.loadReservationsFor(ctx, id)
+	g.Archived = s.archivedSet(ctx)[id]
+	g.ServiceState = networkServiceState(g.Enabled, g.Archived)
 	writeJSON(w, http.StatusOK, g)
 }
 

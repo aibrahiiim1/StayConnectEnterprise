@@ -68,6 +68,8 @@ describe("Change VLAN or port", () => {
     const submit = within(dialog).getByRole("button", { name: /create replacement/i });
     expect((submit as HTMLButtonElement).disabled).toBe(true);
 
+    expect(within(dialog).getByText("Untagged (native)")).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: /tagged vlan/i }));
     fireEvent.change(within(dialog).getByLabelText("VLAN id"), { target: { value: "30" } });
     fireEvent.change(within(dialog).getByLabelText("Why"), { target: { value: "port moved to a trunk" } });
     await waitFor(() => expect((submit as HTMLButtonElement).disabled).toBe(false));
@@ -96,7 +98,7 @@ describe("Change VLAN or port", () => {
     render(<GuestNetworkDetailPage />);
     fireEvent.click(await screen.findByRole("button", { name: /change vlan or port/i }));
     const dialog = await screen.findByRole("dialog");
-    fireEvent.click(within(dialog).getByRole("checkbox", { name: /tagged vlan/i }));
+    expect((within(dialog).getByRole("checkbox", { name: /tagged vlan/i }) as HTMLInputElement).checked).toBe(true);
     fireEvent.change(within(dialog).getByLabelText("Why"), { target: { value: "no real change" } });
     expect(await within(dialog).findByText(/That is the current topology/)).toBeTruthy();
     expect((within(dialog).getByRole("button", { name: /create replacement/i }) as HTMLButtonElement).disabled).toBe(true);

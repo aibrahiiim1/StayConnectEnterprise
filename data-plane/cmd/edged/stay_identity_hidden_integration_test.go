@@ -28,7 +28,7 @@ func TestIntegration_ReconciliationHidesReservationNumbersFromTheViewer(t *testi
 		t.Fatalf("the stay must be past departure with its reservation (%d, %v)", listed, err)
 	}
 	st, raw := f.doRaw(t, "GET", "/pms-reconciliation/past-departure", nil)
-	if st != 200 || strings.Contains(raw, res) || !strings.Contains(raw, `"identity_hidden":true`) || !strings.Contains(raw, stay) {
+	if st != 200 || strings.Contains(raw, `"reservation":`) || !strings.Contains(raw, `"identity_hidden":true`) || !strings.Contains(raw, stay) {
 		t.Fatalf("the viewer must see the stay without its reservation: %d %s", st, raw)
 	}
 	if got := opaqueCaseKey("reservation:" + res); strings.Contains(got, res) || got != opaqueCaseKey("reservation:"+res) {

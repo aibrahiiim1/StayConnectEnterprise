@@ -43,6 +43,41 @@ func (s *server) getNetworkSignin(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// listNetworkSigninOverrides is every network's narrowing in one read, for the screen that shows what each network actually offers. A network without an entry offers
+// everything the site does.
+func (s *server) listNetworkSigninOverrides(w http.ResponseWriter, r *http.Request) {
+	if s.tenantID == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"overrides": map[string]networkSigninDoc{}})
+		return
+	}
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+	rows, err := s.db.Query(ctx, `SELECT network_id::text, disabled_methods, COALESCE(primary_method,''), remember_days FROM iam_v2.network_signin_overrides WHERE tenant_id=$1::uuid`, s.tenantID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "the networks' sign-in settings could not be read")
+		return
+	}
+	defer rows.Close()
+	out := map[string]networkSigninDoc{}
+	for rows.Next() {
+		var id string
+		var d networkSigninDoc
+		if err := rows.Scan(&id, &d.DisabledMethods, &d.PrimaryMethod, &d.RememberDays); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "internal", "the networks' sign-in settings could not be read")
+			return
+		}
+		if d.DisabledMethods == nil {
+			d.DisabledMethods = []string{}
+		}
+		out[id] = d
+	}
+	if rows.Err() != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "the networks' sign-in settings could not be read")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"overrides": out})
+}
+
 func (s *server) putNetworkSignin(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if !s.networkOfSite(w, r, id) {

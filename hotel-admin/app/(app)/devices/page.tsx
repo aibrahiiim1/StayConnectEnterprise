@@ -2,6 +2,7 @@
 
 // The search text travels in a header, not the URL: it is a MAC address or account name, and edged logs request lines.
 
+import { usePmsConnections } from "@/lib/pms-scope";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, type ClientDeviceRow, type DeviceSettings } from "@/lib/api";
 import { canRead, canWrite } from "@/lib/roles";
@@ -33,19 +34,20 @@ function DeviceStatus({ r }: { r: ClientDeviceRow }) {
   return <StatusBadge>Not connected</StatusBadge>;
 }
 
-function holder(r: ClientDeviceRow): string {
+function holder(r: ClientDeviceRow, multi = false): string {
   const p = r.current;
   if (!p) return "—";
   switch (p.subject_kind) {
     case "ACCOUNT": return p.subject_label ?? "Account";
     case "VOUCHER": return "Voucher";
-    case "ROOM": return p.subject_label ? `Room ${p.subject_label}` : "Room";
+    case "ROOM": return p.subject_label ? `Room ${p.subject_label}${multi && p.pms_interface_label ? ` · ${p.pms_interface_label}` : ""}` : "Room";
     case "CLIENT": return "Client sign-in";
     default: return "Open selection";
   }
 }
 
 export default function DevicesPage() {
+  const { multi } = usePmsConnections();
   const roles = useOperatorRoles();
   const mayWrite = roles === null ? false : canWrite("sessions", roles);
   const mayConfigure = roles === null ? false : canWrite("auth-methods", roles);
@@ -134,7 +136,7 @@ export default function DevicesPage() {
               {rows.map((r) => {
                 const where = [r.hostname, r.online_ip || r.lease_ip || r.last_ip].filter(Boolean).join(" · ");
                 const pkg = r.current ? r.current.package_name || "Package" : "";
-                const held = holder(r);
+                const held = holder(r, multi);
                 return (
                 <TR key={r.id || r.mac} onClick={r.id ? () => setOpen(r.id) : undefined}>
                   <TD nowrap className="max-w-[13rem]">

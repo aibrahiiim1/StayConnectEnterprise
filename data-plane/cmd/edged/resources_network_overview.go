@@ -72,6 +72,7 @@ type overviewNetwork struct {
 	HealthKnown     bool               `json:"health_known"`
 	Attention       []string           `json:"attention"`
 	Archived        bool               `json:"archived"`
+	ServiceState    string             `json:"service_state"`
 	IsDefault       bool               `json:"is_default"`
 	// What room sign-in does on this network, from the one assessment every screen reads. Nil when it could not be assessed.
 	RoomSignIn *roomSignInBrief `json:"room_sign_in,omitempty"`
@@ -275,6 +276,7 @@ func (s *server) buildNetworkOverview(ctx context.Context, diag netdDiagReport, 
 		}
 		_ = s.db.QueryRow(ctx, activeOnNetworkSQL, n.ID).Scan(&item.ActiveClients)
 		item.Archived, item.IsDefault = archivedIDs[n.ID], n.ID == defaultID
+		item.ServiceState = networkServiceState(item.SavedEnabled, item.Archived)
 		item.RoomSignIn = roomBy[n.ID]
 		out.Networks = append(out.Networks, item)
 	}

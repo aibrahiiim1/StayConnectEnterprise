@@ -23,7 +23,7 @@ const KIND_LABELS: Record<string, string> = {
  * A voucher is unnamed (the admin service cannot read its code). With nothing else known it falls back to the MAC
  * address, marked `anonymous`.
  */
-export function identifySession(s: Session): SessionIdentity {
+export function identifySession(s: Session, multiPms = false): SessionIdentity {
   const kind = (s.subject_kind ?? "") as SubjectKind;
   const kindLabel = KIND_LABELS[kind] ?? "Device";
 
@@ -32,7 +32,8 @@ export function identifySession(s: Session): SessionIdentity {
     const name = s.subject_name ?? undefined;
     return {
       title: room ? `Room ${room}` : "Room stay",
-      subtitle: name ?? (s.external_reservation_id ? `Reservation ${s.external_reservation_id}` : undefined),
+      subtitle: [multiPms ? s.pms_interface_label : undefined, name ?? (s.external_reservation_id ? `Reservation ${s.external_reservation_id}` : undefined)]
+        .filter(Boolean).join(" · ") || undefined,
       kind, kindLabel, anonymous: false,
     };
   }

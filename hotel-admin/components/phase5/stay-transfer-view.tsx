@@ -12,7 +12,8 @@ import { Card, CardBody, CardDescription, CardFooter, CardHeader, CardTitle } fr
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Field, Input } from "@/components/ui/input";
+import { Field, Input, Select } from "@/components/ui/input";
+import { usePmsConnections } from "@/lib/pms-scope";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { HelpList, HelpSection } from "@/components/help";
@@ -62,10 +63,10 @@ const outcomeWords = (c: string) => OUTCOME_WORDS[c] ?? c.replace(/_/g, " ").toL
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
-function StayLabel({ room, reservation }: { room: string; reservation: string }) {
+function StayLabel({ room, reservation, pms }: { room: string; reservation: string; pms?: string }) {
   return (
     <span className="min-w-0">
-      <span className="block font-medium">{room ? `Room ${room}` : "No room"}</span>
+      <span className="block font-medium">{room ? `Room ${room}` : "No room"}{pms ? <span className="font-normal text-muted-foreground"> · {pms}</span> : null}</span>
       <span className="block text-caption text-muted-foreground">Reservation {reservation || "—"}</span>
     </span>
   );
@@ -79,6 +80,10 @@ export function StayTransferView({ canAct, rolesKnown = true }: { canAct: boolea
   const [rows, setRows] = useState<TransferRow[] | null>(null);
   const [fromStay, setFromStay] = useState("");
   const [toStay, setToStay] = useState("");
+  // Empty = any connection. With several PMS connections the same reservation number can exist in more than one, so the connection can be named.
+  const [fromPms, setFromPms] = useState("");
+  const [toPms, setToPms] = useState("");
+  const { connections, multi, labelOf } = usePmsConnections();
   const [preview, setPreview] = useState<Preview | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [password, setPassword] = useState("");
@@ -116,6 +121,8 @@ export function StayTransferView({ canAct, rolesKnown = true }: { canAct: boolea
         await api.post<Preview>("/stay-transfers/preview", {
           from_stay_id: fromStay.trim(),
           to_stay_id: toStay.trim(),
+          ...(fromPms ? { from_pms_interface_id: fromPms } : {}),
+          ...(toPms ? { to_pms_interface_id: toPms } : {}),
         }),
       );
     } catch (e: unknown) {
@@ -156,6 +163,8 @@ export function StayTransferView({ canAct, rolesKnown = true }: { canAct: boolea
       setReason("");
       setFromStay("");
       setToStay("");
+      setFromPms("");
+      setToPms("");
       load();
     } catch (e: unknown) {
       setExecError(String((e as { message?: string })?.message ?? e));
@@ -184,7 +193,7 @@ export function StayTransferView({ canAct, rolesKnown = true }: { canAct: boolea
             <HelpSection title="How it works">
               <HelpList
                 items={[
-                  <>Enter the stay reference on the PMS the guest is leaving and the one on the PMS they are moving to, then preview.</>,
+                  <>Enter the stay reference on the PMS the guest is leaving and the one on the PMS they are moving to, then preview. If a reservation number exists at more than one PMS connection, choose the connection too.</>,
                   <>The preview shows the devices and live sessions that will move. Nothing moves until you confirm with a reason and your password.</>,
                   <>The guest stays connected: no sign-out, no signing in again.</>,
                 ]}
@@ -218,25 +227,45 @@ export function StayTransferView({ canAct, rolesKnown = true }: { canAct: boolea
               className="grid items-end gap-3 sm:grid-cols-[1fr_auto_1fr_auto]"
               onSubmit={(e) => { e.preventDefault(); void runPreview(); }}
             >
-              <Field label="From stay" hint="Reservation number on the PMS the guest is leaving, or a stay id.">
-                <Input
-                  value={fromStay}
-                  onChange={(e) => { setFromStay(e.target.value); setPreview(null); }}
-                  placeholder="Reservation number"
-                  className="font-mono"
-                  autoComplete="off"
-                />
-              </Field>
+              <div className="space-y-2">
+                <Field label="From stay" hint="Reservation number on the PMS the guest is leaving, or a stay id.">
+                  <Input
+                    value={fromStay}
+                    onChange={(e) => { setFromStay(e.target.value); setPreview(null); }}
+                    placeholder="Reservation number"
+                    className="font-mono"
+                    autoComplete="off"
+                  />
+                </Field>
+                {multi && (
+                  <Field label="PMS connection of that stay" optional>
+                    <Select value={fromPms} onChange={(e) => { setFromPms(e.target.value); setPreview(null); }}>
+                      <option value="">Any PMS connection</option>
+                      {(connections ?? []).filter((c) => !c.retired).map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                    </Select>
+                  </Field>
+                )}
+              </div>
               <ArrowRight className="mb-9 hidden size-4 text-muted-foreground sm:block rtl:rotate-180" aria-hidden />
-              <Field label="To stay" hint="Reservation number on the PMS the guest is moving to, or a stay id.">
-                <Input
-                  value={toStay}
-                  onChange={(e) => { setToStay(e.target.value); setPreview(null); }}
-                  placeholder="Reservation number"
-                  className="font-mono"
-                  autoComplete="off"
-                />
-              </Field>
+              <div className="space-y-2">
+                <Field label="To stay" hint="Reservation number on the PMS the guest is moving to, or a stay id.">
+                  <Input
+                    value={toStay}
+                    onChange={(e) => { setToStay(e.target.value); setPreview(null); }}
+                    placeholder="Reservation number"
+                    className="font-mono"
+                    autoComplete="off"
+                  />
+                </Field>
+                {multi && (
+                  <Field label="PMS connection of that stay" optional>
+                    <Select value={toPms} onChange={(e) => { setToPms(e.target.value); setPreview(null); }}>
+                      <option value="">Any PMS connection</option>
+                      {(connections ?? []).filter((c) => !c.retired).map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                    </Select>
+                  </Field>
+                )}
+              </div>
               <Button type="submit" variant="secondary" className="sm:mb-6" disabled={busy}>
                 {busy && !confirming ? "Previewing…" : "Preview"}
               </Button>
@@ -251,9 +280,9 @@ export function StayTransferView({ canAct, rolesKnown = true }: { canAct: boolea
             {preview && !preview.blocker && (
               <div className="space-y-3 rounded-lg border border-border bg-surface/50 p-4" data-testid="preview-summary">
                 <div className="flex flex-wrap items-center gap-3 text-sm">
-                  <StayLabel room={preview.from_room} reservation={preview.from_external_reservation_id} />
+                  <StayLabel room={preview.from_room} reservation={preview.from_external_reservation_id} pms={multi ? labelOf(preview.from_pms_interface_id) : undefined} />
                   <ArrowRight className="size-4 shrink-0 text-muted-foreground rtl:rotate-180" aria-label="moves to" />
-                  <StayLabel room={preview.to_room} reservation={preview.to_external_reservation_id} />
+                  <StayLabel room={preview.to_room} reservation={preview.to_external_reservation_id} pms={multi ? labelOf(preview.to_pms_interface_id) : undefined} />
                 </div>
                 <MetricStrip
                   className="sm:grid-cols-2"

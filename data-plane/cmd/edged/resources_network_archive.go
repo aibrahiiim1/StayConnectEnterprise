@@ -40,6 +40,19 @@ func (s *server) archivedSet(ctx context.Context) map[string]bool {
 	return out
 }
 
+// networkServiceState is the single reading of a client network's place in the inventory: it serves clients (enabled and not archived), it is switched off but
+// still current, or it is archived history. Whether a serving network is healthy is a separate question the overview answers.
+func networkServiceState(enabled, archived bool) string {
+	switch {
+	case archived:
+		return "archived"
+	case enabled:
+		return "serving"
+	default:
+		return "off"
+	}
+}
+
 // defaultNetworkID is the prepared network when it is the one serving: it exists, is switched on and is not archived. "" otherwise.
 func (s *server) defaultNetworkID(ctx context.Context) string {
 	id := s.factoryNetworkID(ctx)

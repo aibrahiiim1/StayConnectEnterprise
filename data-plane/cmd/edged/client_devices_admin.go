@@ -23,12 +23,14 @@ import (
 const deviceSearchHeader = "X-Device-Search"
 
 type devicePackage struct {
-	EntitlementID   string     `json:"entitlement_id"`
-	Status          string     `json:"status"`
-	PackageName     string     `json:"package_name"`
-	Free            bool       `json:"free"`
-	SubjectKind     string     `json:"subject_kind"` // ACCOUNT | VOUCHER | ROOM | CLIENT | OPEN
-	SubjectLabel    string     `json:"subject_label,omitempty"`
+	EntitlementID string `json:"entitlement_id"`
+	Status        string `json:"status"`
+	PackageName   string `json:"package_name"`
+	Free          bool   `json:"free"`
+	SubjectKind   string `json:"subject_kind"` // ACCOUNT | VOUCHER | ROOM | CLIENT | OPEN
+	SubjectLabel  string `json:"subject_label,omitempty"`
+	// The PMS connection a room stay came from (a room number only identifies a room together with it).
+	PMSConnection   string     `json:"pms_interface_label,omitempty"`
 	AccountID       string     `json:"account_id,omitempty"`
 	Slot            string     `json:"slot"` // AUTHORIZED (holds a place) | DISCONNECTED (released)
 	SlotReason      string     `json:"slot_reason,omitempty"`
@@ -119,7 +121,8 @@ const devicePackageSelect = `
 	           COALESCE(ga.username, st.normalized_room_number, ''), COALESCE(e.guest_account_id::text,''),
 	           ed.status, COALESCE(ed.disconnected_reason,''), ed.first_authorized, ed.last_authorized,
 	           e.window_ends_at, e.consumed_data_bytes, e.data_quota_bytes, spr.max_concurrent_devices,
-	           (SELECT count(*)::int FROM iam_v2.entitlement_devices x WHERE x.entitlement_id = e.id AND x.status = 'AUTHORIZED')
+	           (SELECT count(*)::int FROM iam_v2.entitlement_devices x WHERE x.entitlement_id = e.id AND x.status = 'AUTHORIZED'),
+	           COALESCE((SELECT pi.display_label FROM iam_v2.pms_interfaces pi WHERE pi.id = st.pms_interface_id), '')
 	      FROM iam_v2.entitlement_devices ed
 	      JOIN iam_v2.entitlements e ON e.id = ed.entitlement_id
 	      LEFT JOIN iam_v2.internet_package_revisions ipr ON ipr.id = e.package_revision_id
@@ -131,7 +134,7 @@ const devicePackageSelect = `
 func scanDevicePackage(row interface{ Scan(...any) error }, p *devicePackage) error {
 	return row.Scan(&p.EntitlementID, &p.Status, &p.PackageName, &p.Free, &p.SubjectKind, &p.SubjectLabel, &p.AccountID,
 		&p.Slot, &p.SlotReason, &p.FirstAuthorized, &p.LastAuthorized, &p.WindowEndsAt, &p.ConsumedBytes,
-		&p.DataQuotaBytes, &p.MaxDevices, &p.PlacesInUse)
+		&p.DataQuotaBytes, &p.MaxDevices, &p.PlacesInUse, &p.PMSConnection)
 }
 
 func (s *server) clientDevicesAdminRoutes() http.Handler {

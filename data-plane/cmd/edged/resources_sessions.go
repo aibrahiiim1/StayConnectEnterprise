@@ -44,6 +44,8 @@ type edgeSessionRow struct {
 	StayID      *string `json:"stay_id,omitempty"`
 	Room        *string `json:"room,omitempty"`
 	Reservation *string `json:"external_reservation_id,omitempty"`
+	// The PMS connection the stay came from: a room number means nothing without it where a site has several.
+	PMSInterface *string `json:"pms_interface_label,omitempty"`
 
 	// The package is the guest-facing offer; the plan is the service behind it (its numbers explain slow sessions).
 	PackageCode *string `json:"package_code,omitempty"`
@@ -84,6 +86,7 @@ const sessionCols = `s.id, s.ip::text, s.mac::text, s.state,
          NULLIF(ga.display_name,'')
        ) AS subject_name,
        st.id::text, st.normalized_room_number, st.external_reservation_id,
+       (SELECT NULLIF(pi.display_label,'') FROM iam_v2.pms_interfaces pi WHERE pi.id = st.pms_interface_id),
        ip.code, NULLIF(ipr.display->>'name',''),
        sp.code, spr.down_kbps, spr.up_kbps, spr.max_concurrent_devices,
        COALESCE(e.data_quota_bytes, spr.data_quota_bytes), e.consumed_data_bytes,
@@ -130,7 +133,7 @@ func scanEdgeSession(row interface{ Scan(...any) error }, e *edgeSessionRow) err
 		&e.EndedAt, &e.ExpiresAt, &e.EndReason, &e.BytesUp, &e.BytesDown,
 		&e.CredentialMethod, &e.IngressInterface, &e.NetworkName,
 		&e.EntitlementID, &e.EntitlementStatus, &e.SubjectKind, &e.SubjectLabel, &e.SubjectName,
-		&e.StayID, &e.Room, &e.Reservation,
+		&e.StayID, &e.Room, &e.Reservation, &e.PMSInterface,
 		&e.PackageCode, &e.PackageName,
 		&e.PlanCode, &e.DownKbps, &e.UpKbps, &e.MaxDevices,
 		&e.DataQuotaBytes, &e.DataUsedBytes, &e.TimeQuotaSeconds, &e.TimeUsedSeconds,
@@ -242,7 +245,7 @@ func (s *server) listGuestSessions(w http.ResponseWriter, r *http.Request) {
 	if err := s.db.QueryRow(ctx, `
         SELECT count(*) FILTER (WHERE s.state = 'active')::int,
                count(DISTINCT COALESCE(e.id::text, s.mac::text)) FILTER (WHERE s.state = 'active')::int,
-               count(DISTINCT COALESCE(NULLIF(st.normalized_room_number,''), ga.username))
+               count(DISTINCT (st.pms_interface_id::text || '|' || COALESCE(NULLIF(st.normalized_room_number,''), '')))
                      FILTER (WHERE s.state = 'active' AND e.stay_id IS NOT NULL)::int,
                COALESCE(sum(s.bytes_down + s.bytes_up), 0)::bigint,
                count(*) FILTER (WHERE `+sessionMatch+`)::int,

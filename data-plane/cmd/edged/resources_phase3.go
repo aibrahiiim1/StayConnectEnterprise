@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -148,6 +149,15 @@ const (
 	staySearchMaxLen     = 100
 )
 
+// One PMS connection's share of the stays the current filters match (every connection is listed, with zero when it matches none).
+type staysByInterface struct {
+	ID        string `json:"pms_interface_id"`
+	Label     string `json:"label"`
+	Lifecycle string `json:"lifecycle_state"`
+	Total     int    `json:"total"`
+	InHouse   int    `json:"in_house"`
+}
+
 type staysSummary struct {
 	Total         int `json:"total"`
 	WithInternet  int `json:"with_internet"`
@@ -162,12 +172,15 @@ type staysPage struct {
 	Page     int          `json:"page"`
 	PageSize int          `json:"page_size"`
 	Summary  staysSummary `json:"summary"`
+	// The same filters without the connection filter, so the connection tabs can show what each would hold.
+	ByInterface []staysByInterface `json:"by_interface"`
 }
 
-// The WHERE clause the page and its totals share. $1 tenant, $2 status, $3 search pattern, $4 VIP only, $5 travel agent (exact).
+// The WHERE clause the page and its totals share. $1 tenant, $2 status, $3 search pattern, $4 VIP only, $5 travel agent (exact), $6 PMS connection.
 const stayFilter = `WHERE s.tenant_id=$1 AND ($2::text IS NULL OR s.status=$2)
 		  AND ($4::bool IS NOT TRUE OR s.vip IS TRUE)
 		  AND ($5::text IS NULL OR s.travel_agent = $5)
+		  AND ($6::uuid IS NULL OR s.pms_interface_id = $6::uuid)
 		  AND ($3::text IS NULL
 		       OR s.normalized_room_number ILIKE $3
 		       OR s.external_reservation_id ILIKE $3
@@ -182,6 +195,7 @@ const stayFilter = `WHERE s.tenant_id=$1 AND ($2::text IS NULL OR s.status=$2)
 const stayFilterNoIdentity = `WHERE s.tenant_id=$1 AND ($2::text IS NULL OR s.status=$2)
 		  AND ($4::bool IS NOT TRUE OR s.vip IS TRUE)
 		  AND ($5::text IS NULL OR s.travel_agent = $5)
+		  AND ($6::uuid IS NULL OR s.pms_interface_id = $6::uuid)
 		  AND ($3::text IS NULL
 		       OR s.normalized_room_number ILIKE $3
 		       OR s.travel_agent ILIKE $3
@@ -233,7 +247,15 @@ func (s *server) listStays(w http.ResponseWriter, r *http.Request) {
 	if v := strings.TrimSpace(qv.Get("travel_agent")); v != "" {
 		agentArg = v
 	}
-	args := []any{s.tenantID, statusArg, searchArg, vipArg, agentArg}
+	var ifaceArg any
+	if v := strings.TrimSpace(qv.Get("pms_interface_id")); v != "" {
+		if !uuidRe.MatchString(v) {
+			jsonErr(w, http.StatusBadRequest, "bad_request", "pms_interface_id must be a connection id")
+			return
+		}
+		ifaceArg = v
+	}
+	args := []any{s.tenantID, statusArg, searchArg, vipArg, agentArg, ifaceArg}
 	identity := canSeeStayIdentity(r)
 	filter := stayFilter
 	if !identity {
@@ -259,8 +281,8 @@ func (s *server) listStays(w http.ResponseWriter, r *http.Request) {
 	// Ordered by arrival because iam_v2.stays has no updated_at; room number breaks ties so a page boundary is stable.
 	rows, err := s.db.Query(ctx, `SELECT `+stayCols+` `+stayFrom+`
 		`+filter+`
-		ORDER BY s.arrival DESC NULLS LAST, s.normalized_room_number, s.id
-		LIMIT $6 OFFSET $7`, append(args, size+1, (page-1)*size)...)
+		ORDER BY s.arrival DESC NULLS LAST, COALESCE(i.display_label,''), s.normalized_room_number, s.id
+		LIMIT $7 OFFSET $8`, append(args, size+1, (page-1)*size)...)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 		return
@@ -286,7 +308,66 @@ func (s *server) listStays(w http.ResponseWriter, r *http.Request) {
 	if more {
 		out = out[:size]
 	}
-	writeJSON(w, http.StatusOK, staysPage{Data: out, Meta: listMeta{HasMore: more}, Page: page, PageSize: size, Summary: sum})
+	by, err := s.staysByInterface(ctx, filter, args)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, staysPage{Data: out, Meta: listMeta{HasMore: more}, Page: page, PageSize: size, Summary: sum, ByInterface: by})
+}
+
+// staysByInterface counts the stays the current filters match under each PMS connection, ignoring the connection filter itself, so the tabs show what choosing each would hold.
+// Every configured connection that is not retired is listed, with zero when it matches none (one that was never configured has nothing to show); a retired one appears only while it holds matching stays.
+func (s *server) staysByInterface(ctx context.Context, filter string, args []any) ([]staysByInterface, error) {
+	open := append([]any{}, args...)
+	open[5] = nil
+	rows, err := s.db.Query(ctx, `SELECT s.pms_interface_id::text, COALESCE(i.display_label,''), COALESCE(i.lifecycle_state,''),
+		       count(*)::int, count(*) FILTER (WHERE s.status='IN_HOUSE')::int
+		`+stayFrom+`
+		`+filter+`
+		GROUP BY s.pms_interface_id, i.display_label, i.lifecycle_state`, open...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	seen := map[string]bool{}
+	out := []staysByInterface{}
+	for rows.Next() {
+		var e staysByInterface
+		if err := rows.Scan(&e.ID, &e.Label, &e.Lifecycle, &e.Total, &e.InHouse); err != nil {
+			return nil, err
+		}
+		seen[e.ID] = true
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	live, err := s.db.Query(ctx, `SELECT id::text, COALESCE(display_label,''), lifecycle_state FROM iam_v2.pms_interfaces
+		WHERE tenant_id=$1 AND site_id=$2 AND lifecycle_state <> 'DECOMMISSIONED'
+		  AND (current_revision_id IS NOT NULL OR lifecycle_state <> 'AUTH_DISABLED')`, s.tenantID, s.siteID)
+	if err != nil {
+		return nil, err
+	}
+	defer live.Close()
+	for live.Next() {
+		var e staysByInterface
+		if err := live.Scan(&e.ID, &e.Label, &e.Lifecycle); err != nil {
+			return nil, err
+		}
+		if !seen[e.ID] {
+			out = append(out, e)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := strings.ToLower(out[i].Label), strings.ToLower(out[j].Label)
+		if a != b {
+			return a < b
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out, live.Err()
 }
 
 // Every travel agent the PMS has named on a stay, with how many stays are in house under it. Company names, not guest data.

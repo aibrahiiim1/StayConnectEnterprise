@@ -204,6 +204,19 @@ func TestIntegration_Network_MaterialiseCarriesEverythingAndRevertRestoresIt(t *
 	parent := uniqueParent()
 	id, iface := f.seedReplaceable(t, parent, "10.133.0.0/24", "10.133.0.1")
 
+	// The network's own sign-in narrowing and portal design belong to the client network, not to the topology it sits on.
+	if st, b := f.do(t, "PUT", "/network/guest-networks/"+id+"/sign-in", map[string]any{"disabled_methods": []string{"voucher"}, "primary_method": "guest_account"}); st != 200 {
+		t.Fatalf("narrow sign-in = %d %v", st, b)
+	}
+	st, prof := f.do(t, "POST", "/portal-branding/profiles", map[string]any{"name": "Carried design", "copy_from": "default"})
+	if st != 201 && st != 200 {
+		t.Fatalf("create design = %d %v", st, prof)
+	}
+	profID := prof["id"].(string)
+	if st, b := f.do(t, "PUT", "/portal-branding/profiles/assignments/"+id, map[string]any{"profile_id": profID}); st != 200 {
+		t.Fatalf("assign design = %d %v", st, b)
+	}
+
 	st, body := f.do(t, "POST", "/network/guest-networks/"+id+"/replace", map[string]any{
 		"network_type": "vlan", "parent_interface": parent, "vlan_id": 50, "reason": "moved to a trunk"})
 	if st != 201 {
@@ -245,6 +258,15 @@ func TestIntegration_Network_MaterialiseCarriesEverythingAndRevertRestoresIt(t *
 	if state, s := f.replacementState(t, replID); state != "APPLIED" || s == nil || *s != succ {
 		t.Fatalf("replacement state=%s successor=%v", state, s)
 	}
+	var carriedOff []string
+	var carriedPrimary string
+	if err := f.pool.QueryRow(ctx, `SELECT disabled_methods, COALESCE(primary_method,'') FROM iam_v2.network_signin_overrides WHERE network_id=$1::uuid`, succ).Scan(&carriedOff, &carriedPrimary); err != nil ||
+		len(carriedOff) != 1 || carriedOff[0] != "voucher" || carriedPrimary != "guest_account" {
+		t.Fatalf("the successor lost the network's sign-in narrowing: %v %q (%v)", carriedOff, carriedPrimary, err)
+	}
+	if n := f.count(t, `SELECT count(*) FROM iam_v2.portal_profile_assignments WHERE network_id=$1::uuid AND profile_id=$2::uuid`, succ, profID); n != 1 {
+		t.Fatalf("the successor lost the network's portal design: %d assignments", n)
+	}
 
 	if err := f.app.revertMaterialised(ctx, []string{replID}, "test rollback"); err != nil {
 		t.Fatalf("revert: %v", err)
@@ -264,6 +286,18 @@ func TestIntegration_Network_MaterialiseCarriesEverythingAndRevertRestoresIt(t *
 	_ = f.pool.QueryRow(ctx, `SELECT pms_interface_id::text FROM iam_v2.guest_network_pms_map WHERE guest_network_id=$1`, id).Scan(&routed)
 	if reservations != 1 || routed != iface {
 		t.Fatalf("the original lost something: reservations=%d route=%q", reservations, routed)
+	}
+	if n := f.count(t, `SELECT count(*) FROM iam_v2.network_signin_overrides WHERE network_id=$1::uuid`, succ); n != 0 {
+		t.Fatalf("the reverted successor left its sign-in narrowing behind: %d", n)
+	}
+	if n := f.count(t, `SELECT count(*) FROM iam_v2.portal_profile_assignments WHERE network_id=$1::uuid`, succ); n != 0 {
+		t.Fatalf("the reverted successor left its portal design assignment behind: %d", n)
+	}
+	if n := f.count(t, `SELECT count(*) FROM iam_v2.network_signin_overrides WHERE network_id=$1::uuid`, id); n != 1 {
+		t.Fatalf("the original lost its sign-in narrowing: %d", n)
+	}
+	if n := f.count(t, `SELECT count(*) FROM iam_v2.portal_profile_assignments WHERE network_id=$1::uuid AND profile_id=$2::uuid`, id, profID); n != 1 {
+		t.Fatalf("the original lost its portal design: %d", n)
 	}
 }
 

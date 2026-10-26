@@ -68,7 +68,7 @@ function mockBackend(over: {
 } = {}) {
   get.mockImplementation((path: string) => {
     if (path === "/auth/whoami") return Promise.resolve({ roles: over.roles ?? ["site_admin"] });
-    if (path === "/pms-interfaces") return Promise.resolve({ interfaces: over.interfaces ?? [protel] });
+    if (path === "/pms-interfaces" || path === "/pms-interfaces?include=retired") return Promise.resolve({ interfaces: over.interfaces ?? [protel] });
     if (path === "/pms-providers") {
       return over.providers
         ? Promise.resolve({ providers: over.providers })
@@ -228,7 +228,7 @@ describe("the overview", () => {
 
     expect(screen.queryByText("Test link")).toBeNull();
     expect(screen.getAllByRole("button", { name: "Manage" })).toHaveLength(1);
-    const toggle = screen.getByRole("button", { name: /Inactive \/ not configured/ });
+    const toggle = screen.getByRole("button", { name: /Not configured or retired/ });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     await userEvent.click(toggle);
     expect(screen.getByText("Test link")).toBeTruthy();

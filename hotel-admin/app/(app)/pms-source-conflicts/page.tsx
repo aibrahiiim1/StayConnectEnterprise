@@ -73,13 +73,17 @@ export default function PMSSourceConflictsPage() {
     <PageShell>
       <PageHeader
         title="Duplicate sources"
-        description="Rooms claimed by two PMS connections, whose guests cannot be verified until one has authority."
+        description="Two PMS connections that point at the same PMS server, so they cannot both be trusted for the same guests."
         help={
           <>
             <HelpSection title="What a duplicate source is">
               <p>
-                Two PMS connections claiming the same rooms. Until one of them is given authority, guests in the
-                contested rooms cannot be verified.
+                Two PMS connections that are the same physical PMS, reached twice. Both would write to it and both would
+                claim its guests, so a guest could be verified against either. Only one connection may own a PMS server.
+              </p>
+              <p>
+                The same room number at two <em>different</em> PMS servers is not a duplicate: each connection has its own
+                rooms and stays, and a guest is only ever matched within the connections their network is routed to.
               </p>
             </HelpSection>
             <HelpSection title="Nothing is changed from here">

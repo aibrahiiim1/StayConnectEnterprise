@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { Layers, Rocket, X } from "lucide-react";
 import { api } from "@/lib/api";
 import {
-  CHANGE_VERB, FactoryInfo, GROUP_LABEL, PORT_MODE_LABEL, PortInfo, PortModePlan, StagedGroup,
+  CHANGE_VERB, FactoryInfo, GROUP_LABEL, PORT_MODE_LABEL, PortInfo, PortModePlan, PortNetwork, StagedGroup,
 } from "@/lib/api/network-lifecycle";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -144,6 +144,29 @@ export function StagedChangesList({ writable, reloadKey, onCancelled }: { writab
 
 type VlanRow = { vlan: string; name: string };
 
+/** One sentence on what the port carries; a native network and tagged VLANs on one trunk is an ordinary, supported arrangement. */
+export function portSummary(p: PortInfo): string {
+  const tagged = p.vlans.length;
+  if (p.mode === "trunk" && p.native) {
+    return `Trunk: carries the untagged (native) network ${p.native.name} and ${tagged} tagged VLAN${tagged === 1 ? "" : "s"} side by side. They stay separate networks.`;
+  }
+  if (p.mode === "trunk") return `Trunk: carries ${tagged} tagged VLAN${tagged === 1 ? "" : "s"} and no untagged network.`;
+  if (p.mode === "access") return `Access: carries one untagged network, ${p.native?.name ?? "—"}. Adding VLANs makes it a trunk and keeps this network as the native one.`;
+  return "No network on this port is serving clients.";
+}
+
+function PortNetworkLine({ n, how, state }: { n: PortNetwork; how: string; state: "serving" | "off" }) {
+  return (
+    <li className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+      <Badge tone="neutral" size="sm">{how}</Badge>
+      <span className={state === "off" ? "text-muted-foreground" : "font-medium"}>{n.name}</span>
+      {state === "off" && <Badge tone="neutral" size="sm">Switched off</Badge>}
+      <span className="font-mono text-xs text-muted-foreground">{n.subnet_cidr}</span>
+      {state === "serving" && <span className="text-xs text-muted-foreground">{n.active_clients} connected</span>}
+    </li>
+  );
+}
+
 /** Access / Trunk per port, with a previewed, staged, atomic conversion. */
 export function PortModeCard({ writable, reloadKey, onStaged }: { writable: boolean; reloadKey: number; onStaged: () => void }) {
   const [ports, setPorts] = useState<PortInfo[]>([]);
@@ -207,18 +230,20 @@ export function PortModeCard({ writable, reloadKey, onStaged }: { writable: bool
   }
 
   return (
-    <SectionCard title="Client ports" description="Access carries one untagged network. Trunk carries tagged VLANs, with an optional untagged (native) network.">
-      <ul className="space-y-3">
+    <SectionCard title="Client ports" description="What each physical port carries. A port is a wire; each network on it is its own client network with its own purpose, addresses and sign-in.">
+      <ul className="space-y-4">
         {ports.map((p) => (
-          <li key={p.name} className="flex flex-wrap items-center justify-between gap-3">
-            <div className="min-w-0">
+          <li key={p.name} className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
               <span className="font-mono">{p.name}</span>{" "}
               <Badge tone={p.mode === "trunk" ? "info" : p.mode === "access" ? "default" : "neutral"}>{PORT_MODE_LABEL[p.mode]}</Badge>
-              <div className="text-caption text-muted-foreground">
-                {p.native ? `Native: ${p.native.name}. ` : ""}
-                {p.vlans.length > 0 ? `VLANs: ${p.vlans.map((v) => `${v.vlan_id} ${v.name}`).join(", ")}.` : ""}
-                {p.staged_changes > 0 ? ` ${p.staged_changes} change(s) staged.` : ""}
-              </div>
+              <p className="mt-1 text-caption text-muted-foreground">{portSummary(p)}</p>
+              <ul className="mt-2 space-y-1.5 text-sm" aria-label={`Networks on ${p.name}`}>
+                {p.native && <PortNetworkLine n={p.native} how="Untagged (native)" state="serving" />}
+                {p.vlans.map((v) => <PortNetworkLine key={v.id} n={v} how={`Tagged VLAN ${v.vlan_id}`} state="serving" />)}
+                {(p.switched_off ?? []).map((v) => <PortNetworkLine key={v.id} n={v} how={v.vlan_id ? `Tagged VLAN ${v.vlan_id}` : "Untagged (native)"} state="off" />)}
+              </ul>
+              {p.staged_changes > 0 && <p className="mt-1 text-caption text-muted-foreground">{p.staged_changes} change(s) staged.</p>}
             </div>
             {writable && (
               <div className="flex gap-2">

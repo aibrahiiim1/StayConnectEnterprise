@@ -1,6 +1,6 @@
 import React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 
 const get = vi.fn();
 vi.mock("@/lib/api", () => ({
@@ -45,7 +45,9 @@ describe("the impact of a topology change", () => {
     render(<ReplaceTopologyDialog open onOpenChange={() => {}} onReplaced={() => {}}
       network={{ id: "n1", name: "Rooms", network_type: "untagged", parent_interface: "ens192", vlan_id: null, subnet_cidr: "10.20.0.0/20", gateway_ip: "10.20.0.1" }} />);
     await screen.findByText(/Hypervisor \(ESXi\)/);
-    expect(get).toHaveBeenCalledWith(expect.stringMatching(/^\/network\/guest-networks\/n1\/impact\?.*to_type=vlan/));
+    expect(get).toHaveBeenCalledWith(expect.stringMatching(/^\/network\/guest-networks\/n1\/impact\?.*to_type=untagged/));
+    fireEvent.click(screen.getByRole("checkbox", { name: /tagged vlan/i }));
+    await waitFor(() => expect(get).toHaveBeenCalledWith(expect.stringMatching(/^\/network\/guest-networks\/n1\/impact\?.*to_type=vlan/)));
     await waitFor(() => expect(screen.getByText("Rooms")).toBeTruthy());
   });
 });

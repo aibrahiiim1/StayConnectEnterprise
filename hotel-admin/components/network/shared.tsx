@@ -1,5 +1,6 @@
 "use client";
 
+import { serviceStateOf } from "@/lib/network-state";
 import * as React from "react";
 import { api, Whoami, ValidationIssue, HealthCheck, Reservation, GuestNetwork } from "@/lib/api";
 import { canWrite } from "@/lib/roles";
@@ -240,7 +241,9 @@ export function AddReservationDialog({
         <Field label="Client network" required>
           <Select value={f.guest_network_id} onChange={(e) => setF({ ...f, guest_network_id: e.target.value })}>
             <option value="">Choose a client network…</option>
-            {(networks ?? []).map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}
+            {(networks ?? []).filter((n) => serviceStateOf(n) !== "archived").map((n) => (
+              <option key={n.id} value={n.id}>{serviceStateOf(n) === "off" ? `${n.name} (switched off)` : n.name}</option>
+            ))}
           </Select>
         </Field>
       )}
