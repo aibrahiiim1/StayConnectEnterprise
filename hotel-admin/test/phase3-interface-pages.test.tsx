@@ -188,6 +188,26 @@ describe("PMS interfaces page", () => {
     expect(alert.textContent).toMatch(/reload/i);
   });
 
+  it("explains that another connection already owns the PMS address", async () => {
+    mockInterfacePage();
+    post.mockRejectedValue(Object.assign(
+      new Error("another PMS connection already uses this PMS server address"),
+      { code: "pms_source_in_use", status: 409 },
+    ));
+    const Page = (await import("@/app/(app)/pms-interfaces/page")).default;
+    render(<Page />);
+    await openSheet("History");
+    await userEvent.click(await screen.findByRole("button", { name: /^Version 2/ }));
+    await userEvent.click(await screen.findByRole("button", { name: "Put version 2 live" }));
+    const dialog = await screen.findByRole("dialog", { name: /Put version 2 live/ });
+    await userEvent.type(within(dialog).getByLabelText(/Confirm your password/), "pw");
+    await userEvent.click(within(dialog).getByRole("button", { name: /^Put live$/ }));
+
+    const alert = await within(dialog).findByRole("alert");
+    expect(alert.textContent).toMatch(/already uses this PMS server address/i);
+    expect(alert.textContent).toMatch(/different address|retire the other/i);
+  });
+
   // The Protel FIAS link has no transport credential (credential_mode=NONE), so no Credentials tab or "never set"
   // warning is shown.
   it("presents no credential surface for a connector that needs none", async () => {

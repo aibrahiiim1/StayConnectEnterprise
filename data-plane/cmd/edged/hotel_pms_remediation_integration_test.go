@@ -333,13 +333,87 @@ func TestIntegration_API_PublishThatTakesRoomChargeOffNeedsConfirmation(t *testi
 	}
 }
 
-func TestIntegration_API_SecondProtelFIASConnectionIsRefused(t *testing.T) {
+func (f *apiFixture) createAuthorPublish(t *testing.T, label, endpoint string) (iface, rev string, publishStatus int, publishBody map[string]any) {
+	t.Helper()
+	st, body := f.do(t, http.MethodPost, "/pms-interfaces/", map[string]any{"connector_kind": "protel-fias", "display_label": label})
+	if st != http.StatusCreated {
+		t.Fatalf("create %q = %d %v", label, st, body)
+	}
+	iface = body["id"].(string)
+	st, body = f.do(t, http.MethodPost, "/pms-interfaces/"+iface+"/revisions", validRevisionBody(endpoint))
+	if st != http.StatusCreated {
+		t.Fatalf("author %q = %d %v", label, st, body)
+	}
+	rev = body["revision_id"].(string)
+	publishStatus, publishBody = f.do(t, http.MethodPost, "/pms-interfaces/"+iface+"/publish", map[string]any{
+		"revision_id": rev, "expected_revision_id": "", "reason_code": "INITIAL_SETUP", "password": f.password})
+	return
+}
+
+func (f *apiFixture) activate(t *testing.T, iface string) (int, map[string]any) {
+	t.Helper()
+	return f.do(t, http.MethodPost, "/pms-interfaces/"+iface+"/lifecycle", map[string]any{
+		"state": "ACTIVE", "reason_code": "COMMISSIONING", "password": f.password})
+}
+
+func TestIntegration_API_TwoIndependentProtelFIASSystemsCanBeConfigured(t *testing.T) {
 	f := newAPI(t)
 	f.seedInterface(t)
-	st, body := f.do(t, http.MethodPost, "/pms-interfaces/", map[string]any{
-		"connector_kind": "protel-fias", "display_label": "Second link"})
-	if st != http.StatusConflict || body["error"] != "protel_fias_exists" {
-		t.Fatalf("second protel-fias = %d %v, want 409 protel_fias_exists", st, body)
+	a, revA, st, b := f.createAuthorPublish(t, "Hotel A PMS", "pms-a.local:5010")
+	if st != http.StatusOK {
+		t.Fatalf("publish A = %d %v", st, b)
+	}
+	c, revC, st, b := f.createAuthorPublish(t, "Hotel B PMS", "pms-b.local:5010")
+	if st != http.StatusOK {
+		t.Fatalf("publish B on a different PMS = %d %v", st, b)
+	}
+	for _, id := range []string{a, c} {
+		if st, b := f.activate(t, id); st != http.StatusOK {
+			t.Fatalf("activate %s = %d %v", id, st, b)
+		}
+	}
+	var fpA, fpC string
+	_ = f.pool.QueryRow(context.Background(), `SELECT source_fingerprint FROM iam_v2.pms_interface_revisions WHERE id=$1::uuid`, revA).Scan(&fpA)
+	_ = f.pool.QueryRow(context.Background(), `SELECT source_fingerprint FROM iam_v2.pms_interface_revisions WHERE id=$1::uuid`, revC).Scan(&fpC)
+	if fpA == "" || fpA == fpC {
+		t.Fatalf("each system needs its own source identity: %q %q", fpA, fpC)
+	}
+	if n := f.count(t, `SELECT count(*) FROM iam_v2.pms_interfaces WHERE tenant_id=$1 AND connector_kind='protel-fias' AND lifecycle_state='ACTIVE'`, f.tenant); n < 3 {
+		t.Fatalf("%d active Protel FIAS interfaces, want at least 3", n)
+	}
+}
+
+func TestIntegration_API_TheSamePhysicalPMSCannotBeOwnedTwice(t *testing.T) {
+	f := newAPI(t)
+	a, _, st, b := f.createAuthorPublish(t, "Owner", "Shared-PMS.local:5010")
+	if st != http.StatusOK {
+		t.Fatalf("publish owner = %d %v", st, b)
+	}
+	dup, dupRev, st, b := f.createAuthorPublish(t, "Duplicate", " shared-pms.LOCAL:5010 ")
+	if st != http.StatusConflict || b["error"] != "pms_source_in_use" {
+		t.Fatalf("publishing a second connection to the same PMS = %d %v, want 409 pms_source_in_use", st, b)
+	}
+	if strings.Contains(fmt.Sprint(b), "shared-pms") {
+		t.Fatalf("the refusal leaks the endpoint: %v", b)
+	}
+	var cur *string
+	_ = f.pool.QueryRow(context.Background(), `SELECT current_revision_id::text FROM iam_v2.pms_interfaces WHERE id=$1::uuid`, dup).Scan(&cur)
+	if cur != nil {
+		t.Fatal("a refused publication still changed the interface")
+	}
+
+	if _, err := f.pool.Exec(context.Background(), `UPDATE iam_v2.pms_interfaces SET current_revision_id=$2::uuid WHERE id=$1::uuid`, dup, dupRev); err != nil {
+		t.Fatal(err)
+	}
+	if st, b := f.activate(t, dup); st != http.StatusConflict || b["error"] != "pms_source_in_use" {
+		t.Fatalf("activating a duplicate source = %d %v, want 409 pms_source_in_use", st, b)
+	}
+
+	if _, err := f.pool.Exec(context.Background(), `UPDATE iam_v2.pms_interfaces SET lifecycle_state='DECOMMISSIONED' WHERE id=$1::uuid`, a); err != nil {
+		t.Fatal(err)
+	}
+	if st, b := f.activate(t, dup); st != http.StatusOK {
+		t.Fatalf("a decommissioned owner must release the source: %d %v", st, b)
 	}
 }
 

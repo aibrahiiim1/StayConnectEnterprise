@@ -64,7 +64,7 @@ func (s *supervisor) reconcile(ctx context.Context) error {
 		return nil // transient; retry next tick (do not tear down healthy workers)
 	}
 	next := map[string]struct{}{}
-	for _, iface := range ifaces {
+	for _, iface := range s.sourceOwners(ifaces) {
 		if iface.TenantID != s.assign.TenantID || iface.SiteID != s.assign.SiteID {
 			continue // defense in depth: never accept a cross-scope row
 		}
@@ -89,6 +89,33 @@ func (s *supervisor) reconcile(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// One worker per physical source: when two live interfaces carry the same source fingerprint (the console refuses
+// that, so this is a backstop for rows written any other way), the one already running keeps it, otherwise the
+// lowest id, and the other gets no connection rather than a second writer on the same socket.
+func (s *supervisor) sourceOwners(ifaces []Interface) []Interface {
+	owner := map[string]string{}
+	for _, i := range ifaces {
+		fp := i.SourceFingerprint
+		if fp == "" {
+			continue
+		}
+		cur, taken := owner[fp]
+		_, running := s.workers[i.ID]
+		_, curRunning := s.workers[cur]
+		if !taken || (running && !curRunning) || (running == curRunning && i.ID < cur) {
+			owner[fp] = i.ID
+		}
+	}
+	out := make([]Interface, 0, len(ifaces))
+	for _, i := range ifaces {
+		if i.SourceFingerprint != "" && owner[i.SourceFingerprint] != i.ID {
+			continue
+		}
+		out = append(out, i)
+	}
+	return out
 }
 
 func (s *supervisor) startWorker(parent context.Context, iface Interface) {

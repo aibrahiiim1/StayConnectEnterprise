@@ -162,6 +162,15 @@ func (s *server) setPMSInterfaceLifecycle(w http.ResponseWriter, r *http.Request
 			"publish a revision before activating: an interface with no published revision has no endpoint to dial")
 		return
 	}
+	if want == "ACTIVE" {
+		if owner, conflict, cerr := sourceOwnedElsewhere(ctx, tx, s.tenantID, s.siteID, id, currentRev); cerr != nil {
+			jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+			return
+		} else if conflict {
+			refuseSourceInUse(w, owner)
+			return
+		}
+	}
 	if _, err := tx.Exec(ctx, `UPDATE iam_v2.pms_interfaces SET lifecycle_state=$4
 	      WHERE id=$1 AND tenant_id=$2 AND site_id=$3`, id, s.tenantID, s.siteID, want); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "lifecycle update failed")
@@ -538,6 +547,13 @@ func (s *server) publishPMSInterfaceRevision(w http.ResponseWriter, r *http.Requ
 	}
 	roomChargeReset := curTarget != "" && curTarget != postingTargetUnset &&
 		(newTarget == "" || newTarget == postingTargetUnset)
+	if owner, conflict, cerr := sourceOwnedElsewhere(ctx, tx, s.tenantID, s.siteID, id, strings.TrimSpace(in.RevisionID)); cerr != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	} else if conflict {
+		refuseSourceInUse(w, owner)
+		return
+	}
 	if roomChargeReset && !in.ConfirmRoomChargeReset {
 		writeJSON(w, http.StatusConflict, map[string]any{
 			"error": "room_charge_reset_unconfirmed",
@@ -1207,4 +1223,39 @@ func (s *server) updateInterfaceConnectionSettings(w http.ResponseWriter, r *htt
 		"config_version": version,
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"config_version": version})
+}
+
+// One physical PMS source has one owning interface: a second connection to the same socket would be a second writer
+// and would make guest and charge resolution ambiguous. The vendor is not the unit; the source (connector kind plus
+// endpoint, as fingerprinted at authoring) is. The advisory lock serialises two interfaces claiming one source.
+func sourceOwnedElsewhere(ctx context.Context, tx pgx.Tx, tenantID, siteID, interfaceID, revisionID string) (string, bool, error) {
+	var fp string
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(source_fingerprint,'') FROM iam_v2.pms_interface_revisions
+		WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3::uuid AND id=$4::uuid`,
+		tenantID, siteID, interfaceID, revisionID).Scan(&fp); err != nil {
+		return "", false, err
+	}
+	if fp == "" {
+		return "", false, nil
+	}
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 1))`, tenantID+"|"+siteID+"|"+fp); err != nil {
+		return "", false, err
+	}
+	var label string
+	err := tx.QueryRow(ctx, `SELECT COALESCE(NULLIF(i.display_label,''), i.id::text)
+		  FROM iam_v2.pms_interfaces i
+		  JOIN iam_v2.pms_interface_revisions r ON r.id = i.current_revision_id
+		 WHERE i.tenant_id=$1 AND i.site_id=$2 AND i.id <> $3::uuid
+		   AND i.lifecycle_state <> 'DECOMMISSIONED' AND r.source_fingerprint = $4
+		 ORDER BY i.id LIMIT 1`, tenantID, siteID, interfaceID, fp).Scan(&label)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	return label, err == nil, err
+}
+
+func refuseSourceInUse(w http.ResponseWriter, owner string) {
+	jsonErr(w, http.StatusConflict, "pms_source_in_use",
+		"another PMS connection (\""+owner+"\") already uses this PMS server address: two connections to the same PMS would both write to it. "+
+			"Point this one at a different PMS, or decommission the other first")
 }

@@ -53,6 +53,7 @@ type Interface struct {
 	ConnectorKind     string
 	LifecycleState    string // ACTIVE | AUTH_DISABLED | DRAINING | DECOMMISSIONED
 	CurrentRevisionID string
+	SourceFingerprint string
 }
 
 // Revision is the pinned connector configuration; nothing defaults implicitly and Validate fails closed.
