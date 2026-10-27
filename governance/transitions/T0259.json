@@ -1,0 +1,35 @@
+{
+  "transition_id": "T0259",
+  "seq": 259,
+  "timestamp": "2026-10-27T17:05:35+00:00",
+  "timestamp_derivation": "Computed from the workstation clock after the correction was validated on the isolated test pair, and before the commit that introduces this receipt.",
+  "record_type": "ENROLLMENT_STALE_CSR_CORRECTION",
+  "authorisation": "D75 (2026-10-27) under the Product Owner's mission 'Finish OneGate installer closure by resolving the remaining stale-CSR enrollment defect (F1)'. It authorises the correction, its validation on the isolated test pair and the protected merge. It does NOT authorise any PRE-LIVE or production change or Go-Live.",
+  "context": "The fresh-VM installer (PR #256) was merged as 5b4c5c67 on 2026-10-27 without a transition of its own; its validation is recorded in the installation manual Appendix 3, where it found F1. This receipt records the correction of F1.",
+  "root_cause": "replaceWaitingIdentity adopted a reinstalled waiting appliance's new identity but left the previous installation's CSR pending; Central kept answering 'pending', so the new installation never filed its own CSR, and Activate signed the old one: a certificate for a key nobody holds.",
+  "validation_environment": "Isolated test pair, never connected to PRE-LIVE 172.21.60.25 or the production Central 172.21.96.196: lab Central central.onegate.getsemantics.com (release onegate-central-d799ff5fc737 via central-deploy.sh, migrations 56/0/0, smoke 9/9) and test appliance 172.21.96.97 (onegate-appliance-d799ff5fc737 via appliance-install.sh --upgrade, units PASS, five service binaries embedding d799ff5f).",
+  "verification": "Six new regression tests fail on the previous code and pass now (Central integration against a migrated database: reinstall before activation; a request older than the identity against FetchCertificate, Activate, Reissue and the appliance's own CSR. Appliance: foreign certificate refused and replaced, no request flooding, reconcile, store writes nothing for a foreign key). Full suites pass: control-plane internal/api and internal/pki; data-plane internal/appliancecert and cmd/scd. Live on the test pair: installation A filed CSR A; the reinstall (installation B) voided it (csr_voided, voided_certificate_requests 1), Central answered none and B filed its own; Activate signed B's request; the certificate's public key equals the appliance's mtls-client.key; mTLS verified, assignment applied, licence Active, Central connected, zero Reissue certificate actions; a new Client 12/12 after a reboot.",
+  "lab_security": "The pre-deploy age-encrypted Central dump was decrypted on the workstation (the holder key never on Central) and restored into a disposable database; it matched the live database exactly. The plaintext first-install dump on the lab Central was then shredded, and the local decrypted copies and the scratch database removed. The lab Root CA key remains in pki-offline (0600), untouched.",
+  "follow_up": "Deploying this correction to the PRE-LIVE appliance and the production Central is a separate decision. Observed only because the reinstall was simulated at the identity level on a running VM (not a product path): acctd and netd keep the appliance id they started with, and netd's activation journal and the site database's appliance mirror name the previous id.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0258."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "base": "5b4c5c67b746ce8a8fb2e6dc3fea0f4a699d5ece",
+  "base_note": "Master after the merge of PR #256.",
+  "head": "88cbd93f",
+  "head_note": "The last content commit of branch fix/f1-stale-csr. Governance commits follow it.",
+  "previous_delivery": "T0258",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}

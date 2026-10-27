@@ -1118,6 +1118,20 @@
       "provenance_note": "The delivery agent deployed to PRE-LIVE and did NOT apply the po-merge-approved label: PR #251 is open and unmerged, awaiting the Product Owner's head-specific approval. Directly after the deployment the Product Owner's own admin account exercised the new features on PRE-LIVE (restored a retired network, staged and applied two Access-to-Trunk changes on ens192, and set and cleared room sign-in routing through the new preview-and-confirm call); the audit log is the record. The agent performed no network change, no routing change, no reset and no PMS action. Two Codex P2 findings on the first head were fixed and resolved before the final deployment.",
       "does_not_authorize": "Merging PR #251 (the Product Owner's head-specific approval); Go-Live; any live Access/Trunk conversion, VLAN change, Full Reset or PMS re-routing performed by the agent; PMS traffic or posting; widening package eligibility; raising the shared-set cap above three; routing by anything other than the client network; any change to the external switch, access points or ESXi.",
       "implementation": "PR #251 (head 67808d7a); migration 0155; Phase-0 Amendment A2; docs/CLIENT_NETWORKING.md sections 12 and 16-17; recorded by T0250."
+    },
+    {
+      "id": "D75",
+      "decided_on": "2026-10-27",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-10-27",
+      "status": "ACTIVE",
+      "title": "A CERTIFICATE REQUEST BELONGS TO THE APPLIANCE IDENTITY THAT FILED IT (2026-10-27). When a waiting appliance is reinstalled before activation (same hardware, new identity and mTLS keys), Central voids the previous installation's pending certificate requests in the transaction that adopts the new identity, and reports or signs only a request filed at or after the current identity's registration; signing one request closes the others. The appliance installs only a certificate that carries its own mTLS key and, given any other, files one request for its own key. Finding F1 (installation manual A3.5) is closed: Activate can no longer bind an obsolete certificate, and Reissue certificate is no longer needed after such a reinstall.",
+      "authorization_evidence": "The Product Owner's mission of 2026-10-27 'Finish OneGate installer closure by resolving the remaining stale-CSR enrollment defect (F1)', which authorised the controlled enrollment/PKI correction, meaningful regression tests, validation on the named isolated Test Central and test appliances, documentation/governance synchronization, protected PR delivery and merge under the exact-head controls, and securing the lab's disposable plaintext backup after verifying encrypted recovery evidence.",
+      "does_not_authorize": "Any PRE-LIVE or production change, including deploying this correction to the PRE-LIVE appliance or to the production Central (a separate decision); Root CA replacement or destruction; unrelated architecture changes; financial operations; Go-Live.",
+      "implementation": "Branch fix/f1-stale-csr, PR #257, recorded by T0259. control-plane/internal/api certificates.go (currentPendingCSR, countCurrentPendingCSRs, issuance closes other requests), register.go (replaceWaitingIdentity voids pending requests, csr_voided, voided_certificate_requests), appliance_ops.go (Activate and Reissue use the shared predicate); data-plane/internal/appliancecert cert.go (ErrCertKeyMismatch, matchesLocalKey before store writes, requestOwnCertificate in bootstrap and reconcile). Tests stale_csr_integration_test.go and stale_csr_test.go. No migration.",
+      "supersedes_in_part": "None. It closes the open decision listed as handbook section 24.2 item 1 (finding F1)."
     }
   ]
 }
