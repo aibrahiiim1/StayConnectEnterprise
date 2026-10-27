@@ -250,15 +250,25 @@ health_check(){ # ip expected_serial
   # Test-only injection (acceptance 16): force a post-switch health failure so the
   # transaction rolls back to .prev. Never set in production.
   [ -n "${HA_TEST_FAIL_HEALTH:-}" ] && { echo " forced-test-health-failure"; return 0; }
-  # DNS: serves expected serial + TLS validates hostname
-  local ds is
-  ds="$(echo | openssl s_client -connect 127.0.0.1:443 -servername "$DNS_SAN" 2>/dev/null | openssl x509 -noout -serial 2>/dev/null | cut -d= -f2)"
-  is="$(echo | openssl s_client -connect "$ip:443" 2>/dev/null | openssl x509 -noout -serial 2>/dev/null | cut -d= -f2)"
+  # DNS: serves expected serial + TLS validates hostname. Caddy swaps certificates asynchronously after a reload, so
+  # the new serial is waited for (up to ~20 s) rather than sampled once: a single sample 2 s after the reload saw the
+  # previous certificate on a fresh VM and rolled a good certificate back.
+  local ds is n=0
+  while :; do
+    ds="$(echo | openssl s_client -connect 127.0.0.1:443 -servername "$DNS_SAN" 2>/dev/null | openssl x509 -noout -serial 2>/dev/null | cut -d= -f2)"
+    is="$(echo | openssl s_client -connect "$ip:443" 2>/dev/null | openssl x509 -noout -serial 2>/dev/null | cut -d= -f2)"
+    { [ "$ds" = "$want" ] && [ "$is" = "$want" ]; } || [ "$n" -ge 10 ] && break
+    n=$((n+1)); sleep 2
+  done
   [ "$ds" = "$want" ] || fail="$fail dns-serial($ds!=$want)"
   [ "$is" = "$want" ] || fail="$fail ip-serial($is!=$want)"
   echo | openssl s_client -connect 127.0.0.1:443 -servername "$DNS_SAN" -verify_hostname "$DNS_SAN" -CAfile "$root" 2>/dev/null | grep -q "Verify return code: 0" || fail="$fail dns-verify"
   echo | openssl s_client -connect "$ip:443" -verify_ip "$ip" -CAfile "$root" 2>/dev/null | grep -q "Verify return code: 0" || fail="$fail ip-verify"
-  # app reachable via both (static 200, login endpoint up = 401 for empty creds, redirect 307)
+  # app reachable via both (static 200, login endpoint up = 401 for empty creds, redirect 307) — once an Admin Console
+  # release is installed. On a fresh install the first certificate is issued BEFORE the console exists (the installer
+  # installs the console afterwards), so those checks could only fail and roll the first certificate back; the TLS
+  # checks above still have to pass.
+  [ -e "${HA_CONSOLE_LINK:-/opt/stayconnect/hotel-admin}" ] || { echo "$fail"; return 0; }
   for pair in "--resolve $DNS_SAN:443:127.0.0.1|https://$DNS_SAN" "|https://$ip"; do
     local rz="${pair%%|*}" b="${pair##*|}"
     [ "$(curl -s $rz --cacert "$root" -o /dev/null -w '%{http_code}' "$b/icon.svg")" = "200" ] || fail="$fail static($b)"
