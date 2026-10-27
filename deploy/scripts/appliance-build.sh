@@ -34,7 +34,9 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 OUT="${1:-$ROOT/dist/appliance}"
 SERVICES="scd edged netd portald acctd pmsd keybootstrap svc-run"
-NODE_IMAGE="${NODE_IMAGE:-node:20.18.0-bookworm-slim}"
+# The full (not -slim) image: it ships git and python3, which packaging needs, so no apt step runs in the build
+# (an apt mirror that is unreachable from the build host otherwise hangs the release indefinitely).
+NODE_IMAGE="${NODE_IMAGE:-node:20.18.0-bookworm}"
 say() { echo "[appliance-build] $*"; }
 die() { echo "[appliance-build] REFUSED: $*" >&2; exit 2; }
 for t in docker git python3 sha256sum tar gzip; do command -v "$t" >/dev/null || die "$t is required"; done
@@ -69,10 +71,9 @@ mkdir -p "$REL/bundles"
 winpath() { cygpath -w "$1" 2>/dev/null || echo "$1"; }
 MSYS_NO_PATHCONV=1 docker run --rm \
   -v "$(winpath "$SRC")":/src:ro -v "$(winpath "$REL/bundles")":/out \
-  -e NEXT_TELEMETRY_DISABLED=1 -e npm_config_update_notifier=false -e DEBIAN_FRONTEND=noninteractive \
+  -e NEXT_TELEMETRY_DISABLED=1 -e npm_config_update_notifier=false \
   -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*' \
   "$NODE_IMAGE" bash -euc '
-    apt-get update -qq >/dev/null && apt-get install -y -qq git python3 >/dev/null
     cp -a /src /work && cd /work
     bash deploy/scripts/deploy-hotel-admin.sh package hotel-admin
     cp hotel-admin/hotel-admin-deploy.tgz hotel-admin/hotel-admin-deploy.tgz.sha256 /out/

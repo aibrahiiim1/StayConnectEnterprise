@@ -82,6 +82,7 @@ for svc in $SERVICES; do
     -w /src/data-plane \
     -e CGO_ENABLED=0 -e GOOS=linux -e GOARCH=amd64 \
     -e GOFLAGS=-p=2 -e GOMAXPROCS=2 \
+    -v onegate-appliance-gocache:/tmp/gocache -v onegate-appliance-gomodcache:/tmp/gomodcache \
     -e GOCACHE=/tmp/gocache -e GOMODCACHE=/tmp/gomodcache \
     "$GO_IMAGE" \
     go build -trimpath -tags "$BUILD_TAGS" -o "/out/$svc" "./cmd/$svc"
