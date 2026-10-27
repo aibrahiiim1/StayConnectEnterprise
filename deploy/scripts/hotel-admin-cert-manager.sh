@@ -548,9 +548,14 @@ cmd_renew(){ # force(0/1)
   do_renew "$ip" "$reason"; return $?
 }
 
+# ONE CHANGE AT A TIME. The renewal timer and an explicit rotate (the provisioner's first certificate) ran together
+# on a fresh VM: each minted a certificate, Caddy served the other's, and the health check rolled a good certificate
+# back. A mutating run waits for any other one (up to 5 min) and then re-decides from the current state.
+cert_lock() { exec 9>"${HA_LOCK_FILE:-/run/lock/stayconnect-hotel-admin-cert.lock}" && flock -w 300 9 \
+  || { log "ERR: another certificate operation is still running"; exit 20; }; }
 case "${1:-renew}" in
-  renew)  cmd_renew 0 ;;
-  rotate) cmd_renew 1 ;;
+  renew)  cert_lock; cmd_renew 0 ;;
+  rotate) cert_lock; cmd_renew 1 ;;
   check)  cmd_check ;;
   status) cmd_status ;;
   *) echo "usage: $0 {renew|rotate|check|status}" >&2; exit 20 ;;
