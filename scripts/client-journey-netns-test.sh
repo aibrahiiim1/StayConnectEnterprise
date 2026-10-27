@@ -70,8 +70,13 @@ done
 [ "$st" = active ] && ok "session is active (promoted by the enforcement plane)" || bad "session state is '${st:-none}'"
 ent="$($P "SELECT e.status FROM iam_v2.sessions s JOIN iam_v2.entitlements e ON e.id=s.entitlement_id WHERE host(s.ip)='$CIP' AND s.ended IS NULL ORDER BY s.started DESC LIMIT 1" </dev/null)"
 [ "$ent" = ACTIVE ] && ok "entitlement ACTIVE" || bad "entitlement '${ent:-none}'"
-nft list set inet stayconnect phase3_auth_ipv4 2>/dev/null | grep -q "$CIP" && ok "nft phase3_auth_ipv4 authorises $BR . $CIP" || bad "not in phase3_auth_ipv4"
-tc -s class show dev "$BR" | grep -q "class htb" && ok "a tc HTB class shapes the Client (download, $BR)" || bad "no tc class on $BR"
+# netd adds the element on its next reconcile, a moment after the session turns active: wait for it (up to ~15 s).
+# Output is captured before grep: under pipefail, `nft list ... | grep -q` fails when grep's early exit SIGPIPEs nft.
+in_set() { local o; o="$(nft list set inet stayconnect phase3_auth_ipv4 2>/dev/null)"; grep -q "$CIP " <<<"$o"; }
+for _ in $(seq 1 15); do in_set && break; sleep 1; done
+in_set && ok "nft phase3_auth_ipv4 authorises $BR . $CIP" || bad "not in phase3_auth_ipv4"
+tcout="$(tc -s class show dev "$BR")"
+grep -q "class htb" <<<"$tcout" && ok "a tc HTB class shapes the Client (download, $BR)" || bad "no tc class on $BR"
 
 echo "== 6. Internet traffic"
 c1="$(nsx curl -s -o /dev/null -w '%{http_code}' -m 10 https://example.com/)"
