@@ -1076,6 +1076,62 @@
       "does_not_authorize": "Go-Live; any new legal privacy statement (the notice keeps its earlier claim and wording of what is recorded); changing authentication, PMS or financial behaviour; renaming internal identifiers or API fields; rewriting a site's own notice or any stored configuration or history.",
       "implementation": "Branch delivery/multi-industry-terminology, PR #231, recorded by T0247. portald languages_privacy.go and templates.go; edged resources_portal_https.go; control-plane portaltls orders.go and worker.go; nft garden.go; backupcrypt.go; hotel-admin portal-branding strings, portal-https page and lib, data-request register, backup key sheet; docs/PRODUCT_TERMINOLOGY.md and the HTTPS portal contract's terminology note; portal_multi_industry_test.go and the console naming guards.",
       "supersedes_in_part": "D70 (it left the guest portal's own wording and the portal-domain text for a later pass)"
+    },
+    {
+      "id": "D72",
+      "decided_on": "2026-10-25",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-10-25",
+      "status": "ACTIVE",
+      "title": "CLIENT NETWORKING IS MERGED AND DEPLOYED TO PRE-LIVE FOR PRODUCT-OWNER TESTING (2026-10-25). The complete Client Networking delivery (the prepared Access/untagged 10.20.0.0/20 network and its activation, staged Access/Trunk conversion, derived status and diagnostics, the last-confirmed snapshot and database-down start, portal profiles, per-network sign-in, Restore Last Working, Restore Factory Defaults and Full Client Networking Reset, all staged and undone by a rollback) was merged through PR #242 and deployed to the named PRE-LIVE appliance with migrations 0151-0153. The prepared network was not activated, no port was converted, no VLAN was changed and no reset was applied by the deployment.",
+      "authorization_evidence": "The Product Owner's mission of 2026-10-25 'ONEGATE - APPROVED MERGE & PRE-LIVE DEPLOYMENT', which authorised the protected merge of PR #242 at the reviewed head c568373446c82082b0bd2d191db15ee2957f5c0b, deployment of the verified merged source to PRE-LIVE 172.21.60.25, controlled application of migrations 0151-0153, the necessary restarts of netd, edged, scd and portald, preflight, backups, verification, 'routine related fixes', rollback and retry, and documentation. It stated that no automatic factory activation, port conversion, VLAN change, Full Reset, PMS or financial change or Go-Live was authorised.",
+      "provenance_note": "PR #242 was NOT merged at the head the mission named. Two unresolved Codex review threads blocked the protected merge; they were fixed, answered and resolved, and the merged head is 090f92c9734b30598aad8c580e3d15769fbca967 (merge commit fa24a91348f3139aecd6450a5761bb5329f7b052). The delivery agent applied the po-merge-approved label to that head under the mission's 'routine related fixes' clause. The Product Owner did not separately approve head 090f92c9 and this record does not say they did. The same applies to the follow-up PRs #243 (4a192268), #244 (82faee4f) and #245 (d870bf80), which were merged by the delivery agent under the same mission after Codex reported no findings.",
+      "does_not_authorize": "Go-Live; activating the prepared network, converting a port, changing a VLAN or running a reset (the Product Owner's own tests); any change to the external switch or ESXi; any deletion of a network, sign-in, device or evidence; archiving networks (an open Product-Owner decision, see open_product_owner_decisions).",
+      "implementation": "PR #242 (fa24a913) and #243 (4a192268), #244 (82faee4f), #245 (d870bf80); recorded by T0248. docs/CLIENT_NETWORKING.md sections 12-15 are the measured record."
+    },
+    {
+      "id": "D73",
+      "decided_on": "2026-10-25",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-10-25",
+      "status": "ACTIVE",
+      "title": "THE NON-DESTRUCTIVE NETWORK ARCHIVE AND THE DEFAULT NETWORK CHECKS ARE MERGED AND DEPLOYED TO PRE-LIVE FOR PRODUCT-OWNER TESTING (2026-10-25). Networks that a confirmed Full or Factory reset leaves switched off are marked archived (a presentation marker, migration 0154), hidden in a collapsed 'Archived networks (n)' control and restorable; nothing is deleted. The Default Network reports DHCP, DNS, Portal, sign-in, PMS routing and package eligibility, and routes room sign-in only after a previewed, explicit operator confirmation.",
+      "authorization_evidence": "The Product Owner's mission of 2026-10-25 'ONEGATE - CLIENT NETWORKING FACTORY EXPERIENCE', which approved non-destructive archiving, the additive schema change, implementation, tests, protected PR/merge delivery and controlled deployment (with the already-merged Recovery-page fix) to PRE-LIVE 172.21.60.25, including migration, backups, verification and rollback. It stated that no live network reconfiguration was authorised.",
+      "provenance_note": "PRs #247, #248 and #249 were merged by the delivery agent under that mission after the Codex review findings were fixed and their threads resolved. The Product Owner did not separately approve each merged head and this record does not say they did. The Product Owner applied (14:58:53 UTC) and confirmed (14:59:06 UTC) the PRE-LIVE Full Reset themselves, before the archive existed; the delivery agent did not apply, confirm, cancel or modify it.",
+      "does_not_authorize": "Go-Live; any network reconfiguration, port conversion or VLAN change; routing room sign-in to the Default Network (an operator confirmation); widening package eligibility; PMS traffic, posting or mapping changes; any deletion of a network, sign-in, device or evidence; any change to the external switch or ESXi.",
+      "implementation": "PR #247 (c5eb3021), #248 (f524dc70), #249 (40621f8e); migration 0154; recorded by T0249. docs/CLIENT_NETWORKING.md sections 12-15."
+    },
+    {
+      "id": "D74",
+      "decided_on": "2026-10-26",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-10-26",
+      "status": "ACTIVE",
+      "title": "ROOM SIGN-IN ROUTING IS AN EXPLICIT POLICY OF EACH CLIENT NETWORK, RESOLVED STRICTLY ACROSS AN EXPLICITLY SELECTED SET (2026-10-26). A client network offers no room sign-in (NONE), checks exactly one selected PMS Interface (DEDICATED), or checks an explicitly selected set of two or three independent interfaces under the Phase 0 STRICT contract (SHARED_STRICT); a network nobody has decided about offers it to nobody. 'Every active PMS' (ALL_ACTIVE_INTERFACES) is removed from the contract. A change is previewed and applied only against that preview. One server-side assessment of whether room sign-in works is read by the dashboard, PMS connection, PMS routing, the Default Network and Client networks. Access/Trunk, VLAN and replacement previews name the affected clients, routing, sign-in methods and packages and the external switch, access-point and hypervisor requirements. Recovery never changes PMS routing; after a confirmed reset an optional, separate room sign-in step is offered.",
+      "authorization_evidence": "The Product Owner's mission of 2026-10-26 'ONEGATE - COMPLETE ENTERPRISE CLIENT NETWORKING & MULTI-PMS DELIVERY', which approved this product behaviour (LAN and guest networking, flexible PMS routing NONE/DEDICATED/SHARED STRICT, safe network transitions, the Full Reset and factory experience with an optional Configure Room Sign-in step, operational warnings and readiness, and the correction of the stale Full Reset wording), and authorised the directly related reconciliation, implementation, additive migrations, tests, UI, governance artifacts, protected Git/PR delivery and controlled software/schema deployment to PRE-LIVE 172.21.60.25. It stated that no automatic destructive network cleanup, external switch or ESXi modification, live Access/Trunk conversion, Full Reset execution, real PMS re-routing, PMS posting, financial transaction, unnamed-environment deployment or Go-Live is authorised, and that the head-specific Product Owner merge-authorization controls are preserved.",
+      "provenance_note": "The delivery agent deployed to PRE-LIVE and did NOT apply the po-merge-approved label: PR #251 is open and unmerged, awaiting the Product Owner's head-specific approval. Directly after the deployment the Product Owner's own admin account exercised the new features on PRE-LIVE (restored a retired network, staged and applied two Access-to-Trunk changes on ens192, and set and cleared room sign-in routing through the new preview-and-confirm call); the audit log is the record. The agent performed no network change, no routing change, no reset and no PMS action. Two Codex P2 findings on the first head were fixed and resolved before the final deployment.",
+      "does_not_authorize": "Merging PR #251 (the Product Owner's head-specific approval); Go-Live; any live Access/Trunk conversion, VLAN change, Full Reset or PMS re-routing performed by the agent; PMS traffic or posting; widening package eligibility; raising the shared-set cap above three; routing by anything other than the client network; any change to the external switch, access points or ESXi.",
+      "implementation": "PR #251 (head 67808d7a); migration 0155; Phase-0 Amendment A2; docs/CLIENT_NETWORKING.md sections 12 and 16-17; recorded by T0250."
+    },
+    {
+      "id": "D75",
+      "decided_on": "2026-10-27",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-10-27",
+      "status": "ACTIVE",
+      "title": "A CERTIFICATE REQUEST BELONGS TO THE APPLIANCE IDENTITY THAT FILED IT (2026-10-27). When a waiting appliance is reinstalled before activation (same hardware, new identity and mTLS keys), Central voids the previous installation's pending certificate requests in the transaction that adopts the new identity, and reports or signs only a request filed at or after the current identity's registration; signing one request closes the others. The appliance installs only a certificate that carries its own mTLS key and, given any other, files one request for its own key. Finding F1 (installation manual A3.5) is closed: Activate can no longer bind an obsolete certificate, and Reissue certificate is no longer needed after such a reinstall.",
+      "authorization_evidence": "The Product Owner's mission of 2026-10-27 'Finish OneGate installer closure by resolving the remaining stale-CSR enrollment defect (F1)', which authorised the controlled enrollment/PKI correction, meaningful regression tests, validation on the named isolated Test Central and test appliances, documentation/governance synchronization, protected PR delivery and merge under the exact-head controls, and securing the lab's disposable plaintext backup after verifying encrypted recovery evidence.",
+      "does_not_authorize": "Any PRE-LIVE or production change, including deploying this correction to the PRE-LIVE appliance or to the production Central (a separate decision); Root CA replacement or destruction; unrelated architecture changes; financial operations; Go-Live.",
+      "implementation": "Branch fix/f1-stale-csr, PR #257, recorded by T0259. control-plane/internal/api certificates.go (currentPendingCSR, countCurrentPendingCSRs, issuance closes other requests), register.go (replaceWaitingIdentity voids pending requests, csr_voided, voided_certificate_requests), appliance_ops.go (Activate and Reissue use the shared predicate); data-plane/internal/appliancecert cert.go (ErrCertKeyMismatch, matchesLocalKey before store writes, requestOwnCertificate in bootstrap and reconcile). Tests stale_csr_integration_test.go and stale_csr_test.go. No migration.",
+      "supersedes_in_part": "None. It closes the open decision listed as handbook section 24.2 item 1 (finding F1)."
     }
   ]
 }

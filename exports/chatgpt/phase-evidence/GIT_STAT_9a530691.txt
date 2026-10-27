@@ -1,0 +1,4 @@
+commit 9a5306910248517c96e92b0515e028cd6d763325
+Date:   Tue Oct 27 20:06:22 2026 +0300
+
+    Governance: change manifest for the F1 enrollment correction
