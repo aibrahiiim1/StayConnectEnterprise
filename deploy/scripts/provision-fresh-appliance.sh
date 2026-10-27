@@ -467,8 +467,9 @@ for _ in $(seq 1 30); do [ -f /var/lib/caddy/.local/share/caddy/pki/authorities/
 # off, so a plain renew here was skipped too and the Admin Console had no certificate at all (measured on a fresh
 # VM). With no certificate yet, rotate issues one regardless of back-off; with one, renew acts only when due.
 if [ -s /etc/caddy/hotel-admin/hotel-admin.crt ]; then cm=renew; else cm=rotate; fi
-bash "$DEPLOY/scripts/hotel-admin-cert-manager.sh" "$cm" >/dev/null 2>&1 \
-  || die "the Admin Console certificate could not be issued ($cm); see: $DEPLOY/scripts/hotel-admin-cert-manager.sh status"
+# The manager exits 0 (nothing due) or 2 (renewed — what a first rotate always returns); 10 and 20 are failures.
+rc=0; bash "$DEPLOY/scripts/hotel-admin-cert-manager.sh" "$cm" >/dev/null 2>&1 || rc=$?
+case "$rc" in 0|2) ;; *) die "the Admin Console certificate could not be issued ($cm, exit $rc); see: $DEPLOY/scripts/hotel-admin-cert-manager.sh status";; esac
 # The early, expected failure of the timer's first run is history once a certificate exists; clear it so the
 # unit health check reports the present state.
 systemctl reset-failed stayconnect-hotel-admin-cert-renew.service >/dev/null 2>&1 || true
