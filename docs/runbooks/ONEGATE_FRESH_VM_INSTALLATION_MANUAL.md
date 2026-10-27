@@ -864,6 +864,9 @@ Release **`onegate-appliance-52243660bb6f`** (commit `52243660`), appliance 2 re
 | Isolation from a signed-in Client | Admin Console, SSH, database `:5432`, console backend `:3100` and the WAN-side subnet: all unreachable |
 | Reboot | all units active, revision unchanged and re-asserted, licence Active, the pre-reboot Client re-authorised, **two new Clients 12/12** |
 | Installer re-run | exit 0 in 36 s, "re-running release …", administrator "unchanged", **0 of 23** identity/key/DSN/env/certificate files changed, a new Client 12/12 |
+| Backup before upgrade | backup key holder added and confirmed; `scd backup-now` encrypted and proven restorable (230 tables) |
+| Upgrade to the final release `41503f8f` | exit 0 in 28 s; 0 pending migrations; **"every Gate-P file matches the release's SHA256SUMS"**, `GATEP_RECONCILE = OK`; all five daemons running `41503f8f`; a signed-in Client stayed online |
+| Binary rollback and roll forward | `BINARY_ROLLBACK = PASS` (running revision back to `52243660`), then `--upgrade` again: `GATEP_RECONCILE = OK`, units PASS, running `41503f8f`; the Client online throughout |
 
 The pristine run took four snapshot reverts. Each earlier attempt stopped on a real defect that only a blank machine shows, fixed in the
 commits listed in B.0 (first-boot apt lock, the first certificate's health check and exit code, the renewal-timer race). After the fix that
