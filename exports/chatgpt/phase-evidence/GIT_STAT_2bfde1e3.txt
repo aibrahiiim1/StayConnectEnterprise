@@ -1,0 +1,4 @@
+commit 2bfde1e3a36433bd5069c4cbb1b794bf8ce28338
+Date:   Tue Oct 27 23:16:13 2026 +0300
+
+    Governance: T0260 records the installer acceptance on the test pair (findings R1-R3) and its change manifest
