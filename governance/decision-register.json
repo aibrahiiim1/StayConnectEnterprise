@@ -1132,6 +1132,20 @@
       "does_not_authorize": "Any PRE-LIVE or production change, including deploying this correction to the PRE-LIVE appliance or to the production Central (a separate decision); Root CA replacement or destruction; unrelated architecture changes; financial operations; Go-Live.",
       "implementation": "Branch fix/f1-stale-csr, PR #257, recorded by T0259. control-plane/internal/api certificates.go (currentPendingCSR, countCurrentPendingCSRs, issuance closes other requests), register.go (replaceWaitingIdentity voids pending requests, csr_voided, voided_certificate_requests), appliance_ops.go (Activate and Reissue use the shared predicate); data-plane/internal/appliancecert cert.go (ErrCertKeyMismatch, matchesLocalKey before store writes, requestOwnCertificate in bootstrap and reconcile). Tests stale_csr_integration_test.go and stale_csr_test.go. No migration.",
       "supersedes_in_part": "None. It closes the open decision listed as handbook section 24.2 item 1 (finding F1)."
+    },
+    {
+      "id": "D76",
+      "decided_on": "2026-10-28",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-10-28",
+      "status": "ACTIVE",
+      "title": "MODULES FOLLOW THE LICENCE: THE HOTEL MODULE IS INSTALLED; ROOM SIGN-IN ONLY WHERE IT IS IN USE (2026-10-28). The supported product profile installs the Hotel module (room sign-in and the Hotel section of the Admin Console) on every appliance, by a fresh install and by every upgrade, so Central's licence and the site's switch decide whether it is used. pmsd, the only process that talks to a PMS, stays dark until the PMS is commissioned. Room sign-in is shown (check, configure action, network list) only while the Hotel module is licensed, installed and switched on. Card payment and room charge remain uninstalled: switching them on needs the Product Owner's authorisation, and the Modules page says so.",
+      "authorization_evidence": "The Product Owner's request of 2026-10-28 after testing the test appliance: the Client networks page asked to configure room sign-in although the licence had no Hotel module, and after the licence was changed to include every module the Modules page still showed Hotel, Card payment and Room charge as not available and no Hotel section appeared -- 'check these issues, fix, update the installation and the manual as needed, then merge and deploy'.",
+      "does_not_authorize": "Installing or enabling card payment, room charge, PMS posting, LIVE payments or any payment-provider activity; commissioning a PMS; any PRE-LIVE or production change; Go-Live.",
+      "implementation": "Branch fix/modules-licence-driven, PR #260, recorded by T0261. deploy/scripts/apply-product-profile.sh (called by provision-fresh-appliance.sh and appliance-install.sh --upgrade); data-plane/cmd/edged roomSignInInScope (modules.go) used by the Default Network readiness and the network overview; hotel-admin moduleReasonWords. Tests: edged TestRoomSignInInScopeOnlyWithTheHotelModuleInUse, hotel-admin modules-page. No migration.",
+      "supersedes_in_part": "The installer design that left the PMS surface flags off until commissioning (inventory G9, manual C.10 step 2): only pmsd stays dark now."
     }
   ]
 }
