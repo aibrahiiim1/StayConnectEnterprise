@@ -163,6 +163,10 @@ var (
 	// (duplicate requests), but treating it as fatal would stop the certificate lifecycle on every appliance at once when Central adds a status. The
 	// appliance keeps waiting, loudly, and recovers when Central says something it understands.
 	ErrCertUnknownState = errors.New("unrecognised certificate status from Central")
+
+	// ErrCertKeyMismatch: Central issued a certificate for a key this appliance does not hold, i.e. it signed a request from an
+	// earlier installation of the same hardware (finding F1). The certificate is never written; the appliance asks for its own.
+	ErrCertKeyMismatch = errors.New("the issued certificate does not carry this appliance's mTLS key")
 )
 
 // Loads an existing local certificate, or makes ONE bootstrap attempt if none is present, without blocking for issuance (see EnsureUntilInstalled).
@@ -250,6 +254,10 @@ func (m *Manager) bootstrapOnce(ctx context.Context) error {
 		return err
 	}
 	maySubmit, err := m.actOnStatus(ctx, status, certPEM, caPEM)
+	if errors.Is(err, ErrCertKeyMismatch) {
+		_, err = m.requestOwnCertificate(ctx, fprOfPEM(certPEM), m.submitCSR, m.collect)
+		return err
+	}
 	if err != nil || !maySubmit {
 		return err
 	}
@@ -263,6 +271,10 @@ func (m *Manager) bootstrapOnce(ctx context.Context) error {
 		return err
 	}
 	maySubmit, err = m.actOnStatus(ctx, status, certPEM, caPEM)
+	if errors.Is(err, ErrCertKeyMismatch) {
+		_, err = m.requestOwnCertificate(ctx, fprOfPEM(certPEM), m.submitCSR, m.collect)
+		return err
+	}
 	if err != nil {
 		return err
 	}
@@ -302,6 +314,54 @@ func (m *Manager) collect(ctx context.Context) (status, certPEM, caPEM string, e
 		return "", "", "", fmt.Errorf("cert fetch: %w", err)
 	}
 	return out.Status, out.CertificatePEM, out.CAChain, nil
+}
+
+// requestOwnCertificate answers an issued certificate that carries another key. Nothing is written. ONE CSR for the local key
+// is filed per foreign certificate per rotationResubmitAfter (the on-disk marker), so a Central that cannot sign it yet is not
+// flooded; an activated appliance's request is signed on arrival, so the re-collect usually installs the right certificate.
+// The request is signed by the identity key like every other CSR: the appliance gains nothing it could not already ask for.
+func (m *Manager) requestOwnCertificate(ctx context.Context, foreignFpr string, submit func(context.Context) error,
+	collect func(context.Context) (string, string, string, error)) (bool, error) {
+	if t := m.loadRotationPending(foreignFpr); t.IsZero() || time.Since(t) >= rotationResubmitAfter {
+		slog.Warn("appliancecert: Central issued a certificate for a key this appliance does not hold; requesting its own",
+			"foreign_fpr", foreignFpr, "note", "a certificate request from an earlier installation of this hardware was signed")
+		if err := submit(ctx); err != nil {
+			return false, err
+		}
+		m.markRotationPending(foreignFpr)
+	}
+	status, certPEM, caPEM, err := collect(ctx)
+	if err != nil {
+		return false, err
+	}
+	if status == statusIssued && certPEM != "" {
+		err := m.store(ctx, []byte(certPEM), []byte(caPEM))
+		if err == nil {
+			m.clearRotationPending()
+			slog.Info("appliancecert: certificate for this appliance's own key installed", "fpr", m.currentFpr())
+			return true, nil
+		}
+		if !errors.Is(err, ErrCertKeyMismatch) {
+			return false, err
+		}
+	}
+	return false, fmt.Errorf("%w: Central has not yet signed this appliance's own request (status %q)", ErrCertPending, status)
+}
+
+// matchesLocalKey refuses a certificate whose public key is not this appliance's mTLS key, before anything is written.
+func (m *Manager) matchesLocalKey(certPEM []byte) error {
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		return errors.New("certificate PEM decode failed")
+	}
+	leaf, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return fmt.Errorf("certificate parse: %w", err)
+	}
+	if pub, ok := leaf.PublicKey.(ed25519.PublicKey); !ok || !pub.Equal(m.mtlsPriv.Public()) {
+		return fmt.Errorf("%w (certificate %s)", ErrCertKeyMismatch, x509sha256(leaf.Raw))
+	}
+	return nil
 }
 
 func (m *Manager) installCollected(ctx context.Context, certPEM, caPEM string) error {
@@ -490,6 +550,12 @@ func (m *Manager) installPEM(certPEM, caPEM []byte) error {
 
 // store writes cert + CA atomically (0644 — public material) then installs.
 func (m *Manager) store(ctx context.Context, certPEM, caPEM []byte) error {
+	if err := m.ensureMTLSKey(); err != nil {
+		return err
+	}
+	if err := m.matchesLocalKey(certPEM); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(m.dir, 0o700); err != nil {
 		return err
 	}
@@ -646,7 +712,16 @@ func (m *Manager) Reconcile(ctx context.Context) (ReconcileOutcome, error) {
 		if certPEM == "" || fprOfPEM(certPEM) == m.currentFpr() {
 			return ReconcileCurrent, nil
 		}
-		if err := m.store(ctx, []byte(certPEM), []byte(caPEM)); err != nil {
+		if err := m.store(ctx, []byte(certPEM), []byte(caPEM)); errors.Is(err, ErrCertKeyMismatch) {
+			installed, err := m.requestOwnCertificate(ctx, fprOfPEM(certPEM), m.submitCSRIngress, m.collectIngress)
+			if installed {
+				return ReconcileReissued, nil
+			}
+			if errors.Is(err, ErrCertPending) {
+				return ReconcileWaiting, nil
+			}
+			return "", err
+		} else if err != nil {
 			return "", err
 		}
 		slog.Warn("appliancecert: Central holds a newer certificate for this appliance; installed it", "fpr", m.currentFpr())

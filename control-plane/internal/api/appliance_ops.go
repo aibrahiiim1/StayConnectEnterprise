@@ -203,9 +203,7 @@ func (b *Base) activate(w http.ResponseWriter, r *http.Request) {
 	// Committed. The rest is best effort and never undoes the activation.
 	certIssued := false
 	if b.CA != nil {
-		var pending int
-		_ = b.DB.QueryRow(ctx, `SELECT count(*) FROM appliance_certificate_requests WHERE appliance_id=$1 AND status='pending'`, id).Scan(&pending)
-		if pending > 0 {
+		if b.countCurrentPendingCSRs(ctx, id) > 0 {
 			cb := &CertBase{Base: b, CA: b.CA, ClientValid: b.ClientValid}
 			_, cerr := cb.issueCertForAppliance(ctx, r, id, email)
 			certIssued = cerr == nil
@@ -632,10 +630,8 @@ func (b *Base) reissueCertificate(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := DBCtx(r)
 	defer cancel()
 	operatorID, email := actorOf(r)
-	var pending int
-	_ = b.DB.QueryRow(ctx, `SELECT count(*) FROM appliance_certificate_requests WHERE appliance_id=$1 AND status='pending'`, id).Scan(&pending)
 	outcome := "signed_pending_csr"
-	if pending > 0 {
+	if b.countCurrentPendingCSRs(ctx, id) > 0 {
 		cb := &CertBase{Base: b, CA: b.CA, ClientValid: b.ClientValid}
 		if _, err := cb.issueCertForAppliance(ctx, r, id, email); err != nil {
 			Fail(w, r, http.StatusBadRequest, CodeBadRequest, "the waiting CSR could not be signed: "+publicError(r, err))
