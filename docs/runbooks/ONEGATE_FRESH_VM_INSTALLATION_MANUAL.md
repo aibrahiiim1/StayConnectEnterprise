@@ -119,7 +119,7 @@ OneGate's design rule is **two NICs and no more**. The installer counts physical
 |---|---|---|
 | WAN IP/prefix/gateway | Static is recommended: the Admin Console certificate, the nft `443` pin and the Central link follow this address. Changing it later is a staged change with a confirm window (Part C.5). | **[CODE]** |
 | DNS on the WAN NIC | Resolvers that **resolve your Central's name** (`sc-central.echofusion.com` for the production Central). The provisioner queries every upstream resolver and **stops if they disagree** about the name (set `ALLOW_SPLIT_DNS=1` only knowingly). | **[CODE][VM]** |
-| Central reachability | Outbound **TCP 443** to Central for register/CSR/licence/assignment/hello/portal-TLS, and **TCP 9443** (mutual TLS) once a certificate exists. The name must be a **hostname, not an IP**. Central never connects inbound to the appliance. **If Central sits behind NAT, both 443 and 9443 must be forwarded to the Central host** (the validation found 443 forwarded to the wrong host once — check, do not assume). | **[CODE][VM]** |
+| Central reachability | Outbound **TCP 443** to Central for register/CSR/licence/assignment/hello/portal-TLS, and **TCP 9443** (mutual TLS) once a certificate exists. The name must be a **hostname, not an IP**. Central never connects inbound to the appliance. **If Central sits behind NAT, both 443 and 9443 must be forwarded to the Central host** (the validation found 443 forwarded to the wrong host once — check, do not assume). An appliance outside Central's network needs the name in **public DNS** (an A record to Central's public address); one on Central's own LAN reaches the public address only if the router does hairpin NAT, or by internal DNS. Proven from outside for the test Central (A3.8). | **[CODE][VM]** |
 | Package/image sources | Outbound HTTPS to the Ubuntu mirrors, `download.docker.com`, `dl.cloudsmith.io` (Caddy), `deb.nodesource.com`, and Docker Hub (images `timescale/timescaledb:2.16.1-pg16`, `redis:7-alpine`). **No offline install path exists. [PO] if the site is air-gapped.** | **[CODE][VM]** |
 | NTP | Outbound UDP 123 to the site's/clock source | — |
 | Inbound to the appliance | **22/tcp** (SSH; not address-pinned) and **443/tcp** (Admin Console, pinned to the WAN IP by the rendered firewall). Nothing else on the WAN. Restrict who may reach these at the upstream firewall. | **[CODE][VM]** |
@@ -197,11 +197,17 @@ ip -br link                                   # exactly two physical NICs
 ip route show default                         # via the WAN NIC
 getent hosts <central-name>                   # resolves to Central (public or internal address, as designed)
 curl -sSk https://<central-name>/readyz                    # Central answers (its CA is checked by the installer, B.5)
-timeout 5 bash -c '</dev/tcp/<central-name>/9443' && echo "9443 open"          # the mutual-TLS listener is reachable
+# 9443 must be Central's mutual-TLS listener, not merely an open port: it asks for a client certificate from the appliance CAs
+echo | openssl s_client -connect <central-name>:9443 -servername <central-name> 2>/dev/null \
+  | grep -A2 'Acceptable client certificate CA names'      # → "StayConnect Appliance Intermediate CA v1" and "StayConnect Root CA"
 ```
 
 The installer repeats the platform checks and refuses on failure; the Central checks matter because a blocked 443/9443 or a wrong
-port-forward only shows up later, as an appliance that never registers or never converts to mutual TLS.
+port-forward only shows up later, as an appliance that never registers or never converts to mutual TLS. An open-port test cannot tell
+Central's listener from another host answering on 9443 (the validation once found 443 forwarded to the wrong host); the client-CA list can.
+Before activation the appliance cannot verify the 9443 server certificate itself — Central presents only its leaf, and the Intermediate
+arrives with the appliance's own certificate (`/etc/stayconnect/certs/ca.crt`) — so `Verify return code: 21` at this point is expected.
+Testing from a Windows workstation with `curl`: add `--ssl-no-revoke` (an internal CA publishes no revocation list). **[VM]** (A3.8)
 
 ### B.4 Copy the release and the trust files to the VM (WS) — **[VM]**
 
@@ -976,3 +982,20 @@ written; each one that did not work as written is corrected above (R3). Final re
 | Central reboot | **found R1**: Redis restart-looped (`can't create /tmp/redis-auth.conf`), ctrlapi with it, the appliance saw Central unreachable. Fixed (`05481cb5`), applied with the F.6 compose step: two Redis restarts healthy, a second reboot → every service back, smoke PASS, 0 Redis failures, the appliance reconnected |
 
 Not repeated here: a blank-VM install of the final release (A3.5), offline activation, and the D.4 witness items.
+
+### A3.8 External connectivity of the test Central (2026-10-27, read-only)
+
+From a host outside Central's network (public egress `41.33.106.242`, a different address from Central's), with no change to Central, the
+appliance, networking or trust:
+
+| Check | Result |
+|---|---|
+| Public DNS | `central.onegate.getsemantics.com` → A `41.128.240.133` (Cloudflare-hosted zone; same answer from 1.1.1.1, 8.8.8.8 and DoH) |
+| 443 | `/readyz` → 200 `ready`, the certificate verified against the published `central-tls-ca.crt` for the name |
+| 9443 listener | requests a client certificate from *StayConnect Appliance Intermediate CA v1* / *StayConnect Root CA*; server certificate `CN=stayconnect-mtls` verifies (code 0) for the name against the appliance CA bundle; presents only its leaf, so the Root alone gives code 21 (B.3) |
+| 9443 without a client certificate | handshake refused |
+| Full mutual TLS over the external path | the activated test appliance's own `curl`, its key never leaving it, tunnelled through the outside host (reverse SOCKS): `GET /v1/appliance/assignment` → **200** with the signed assignment; `/v1/appliance/assignment-registry` → 401 (it also requires the signed request, by design) |
+| 443 enrollment endpoint | `GET /v1/appliance/certificate` without a signed request → 401 (reachable and authenticating) |
+
+Not exercised from outside: registering a *new* appliance end to end (it would create a Central record). Registration and the CSR use the
+same 443 listener and name verified here, and an appliance on Central's own subnet completed them (A3.2, A3.6).
