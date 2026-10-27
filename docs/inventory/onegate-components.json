@@ -61,7 +61,7 @@
     "appliance_to_central_endpoints": 12,
     "secret_files": 10,
     "known_install_gaps": 4,
-    "resolved_install_gaps": 15
+    "resolved_install_gaps": 16
   },
   "components": [
     {
@@ -1992,6 +1992,7 @@
     "R2 -> appliance-install.sh stops when the first administrator is refused; re-run resumes (28cfc9f4; manual A3.7)",
     "R3 -> manual verification commands corrected by executing them; client-journey --remove (28cfc9f4, 05481cb5; manual A3.7)",
     "M1 -> the product profile installs the Hotel module and every upgrade applies it (apply-product-profile.sh); card payment and room charge stay uninstalled with words saying why (manual C.12)",
-    "M2 -> room sign-in shown only while the Hotel module is in use (edged roomSignInInScope)"
+    "M2 -> room sign-in shown only while the Hotel module is in use (edged roomSignInInScope)",
+    "M3 -> card payment and room charge configurable, execution blocked (card_payment_provider_calls, transmit); ha/white_label reported not implemented (D77; manual C.12)"
   ]
 }

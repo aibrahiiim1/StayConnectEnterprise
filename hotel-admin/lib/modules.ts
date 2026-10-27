@@ -36,8 +36,10 @@ export const MODULE_REASON_WORDS: Record<string, string> = {
 // A licence alone does not install a module: these say what does, per module, when the appliance does not run it.
 const NOT_DEPLOYED_BY_MODULE: Record<string, string> = {
   hospitality: "Licensed, but this appliance's installation predates the Hotel module. Upgrade it with the current release (installation manual E.5) and it becomes available.",
-  card_payment: "Licensed, but not switched on in this appliance's installation. Card payment calls a payment provider, so it is enabled only with the vendor's authorisation (installation manual C.12).",
-  room_charge: "Licensed, but not switched on in this appliance's installation. Room charge posts charges to the PMS, so it is enabled only with the vendor's authorisation (installation manual C.12).",
+  card_payment: "Licensed, but this appliance's installation predates configurable card payment. Upgrade it with the current release (installation manual E.5) and it becomes available.",
+  room_charge: "Licensed, but this appliance's installation predates configurable room charge. Upgrade it with the current release (installation manual E.5) and it becomes available.",
+  ha: "Not implemented in this release: a licence can include it, but OneGate does not provide high availability yet.",
+  white_label: "Not implemented in this release: a licence can include it, but it adds nothing yet. Portal branding is available to every site.",
 };
 
 /** The words for one reason on one module; a module-specific explanation wins over the generic one. */
@@ -58,6 +60,7 @@ export const READINESS_WORDS: Record<string, string> = {
   PROVIDER_NOT_SUPPORTED: "The account's provider or region is not supported.",
   PROVIDER_CREDENTIALS_INCOMPLETE: "The provider account is missing a required credential.",
   PROVIDER_UNREACHABLE: "The payment provider cannot be reached.",
+  PROVIDER_CALLS_NOT_AUTHORISED: "Configurable only: this appliance is not authorised to contact a payment provider, so clients are not offered card payment and a provider connection cannot be tested.",
   PMS_POSTING_NOT_AUTHORISED: "Sending charges to the PMS is switched off on this appliance (a safety switch set at installation). Room charge can be configured, but clients are not offered it and nothing is posted to the PMS.",
   NO_DATABASE: "The database is not available.",
   READINESS_UNREADABLE: "Readiness could not be read.",

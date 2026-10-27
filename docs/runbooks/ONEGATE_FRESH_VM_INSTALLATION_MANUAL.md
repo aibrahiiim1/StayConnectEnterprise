@@ -267,10 +267,12 @@ What happens, in order, each step printing a heading and stopping at the first f
 | `edged.env` | `STAYCONNECT_PHASE2_MASTER=true`, `STAYCONNECT_PHASE2_ADMIN=true` | the Admin Console's packages/plans/vouchers surfaces |
 | `netd.env`, `acctd.env` | `STAYCONNECT_PHASE3_MASTER=true`, `NETD_PHASE3_PRODUCER_UID=<uid of acctd's user>` | the **enforcement plane**: without it every session stays `PENDING_ENFORCEMENT` and no Client reaches the Internet |
 | `scd.env`, `edged.env` | `STAYCONNECT_PHASE3_MASTER=true`; scd `STAYCONNECT_PHASE3_PMS_AUTH=true`; edged `STAYCONNECT_PHASE3_ADMIN=true` | the **Hotel module is installed**: room sign-in and the *Hotel* section exist, and Central's licence (with the site's switch) decides whether they are used. Inert until a PMS is commissioned (C.10) |
+| `scd.env` | `STAYCONNECT_PHASE4_MASTER=true`, `STAYCONNECT_PHASE4_PAYMENT=true`, `STAYCONNECT_PHASE4_POSTING=true` | **card payment and room charge can be configured** (provider accounts, sealed credentials, room-charge preparation); **nothing executes** — C.12 |
 | (provisioner defaults) | `STAYCONNECT_IAMV2_MASTER/OTP/SOCIAL=true`, `SCD_DURABLE_THROTTLE`, `SCD_OTP_HMAC` | IAM v2 sign-in, throttling, OTP |
 
-**Not** enabled: the PMS connector (`pmsd`, which alone talks to a PMS — commissioned in C.10) and every financial flag
-(`STAYCONNECT_PHASE4_*`, `STAYCONNECT_PAYMENT_LIVE_ALLOWED`: card payment and room charge — C.12, **[PO]**).
+**Not** enabled, and never written by the profile: the PMS connector (`pmsd`, which alone talks to a PMS — commissioned in C.10) and every
+financial **execution** switch — `STAYCONNECT_PHASE4_PAYMENT_PROVIDER` (payment-provider calls), `_OUTBOX_WORKER` and `_PMS_TRANSMIT` (PMS posting),
+`_FINANCIAL_REVIEW`, `STAYCONNECT_PAYMENT_LIVE_ALLOWED` — C.12, **[PO]**.
 The profile is written by `deploy/scripts/apply-product-profile.sh`, which a fresh install **and every `--upgrade`** run, so an appliance installed by
 an older release gets what the current one ships. It then runs `check-phase3-enforcement-plane.sh` and `check-phase6-guest-dependency.sh` and stops
 if the environment is incoherent.
@@ -428,10 +430,20 @@ Mews, Apaleo and OPERA Cloud connectors exist but have **never connected to a li
 | **Switched on** | the site | *Modules* (or *Sign-in methods* for the identity add-ons) |
 | **Ready** | the module's own prerequisites | e.g. a delivery provider for one-time codes |
 
-What a release installs **[CODE][VM]**: paid access, the identity add-ons (SMS, WhatsApp, email accounts, social sign-in), white label, high
-availability and the **Hotel** module. Not installed: **card payment** (it calls a payment provider) and **room charge** (it posts charges to the PMS).
-Their *Modules* card says so. Licensing them is not enough, and this manual has no step that switches them on: that is a Product-Owner/vendor
-authorisation **[PO]**.
+What a release installs **[CODE][VM]**: paid access, the identity add-ons (SMS, WhatsApp, email accounts, social sign-in), the **Hotel**
+module, and **card payment** and **room charge for configuration**. *Available* means the module can be configured here. It never means the
+module can move money or reach a PMS: execution is separate, and it shows as **Ready: No** with the reason.
+
+| Module | Configurable here (installed) | Execution | Shows as |
+|---|---|---|---|
+| Card payment | provider accounts, sealed credentials, domains, settings | **blocked**: without `STAYCONNECT_PHASE4_PAYMENT_PROVIDER` scd builds no checkout engine, refuses *Test connection* ("Not tested"), opens no provider domain to clients who have not signed in, and never offers card payment | Available Yes · Ready No — "Configurable only: this appliance is not authorised to contact a payment provider" |
+| Room charge | room-charge preparation (posting domain) | **blocked**: without `_OUTBOX_WORKER` and `_PMS_TRANSMIT` nothing can reach a PMS; room charge is never offered | Available Yes · Ready No — "Sending charges to the PMS is switched off on this appliance" |
+| High availability, White label | — not implemented in this release | — | Available **No** — "Not implemented in this release" (a licence can carry them; nothing implements them) |
+
+Switching execution on is a Product-Owner authorisation **[PO]**, and this manual has no step for it. The product profile never writes an execution
+switch. On an appliance where one is already on, the profile reports it and leaves it alone. If it finds one sitting without its master (inert
+today), it **refuses** rather than add the master and switch execution on. Real payments additionally need `STAYCONNECT_PAYMENT_LIVE_ALLOWED`;
+a LIVE-mode account cannot even be saved without it.
 
 ### C.11 Hardening you should do before handing over
 
@@ -811,7 +823,7 @@ Written by the provisioner only if absent (`[ -f ] ||`); never regenerated. The 
 
 | File | Keys the provisioner writes | Operator-added (when enabling features) |
 |---|---|---|
-| `scd.env` | `SCD_DB_URL`, `SCD_SOCKET=/run/stayconnect/scd.sock`, `SCD_CTRLAPI_BASE`, `SCD_MTLS_BASE`, `SCD_AUTO_REGISTER=true`, `SCD_METRICS_ADDR=127.0.0.1:9101`, `STAYCONNECT_IAMV2_MASTER/OTP/SOCIAL=true`, `SCD_PAYMENT_DB_URL`, `STAYCONNECT_PHASE4_PAYMENT_OUTCOME_DSN`, `SCD_POSTING_DB_URL`, `SCD_SECRETS_DIR`, `SCD_DURABLE_THROTTLE=true`, `SCD_OTP_HMAC=true`; profile: `STAYCONNECT_PHASE2_MASTER=true`, `STAYCONNECT_PHASE2_PORTAL=true`, `STAYCONNECT_PHASE3_MASTER=true`, `STAYCONNECT_PHASE3_PMS_AUTH=true` | `STAYCONNECT_PHASE4_*` (**[PO]**), `STAYCONNECT_PHASE5_*`, `STAYCONNECT_PHASE6_*`, `STAYCONNECT_PAYMENT_LIVE_ALLOWED` (**[PO]**, never set in a pilot) |
+| `scd.env` | `SCD_DB_URL`, `SCD_SOCKET=/run/stayconnect/scd.sock`, `SCD_CTRLAPI_BASE`, `SCD_MTLS_BASE`, `SCD_AUTO_REGISTER=true`, `SCD_METRICS_ADDR=127.0.0.1:9101`, `STAYCONNECT_IAMV2_MASTER/OTP/SOCIAL=true`, `SCD_PAYMENT_DB_URL`, `STAYCONNECT_PHASE4_PAYMENT_OUTCOME_DSN`, `SCD_POSTING_DB_URL`, `SCD_SECRETS_DIR`, `SCD_DURABLE_THROTTLE=true`, `SCD_OTP_HMAC=true`; profile: `STAYCONNECT_PHASE2_MASTER=true`, `STAYCONNECT_PHASE2_PORTAL=true`, `STAYCONNECT_PHASE3_MASTER=true`, `STAYCONNECT_PHASE3_PMS_AUTH=true`, `STAYCONNECT_PHASE4_MASTER=true`, `STAYCONNECT_PHASE4_PAYMENT=true`, `STAYCONNECT_PHASE4_POSTING=true` (configuration only) | execution switches (C.12, **[PO]**): `STAYCONNECT_PHASE4_*` (**[PO]**), `STAYCONNECT_PHASE5_*`, `STAYCONNECT_PHASE6_*`, `STAYCONNECT_PAYMENT_LIVE_ALLOWED` (**[PO]**, never set in a pilot) |
 | `edged.env` | `EDGED_DB_URL`, `EDGED_SCD_SOCKET`, `EDGED_COOKIE_SECURE=true`, `STAYCONNECT_IAMV2_MASTER=true`; profile: `STAYCONNECT_PHASE2_MASTER=true`, `STAYCONNECT_PHASE2_ADMIN=true`, `STAYCONNECT_PHASE3_MASTER=true`, `STAYCONNECT_PHASE3_ADMIN=true` | … `PMSD_SECRET_KEY_ID/_HEX` if an `AUTH_KEY` interface is authored |
 | `acctd.env` | `ACCTD_DB_URL`, `ACCTD_SCD_SOCKET`; profile: `STAYCONNECT_PHASE3_MASTER=true` (enforcement plane) | `ACCTD_TICK_SECONDS` (1–10) |
 | `portald.env` | `PORTALD_SCD_SOCKET`; profile: `STAYCONNECT_PHASE2_MASTER=true`, `STAYCONNECT_PHASE2_PORTAL=true` | `PORTALD_HTTP_ADDR`, `PORTALD_HTTPS_ADDR`, `PORTALD_FQDN` (defaults are right) |
@@ -864,7 +876,9 @@ DSNs are `postgres://<svc_role>:<password>@127.0.0.1:5432/stayconnect_site?sslmo
 | Voucher rejected | wrong network offer, expired, revoked, throttled | scd log; *Guest sign-in attempts* |
 | No OTP / verification email | no enabled sender (the stub only writes `/var/log/stayconnect/otp-mail.log`) | *Delivery* |
 | Social login not offered | portal HTTPS inactive or hostname not in the provider's callback hosts | *Portal HTTPS*, provider console |
-| *Modules*: licensed but **Available: No**; no *Hotel* section | the installation does not have the module: Hotel on a release before the module fix (upgrade, E.5); card payment / room charge are never installed by a release (C.12) | *Modules* card words; `grep PHASE3 /etc/stayconnect/scd.env /etc/stayconnect/edged.env` |
+| *Modules*: licensed but **Available: No** | the installation predates the module (Hotel, card payment, room charge: upgrade, E.5), or the module is not implemented in this release (high availability, white label) | the *Modules* card's words; `grep -E 'PHASE3|PHASE4' /etc/stayconnect/scd.env /etc/stayconnect/edged.env` |
+| Card payment / room charge **Available: Yes, Ready: No** | by design: configurable, not executable (C.12) | the readiness words; execution is a **[PO]** authorisation |
+| Upgrade stops: "sets STAYCONNECT_PHASE4_… with no STAYCONNECT_PHASE4_MASTER" | a financial execution switch left in `scd.env` without its master; adding the master would have switched execution on | remove the switch, or get the authorisation and set the master by hand; re-run `--upgrade` |
 | *Client networks* asks to configure room sign-in on a site without the Hotel module | releases before the module fix | upgrade; room sign-in is shown only with the Hotel module in use |
 | Room sign-in always "not verified" | by design uniform; check mirror freshness, routing policy (`NONE`/undecided), licence `hospitality`, interface not `ACTIVE`, ambiguity | `/pms-routing/readiness`; `iam_v2.pms_interface_runtime`; scd log |
 | `systemctl restart X` hangs | `StartLimitIntervalSec=0` with a *refused* start | `systemctl stop X; systemctl reset-failed X; systemctl start --no-block X` |

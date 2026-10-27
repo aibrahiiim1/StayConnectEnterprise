@@ -15,8 +15,16 @@
 # talks to a PMS -- stays dark (its env file is untouched here) until the commissioning step of the installation
 # manual (C.10) configures it with its keys.
 #
-# NOT HERE, ON PURPOSE: anything financial (STAYCONNECT_PHASE4_*: card payment calls a payment provider, room charge
-# posts to the PMS) and STAYCONNECT_PAYMENT_LIVE_ALLOWED. Those need the vendor's authorisation (manual C.12).
+# CARD PAYMENT AND ROOM CHARGE ARE INSTALLED FOR CONFIGURATION, NEVER FOR EXECUTION (Product Owner, 2026-10-28). Their
+# domains (STAYCONNECT_PHASE4_MASTER, _PAYMENT, _POSTING) let an operator keep provider accounts and prepare room charge;
+# nothing executes: without the provider-call flag scd builds no checkout engine, refuses a connection test, opens no
+# provider domain to unsigned clients and reports the module not ready, so no client is offered card payment; without
+# transmit (and the outbox worker) no posting can reach a PMS, and room charge is never ready, so never offered.
+#
+# NEVER HERE: the execution switches -- STAYCONNECT_PHASE4_PAYMENT_PROVIDER (payment-provider calls),
+# STAYCONNECT_PHASE4_OUTBOX_WORKER and STAYCONNECT_PHASE4_PMS_TRANSMIT (PMS posting), STAYCONNECT_PHASE4_FINANCIAL_REVIEW
+# and STAYCONNECT_PAYMENT_LIVE_ALLOWED. Each is a separate Product-Owner authorisation (manual C.12); this script refuses to
+# finish if it ever finds one it would have written.
 #
 # ensure_kv adds a key only when it is ABSENT and never changes an existing value, so an operator's choice on an
 # appliance already in service (a flag set to false) survives every re-run and upgrade.
@@ -62,6 +70,27 @@ if truthy "$(val_in edged.env STAYCONNECT_PHASE3_MASTER)"; then
 else
   echo "[product-profile] edged.env: STAYCONNECT_PHASE3_MASTER is off here by choice; the Hotel section not added"
 fi
+# card payment and room charge: configuration domains in scd only, each under its own enabled master. Adding the master
+# must never make an execution switch effective: one that is on with no master is inert today, and stays the operator's.
+if [ -z "$(val_in scd.env STAYCONNECT_PHASE4_MASTER)" ]; then
+  for k in STAYCONNECT_PHASE4_PAYMENT_PROVIDER STAYCONNECT_PHASE4_OUTBOX_WORKER STAYCONNECT_PHASE4_PMS_TRANSMIT STAYCONNECT_PHASE4_FINANCIAL_REVIEW; do
+    truthy "$(val_in scd.env "$k")" && die "$ETC/scd.env sets $k with no STAYCONNECT_PHASE4_MASTER: adding the master would switch financial execution on. Resolve it by hand (C.12)"
+  done
+fi
+ensure_kv scd.env STAYCONNECT_PHASE4_MASTER true
+if truthy "$(val_in scd.env STAYCONNECT_PHASE4_MASTER)"; then
+  ensure_kv scd.env STAYCONNECT_PHASE4_PAYMENT true
+  ensure_kv scd.env STAYCONNECT_PHASE4_POSTING true
+else
+  echo "[product-profile] scd.env: STAYCONNECT_PHASE4_MASTER is off here by choice; card payment and room charge not added"
+fi
+# A Phase-4 child on under a disabled master is a start-up refusal (payment.LoadConfigFromEnv, posting.LoadConfigFromEnv).
+if ! truthy "$(val_in scd.env STAYCONNECT_PHASE4_MASTER)"; then
+  for k in STAYCONNECT_PHASE4_PAYMENT STAYCONNECT_PHASE4_PAYMENT_PROVIDER STAYCONNECT_PHASE4_POSTING STAYCONNECT_PHASE4_OUTBOX_WORKER \
+           STAYCONNECT_PHASE4_PMS_TRANSMIT STAYCONNECT_PHASE4_FINANCIAL_REVIEW; do
+    truthy "$(val_in scd.env "$k")" && die "$ETC/scd.env sets $k while its STAYCONNECT_PHASE4_MASTER is off: scd would refuse to start"
+  done
+fi
 # Each daemon validates its OWN file: a Phase-3 child flag on while that file's master is off stops it at start.
 for f in scd.env edged.env; do
   truthy "$(val_in "$f" STAYCONNECT_PHASE3_MASTER)" && continue
@@ -74,4 +103,11 @@ bash "$DEPLOY/scripts/check-phase3-enforcement-plane.sh" "$ETC" >/dev/null \
   || die "the environment is not coherent: $(bash "$DEPLOY/scripts/check-phase3-enforcement-plane.sh" "$ETC" 2>&1 | head -3)"
 bash "$DEPLOY/scripts/check-phase6-guest-dependency.sh" "$ETC" >/dev/null 2>&1 \
   || die "the environment is not coherent: $(bash "$DEPLOY/scripts/check-phase6-guest-dependency.sh" "$ETC" 2>&1 | head -3)"
-echo "[product-profile] OK (client access, enforcement plane, Hotel module installed; nothing financial)"
+# The profile never grants execution. A switch found on here was set by someone else, deliberately: report it, never add it.
+for f in "$ETC"/*.env; do
+  for k in STAYCONNECT_PHASE4_PAYMENT_PROVIDER STAYCONNECT_PHASE4_OUTBOX_WORKER STAYCONNECT_PHASE4_PMS_TRANSMIT \
+           STAYCONNECT_PHASE4_FINANCIAL_REVIEW STAYCONNECT_PAYMENT_LIVE_ALLOWED; do
+    truthy "$(val_in "$(basename "$f")" "$k")" && echo "[product-profile] NOTE: $(basename "$f") has $k on (set outside this profile)"
+  done
+done
+echo "[product-profile] OK (client access, enforcement plane, Hotel module; card payment and room charge configurable, not executable)"

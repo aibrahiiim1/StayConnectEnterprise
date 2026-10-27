@@ -229,6 +229,17 @@ describe("Payment methods — Card payment configuration", () => {
     expect(post).toHaveBeenCalledWith("/payment-providers/accounts/acc-1/test", {});
   });
 
+  it("says Not tested, never Connection failed, when provider calls are not authorised here", async () => {
+    routes(["site_admin"], { card_payment: mod("card_payment"), room_charge: mod("room_charge") });
+    post.mockResolvedValue({ ok: false, error: "provider_calls_not_authorised",
+      message: "This appliance is not authorised to contact a payment provider, so the connection cannot be tested." });
+    render(<PaymentMethodsPage />);
+    await screen.findByText("Main Stripe");
+    await chooseRowAction("Main Stripe", /test connection/i);
+    expect(await screen.findByText(/not tested: this appliance is not authorised/i)).toBeInTheDocument();
+    expect(screen.queryByText(/connection failed/i)).toBeNull();
+  });
+
   it("saves timings with a reason and password", async () => {
     routes(["site_admin"], { card_payment: mod("card_payment"), room_charge: mod("room_charge") });
     put.mockResolvedValue({ ...SETTINGS, settings: { ...SETTINGS.settings, checkout_expiry_minutes: 45, is_default: false } });

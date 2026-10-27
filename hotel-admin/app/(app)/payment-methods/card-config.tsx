@@ -154,7 +154,7 @@ export function CardPaymentConfig({ writable }: { writable: boolean }) {
     <div className="space-y-5">
       <ErrorBanner err={err} className="mb-0" />
       {providers?.engine_unready && (
-        <Callout tone="warning" title="The card payment engine is not ready on this appliance">
+        <Callout tone={providers.engine_unready === "PROVIDER_CALLS_NOT_AUTHORISED" ? "info" : "warning"} title={providers.engine_unready === "PROVIDER_CALLS_NOT_AUTHORISED" ? "Card payment can be configured here, not run" : "The card payment engine is not ready on this appliance"}>
           <CodeText code={providers.engine_unready} />
         </Callout>
       )}
@@ -315,6 +315,8 @@ function AccountsCard({
                         <div className="mt-1 text-xs" role="status">
                           {r.ok ? (
                             <span className="text-success-subtle-foreground">Connection accepted</span>
+                          ) : r.error === "provider_calls_not_authorised" ? (
+                            <span className="text-muted-foreground">Not tested: {r.message}</span>
                           ) : (
                             <span className="text-destructive">
                               Connection failed{r.message ? `: ${r.message}` : r.error ? ` (${r.error})` : ""}

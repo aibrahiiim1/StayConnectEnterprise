@@ -207,6 +207,7 @@ export function postingSourceWords(code: string | null | undefined): string {
 
 const CODE_WORDS: Record<string, string> = {
   CARD_NOT_DEPLOYED: "Card payment is not installed on this appliance",
+  PROVIDER_CALLS_NOT_AUTHORISED: "Configurable only: this appliance is not authorised to contact a payment provider, so clients are not offered card payment and connections cannot be tested",
   PAYMENT_KEY_MISSING: "This appliance has no payment key",
   PAYMENT_CREDENTIALS_MISSING: "The appliance's payment database login is not configured",
   PAYMENT_DATABASE_UNAVAILABLE: "The payment database is not available",

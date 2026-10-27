@@ -20,12 +20,15 @@ const EnvPaymentLiveAllowed = "STAYCONNECT_PAYMENT_LIVE_ALLOWED"
 type Capability string
 
 const (
-	CapClientPackages     Capability = "client_packages"
-	CapPackageAdmin       Capability = "package_admin"
-	CapHospitality        Capability = "hospitality"
-	CapPaidAccess         Capability = "paid_access"
+	CapClientPackages Capability = "client_packages"
+	CapPackageAdmin   Capability = "package_admin"
+	CapHospitality    Capability = "hospitality"
+	CapPaidAccess     Capability = "paid_access"
+	// CapCardPayment: the payment domain is installed, so card payment can be configured (accounts, sealed credentials,
+	// domains). It permits no provider call: that is CapCardProviderCalls.
 	CapCardPayment        Capability = "card_payment"
-	CapCardLive           Capability = "card_payment_live" // LIVE-mode (real money) provider execution
+	CapCardProviderCalls  Capability = "card_payment_provider_calls" // the appliance may call a payment provider
+	CapCardLive           Capability = "card_payment_live"           // LIVE-mode (real money) provider execution
 	CapRoomChargeConfig   Capability = "room_charge_config"
 	CapRoomChargeReview   Capability = "room_charge_review"
 	CapRoomChargeTransmit Capability = "room_charge_transmit" // PS bytes may reach a PMS (real posting)
@@ -136,6 +139,8 @@ func (c Ceiling) Available(cp Capability) bool {
 	case CapPaidAccess:
 		return c.commerce.MasterEnabled
 	case CapCardPayment:
+		return c.pay.DomainOn() && c.commerce.PortalOn()
+	case CapCardProviderCalls:
 		return c.pay.ProviderOn() && c.commerce.PortalOn()
 	case CapCardLive:
 		return c.liveAllowed && c.pay.ProviderOn()
@@ -155,7 +160,9 @@ func (c Ceiling) Available(cp Capability) bool {
 	return false
 }
 
-// ModuleDeployed: identity add-ons need their IAM-v2 method; modules with no optional code path are always deployed.
+// ModuleDeployed: whether this installation can configure the module. Identity add-ons need their IAM-v2 method; the financial
+// modules need their domain (execution is a separate capability and decides readiness, never availability). A licence key with
+// no implementation in this release (high availability, white label) is never reported as deployed.
 func (c Ceiling) ModuleDeployed(id string) bool {
 	switch id {
 	case lic.ModuleHospitality:
@@ -172,6 +179,8 @@ func (c Ceiling) ModuleDeployed(id string) bool {
 		return c.Available(CapOTPSignIn)
 	case lic.ModuleSocialLogin:
 		return c.Available(CapSocialSignIn)
+	case lic.ModuleHA, lic.ModuleWhiteLabel:
+		return false
 	}
 	_, known := lic.LookupModule(id)
 	return known
@@ -180,7 +189,7 @@ func (c Ceiling) ModuleDeployed(id string) bool {
 func (c Ceiling) Summary() string {
 	parts := []string{}
 	for _, cp := range []Capability{CapClientPackages, CapPackageAdmin, CapHospitality, CapPaidAccess, CapCardPayment,
-		CapCardLive, CapRoomChargeConfig, CapRoomChargeReview, CapRoomChargeTransmit, CapOTPSignIn, CapSocialSignIn, CapEmailAccounts} {
+		CapCardProviderCalls, CapCardLive, CapRoomChargeConfig, CapRoomChargeReview, CapRoomChargeTransmit, CapOTPSignIn, CapSocialSignIn, CapEmailAccounts} {
 		parts = append(parts, string(cp)+"="+strconv.FormatBool(c.Available(cp)))
 	}
 	return "deployment ceiling " + strings.Join(parts, " ")
