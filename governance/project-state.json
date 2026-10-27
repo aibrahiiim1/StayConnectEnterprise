@@ -1278,7 +1278,7 @@
     "prelive_phase4_flag_posture": "PRE-LIVE 172.21.60.25 since 2026-09-30 (D47): scd runs STAYCONNECT_PHASE4_MASTER, _PAYMENT, _PAYMENT_PROVIDER, _POSTING, _FINANCIAL_REVIEW, _OUTBOX_WORKER and _PMS_TRANSMIT; pmsd runs _MASTER, _OUTBOX_WORKER and _PMS_TRANSMIT; edged runs _MASTER, _POSTING and _FINANCIAL_REVIEW. STAYCONNECT_PAYMENT_LIVE_ALLOWED is set nowhere. Real PMS postings ever: one (T0204, USD 1.00, PA OK). Payment-provider traffic ever: none.",
     "phase4_flags_off_scope": "phase4_flags_off records the DELIVERED REPOSITORY configuration (no file in the tree enables a Phase-4 flag; scripts/ci/phase4-dark-check.sh asserts it). It is not a statement about the PRE-LIVE environment, whose posture is recorded in prelive_phase4_flag_posture."
   },
-  "latest_transition_id": "T0259",
+  "latest_transition_id": "T0260",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1773,20 +1773,20 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "ENROLLMENT_STALE_CSR_CORRECTION",
-    "decision": "D75 (a certificate request belongs to the appliance identity that filed it; finding F1 closed, 2026-10-27).",
-    "decision_note": "Validated on the isolated test pair only (lab Central central.onegate.getsemantics.com and test appliance 172.21.96.97, both at d799ff5f). Not deployed to PRE-LIVE or to the production Central, which the mission excluded. PR #257 is merged under the mission's authorisation.",
-    "manifest": "docs/manifests/EnrollmentStaleCsr-change-manifest.md",
-    "base": "5b4c5c67b746ce8a8fb2e6dc3fea0f4a699d5ece",
-    "base_note": "Master after the merge of PR #256 (5b4c5c67), the fresh-VM installer.",
-    "head": "88cbd93f",
-    "head_note": "The last content commit of branch fix/f1-stale-csr. Governance commits follow it.",
-    "transition": "T0259",
-    "previous_delivery": "T0258",
-    "pr": 257,
-    "pr_state": "PR #257; its protected merge is authorised by the mission",
-    "note": "T0259. PRE-LIVE and the production Central are unchanged by this delivery. Go-Live not authorised.",
-    "branch": "fix/f1-stale-csr"
+    "kind": "INSTALLER_ACCEPTANCE",
+    "decision": "None new. Executes the installer mission of 2026-10-27 under the decisions already in force (D75 the latest).",
+    "decision_note": "Validated on the isolated test pair only (Central central.onegate.getsemantics.com at 05481cb5, appliance 172.21.96.97 at 28cfc9f4), identities and data preserved. Not deployed to PRE-LIVE or to the production Central; the production Central needs the R1 compose fix before its next reboot (a separate decision).",
+    "manifest": "docs/manifests/InstallerAcceptance-change-manifest.md",
+    "base": "701157ed57c5182f0333be5d63fefec7a570c058",
+    "base_note": "Master after the merge of PR #257 (701157ed).",
+    "head": "daf0e04a",
+    "head_note": "The last content commit of branch fix/installer-acceptance. Governance commits follow it.",
+    "transition": "T0260",
+    "previous_delivery": "T0259",
+    "pr": 258,
+    "pr_state": "PR #258; its protected merge is authorised by the mission",
+    "note": "T0260. PRE-LIVE and the production Central are unchanged by this delivery. Go-Live not authorised.",
+    "branch": "fix/installer-acceptance"
   },
   "onboarding_reconciliation": {
     "decision": "D37",
