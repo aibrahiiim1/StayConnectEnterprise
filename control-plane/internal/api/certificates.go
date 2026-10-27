@@ -20,6 +20,21 @@ type CertBase struct {
 	ClientValid time.Duration // issued client-cert lifetime
 }
 
+// currentPendingCSR selects (as rq, joined to appliances a) the pending certificate requests filed under the appliance's
+// CURRENT identity. A CSR is submitted on a request signed by the identity key, and registered_at is when Central adopted
+// that key: the first registration, or replaceWaitingIdentity after a reinstall before activation. A request filed earlier
+// carries the mTLS key of an installation that no longer exists; signing it issues a certificate nobody can use, and while
+// it reads as "pending" the new installation never files its own (finding F1). Such a request is never signed or reported.
+const currentPendingCSR = `rq.status='pending' AND rq.requested_at >= COALESCE(a.registered_at, '-infinity'::timestamptz)`
+
+// countCurrentPendingCSRs counts the requests Activate or Reissue could sign, and that FetchCertificate reports as pending.
+func (b *Base) countCurrentPendingCSRs(ctx context.Context, appID string) int {
+	var n int
+	_ = b.DB.QueryRow(ctx, `SELECT count(*) FROM appliance_certificate_requests rq JOIN appliances a ON a.id=rq.appliance_id
+         WHERE rq.appliance_id=$1 AND `+currentPendingCSR, appID).Scan(&n)
+	return n
+}
+
 // SubmitCSR stores the appliance's CSR (its key stays local). An appliance already holding an active
 // certificate in a good lifecycle state is auto-signed (rotation); otherwise the CSR is queued for first issuance.
 func (b *CertBase) SubmitCSR(w http.ResponseWriter, r *http.Request) {
@@ -90,10 +105,8 @@ func (b *CertBase) FetchCertificate(w http.ResponseWriter, r *http.Request) {
          WHERE appliance_id=$1 AND status='active' ORDER BY created_at DESC LIMIT 1`,
 		ident.ApplianceID).Scan(&certPEM, &fpr, &notAfter)
 	if err == pgx.ErrNoRows {
-		var pend int
-		b.DB.QueryRow(ctx, `SELECT count(*) FROM appliance_certificate_requests WHERE appliance_id=$1 AND status='pending'`, ident.ApplianceID).Scan(&pend)
 		status := "none"
-		if pend > 0 {
+		if b.countCurrentPendingCSRs(ctx, ident.ApplianceID) > 0 {
 			status = "pending"
 		}
 		WriteJSON(w, http.StatusOK, map[string]any{"status": status, "ca_chain": string(b.CA.CertPEM())})
@@ -110,14 +123,15 @@ func (b *CertBase) FetchCertificate(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// issueCertForAppliance signs the latest pending CSR, supersedes any prior active cert, and records the issuance.
+// issueCertForAppliance signs the latest pending CSR of the current identity, supersedes any prior active cert, and records
+// the issuance. Every other pending request is closed as rejected: none of them may be signed later.
 func (b *CertBase) issueCertForAppliance(ctx context.Context, r *http.Request, appID, actor string) (*pki.SignedClient, error) {
-	var csrPEM, tenantID, siteID, serial string
+	var reqID, csrPEM, tenantID, siteID, serial string
 	if err := b.DB.QueryRow(ctx, `
-        SELECT rq.csr_pem, COALESCE(a.tenant_id::text,''), COALESCE(a.site_id::text,''), a.serial
+        SELECT rq.id::text, rq.csr_pem, COALESCE(a.tenant_id::text,''), COALESCE(a.site_id::text,''), a.serial
           FROM appliance_certificate_requests rq JOIN appliances a ON a.id=rq.appliance_id
-         WHERE rq.appliance_id=$1 AND rq.status='pending'
-         ORDER BY rq.requested_at DESC LIMIT 1`, appID).Scan(&csrPEM, &tenantID, &siteID, &serial); err != nil {
+         WHERE rq.appliance_id=$1 AND `+currentPendingCSR+`
+         ORDER BY rq.requested_at DESC LIMIT 1`, appID).Scan(&reqID, &csrPEM, &tenantID, &siteID, &serial); err != nil {
 		return nil, err
 	}
 	sc, err := b.CA.SignApplianceCSR([]byte(csrPEM), appID, tenantID, siteID, b.ClientValid)
@@ -148,7 +162,13 @@ func (b *CertBase) issueCertForAppliance(ctx context.Context, r *http.Request, a
 		sc.NotBefore, sc.NotAfter, string(sc.CertPEM), operatorID).Scan(&certID); err != nil {
 		return nil, err
 	}
-	_, _ = tx.Exec(ctx, `UPDATE appliance_certificate_requests SET status='signed', decided_at=now(), decided_by=NULLIF($2,'')::uuid WHERE appliance_id=$1 AND status='pending'`, appID, operatorID)
+	if _, err := tx.Exec(ctx, `UPDATE appliance_certificate_requests SET status='signed', decided_at=now(), decided_by=NULLIF($2,'')::uuid WHERE id=$1`, reqID, operatorID); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE appliance_certificate_requests SET status='rejected', decided_at=now(), decided_by=NULLIF($2,'')::uuid
+        WHERE appliance_id=$1 AND status='pending'`, appID, operatorID); err != nil {
+		return nil, err
+	}
 	_, _ = tx.Exec(ctx, `UPDATE appliances SET current_cert_fingerprint=$2, cert_not_after=$3, updated_at=now() WHERE id=$1`, appID, sc.FingerprintHex, sc.NotAfter)
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err

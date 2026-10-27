@@ -320,6 +320,23 @@ func (b *IdentityBase) replaceWaitingIdentity(w http.ResponseWriter, r *http.Req
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "registration failed")
 		return
 	}
+	// A pending request belongs to the replaced installation: it carries an mTLS key that no longer exists, and while it
+	// reads as "pending" the new installation would never file its own. Close it so Activate cannot sign it (F1).
+	tag, err := tx.Exec(ctx, `UPDATE appliance_certificate_requests SET status='rejected', decided_at=now()
+        WHERE appliance_id=$1 AND status='pending'`, id)
+	if err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "registration failed")
+		return
+	}
+	voided := tag.RowsAffected()
+	if voided > 0 {
+		if _, err := tx.Exec(ctx, `INSERT INTO appliance_certificate_events (appliance_id, event, detail, actor, source_ip)
+            VALUES ($1,'csr_voided',jsonb_build_object('reason','identity replaced','requests',$2::int),'registration',$3)`,
+			id, voided, ip); err != nil {
+			Fail(w, r, http.StatusInternalServerError, CodeInternal, "registration failed")
+			return
+		}
+	}
 	if _, err := tx.Exec(ctx, `
         UPDATE appliances SET
             public_key = $2, current_cert_fingerprint = NULL,
@@ -337,7 +354,8 @@ func (b *IdentityBase) replaceWaitingIdentity(w http.ResponseWriter, r *http.Req
 	}
 	details := map[string]any{"serial": req.Serial, "source_ip": ip,
 		"previous_identity_key_fingerprint": identityFprFromPubB64(oldPub),
-		"new_identity_key_fingerprint":      identityFprFromPubB64(req.PublicKey)}
+		"new_identity_key_fingerprint":      identityFprFromPubB64(req.PublicKey),
+		"voided_certificate_requests":       voided}
 	if held != "" {
 		details["holds_customer_id"] = held
 	}

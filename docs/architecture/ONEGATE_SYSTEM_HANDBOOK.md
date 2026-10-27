@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Authoritative current-state reference (not a historical snapshot) |
-| **Reviewed against** | `master` at `7e4686ae56a229ef05460e02675d1d17924f8c9c` (2026-10-26); install path (sections 7.5, 16, 22–24) updated by the fresh-VM installer mission, 2026-10-27 |
+| **Reviewed against** | `master` at `7e4686ae56a229ef05460e02675d1d17924f8c9c` (2026-10-26); install path (sections 7.5, 16, 22–24) updated by the fresh-VM installer mission, 2026-10-27; certificate enrollment (section 9.3, finding F1) corrected 2026-10-27 |
 | **Fresh-VM validation** | A new Central and a new appliance on VMware ESXi / Ubuntu 22.04.5, isolated from PRE-LIVE and the production Central, 2026-10-27 — labelled **[VM]** (installation manual Appendix 3) |
 | **Live environments inspected (read-only)** | PRE-LIVE appliance `172.21.60.25` and OneGate Central `172.21.96.196`, 2026-10-26 |
 | **Companion documents** | [Fresh VM Installation & Configuration Manual](../runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md) · [Machine-readable inventory](../inventory/onegate-components.json) |
@@ -550,7 +550,9 @@ Plus `operator-mfa.key` (seals Central TOTP secrets) and the portal-TLS `acme-ac
 
 1. `scd` generates an **Ed25519 identity key** locally (`/etc/stayconnect/identity/ed25519.key` + `identity.json`) and a **separate mTLS key** (`certs/mtls-client.key`, never uploaded). Serial, WAN MAC, LAN MAC, hardware fingerprint and model are derived from DMI/NICs (`internal/hwid`); the OS hostname plays no part.
 2. Registration is token-less and signed by the identity key; Central creates a `pending_approval` ("waiting") appliance.
-3. After an operator activates it, `scd` submits a CSR (`POST /v1/appliance/csr` over `:443` with the signed JWT), Central issues the certificate from the Intermediate, and `scd` collects it atomically with `ca.crt`.
+3. `scd` submits a CSR (`POST /v1/appliance/csr` over `:443` with the signed JWT) as soon as Central reports `none`; a waiting appliance's request stays `pending` and is signed by *Activate* (an activated appliance's request is signed on arrival). Central issues the certificate from the Intermediate, and `scd` collects it atomically with `ca.crt`.
+   * **A request belongs to the identity that filed it.** When a waiting appliance is reinstalled (same hardware, new identity and mTLS keys), Central voids the previous installation's pending requests in the same transaction that adopts the new identity (`csr_voided`, counted in the `appliance.identity_replaced` audit), and only a request filed at or after the current identity's `registered_at` is ever reported as `pending` or signed (`currentPendingCSR`, `control-plane/internal/api/certificates.go`). Signing one other request closes the rest as `rejected`. **[VM]**
+   * **The appliance installs only a certificate for its own key.** A certificate whose public key is not `mtls-client.key` is refused before anything is written; `scd` then files one CSR for its own key (at most one per foreign certificate per 24 h, on-disk marker), which an activated appliance has signed on arrival — in the bootstrap and in the reconcile loop. **[CODE]** + unit tests.
 4. `MaybeRotate` checks every 6 h and renews in the last 14 days with verify-before-switch and rollback; Central accepts the superseded certificate for 24 h.
 
 ---
@@ -1231,17 +1233,17 @@ mission closed them in code and proved the result on a fresh VM pair (manual App
 | G16 | `gatep-set-passwords.sh` "four roles" text | cosmetic, unchanged |
 | new | live-site migrations needed a ledger grant made only by hand on PRE-LIVE | `gatep-iam-roles.sql` grants `iam_v2_owner` `SELECT, INSERT` on `public.schema_migrations` |
 | new | Gate-P reconcile refused an installed release (no `.git`) | `gatep-reconcile.sh` verifies the release's `RELEASE.json` + `SHA256SUMS` |
+| F1 | a waiting appliance reinstalled before activation got the previous installation's CSR signed at *Activate* (certificate for a key nobody holds; `client keypair: tls: private key does not match public key`) | Central voids a replaced identity's pending requests and never reports or signs a request older than the current identity; the appliance refuses a foreign certificate and files its own (section 9.3). **[VM]** reinstall before activation on the test pair converged with no *Reissue certificate* (manual A3.6) |
 
 Still open, by design: **G9** (`pmsd` and the PMS flags stay off until a PMS is commissioned — manual C.10), **G12** (hostname and WAN netplan are
 the operator's), **G15** (no observability stack, no HA).
 
 ### 24.2 Decisions that need a separate operational decision (Product Owner)
 
-1. **Stale CSR after a reinstall before activation (finding F1, installation manual A3.5).** Central signs the pending CSR of a waiting appliance at *Activate*; when the hardware was reinstalled while waiting (new identity and mTLS key, same serial), that CSR belongs to the previous install, and the appliance never re-submits. Workaround: *Reissue certificate*. Fix options (enrollment is a controlled area): Central supersedes pending CSRs when a waiting appliance's identity key changes, or the appliance re-submits when an issued certificate does not match its key.
-2. **Off-host copy destination** for Central dumps and export bundles; Root-CA backup shredding after offline-media confirmation.
-3. **Supported OS** — whether Ubuntu 24.04 is a supported target.
-4. **Go-Live**, LIVE-mode card payments, further real PMS postings — remain unauthorised.
-5. **Doc retirement** of the remaining obsolete documents in section 23 (this PR corrects the install-path ones only).
+1. **Off-host copy destination** for Central dumps and export bundles; Root-CA backup shredding after offline-media confirmation.
+2. **Supported OS** — whether Ubuntu 24.04 is a supported target.
+3. **Go-Live**, LIVE-mode card payments, further real PMS postings — remain unauthorised.
+4. **Doc retirement** of the remaining obsolete documents in section 23 (this PR corrects the install-path ones only).
 
 ---
 
