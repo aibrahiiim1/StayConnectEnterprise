@@ -1,0 +1,4 @@
+commit c47466d2d9e23a3b6bb6776c08bd9bd6f2d3cff6
+Date:   Wed Oct 28 01:27:42 2026 +0300
+
+    Governance: D76 and T0261 record that modules follow the licence (the Hotel module installed; room sign-in only where it is in use)
