@@ -45,11 +45,30 @@ ensure_kv edged.env   STAYCONNECT_PHASE2_ADMIN  true
 ensure_kv netd.env    STAYCONNECT_PHASE3_MASTER true
 ensure_kv netd.env    NETD_PHASE3_PRODUCER_UID  "$PRODUCER_UID"
 ensure_kv acctd.env   STAYCONNECT_PHASE3_MASTER true
-# the Hotel module: room sign-in (scd) and the Hotel section of the Admin Console (edged)
+# the Hotel module: room sign-in (scd) and the Hotel section of the Admin Console (edged). A child flag is added only
+# where that file's own master is on: an operator who set STAYCONNECT_PHASE3_MASTER=false keeps a coherent file
+# (a child flag under a disabled master is a start-up refusal in iamv2.PMSConfig.Validate).
+val_in() { grep -E "^$2=" "$ETC/$1" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d ' "'"'"; }
+truthy() { case "$1" in true|TRUE|True|1) return 0;; *) return 1;; esac; }
 ensure_kv scd.env     STAYCONNECT_PHASE3_MASTER   true
-ensure_kv scd.env     STAYCONNECT_PHASE3_PMS_AUTH true
 ensure_kv edged.env   STAYCONNECT_PHASE3_MASTER   true
-ensure_kv edged.env   STAYCONNECT_PHASE3_ADMIN    true
+if truthy "$(val_in scd.env STAYCONNECT_PHASE3_MASTER)"; then
+  ensure_kv scd.env   STAYCONNECT_PHASE3_PMS_AUTH true
+else
+  echo "[product-profile] scd.env: STAYCONNECT_PHASE3_MASTER is off here by choice; room sign-in not added"
+fi
+if truthy "$(val_in edged.env STAYCONNECT_PHASE3_MASTER)"; then
+  ensure_kv edged.env STAYCONNECT_PHASE3_ADMIN    true
+else
+  echo "[product-profile] edged.env: STAYCONNECT_PHASE3_MASTER is off here by choice; the Hotel section not added"
+fi
+# Each daemon validates its OWN file: a Phase-3 child flag on while that file's master is off stops it at start.
+for f in scd.env edged.env; do
+  truthy "$(val_in "$f" STAYCONNECT_PHASE3_MASTER)" && continue
+  for k in STAYCONNECT_PHASE3_PMS_AUTH STAYCONNECT_PHASE3_ADMIN STAYCONNECT_PHASE3_PMS_CONNECTOR STAYCONNECT_PHASE3_PMS_INGEST STAYCONNECT_PHASE3_CHECKOUT_GRACE; do
+    truthy "$(val_in "$f" "$k")" && die "$ETC/$f sets $k while its STAYCONNECT_PHASE3_MASTER is off: that daemon would refuse to start"
+  done
+done
 
 bash "$DEPLOY/scripts/check-phase3-enforcement-plane.sh" "$ETC" >/dev/null \
   || die "the environment is not coherent: $(bash "$DEPLOY/scripts/check-phase3-enforcement-plane.sh" "$ETC" 2>&1 | head -3)"
