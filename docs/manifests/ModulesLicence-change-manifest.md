@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `474b782a058eeb8679bd3b94c1ea3f6982d0bf64`
-- **HEAD commit:** `577a8ffe3ed6366a30f96101498cffadd53df534`
-- **Provenance (generation HEAD = inventory_head):** `c47466d2d9e23a3b6bb6776c08bd9bd6f2d3cff6`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `8b18aec418bb9109263ea397e9c92aa4e3529a52`
+- **Provenance (generation HEAD = inventory_head):** `8b18aec418bb9109263ea397e9c92aa4e3529a52`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `fix/modules-licence-driven`
 - **Remote branch:** `origin/fix/modules-licence-driven`
 - **Changed files:** 40
@@ -17,7 +17,7 @@
 | `data-plane/cmd/edged/resources_network_archive.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Modules follow the licence: the Hotel module is installed; room sign-in only where it is in use |
 | `data-plane/cmd/edged/resources_network_overview.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Modules follow the licence: the Hotel module is installed; room sign-in only where it is in use |
 | `deploy/scripts/appliance-install.sh` | MODIFIED | `M` | configuration | DEPLOY | rollback RESTORES prior content | Modules follow the licence: the Hotel module is installed; room sign-in only where it is in use |
-| `deploy/scripts/apply-product-profile.sh` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | Modules follow the licence: the Hotel module is installed; room sign-in only where it is in use |
+| `deploy/scripts/apply-product-profile.sh` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | Product profile: a Hotel child flag only under its own enabled master; refuse a file a daemon would reject |
 | `deploy/scripts/provision-fresh-appliance.sh` | MODIFIED | `M` | configuration | DEPLOY | rollback RESTORES prior content | Modules follow the licence: the Hotel module is installed; room sign-in only where it is in use |
 | `docs/architecture/ONEGATE_SYSTEM_HANDBOOK.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Modules follow the licence: the Hotel module is installed; room sign-in only where it is in use |
 | `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: D76 and T0261 record that modules follow the licence (the Hotel module installed; room sign-in only where it is in use) |
@@ -25,27 +25,27 @@
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: D76 and T0261 record that modules follow the licence (the Hotel module installed; room sign-in only where it is in use) |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: D76 and T0261 record that modules follow the licence (the Hotel module installed; room sign-in only where it is in use) |
 | `docs/inventory/onegate-components.json` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Modules follow the licence: the Hotel module is installed; room sign-in only where it is in use |
-| `docs/manifests/ModulesLicence-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Governance: D76 and T0261 record that modules follow the licence (the Hotel module installed; room sign-in only where it is in use) |
+| `docs/manifests/ModulesLicence-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Governance: export packs at T0261 and the manifest that covers them |
 | `docs/runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Modules follow the licence: the Hotel module is installed; room sign-in only where it is in use |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/GIT_STAT_2bfde1e3.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/GIT_STAT_c47466d2.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0261 and the manifest that covers them |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0261 and the manifest that covers them |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0261 and the manifest that covers them |
+| `exports/chatgpt/phase-evidence/GIT_STAT_2bfde1e3.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Governance: export packs at T0261 and the manifest that covers them |
+| `exports/chatgpt/phase-evidence/GIT_STAT_c47466d2.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Governance: export packs at T0261 and the manifest that covers them |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0261 and the manifest that covers them |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0261 and the manifest that covers them |
+| `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0261 and the manifest that covers them |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0261 and the manifest that covers them |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0261 and the manifest that covers them |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0261 and the manifest that covers them |
+| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0261 and the manifest that covers them |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: D76 and T0261 record that modules follow the licence (the Hotel module installed; room sign-in only where it is in use) |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0261 and the manifest that covers them |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: D76 and T0261 record that modules follow the licence (the Hotel module installed; room sign-in only where it is in use) |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0261 and the manifest that covers them |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0261 and the manifest that covers them |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0261 and the manifest that covers them |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0261 and the manifest that covers them |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: D76 and T0261 record that modules follow the licence (the Hotel module installed; room sign-in only where it is in use) |
 | `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: D76 and T0261 record that modules follow the licence (the Hotel module installed; room sign-in only where it is in use) |
 | `governance/transitions/T0261.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: D76 and T0261 record that modules follow the licence (the Hotel module installed; room sign-in only where it is in use) |
@@ -56,11 +56,11 @@
 ## Total diff statistics (`git diff --stat`)
 ```text
  data-plane/cmd/edged/modules.go                    |  14 +++
- data-plane/cmd/edged/modules_test.go               |  24 ++++
- data-plane/cmd/edged/resources_network_archive.go  |  37 +++---
+ data-plane/cmd/edged/modules_test.go               |  24 +++++
+ data-plane/cmd/edged/resources_network_archive.go  |  37 ++++---
  data-plane/cmd/edged/resources_network_overview.go |   4 +-
  deploy/scripts/appliance-install.sh                |   5 +-
- deploy/scripts/apply-product-profile.sh            |  58 ++++++++++
+ deploy/scripts/apply-product-profile.sh            |  77 ++++++++++++++
  deploy/scripts/provision-fresh-appliance.sh        |  32 +-----
  docs/architecture/ONEGATE_SYSTEM_HANDBOOK.md       |   2 +
  .../StayConnect-IAM-Phase0-Contract.md             |   4 +-
@@ -68,7 +68,7 @@
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   4 +-
  docs/context/StayConnect-IAM-Handoff.md            |   4 +-
  docs/inventory/onegate-components.json             |   8 +-
- docs/manifests/ModulesLicence-change-manifest.md   | 126 +++++++++++++++++++++
+ docs/manifests/ModulesLicence-change-manifest.md   | 114 +++++++++++++++++++++
  .../ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md        |  38 +++++--
  .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 352770 -> 352771 bytes
  .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 170010 -> 170731 bytes
@@ -83,7 +83,7 @@
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   4 +-
  .../StayConnect-IAM-Phase1B-Plan.md                |   4 +-
  .../chatgpt/stayconnectenterprise/00-START-HERE.md |   4 +-
- exports/chatgpt/stayconnectenterprise/MANIFEST.md  |  62 +++++-----
+ exports/chatgpt/stayconnectenterprise/MANIFEST.md  |  62 +++++------
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   4 +-
  .../StayConnect-IAM-Handoff.md                     |   4 +-
  .../StayConnect-IAM-Phase0-Contract.md             |   4 +-
@@ -95,33 +95,21 @@
  hotel-admin/app/(app)/modules/page.tsx             |   4 +-
  hotel-admin/lib/modules.ts                         |  13 +++
  hotel-admin/test/modules-page.test.tsx             |  22 ++++
- 40 files changed, 476 insertions(+), 143 deletions(-)
+ 40 files changed, 483 insertions(+), 143 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
 ```text
 M  docs/manifests/ModulesLicence-change-manifest.md
-M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
-M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
-M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-D  exports/chatgpt/phase-evidence/GIT_STAT_2bfde1e3.txt
-A  exports/chatgpt/phase-evidence/GIT_STAT_c47466d2.txt
-M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
-M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/phase-evidence/governance/decision-register.json
-M  exports/chatgpt/phase1b-planning/MANIFEST.md
-M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
-M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md
-M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md
+M  governance/decision-register.json
+M  governance/project-state.json
+M  governance/transitions/T0261.json
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 8b18aec4 Product profile: a Hotel child flag only under its own enabled master; refuse a file a daemon would reject
+HISTORICAL: 00052b11 Governance: export packs at T0261 and the manifest that covers them
 HISTORICAL: c47466d2 Governance: D76 and T0261 record that modules follow the licence (the Hotel module installed; room sign-in only where it is in use)
 HISTORICAL: 577a8ffe Modules follow the licence: the Hotel module is installed; room sign-in only where it is in use
 ```

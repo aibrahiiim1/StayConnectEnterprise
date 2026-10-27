@@ -1775,11 +1775,11 @@
   "current_delivery": {
     "kind": "MODULES_FOLLOW_THE_LICENCE",
     "decision": "D76 (modules follow the licence: the Hotel module installed; room sign-in only where it is in use, 2026-10-28).",
-    "decision_note": "Deployed to the test appliance 172.21.96.97 only (release onegate-appliance-577a8ffe3ed6). Not deployed to PRE-LIVE; the production Central is unaffected (no Central change).",
+    "decision_note": "Deployed to the test appliance 172.21.96.97 only (release onegate-appliance-8b18aec418bb). Not deployed to PRE-LIVE; the production Central is unaffected (no Central change).",
     "manifest": "docs/manifests/ModulesLicence-change-manifest.md",
     "base": "474b782a058eeb8679bd3b94c1ea3f6982d0bf64",
     "base_note": "Master after the merge of PR #259 (474b782a).",
-    "head": "577a8ffe",
+    "head": "8b18aec4",
     "head_note": "The last content commit of branch fix/modules-licence-driven. Governance commits follow it.",
     "transition": "T0261",
     "previous_delivery": "T0260",
