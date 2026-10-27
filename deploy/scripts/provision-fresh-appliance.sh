@@ -72,17 +72,20 @@ say "packages"
 export DEBIAN_FRONTEND=noninteractive
 # A FRESHLY BOOTED Ubuntu runs unattended-upgrades within minutes, and it holds the dpkg/apt locks; apt-get then
 # fails at once ("Could not get lock /var/lib/dpkg/lock-frontend ... unattended-upgr" — measured on a fresh VM).
-# Wait for the locks (up to 20 min) instead, and let every apt-get below wait for the dpkg lock as well.
-for _ in $(seq 1 240); do
-  if command -v fuser >/dev/null 2>&1; then
-    fuser /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock >/dev/null 2>&1 || break
-  else
-    pgrep -x 'unattended-upgr|apt-get|apt|dpkg' >/dev/null 2>&1 || break
-  fi
+# Wait for the locks (up to 60 min: a stale image upgrades 150+ packages on first boot) instead, and let every
+# apt-get below wait for the dpkg lock as well.
+# Busy = a process holds a lock file open, OR the daily apt job / unattended-upgrade / apt / dpkg is running (the
+# daily job releases the locks between its update and install phases, so the locks alone are not enough).
+apt_busy() {
+  fuser /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock >/dev/null 2>&1 && return 0
+  pgrep -f '/usr/bin/unattended-upgrade( |$)|apt\.systemd\.daily|^/usr/bin/(apt|apt-get|dpkg) ' >/dev/null 2>&1
+}
+for _ in $(seq 1 720); do
+  apt_busy || break
   [ "${_waited:-0}" = 1 ] || { say "waiting for another package manager (unattended-upgrades?) to release the apt/dpkg locks"; _waited=1; }
   sleep 5
 done
-apt-get() { command apt-get -o DPkg::Lock::Timeout=1200 "$@"; }
+apt-get() { command apt-get -o DPkg::Lock::Timeout=3600 "$@"; }
 apt-get update -qq
 # conntrack: the fallback netd uses to end a revoked address's open flows when ctnetlink is unavailable (audit B-1).
 # dnsutils: dig, which the Central-endpoint split-DNS check needs (without it the check silently degraded).
