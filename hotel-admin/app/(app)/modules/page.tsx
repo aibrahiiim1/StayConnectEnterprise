@@ -234,7 +234,7 @@ function ModuleCard({
               answers identity modules from Sign-in methods); the note says where it is set. */}
           <Gate label="Switched on" on={mod.licensed ? mod.enabled : null}
             note={mod.licensed && !mod.switchable ? (IDENTITY_MODULES.has(mod.id) ? "Set on Sign-in methods" : "No local switch") : undefined} />
-          <Gate label="Ready" on={mod.licensed ? mod.ready : null} />
+          <Gate label="Ready" on={mod.licensed && mod.deployed ? mod.ready : null} />
         </dl>
         {reasons.length > 0 && (
           <ul className="list-disc space-y-0.5 ps-5 text-xs text-muted-foreground">

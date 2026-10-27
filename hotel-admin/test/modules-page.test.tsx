@@ -107,6 +107,8 @@ describe("Modules with no implementation in this release", () => {
     for (const name of ["High availability", "White label"]) {
       const card = screen.getByText(name).closest("div.flex.flex-col, [class*='flex-col']") as HTMLElement;
       expect((within(card).getByText("Available").nextElementSibling as HTMLElement).textContent).toBe("No");
+      // Nothing to run, so nothing is claimed ready.
+      expect((within(card).getByText("Ready").nextElementSibling as HTMLElement).textContent).toBe("—");
     }
   });
 });
