@@ -93,7 +93,8 @@ elif [ -f "$ROOT/RELEASE.json" ] && [ -f "$ROOT/SHA256SUMS" ]; then
     refuse "the installed release is ${REL_COMMIT:-unknown} but --expect-commit asked for $EXPECT_COMMIT"
   fi
   for f in "${FILES[@]}"; do
-    want="$(awk -v p="./deploy/gatep/$f" '$2==p {print $1}' "$ROOT/SHA256SUMS")"
+    # sha256sum writes "<hash> *<path>" in binary mode and "<hash>  <path>" in text mode; accept both.
+    want="$(awk -v p="./deploy/gatep/$f" '{n=$2; sub(/^\*/, "", n)} n==p {print $1}' "$ROOT/SHA256SUMS")"
     [ -n "$want" ] || refuse "deploy/gatep/$f is not listed in the release's SHA256SUMS"
     got="$(sha256sum "$GP/$f" | awk '{print $1}')"
     [ "$want" = "$got" ] || refuse "deploy/gatep/$f differs from what release ${REL_COMMIT:-unknown} shipped"
