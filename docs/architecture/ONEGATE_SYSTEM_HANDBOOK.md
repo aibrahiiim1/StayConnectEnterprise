@@ -1237,10 +1237,11 @@ the operator's), **G15** (no observability stack, no HA).
 
 ### 24.2 Decisions that need a separate operational decision (Product Owner)
 
-1. **Off-host copy destination** for Central dumps and export bundles; Root-CA backup shredding after offline-media confirmation.
-2. **Supported OS** — whether Ubuntu 24.04 is a supported target.
-3. **Go-Live**, LIVE-mode card payments, further real PMS postings — remain unauthorised.
-4. **Doc retirement** of the remaining obsolete documents in section 23 (this PR corrects the install-path ones only).
+1. **Stale CSR after a reinstall before activation (finding F1, installation manual A3.5).** Central signs the pending CSR of a waiting appliance at *Activate*; when the hardware was reinstalled while waiting (new identity and mTLS key, same serial), that CSR belongs to the previous install, and the appliance never re-submits. Workaround: *Reissue certificate*. Fix options (enrollment is a controlled area): Central supersedes pending CSRs when a waiting appliance's identity key changes, or the appliance re-submits when an issued certificate does not match its key.
+2. **Off-host copy destination** for Central dumps and export bundles; Root-CA backup shredding after offline-media confirmation.
+3. **Supported OS** — whether Ubuntu 24.04 is a supported target.
+4. **Go-Live**, LIVE-mode card payments, further real PMS postings — remain unauthorised.
+5. **Doc retirement** of the remaining obsolete documents in section 23 (this PR corrects the install-path ones only).
 
 ---
 

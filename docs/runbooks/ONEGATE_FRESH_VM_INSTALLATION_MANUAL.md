@@ -68,9 +68,10 @@ flowchart TD
   N --> D["D. Verify (software) → then real-device / PMS acceptance"]
 ```
 
-Time budget measured on the test pair: release build **≈ 12 min** (warm Go caches; the first build downloads the toolchains);
-appliance install **≈ 9 min** on a blank VM (most of it apt and container pulls); activation **< 2 min** after the Central
-operator acts; upgrade **≈ 25 s** when no migration is pending.
+Time budget measured on the test pair: release build **≈ 7–9 min** (warm Go caches; the first build downloads the toolchains);
+appliance install **≈ 4–5 min** on a blank VM with a current package cache (276 s on 1 vCPU), **plus up to ~15 min** when a stale
+image's first-boot unattended upgrade is still running (the installer waits for it); activation **< 2 min** after the Central operator
+acts; re-run **≈ 36 s**; upgrade **≈ 25 s** when no migration is pending.
 
 ---
 
@@ -83,7 +84,7 @@ operator acts; upgrade **≈ 25 s** when no migration is pending.
 | Hypervisor | **VMware ESXi / vSphere** — the platform PRE-LIVE runs on and the platform the validation used. Other hypervisors/bare metal are **not validated — [PO]**. | **[VM]**, PRE-LIVE |
 | Guest OS | **Ubuntu Server 22.04 LTS (amd64)** — validated on 22.04.5, kernel 5.15. The installer refuses anything else unless `--allow-unsupported-platform` is given, and the result is then not a supported installation. 24.04 is **not validated** (Kea/Unbound/netplan/polkit versions differ). | **[VM]**, **[CODE]** |
 | Minimum | The installer refuses **< 4 GiB memory** (3500 MiB measured) or **< 15 GiB free on `/`**. Documented pilot minimum: **2 vCPU / 4 GB / 40 GB**. | **[CODE]**, `DEPLOYMENT_APPLIANCE.md §8` |
-| Validated size | **4 vCPU / 12 GB / 48 GB** (test appliance; the install used 7.1 GB of disk). PRE-LIVE runs 1 vCPU / 7.8 GiB / 48 GB. There is **no official sizing statement beyond the pilot figure — [PO]**. Backups (pre-change, pre-restore, scheduled) and the set-aside database after a restore need headroom. | **[VM]**, **[LIVE-REF]** |
+| Validated size | **1 vCPU / 7.8 GiB / 97 GB** (second test appliance, the pristine run) and **4 vCPU / 12 GB / 48 GB** (first test appliance; the install used 7.1 GB of disk). PRE-LIVE runs 1 vCPU / 7.8 GiB / 48 GB. There is **no official sizing statement beyond the pilot figure — [PO]**. Backups (pre-change, pre-restore, scheduled) and the set-aside database after a restore need headroom. | **[VM]**, **[LIVE-REF]** |
 | Architecture | amd64 only (the build and Docker apt line are hard-coded; the installer checks) | **[CODE]** |
 | Disk layout | The Ubuntu default LVM root works; the product does not require a particular layout. `/var/lib/docker` holds the database volume — it must be on durable storage. | **[VM]** |
 | Clock | UTC; **time synchronisation is mandatory** — the licence engine keeps a 48 h clock high-water and refuses large backwards jumps. The installer warns when the clock is not synchronised. | **[CODE]** |
@@ -162,6 +163,7 @@ OneGate's design rule is **two NICs and no more**. The installer counts physical
 | **K5** | A blank box could not be migrated through `edge-migrate.sh` (it needs a verified pre-change backup, impossible before an operator exists). | A blank box is built **at** the release's schema by the baseline (no migration runs); the database records the baseline coverage in `/etc/stayconnect/schema-baseline`. Day-2 migrations go through `edge-migrate.sh` as before (Part E.5). |
 | G10 | The enforcement plane and the commerce flags were left off: a Client "signed in" and never got the Internet. | The provisioner writes the supported product profile (B.5) and runs the enforcement-plane coherence check. |
 | — | The Admin Console certificate was minted before Caddy could reload; Caddy failed on a vhost written `0640`; a first-run backup-cleanup reported a false failure; a re-run refused the existing admin. | All found on the first real install and fixed (Appendix 3). |
+| — | Found only on a **pristine** VM (snapshot reverted three times to reach a clean pass): Ubuntu's first-boot unattended-upgrades held the dpkg lock; the first certificate's health check needed a console that is installed later, sampled the served serial once, raced the renewal timer, and its "renewed" exit code (2) was read as failure; a pasted `email:` prefix became a sign-in name. | The provisioner waits for apt (up to 60 min); the cert manager locks, waits for the served serial and checks the console only once one is installed; exit 2 is success; the admin email must be a plain address. |
 
 ### B.1 Build the release (WS) — **[VM]**
 
@@ -593,7 +595,7 @@ The product's own backup writes an encrypted copy of `/etc/stayconnect` (`etc-<s
 
 **Case 1 — restore into the same, healthy appliance (supported; drill-tested by `scripts/ledger-restore-drill.sh`):** Admin Console → *Backups* → choose the backup → *Restore* (password + typed backup name + holder key). The product loads the dump into a **staging** database, replays the erasure ledger there, quiesces edged/pmsd/acctd/portald, swaps databases, reinstates privileges, registers hypertables and enters **financial-recovery mode** (money movement held until an operator reconciles). Command line equivalent: `scd backup-restore --name <backup> --identity-file <holder-private-key>`. Allow up to ~2 h 15 min. The previous database is kept (`stayconnect_site_before_…`) for 14 days. **[VM]**: a restore on the test appliance brought the voucher count back to the backup's (8 → 6), kept both hypertables, `APPLIANCE_UNITS = PASS`, and a new Client then passed the full journey; the appliance entered financial-recovery mode as designed.
 
-**Case 2 — rebuild the machine but keep the same identity and data** — obtain Product-Owner/vendor sign-off before doing it to a production appliance — **[PO]**:
+**Case 2 — rebuild the machine but keep the same identity and data** — **[SELFTEST]**, not yet run end to end on a VM (Appendix 3, A3.5); obtain Product-Owner/vendor sign-off before doing it to a production appliance — **[PO]**:
 
 1. Install the same or a newer release on the new machine (Part B). This creates *new* keys and a *new* identity, which the next step replaces. **Do not activate it** in Central.
 2. Copy the backup set (`db-…sql.gz.age` + `.verified` + `.meta.json`, `etc-….tgz.age`), the erasure-ledger secondary copy, and a backup holder's **private** key to the machine (`/root`, mode 0600).
@@ -799,6 +801,7 @@ DSNs are `postgres://<svc_role>:<password>@127.0.0.1:5432/stayconnect_site?sslmo
 | Upgrade stops: "… is not listed in the release's SHA256SUMS" / "differs from what release … shipped" | a Gate-P file in `/opt/stayconnect/deploy/gatep` was edited, or the tree is not the installed release | re-run `--upgrade` from an unmodified release |
 | Appliance never appears in Central | Central CA not installed, DNS/split-DNS, outbound 443 blocked | `journalctl -u stayconnect-scd \| grep -i regist`; `curl --cacert … https://<central>/readyz`; `ls /usr/local/share/ca-certificates/stayconnect-central-ca.crt` |
 | Appears, but never gets a Customer/Site after Activate | `assignment-registry-root.pub` missing (log: "no trusted registry and no root anchor - assignment agent disabled") | B.5; `install-assignment-root-anchor.sh --show`; restart scd |
+| Activated, licence Active, but never *connected*; scd logs `client keypair: tls: private key does not match public key` | the appliance was reinstalled before activation and Central signed the previous install's CSR (finding F1) | Central → appliance → *Reissue certificate* |
 | Activated, no licence | vendor key not pinned (offline) or licence fetch failing | `ls /etc/stayconnect/vendor-license.pub`; scd log; Central *Licenses* |
 | "Wrong hardware" licence | disk cloned/moved to other hardware | Central Replace hardware / Rebind WAN MAC |
 | Central deleted the appliance | unknown ≥ 3 times over ≥ 10 min | blank-disk reinstall (E.3) |
@@ -823,14 +826,80 @@ DSNs are `postgres://<svc_role>:<password>@127.0.0.1:5432/stayconnect_site?sslmo
 
 ## Appendix 3 — Validation performed for this manual
 
-Performed on **2026-10-26** against `master 7e4686ae56a229ef05460e02675d1d17924f8c9c`. No change was made to PRE-LIVE or Central; no migration was executed on a real environment; no software was deployed.
+**2026-10-27**, on an **isolated test environment** built for this purpose and never connected to PRE-LIVE `172.21.60.25` or the production
+Central `172.21.96.196`: a **new Central** (`central.onegate.getsemantics.com`, its own trust universe, VMware ESXi, Ubuntu 22.04.5, 2 vCPU /
+5.9 GiB / 18 GB) and two **new appliances** in turn (VMware ESXi, Ubuntu 22.04.5, two NICs each): appliance 1 (4 vCPU / 12 GB / 48 GB, behind
+NAT, reaching Central by its public name) and appliance 2 (1 vCPU / 7.8 GiB / 97 GB, on Central's subnet, reaching it through hairpin NAT). Test
+data only (customer "OneGate Test Lab", site "Test Site"); no PMS, no payment provider, no real Client.
 
-| What | How | Result |
-|---|---|---|
-| Live inventory of PRE-LIVE `172.21.60.25` and Central `172.21.96.196` | read-only shell inspection (versions, units, listeners, file names/modes — no secret value read or recorded) | Handbook §3.4, §6, §14; unit files and Caddyfile compared with the repository |
-| Syntax of installer scripts | `bash -n` on `provision-fresh-appliance.sh`, `install-service-units.sh`, `build-appliance-binaries.sh`, `deploy-hotel-admin.sh`, `hotel-admin-cert-manager.sh`, `edge-migrate.sh`, `install-pmsd-dark.sh`, `appliance-central-cutover.sh`, `appliance-dns-align.sh`, `gatep-set-passwords.sh`, and `central-*.sh` | all pass |
-| **Provisioner database sequence on a blank disposable TimescaleDB 2.16.1/PG 16 container** | replay of `gatep-roles` → `gatep-iam-roles` → baseline → `gatep-iam-roles` → `gatep-iam-ownership` → `gatep-grants` | **K1 reproduced**: baseline OK (`iam_v2` 161 tables, `public` 49, 2 hypertables, 0 ledger rows); `gatep-grants.sql` FAILS on `iam_v2.guest_network_pms_policy`; **K2 reproduced**: second baseline load fails `schema "iam_v2" already exists` |
-| Post-baseline migrations on that container | `edge-migrate.sh --target-kind disposable` one migration at a time, 0150 → 0158 (about a minute each; 0155/0156 longest) | **all nine applied**; then `gatep-ownership` + `gatep-grants` succeed; `iam_v2` 169 / `public` 49 (+ the harness marker table, dropped); 9 ledger rows; 5 functions were owned by the superuser until ownership was re-run |
-| Regenerated baseline (Path A) | `scripts/generate-production-baseline.sh` in a throwaway clone of the same commit, then the provisioner's database sequence on a second blank container | **success**, results in B.7 Path A item 4; K2 reproduced again (second load fails) |
-| Fresh VM, Central activation, Client journey, PMS | **not performed** — no disposable VM, no authorisation to touch PRE-LIVE/Central | all such steps carry **[NOT-EXERCISED]** |
+**Earlier (2026-10-26, first edition):** the provisioner's database sequence was replayed on disposable TimescaleDB containers and reproduced
+K1/K2; that is history now (B.0).
 
+### A3.1 Central
+
+| Step | Result |
+|---|---|
+| Build `deploy/scripts/central-build.sh` at `721aa6c5` | release `onegate-central-721aa6c5f071` (no Central code changed after it) |
+| `central-install.sh --mode new --tls internal --endpoint-config <lab> --extra-names <public>,<private> --install-prereqs` | PASS: smoke 7/7, preflight READY, 56 migrations, `ufw` 22/443/9443, backups encrypted to an age recipient |
+| NAT check from outside with a temporary listener | found **443 forwarded to the wrong host** (the appliance); corrected by the network owner; 443 and 9443 then reached Central |
+
+### A3.2 Appliance — the pristine run (final acceptance)
+
+Release **`onegate-appliance-52243660bb6f`** (commit `52243660`), appliance 2 reverted to its blank snapshot, one command:
+`appliance-install.sh --trust-dir … --admin-email … --admin-password-file … --central-base https://central.onegate.getsemantics.com --yes`.
+
+| Check | Result |
+|---|---|
+| Install | **exit 0 in 276 s**, `APPLIANCE_UNITS = PASS`, `installed release 52243660…` |
+| Services | `scd netd acctd edged portald hotel-admin caddy` active; no failed unit |
+| Database | `iam_v2` 169 tables, `public` 49, 2 hypertables, `schema-baseline` = 0158, empty ledger |
+| Provenance | `DEPLOYED_BINARIES.sha256`: 8 binaries, each embedding commit `52243660` |
+| Product profile | commerce flags in scd/portald/edged, enforcement plane in netd/acctd (`NETD_PHASE3_PRODUCER_UID=0`: acctd runs as root); `check-phase3-enforcement-plane.sh` OK |
+| Admin Console | dual-SAN certificate `hotel.stayconnect.local` + `172.21.96.97`; `https://172.21.96.97/` → 307 to sign-in |
+| Registration | self-registered, *waiting*, within seconds of the install |
+| Activation | Central *Replace hardware* on appliance 1's record, *Activate* appliance 2 at the same site → signed assignment applied (scd re-exec), licence **Active**, mTLS certificate, licence fetch cut over to `:9443`, Central **connected** — after one *Reissue certificate* (A3.5 finding F1) |
+| Client network | factory network activated → apply (5/5 health checks) → confirm: revision 1 active, `br-g-03bdf735` 10.20.0.1/20, Kea and Unbound active |
+| Package + vouchers | plan `LAB-1H` (10/5 Mbit/s, 2 devices), Free package `LAB-FREE-1H`, vouchers issued |
+| **Client journey** (`client-journey-netns-test.sh`) | **12/12**: DHCP lease, DNS, HTTP intercepted to the portal, HTTPS blocked before sign-in, captive probe 302, voucher → `/success`, session **active**, entitlement **ACTIVE**, nft `phase3_auth_ipv4`, tc HTB class, **HTTPS 200 to the Internet**, accounting 0.9 MB |
+| Isolation from a signed-in Client | Admin Console, SSH, database `:5432`, console backend `:3100` and the WAN-side subnet: all unreachable |
+| Reboot | all units active, revision unchanged and re-asserted, licence Active, the pre-reboot Client re-authorised, **two new Clients 12/12** |
+| Installer re-run | exit 0 in 36 s, "re-running release …", administrator "unchanged", **0 of 23** identity/key/DSN/env/certificate files changed, a new Client 12/12 |
+
+The pristine run took four snapshot reverts. Each earlier attempt stopped on a real defect that only a blank machine shows, fixed in the
+commits listed in B.0 (first-boot apt lock, the first certificate's health check and exit code, the renewal-timer race). After the fix that
+followed the third attempt, the installer's **resume** path on the same half-installed VM completed every remaining step before the fourth,
+clean run.
+
+### A3.3 Appliance 1 — recovery and lifecycle
+
+| Scenario | Result |
+|---|---|
+| Interrupted installs | nine real interruptions (defects fixed one by one); each re-run resumed and converged without regenerating identity, keys or passwords |
+| Backup | holder added and confirmed; `scd backup-now` encrypted and **proven restorable** (230 tables) |
+| Restore (Case 1) | `scd backup-restore`: vouchers back to the backup's count (8 → 6), 2 hypertables, units PASS, financial-recovery hold entered, a new Client 12/12 |
+| Upgrade `cfc41bb1` → `fef922c5` | 22 s, 0 pending migrations (floor from `schema-baseline`), Gate-P reconciled, binaries replaced with `.bak-<stamp>`, console redeployed, identity/cert/`.dsn` unchanged, a signed-in Client stayed online |
+| Binary rollback | `BINARY_ROLLBACK = PASS` (5 binaries, sha256 on disk and `/proc/<pid>/exe`), running revision back to `cfc41bb1`, the Client stayed online |
+| Roll forward | **found** `gatep-reconcile.sh` refusing an installed release's `SHA256SUMS` (`*` binary-mode marker) — fixed (`a6954146`); the upgrade refused before replacing any binary, as designed |
+| Process kill | `SIGKILL` of scd, Kea, Unbound, portald: each restarted, the Client stayed online |
+| Operator disconnect | session ended, nft element removed, Internet stopped |
+
+### A3.4 Self-tests (workstation)
+
+`site-db-init-selftest.sh` 10/10 · `apply-pending-migrations-selftest.sh` 5/5 · `restore-appliance-config-selftest.sh` 10/10 (Ubuntu 22.04 container) ·
+`install-service-units-selftest.sh` PASS · `check-phase3-enforcement-plane.sh` self-test PASS · `edged` `TestSeedAdminPasswordSources` PASS ·
+`factory-clean-baseline-verify.sh` PASS (14 058 facts).
+
+### A3.5 Findings outside the installer, and what was not exercised
+
+* **F1 — stale CSR after a reinstall before activation (Central/appliance enrollment).** Appliance 2's hardware registered three times
+  (each snapshot revert generated a new identity and mTLS key under the same hardware serial). Central kept the CSR of the **first** attempt
+  pending, and signed it on *Activate*; the appliance's current key did not match (`client keypair: tls: private key does not match public
+  key`) and, because Central reported its request as pending, it never sent a CSR for its own key. Recovered with the supported operator action
+  *Reissue certificate* (revokes, the appliance submits a CSR, Central auto-signs). The enrollment protocol is a controlled area, so the fix — Central
+  superseding the pending CSRs of a waiting appliance whose identity key changes, or the appliance re-submitting when an issued certificate
+  does not match its key — is a **Product-Owner decision**; until then: *if an appliance is reinstalled before it is activated and, after
+  Activate, does not reach* connected, *use* Reissue certificate.
+* **Case 2 (rebuild with the same identity)** — `restore-appliance-config.sh` is self-tested (10/10) but was **not** run end to end on a VM:
+  appliance 1's VM was decommissioned before it could be rebuilt, and a different VM is different hardware (a licence mismatch by design).
+* Offline activation, PMS, payments, social login, SMS/WhatsApp/email delivery, tagged VLANs on a physical switch, real devices (D.4): not exercised.
+* Client-to-Client isolation on one bridge is **not** an appliance function (A.3 item 4): two namespace Clients on one bridge could reach each other.

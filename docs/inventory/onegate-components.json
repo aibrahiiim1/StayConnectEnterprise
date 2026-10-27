@@ -60,7 +60,7 @@
     "sockets": 5,
     "appliance_to_central_endpoints": 12,
     "secret_files": 10,
-    "known_install_gaps": 4,
+    "known_install_gaps": 5,
     "resolved_install_gaps": 9
   },
   "components": [
@@ -1949,7 +1949,8 @@
     "G9 pmsd and the PMS surface flags stay off until a PMS is commissioned (by design; manual C.10)",
     "G12 hostname and WAN netplan are the operator's (by design)",
     "G15 no installer for observability/HA (not implemented)",
-    "G16 gatep-set-passwords.sh 'four roles' text (cosmetic)"
+    "G16 gatep-set-passwords.sh 'four roles' text (cosmetic)",
+    "F1 a waiting appliance reinstalled before activation gets the previous install's CSR signed at Activate (key mismatch); workaround Central 'Reissue certificate'; fix is a PO decision (enrollment)"
   ],
   "install_path_updated": "2026-10-27: fresh-VM installer mission (appliance-build.sh / appliance-install.sh), validated on a fresh VMware ESXi / Ubuntu 22.04.5 VM pair",
   "validation_environment": {
@@ -1968,7 +1969,14 @@
       "disk_gb": 18,
       "nics": 1
     },
-    "date": "2026-10-27"
+    "date": "2026-10-27",
+    "appliance_2": {
+      "vcpu": 1,
+      "memory_gib": 7.8,
+      "disk_gb": 97,
+      "nics": 2,
+      "run": "pristine install of release 52243660, 276 s"
+    }
   },
   "resolved_install_gaps": [
     "G1/G4/G5/G6/G8/G13/G17 -> appliance-build.sh + appliance-install.sh",
