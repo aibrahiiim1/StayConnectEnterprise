@@ -44,7 +44,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="${1:-$ROOT/../sc-appliance-build}"
 GO_IMAGE="${GO_IMAGE:-golang:1.25.12}"
-SERVICES="${SERVICES:-scd edged pmsd portald netd acctd}"
+# keybootstrap and svc-run are part of every release: the provisioner runs keybootstrap before scd may start, and
+# the Caddy, Admin Console, Kea and Unbound units run svc-run as their ExecStartPre. They were missing from this
+# default, so a release built with it could not be provisioned.
+SERVICES="${SERVICES:-scd edged pmsd portald netd acctd keybootstrap svc-run}"
 BUILD_TAGS="${BUILD_TAGS:-stayconnect_production}"
 
 cd "$ROOT"
@@ -79,6 +82,7 @@ for svc in $SERVICES; do
     -w /src/data-plane \
     -e CGO_ENABLED=0 -e GOOS=linux -e GOARCH=amd64 \
     -e GOFLAGS=-p=2 -e GOMAXPROCS=2 \
+    -v onegate-appliance-gocache:/tmp/gocache -v onegate-appliance-gomodcache:/tmp/gomodcache \
     -e GOCACHE=/tmp/gocache -e GOMODCACHE=/tmp/gomodcache \
     "$GO_IMAGE" \
     go build -trimpath -tags "$BUILD_TAGS" -o "/out/$svc" "./cmd/$svc"

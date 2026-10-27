@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0149, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0158, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -2521,6 +2521,64 @@ END $_$;
 
 
 --
+-- Name: delete_unused_pms_interface(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.delete_unused_pms_interface(p_tenant uuid, p_site uuid, p_interface uuid) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $_$
+DECLARE v_state text; v_attempted boolean; v_tbl text; v_has boolean;
+BEGIN
+  SELECT lifecycle_state INTO v_state FROM iam_v2.pms_interfaces
+   WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_interface FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'PMS_INTERFACE_NOT_FOUND' USING ERRCODE = 'no_data_found';
+  END IF;
+  IF v_state <> 'AUTH_DISABLED' THEN
+    RAISE EXCEPTION 'PMS_INTERFACE_IN_USE: the connection is % and can only be retired', v_state USING ERRCODE = 'check_violation';
+  END IF;
+  SELECT EXISTS (SELECT 1 FROM iam_v2.pms_interface_runtime
+                  WHERE tenant_id = p_tenant AND site_id = p_site AND pms_interface_id = p_interface
+                    AND (last_connect_attempt_at IS NOT NULL OR last_connected_at IS NOT NULL OR last_complete_sync_at IS NOT NULL OR last_event_cursor IS NOT NULL))
+    INTO v_attempted;
+  IF v_attempted THEN
+    RAISE EXCEPTION 'PMS_INTERFACE_IN_USE: the connection has connected to its PMS and can only be retired' USING ERRCODE = 'check_violation';
+  END IF;
+
+  -- Whatever else carries this connection's id (stays, events, postings, answers, routing, packages, coverage, rooms, sign-in records, tomorrow's tables) is history or
+  -- configuration in use: the connection is not deletable while any of it exists. The tables removed below are the connection's own configuration.
+  FOR v_tbl IN
+    SELECT c.relname FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = 'iam_v2'
+      JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = 'pms_interface_id' AND NOT a.attisdropped
+     WHERE c.relkind IN ('r','p')
+       AND c.relname NOT IN ('pms_interface_runtime','pms_interface_secret_generations','pms_interface_revisions','pms_interface_pnumber_seq',
+                             'pms_connection_settings','pms_interface_financial_settings')
+  LOOP
+    EXECUTE format('SELECT EXISTS (SELECT 1 FROM iam_v2.%I WHERE pms_interface_id = $1)', v_tbl) INTO v_has USING p_interface;
+    IF v_has THEN
+      RAISE EXCEPTION 'PMS_INTERFACE_IN_USE: records in % still refer to the connection', v_tbl USING ERRCODE = 'check_violation';
+    END IF;
+  END LOOP;
+  IF EXISTS (SELECT 1 FROM iam_v2.pms_source_conflicts WHERE interface_a = p_interface OR interface_b = p_interface) THEN
+    RAISE EXCEPTION 'PMS_INTERFACE_IN_USE: a source conflict still refers to the connection' USING ERRCODE = 'check_violation';
+  END IF;
+
+  PERFORM set_config('iam_v2.unused_interface_delete', p_interface::text, true);
+  UPDATE iam_v2.pms_interfaces SET current_revision_id = NULL
+   WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_interface AND current_revision_id IS NOT NULL;
+  DELETE FROM iam_v2.pms_interface_runtime        WHERE tenant_id = p_tenant AND site_id = p_site AND pms_interface_id = p_interface;
+  DELETE FROM iam_v2.pms_interface_secret_generations WHERE tenant_id = p_tenant AND site_id = p_site AND pms_interface_id = p_interface;
+  DELETE FROM iam_v2.pms_interface_revisions      WHERE tenant_id = p_tenant AND site_id = p_site AND pms_interface_id = p_interface;
+  DELETE FROM iam_v2.pms_interface_pnumber_seq    WHERE tenant_id = p_tenant AND site_id = p_site AND pms_interface_id = p_interface;
+  DELETE FROM iam_v2.pms_connection_settings      WHERE pms_interface_id = p_interface;
+  DELETE FROM iam_v2.pms_interfaces               WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_interface;
+END;
+$_$;
+
+
+--
 -- Name: device_exclusive_to(uuid, uuid[], uuid[], uuid[], uuid[]); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -3051,6 +3109,33 @@ END $$;
 --
 
 COMMENT ON FUNCTION iam_v2.give_up_waiting_stay_events(p_tenant uuid, p_site uuid, p_before timestamp with time zone, p_only uuid[], p_limit integer) IS 'Gives up PMS events still PENDING that were received before p_before (0139, GDPR audit B2): FAILED with review code RETENTION_GIVEN_UP, payload blanked. Rows the stay engine holds are skipped. Run by retention and erasure only; granted to nobody.';
+
+
+--
+-- Name: gnpp_consistent(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.gnpp_consistent() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  net  uuid;
+  m    text;
+  n    int;
+BEGIN
+  net := NEW.guest_network_id;
+  SELECT mode INTO m FROM iam_v2.guest_network_pms_policy WHERE guest_network_id = net;
+  IF m IS NULL THEN
+    RETURN NULL;
+  END IF;
+  SELECT count(*) INTO n FROM iam_v2.guest_network_pms_map WHERE guest_network_id = net;
+  IF (m = 'NONE' AND n <> 0) OR (m = 'DEDICATED' AND n <> 1) OR (m = 'SHARED_STRICT' AND (n < 2 OR n > 3)) THEN
+    RAISE EXCEPTION 'client network % has routing policy % but % mapped PMS interface(s)', net, m, n
+      USING ERRCODE = '23514', CONSTRAINT = 'gnpp_consistent';
+  END IF;
+  RETURN NULL;
+END;
+$$;
 
 
 --
@@ -5679,12 +5764,13 @@ CREATE FUNCTION iam_v2.p3_feed_authorizes(p_tenant uuid, p_site uuid, p_interfac
               AND COALESCE(rt.last_heartbeat_at, rt.last_connected_at)
                     > now() - make_interval(secs => iam_v2.p3_cfg_secs(pr.config,'heartbeat_timeout_ms',300)))
              OR
-             -- THE LAST GOOD ROSTER. A resync that is in flight, or that began and failed, says nothing about
-             -- the roster already published: that roster is untouched until a replacement completes, so it
-             -- remains exactly as trustworthy as it was a moment before the attempt started. Only its AGE may
-             -- retire it, and term (3) is what does that.
-             (    rt.transport_status <> 'CONNECTED'
-              AND rt.last_complete_sync_at IS NOT NULL)
+             -- THE LAST GOOD ROSTER, whenever the live branch is not satisfied because the guest list is not
+             -- IN_SYNC (a resync requested, running or failed) or the transport is down. Either way the roster
+             -- already published is untouched until a replacement completes, so it is exactly as trustworthy as
+             -- before the attempt began. A connected feed that is IN_SYNC but silent is NOT covered: that is a
+             -- hung link, not a resync, and stays refused.
+             (    rt.last_complete_sync_at IS NOT NULL
+              AND (rt.transport_status <> 'CONNECTED' OR rt.sync_status <> 'IN_SYNC'))
            )
        AND rt.continuity_status = 'CONTINUOUS'
        AND rt.pinned_revision_id = p_revision
@@ -5715,7 +5801,7 @@ $_$;
 -- Name: FUNCTION p3_feed_authorizes(p_tenant uuid, p_site uuid, p_interface uuid, p_revision uuid, p_evidence_at timestamp with time zone); Type: COMMENT; Schema: iam_v2; Owner: -
 --
 
-COMMENT ON FUNCTION iam_v2.p3_feed_authorizes(p_tenant uuid, p_site uuid, p_interface uuid, p_revision uuid, p_evidence_at timestamp with time zone) IS 'Single source of truth for the feed half of PMS Room sign-in eligibility. Authorises on EITHER a live feed OR the LAST SUCCESSFULLY PUBLISHED roster (D39), in both cases only when the materialized roster has caught up: no CLAIMABLE PENDING stay_event may exist, where claimable mirrors the applier''s own predicate (LIVE, or a generation at or below the published one). A resync that is in flight or that began and failed does NOT invalidate the published roster — the applier cannot consume an unpublished generation, so the live roster is whole until a replacement completes, and only max_auth_cache_age_seconds retires it. STABLE and therefore NOT sufficient on its own: callers take the interface runtime row lock first.';
+COMMENT ON FUNCTION iam_v2.p3_feed_authorizes(p_tenant uuid, p_site uuid, p_interface uuid, p_revision uuid, p_evidence_at timestamp with time zone) IS 'Single source of truth for the feed half of PMS Room sign-in eligibility. Authorises on EITHER a live feed (CONNECTED, IN_SYNC, heard within the heartbeat timeout) OR the LAST SUCCESSFULLY PUBLISHED roster whenever the transport is down or the guest list is not IN_SYNC (D39, D69), in both cases only when the materialized roster has caught up: no CLAIMABLE PENDING stay_event may exist, where claimable mirrors the applier''s own predicate (LIVE, or a generation at or below the published one). A resync in flight or failed does NOT invalidate the published roster; only the evidence age retires it. STABLE and therefore NOT sufficient on its own: callers take the interface runtime row lock first.';
 
 
 --
@@ -5824,6 +5910,23 @@ BEGIN
   END IF;
   RAISE EXCEPTION '%: append-only history (UPDATE rejected)', TG_TABLE_NAME;
 END $$;
+
+
+--
+-- Name: p3_interface_can_authorise(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p3_interface_can_authorise(p_tenant uuid, p_site uuid, p_interface uuid) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT COALESCE(bool_or(iam_v2.p3_feed_authorizes(pi.tenant_id, pi.site_id, pi.id, pi.current_revision_id,
+           CASE WHEN rt.transport_status = 'CONNECTED' AND rt.sync_status = 'IN_SYNC' THEN now() ELSE rt.last_complete_sync_at END)), false)
+    FROM iam_v2.pms_interfaces pi
+    LEFT JOIN iam_v2.pms_interface_runtime rt
+      ON rt.tenant_id = pi.tenant_id AND rt.site_id = pi.site_id AND rt.pms_interface_id = pi.id
+   WHERE pi.tenant_id = p_tenant AND pi.site_id = p_site AND pi.id = p_interface AND pi.lifecycle_state = 'ACTIVE';
+$$;
 
 
 --
@@ -11851,6 +11954,52 @@ $$;
 
 
 --
+-- Name: profile_privacy_notice_stamp(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.profile_privacy_notice_stamp() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE pd jsonb; d jsonb; v_text text; v_url text; v_terms text; v_fp text; v_id uuid;
+        c_builtin constant text := '[built-in notice] This Wi-Fi is provided by the hotel, which is responsible for your personal data on it. To give you internet access and keep the network secure, it records your device''s network addresses, when you connect and how much data you use, and what you sign in with. These records are deleted or made anonymous after a set time. Ask at reception for the hotel''s full privacy notice, or to see, correct or delete your data. (Shown in the guest''s language.)';
+BEGIN
+  IF NEW.guest_network_id IS NULL THEN
+    RETURN NEW;
+  END IF;
+  SELECT p.doc INTO pd FROM iam_v2.portal_profile_assignments a JOIN iam_v2.portal_profiles p ON p.id = a.profile_id
+   WHERE a.network_id = NEW.guest_network_id AND p.tenant_id = NEW.tenant_id;
+  IF NOT FOUND THEN
+    RETURN NEW;
+  END IF;
+  d := CASE WHEN jsonb_typeof(pd) = 'object' AND pd ? 'design' THEN pd -> 'design' ELSE pd END;
+  IF jsonb_typeof(d) = 'object' THEN
+    v_text  := NULLIF(CASE WHEN jsonb_typeof(d -> 'privacy_text') = 'string' THEN d ->> 'privacy_text' END, '');
+    v_url   := NULLIF(CASE WHEN jsonb_typeof(d -> 'privacy_url') = 'string' THEN d ->> 'privacy_url' END, '');
+    v_terms := NULLIF(CASE WHEN jsonb_typeof(d -> 'terms_url') = 'string' THEN d ->> 'terms_url' END, '');
+  END IF;
+  IF v_text IS NULL THEN
+    v_text := c_builtin;
+  END IF;
+  v_fp := encode(sha256(convert_to(jsonb_build_array(v_text, v_url, v_terms)::text, 'UTF8')), 'hex');
+  INSERT INTO public.privacy_notice_versions (tenant_id, fingerprint, privacy_text, privacy_url, terms_url)
+  VALUES (NEW.tenant_id, v_fp, v_text, v_url, v_terms)
+  ON CONFLICT ON CONSTRAINT pnv_one_per_content DO NOTHING
+  RETURNING id INTO v_id;
+  IF v_id IS NULL THEN
+    SELECT x.id INTO v_id FROM public.privacy_notice_versions x WHERE x.tenant_id = NEW.tenant_id AND x.fingerprint = v_fp;
+  END IF;
+  IF v_id IS NOT NULL THEN
+    NEW.privacy_notice_version_id := v_id;
+  END IF;
+  RETURN NEW;
+EXCEPTION WHEN OTHERS THEN
+  RAISE WARNING 'profile privacy notice not recorded for auth context %: % (%)', NEW.id, SQLERRM, SQLSTATE;
+  RETURN NEW;
+END $$;
+
+
+--
 -- Name: publish_checkout_grace_config(uuid, uuid, uuid, integer, integer, integer, bigint, integer, text, integer); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -14057,6 +14206,21 @@ BEGIN RAISE EXCEPTION 'payment_transaction_events is append-only (no % )', TG_OP
 
 
 --
+-- Name: trg_reject_update_delete_unless_unused_delete(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.trg_reject_update_delete_unless_unused_delete() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF TG_OP = 'DELETE' AND current_setting('iam_v2.unused_interface_delete', true) = OLD.pms_interface_id::text THEN
+    RETURN OLD;
+  END IF;
+  RAISE EXCEPTION '% is immutable (no UPDATE/DELETE) on %', TG_TABLE_NAME, TG_OP;
+END; $$;
+
+
+--
 -- Name: trg_secret_gen_guard(); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -14065,6 +14229,25 @@ CREATE FUNCTION iam_v2.trg_secret_gen_guard() RETURNS trigger
     AS $$
 BEGIN
   IF TG_OP='DELETE' THEN RAISE EXCEPTION 'secret generations are not deletable'; END IF;
+  IF ROW(NEW.ciphertext,NEW.nonce,NEW.encryption_key_id,NEW.cipher_version,NEW.generation_no,NEW.pms_interface_id)
+     IS DISTINCT FROM ROW(OLD.ciphertext,OLD.nonce,OLD.encryption_key_id,OLD.cipher_version,OLD.generation_no,OLD.pms_interface_id)
+  THEN RAISE EXCEPTION 'secret generation identity is immutable (only superseded_at may change)'; END IF;
+  RETURN NEW;
+END; $$;
+
+
+--
+-- Name: trg_secret_gen_guard_unless_unused_delete(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.trg_secret_gen_guard_unless_unused_delete() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    IF current_setting('iam_v2.unused_interface_delete', true) = OLD.pms_interface_id::text THEN RETURN OLD; END IF;
+    RAISE EXCEPTION 'secret generations are not deletable';
+  END IF;
   IF ROW(NEW.ciphertext,NEW.nonce,NEW.encryption_key_id,NEW.cipher_version,NEW.generation_no,NEW.pms_interface_id)
      IS DISTINCT FROM ROW(OLD.ciphertext,OLD.nonce,OLD.encryption_key_id,OLD.cipher_version,OLD.generation_no,OLD.pms_interface_id)
   THEN RAISE EXCEPTION 'secret generation identity is immutable (only superseded_at may change)'; END IF;
@@ -17432,6 +17615,33 @@ COMMENT ON TABLE iam_v2.guest_device_actions IS 'Every guest-initiated action th
 
 
 --
+-- Name: guest_network_changes; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.guest_network_changes (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    network_id uuid NOT NULL,
+    kind text NOT NULL,
+    state text DEFAULT 'PENDING'::text NOT NULL,
+    prior_enabled boolean,
+    group_id uuid NOT NULL,
+    group_kind text NOT NULL,
+    revision_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    applied_at timestamp with time zone,
+    settled_at timestamp with time zone,
+    target jsonb,
+    before jsonb,
+    CONSTRAINT gnc_group_kind CHECK ((group_kind = ANY (ARRAY['ACTIVATE'::text, 'FACTORY_ACTIVATE'::text, 'PORT_MODE'::text, 'RESTORE'::text, 'FACTORY_RESET'::text, 'FULL_RESET'::text]))),
+    CONSTRAINT gnc_kind CHECK ((kind = ANY (ARRAY['ENABLE'::text, 'DISABLE'::text, 'SETTINGS'::text]))),
+    CONSTRAINT gnc_prior CHECK (((state <> 'APPLIED'::text) OR (prior_enabled IS NOT NULL))),
+    CONSTRAINT gnc_state CHECK ((state = ANY (ARRAY['PENDING'::text, 'APPLIED'::text, 'CONFIRMED'::text, 'CANCELLED'::text, 'REVERTED'::text])))
+);
+
+
+--
 -- Name: guest_network_replacements; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -17511,6 +17721,21 @@ CREATE TABLE iam_v2.guest_network_pms_map (
     is_default boolean DEFAULT false NOT NULL,
     routing_mode text DEFAULT 'MAPPED'::text NOT NULL,
     CONSTRAINT guest_network_pms_map_routing_mode_check CHECK ((routing_mode = ANY (ARRAY['MAPPED'::text, 'ALL_ACTIVE_INTERFACES'::text])))
+);
+
+
+--
+-- Name: guest_network_pms_policy; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.guest_network_pms_policy (
+    guest_network_id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    mode text NOT NULL,
+    configured_at timestamp with time zone DEFAULT now() NOT NULL,
+    configured_by text DEFAULT ''::text NOT NULL,
+    CONSTRAINT gnpp_mode CHECK ((mode = ANY (ARRAY['NONE'::text, 'DEDICATED'::text, 'SHARED_STRICT'::text])))
 );
 
 
@@ -17764,6 +17989,69 @@ CREATE TABLE iam_v2.ledger_meta (
     ledger_id uuid DEFAULT gen_random_uuid() NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT ledger_meta_one CHECK (singleton)
+);
+
+
+--
+-- Name: network_archive; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.network_archive (
+    network_id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    group_id uuid,
+    group_kind text NOT NULL,
+    archived_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT na_group_kind CHECK ((group_kind = ANY (ARRAY['FACTORY_RESET'::text, 'FULL_RESET'::text])))
+);
+
+
+--
+-- Name: network_layer_snapshots; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.network_layer_snapshots (
+    revision_id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    taken_at timestamp with time zone DEFAULT now() NOT NULL,
+    layers jsonb NOT NULL
+);
+
+
+--
+-- Name: network_review_items; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.network_review_items (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    network_id uuid NOT NULL,
+    layer text NOT NULL,
+    detail text NOT NULL,
+    paused_pms boolean DEFAULT false NOT NULL,
+    change_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    resolved_at timestamp with time zone,
+    CONSTRAINT nri_layer CHECK ((layer = ANY (ARRAY['portal_profile'::text, 'signin'::text, 'pms_routing'::text])))
+);
+
+
+--
+-- Name: network_signin_overrides; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.network_signin_overrides (
+    network_id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    disabled_methods text[] DEFAULT '{}'::text[] NOT NULL,
+    primary_method text,
+    remember_days integer,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT nso_remember CHECK (((remember_days IS NULL) OR ((remember_days >= 0) AND (remember_days <= 365))))
 );
 
 
@@ -19134,6 +19422,35 @@ CREATE VIEW iam_v2.pms_unanswered_review_events AS
 --
 
 COMMENT ON VIEW iam_v2.pms_unanswered_review_events IS 'Recorded events that still need an answer: MANUAL_REVIEW with no disposition. THE single definition of outstanding PMS work -- every operator-facing count reads this, so no two screens can disagree about how much there is to do.';
+
+
+--
+-- Name: portal_profile_assignments; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.portal_profile_assignments (
+    network_id uuid NOT NULL,
+    profile_id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    assigned_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: portal_profiles; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.portal_profiles (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    name text NOT NULL,
+    doc jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pp_name CHECK (((length(btrim(name)) >= 1) AND (length(btrim(name)) <= 80)))
+);
 
 
 --
@@ -22545,11 +22862,27 @@ ALTER TABLE ONLY iam_v2.guest_device_actions
 
 
 --
+-- Name: guest_network_changes guest_network_changes_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.guest_network_changes
+    ADD CONSTRAINT guest_network_changes_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: guest_network_pms_map guest_network_pms_map_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
 ALTER TABLE ONLY iam_v2.guest_network_pms_map
     ADD CONSTRAINT guest_network_pms_map_pkey PRIMARY KEY (guest_network_id, pms_interface_id);
+
+
+--
+-- Name: guest_network_pms_policy guest_network_pms_policy_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.guest_network_pms_policy
+    ADD CONSTRAINT guest_network_pms_policy_pkey PRIMARY KEY (guest_network_id);
 
 
 --
@@ -22718,6 +23051,38 @@ ALTER TABLE ONLY iam_v2.erasure_ledger
 
 ALTER TABLE ONLY iam_v2.ledger_meta
     ADD CONSTRAINT ledger_meta_pkey PRIMARY KEY (singleton);
+
+
+--
+-- Name: network_archive network_archive_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.network_archive
+    ADD CONSTRAINT network_archive_pkey PRIMARY KEY (network_id);
+
+
+--
+-- Name: network_layer_snapshots network_layer_snapshots_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.network_layer_snapshots
+    ADD CONSTRAINT network_layer_snapshots_pkey PRIMARY KEY (revision_id);
+
+
+--
+-- Name: network_review_items network_review_items_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.network_review_items
+    ADD CONSTRAINT network_review_items_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: network_signin_overrides network_signin_overrides_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.network_signin_overrides
+    ADD CONSTRAINT network_signin_overrides_pkey PRIMARY KEY (network_id);
 
 
 --
@@ -23238,6 +23603,22 @@ ALTER TABLE ONLY iam_v2.pms_source_conflicts
 
 ALTER TABLE ONLY iam_v2.pms_source_conflicts
     ADD CONSTRAINT pms_source_conflicts_tenant_id_site_id_interface_a_interfac_key UNIQUE (tenant_id, site_id, interface_a, interface_b);
+
+
+--
+-- Name: portal_profile_assignments portal_profile_assignments_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.portal_profile_assignments
+    ADD CONSTRAINT portal_profile_assignments_pkey PRIMARY KEY (network_id);
+
+
+--
+-- Name: portal_profiles portal_profiles_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.portal_profiles
+    ADD CONSTRAINT portal_profiles_pkey PRIMARY KEY (id);
 
 
 --
@@ -24693,10 +25074,38 @@ CREATE INDEX gdrr_site ON iam_v2.guest_data_request_register USING btree (tenant
 
 
 --
+-- Name: gnc_group; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX gnc_group ON iam_v2.guest_network_changes USING btree (group_id);
+
+
+--
+-- Name: gnc_one_live_per_network; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE UNIQUE INDEX gnc_one_live_per_network ON iam_v2.guest_network_changes USING btree (network_id) WHERE (state = ANY (ARRAY['PENDING'::text, 'APPLIED'::text]));
+
+
+--
+-- Name: gnc_site_state; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX gnc_site_state ON iam_v2.guest_network_changes USING btree (tenant_id, site_id, state, created_at DESC);
+
+
+--
 -- Name: gnpm_one_default; Type: INDEX; Schema: iam_v2; Owner: -
 --
 
 CREATE UNIQUE INDEX gnpm_one_default ON iam_v2.guest_network_pms_map USING btree (guest_network_id) WHERE is_default;
+
+
+--
+-- Name: gnpp_site; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX gnpp_site ON iam_v2.guest_network_pms_policy USING btree (tenant_id, site_id);
 
 
 --
@@ -24742,10 +25151,31 @@ CREATE INDEX internet_packages_active_lookup ON iam_v2.internet_packages USING b
 
 
 --
+-- Name: na_site; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX na_site ON iam_v2.network_archive USING btree (tenant_id, site_id);
+
+
+--
+-- Name: nls_site; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX nls_site ON iam_v2.network_layer_snapshots USING btree (tenant_id, site_id, taken_at DESC);
+
+
+--
 -- Name: npsg_one_current; Type: INDEX; Schema: iam_v2; Owner: -
 --
 
 CREATE UNIQUE INDEX npsg_one_current ON iam_v2.notification_provider_secret_generations USING btree (tenant_id, provider_id) WHERE (superseded_at IS NULL);
+
+
+--
+-- Name: nri_one_open; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE UNIQUE INDEX nri_one_open ON iam_v2.network_review_items USING btree (network_id, layer) WHERE (resolved_at IS NULL);
 
 
 --
@@ -24910,6 +25340,13 @@ CREATE INDEX posting_attempts_by_posting ON iam_v2.posting_attempts USING btree 
 
 
 --
+-- Name: pp_name_per_site; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE UNIQUE INDEX pp_name_per_site ON iam_v2.portal_profiles USING btree (site_id, lower(btrim(name)));
+
+
+--
 -- Name: ppa_merchant_ref_globally_unique; Type: INDEX; Schema: iam_v2; Owner: -
 --
 
@@ -24928,6 +25365,13 @@ COMMENT ON INDEX iam_v2.ppa_merchant_ref_globally_unique IS 'C27: one external m
 --
 
 CREATE UNIQUE INDEX ppa_one_default_per_site ON iam_v2.payment_provider_accounts USING btree (tenant_id, site_id) WHERE is_default;
+
+
+--
+-- Name: ppa_profile; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX ppa_profile ON iam_v2.portal_profile_assignments USING btree (profile_id);
 
 
 --
@@ -25722,6 +26166,20 @@ CREATE TRIGGER erasure_ledger_no_truncate BEFORE TRUNCATE ON iam_v2.erasure_ledg
 
 
 --
+-- Name: guest_network_pms_map gnpp_map_consistent; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE CONSTRAINT TRIGGER gnpp_map_consistent AFTER INSERT OR UPDATE ON iam_v2.guest_network_pms_map DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION iam_v2.gnpp_consistent();
+
+
+--
+-- Name: guest_network_pms_policy gnpp_policy_consistent; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE CONSTRAINT TRIGGER gnpp_policy_consistent AFTER INSERT OR UPDATE ON iam_v2.guest_network_pms_policy DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION iam_v2.gnpp_consistent();
+
+
+--
 -- Name: guest_access_accounts guest_access_account_removed_is_final; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
@@ -25767,7 +26225,7 @@ CREATE TRIGGER imm_plan_rev BEFORE DELETE OR UPDATE ON iam_v2.service_plan_revis
 -- Name: pms_interface_revisions imm_pms_rev; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER imm_pms_rev BEFORE DELETE OR UPDATE ON iam_v2.pms_interface_revisions FOR EACH ROW EXECUTE FUNCTION iam_v2.trg_reject_update_delete();
+CREATE TRIGGER imm_pms_rev BEFORE DELETE OR UPDATE ON iam_v2.pms_interface_revisions FOR EACH ROW EXECUTE FUNCTION iam_v2.trg_reject_update_delete_unless_unused_delete();
 
 
 --
@@ -26380,6 +26838,13 @@ CREATE TRIGGER p9_auth_context_privacy_notice BEFORE INSERT OR UPDATE OF privacy
 
 
 --
+-- Name: auth_contexts p9_z_profile_privacy_notice; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER p9_z_profile_privacy_notice BEFORE INSERT ON iam_v2.auth_contexts FOR EACH ROW EXECUTE FUNCTION iam_v2.profile_privacy_notice_stamp();
+
+
+--
 -- Name: posting_attempts pa_oneway; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
@@ -26530,7 +26995,7 @@ CREATE TRIGGER self_service_settings_changes_append_only BEFORE DELETE OR UPDATE
 -- Name: pms_interface_secret_generations sg_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER sg_guard BEFORE DELETE OR UPDATE ON iam_v2.pms_interface_secret_generations FOR EACH ROW EXECUTE FUNCTION iam_v2.trg_secret_gen_guard();
+CREATE TRIGGER sg_guard BEFORE DELETE OR UPDATE ON iam_v2.pms_interface_secret_generations FOR EACH ROW EXECUTE FUNCTION iam_v2.trg_secret_gen_guard_unless_unused_delete();
 
 
 --
@@ -27936,6 +28401,14 @@ ALTER TABLE ONLY iam_v2.pms_source_conflicts
 
 
 --
+-- Name: portal_profile_assignments portal_profile_assignments_profile_id_fkey; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.portal_profile_assignments
+    ADD CONSTRAINT portal_profile_assignments_profile_id_fkey FOREIGN KEY (profile_id) REFERENCES iam_v2.portal_profiles(id) ON DELETE CASCADE;
+
+
+--
 -- Name: post_stay_profiles post_stay_profiles_tenant_id_site_id_origin_stay_id_fkey; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -28901,6 +29374,14 @@ REVOKE ALL ON FUNCTION iam_v2.deauthorize_entitlement_device(p_ent uuid, p_devic
 
 
 --
+-- Name: FUNCTION delete_unused_pms_interface(p_tenant uuid, p_site uuid, p_interface uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.delete_unused_pms_interface(p_tenant uuid, p_site uuid, p_interface uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.delete_unused_pms_interface(p_tenant uuid, p_site uuid, p_interface uuid) TO svc_edged;
+
+
+--
 -- Name: FUNCTION device_exclusive_to(p_device uuid, p_own_ind uuid[], p_principals uuid[], p_accounts uuid[], p_challenges uuid[]); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -29493,6 +29974,14 @@ GRANT ALL ON FUNCTION iam_v2.p3_guest_network_mirror_state(p_tenant uuid, p_site
 --
 
 REVOKE ALL ON FUNCTION iam_v2.p3_history_appendonly() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION p3_interface_can_authorise(p_tenant uuid, p_site uuid, p_interface uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p3_interface_can_authorise(p_tenant uuid, p_site uuid, p_interface uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p3_interface_can_authorise(p_tenant uuid, p_site uuid, p_interface uuid) TO svc_scd;
 
 
 --
@@ -31693,6 +32182,13 @@ GRANT SELECT ON TABLE iam_v2.guest_data_erasures TO svc_edged;
 
 
 --
+-- Name: TABLE guest_network_changes; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE iam_v2.guest_network_changes TO svc_edged;
+
+
+--
 -- Name: TABLE guest_network_replacements; Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -31713,6 +32209,14 @@ GRANT SELECT ON TABLE iam_v2.guest_network_lineage TO svc_edged;
 
 GRANT SELECT ON TABLE iam_v2.guest_network_pms_map TO svc_scd;
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE iam_v2.guest_network_pms_map TO svc_edged;
+
+
+--
+-- Name: TABLE guest_network_pms_policy; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.guest_network_pms_policy TO svc_scd;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE iam_v2.guest_network_pms_policy TO svc_edged;
 
 
 --
@@ -31782,6 +32286,35 @@ GRANT SELECT ON TABLE iam_v2.internet_package_revisions TO svc_pmsd;
 GRANT SELECT ON TABLE iam_v2.internet_packages TO svc_scd;
 GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.internet_packages TO svc_edged;
 GRANT SELECT ON TABLE iam_v2.internet_packages TO svc_pmsd;
+
+
+--
+-- Name: TABLE network_archive; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE iam_v2.network_archive TO svc_edged;
+
+
+--
+-- Name: TABLE network_layer_snapshots; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE iam_v2.network_layer_snapshots TO svc_edged;
+
+
+--
+-- Name: TABLE network_review_items; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE iam_v2.network_review_items TO svc_edged;
+
+
+--
+-- Name: TABLE network_signin_overrides; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE iam_v2.network_signin_overrides TO svc_edged;
+GRANT SELECT ON TABLE iam_v2.network_signin_overrides TO svc_scd;
 
 
 --
@@ -32108,6 +32641,22 @@ GRANT SELECT ON TABLE iam_v2.pms_stays_past_departure TO svc_edged;
 --
 
 GRANT SELECT ON TABLE iam_v2.pms_unanswered_review_events TO svc_edged;
+
+
+--
+-- Name: TABLE portal_profile_assignments; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE iam_v2.portal_profile_assignments TO svc_edged;
+GRANT SELECT ON TABLE iam_v2.portal_profile_assignments TO svc_scd;
+
+
+--
+-- Name: TABLE portal_profiles; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE iam_v2.portal_profiles TO svc_edged;
+GRANT SELECT ON TABLE iam_v2.portal_profiles TO svc_scd;
 
 
 --
@@ -32900,6 +33449,13 @@ GRANT USAGE ON SEQUENCE public.portal_https_settings_changes_id_seq TO svc_edged
 GRANT SELECT,INSERT,UPDATE ON TABLE public.portal_tls_state TO svc_scd;
 GRANT SELECT ON TABLE public.portal_tls_state TO svc_edged;
 GRANT SELECT ON TABLE public.portal_tls_state TO svc_netd;
+
+
+--
+-- Name: TABLE privacy_notice_versions; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT ON TABLE public.privacy_notice_versions TO iam_v2_owner;
 
 
 --

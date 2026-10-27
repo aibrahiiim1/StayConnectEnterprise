@@ -348,6 +348,39 @@ else
   bad "a second install failed:"; sed 's/^/      /' "$r/out2"
 fi
 
+# ---------------------------------------------------------------- drop-ins, OS-service overrides, polkit
+# The scd drop-in, the Kea/Unbound restart overrides and the polkit grant were shipped and installed by nothing.
+echo "== drop-ins, the Kea/Unbound overrides and the polkit grant are installed =="
+t="$(new_tree dropins)"
+cp "$DEPLOY/systemd/stayconnect-backup-cleanup.service" "$t/src/systemd/"
+cp "$DEPLOY/scripts/stayconnect-backup-cleanup.sh" "$t/src/scripts/"
+printf '#!/bin/sh\nexit 0\n' > "$t/src/scripts/wait-for-site-db.sh"
+mkdir -p "$t/src/systemd/stayconnect-scd.service.d" "$t/src/kea/systemd" "$t/src/unbound/systemd" "$t/src/polkit"
+cp "$DEPLOY/systemd/stayconnect-scd.service.d/hotel-admin-cert.conf" "$t/src/systemd/stayconnect-scd.service.d/"
+cp "$DEPLOY/kea/systemd/override.conf" "$t/src/kea/systemd/"
+cp "$DEPLOY/unbound/systemd/override.conf" "$t/src/unbound/systemd/"
+cp "$DEPLOY/polkit/"* "$t/src/polkit/"
+printf '#!/bin/sh\nexit 0\n' > "$t/bin/svc-run"; chmod +x "$t/bin/svc-run"
+if SC_POLKIT_VERSION=0.105-33ubuntu0.2 run_installer "$t"; then
+  [ -f "$t/units/stayconnect-scd.service.d/hotel-admin-cert.conf" ] && ok "the scd drop-in is installed" || bad "the scd drop-in is missing"
+  [ -f "$t/units/kea-dhcp4-server.service.d/override.conf" ] && ok "the Kea restart override is installed" || bad "the Kea override is missing"
+  [ -f "$t/units/unbound.service.d/override.conf" ] && ok "the Unbound restart override is installed" || bad "the Unbound override is missing"
+  [ -f "$t/root/etc/polkit-1/localauthority/50-local.d/50-stayconnect-health.pkla" ] && ok "polkit 0.105 receives the .pkla grant" || bad "the .pkla grant is missing"
+  grep -q '^ExecStartPre=+' "$t/units/kea-dhcp4-server.service.d/override.conf" && bad "the Kea override still lets the daemon rewrite its own config" || ok "the Kea override grants no write access to Kea's config"
+else
+  bad "the drop-in case was refused:"; sed 's/^/      /' "$t/out"
+fi
+t="$(new_tree polkit_new)"
+cp "$DEPLOY/systemd/stayconnect-backup-cleanup.service" "$t/src/systemd/"
+cp "$DEPLOY/scripts/stayconnect-backup-cleanup.sh" "$t/src/scripts/"
+printf '#!/bin/sh\nexit 0\n' > "$t/src/scripts/wait-for-site-db.sh"
+mkdir -p "$t/src/polkit" && cp "$DEPLOY/polkit/"* "$t/src/polkit/"
+if SC_POLKIT_VERSION=124-2ubuntu1 run_installer "$t" && [ -f "$t/root/etc/polkit-1/rules.d/49-stayconnect-health.rules" ]; then
+  ok "newer polkit receives the unit-restricted JavaScript rule"
+else
+  bad "newer polkit did not receive the .rules grant"; sed 's/^/      /' "$t/out"
+fi
+
 if [ "$fail" = "0" ]; then
   echo "INSTALL_SERVICE_UNITS_SELFTEST = PASS"
   exit 0

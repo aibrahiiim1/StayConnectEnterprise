@@ -432,6 +432,67 @@ for u in "$UNITSRC"/stayconnect-*.service "$UNITSRC"/stayconnect-*.timer; do
   changed=1
 done
 
+# ---- 4a. DROP-INS SHIPPED BESIDE THE UNITS ----------------------------------
+#
+# deploy/systemd/stayconnect-scd.service.d/hotel-admin-cert.conf gives scd write access to the Admin Console
+# certificate directory, which the certificate manager needs when scd runs it on edged's behalf. The loop above
+# only matches files, so a drop-in DIRECTORY was never installed by anything: the appliance ran without it and
+# the Admin Console's "rotate certificate" could not write its files.
+for d in "$UNITSRC"/stayconnect-*.service.d; do
+  [ -d "$d" ] || continue
+  b="$(basename "$d")"
+  for f in "$d"/*.conf; do
+    [ -f "$f" ] || continue
+    dst="$UNITS/$b/$(basename "$f")"
+    if [ -f "$dst" ] && cmp -s "$f" "$dst"; then continue; fi
+    mkdir -p "$UNITS/$b" && install -m 0644 "$f" "$dst" || die "cannot install $dst"
+    say "updated $b/$(basename "$f")"
+    changed=1
+  done
+done
+
+# ---- 4c. RESTART POLICY FOR THE DISTRIBUTION'S DHCP AND DNS SERVERS ----------
+#
+# The stock kea-dhcp4-server unit has no Restart= at all and unbound's has no start-limit guarantee, so one crash
+# left Client DHCP or DNS down until somebody noticed. The shipped overrides add Restart=on-failure, an unlimited
+# start budget and the svc-run back-off. They were in the repository and installed by nothing.
+for pair in "kea/systemd/override.conf|kea-dhcp4-server.service.d" "unbound/systemd/override.conf|unbound.service.d"; do
+  src="$SRC/${pair%%|*}"; dir="${pair#*|}"
+  [ -f "$src" ] || continue
+  if [ ! -x "$BIN/svc-run" ]; then
+    say "NOTE: $BIN/svc-run is missing, so $dir/override.conf (which runs it) is NOT installed"
+    continue
+  fi
+  dst="$UNITS/$dir/override.conf"
+  if [ -f "$dst" ] && cmp -s "$src" "$dst"; then continue; fi
+  mkdir -p "$UNITS/$dir" && install -m 0644 "$src" "$dst" || die "cannot install $dst"
+  say "updated $dir/override.conf"
+  changed=1
+done
+
+# ---- 4d. POLKIT: LET THE ADMIN CONSOLE RESTART THE APPLIANCE'S OWN SERVICES ---
+#
+# edged runs unprivileged under NoNewPrivileges; its step-up-protected, audited "Restart service" action goes
+# through systemd's D-Bus API and therefore through polkit. Without a grant every restart is refused. polkit
+# 0.105 (Ubuntu 22.04) has no JavaScript rules.d, so it gets the .pkla (which grants manage-units to the
+# stayconnect user; edged's own per-unit allowlist decides which units). Newer polkit gets the .rules file,
+# which also restricts the unit list itself.
+POLKIT_VER="${SC_POLKIT_VERSION:-$(dpkg-query -W -f='${Version}' polkitd 2>/dev/null || dpkg-query -W -f='${Version}' policykit-1 2>/dev/null || true)}"
+if [ -n "$POLKIT_VER" ] && [ -d "$SRC/polkit" ]; then
+  case "$POLKIT_VER" in
+    0.10[0-5]*|0.[0-9][0-9]-*|0.[0-9]-*)
+      src="$SRC/polkit/50-stayconnect-health.pkla"; dst="$ROOT_PREFIX/etc/polkit-1/localauthority/50-local.d/50-stayconnect-health.pkla";;
+    *)
+      src="$SRC/polkit/49-stayconnect-health.rules"; dst="$ROOT_PREFIX/etc/polkit-1/rules.d/49-stayconnect-health.rules";;
+  esac
+  if [ -f "$src" ] && ! cmp -s "$src" "$dst" 2>/dev/null; then
+    mkdir -p "$(dirname "$dst")" && install -m 0644 "$src" "$dst" || die "cannot install $dst"
+    say "installed polkit grant $(basename "$dst") (polkit $POLKIT_VER)"
+  fi
+else
+  say "NOTE: polkit is not installed; the Admin Console cannot restart services until it is"
+fi
+
 # ---- 4b. RETIRED UNITS ARE STOPPED AND REMOVED (GDPR final mission: one backup system) --------------------
 #
 # The nightly site-backup job (stayconnect-site-backup.timer, which ran a second backup engine writing plain pg_dump sets) is retired:

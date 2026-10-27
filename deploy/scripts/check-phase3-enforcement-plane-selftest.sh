@@ -51,6 +51,18 @@ printf 'NETD_DB_URL=x\n'  > "$d/netd.env"
 printf 'ACCTD_DB_URL=x\n' > "$d/acctd.env"
 expect 1 "$d" "Checkout Grace without the plane is REFUSED"
 
+# 3b. The Client Portal's commerce path (vouchers, Free packages, accounts) mints sessions on every appliance.
+d="$(case_dir commerce_only)"
+printf 'STAYCONNECT_IAMV2_MASTER=true\nSTAYCONNECT_PHASE2_MASTER=1\nSTAYCONNECT_PHASE2_PORTAL=1\n' > "$d/scd.env"
+printf 'NETD_DB_URL=x\n'  > "$d/netd.env"
+printf 'ACCTD_DB_URL=x\n' > "$d/acctd.env"
+expect 1 "$d" "the commerce portal without the plane is REFUSED"
+d="$(case_dir commerce_coherent)"
+printf 'STAYCONNECT_IAMV2_MASTER=true\nSTAYCONNECT_PHASE2_MASTER=1\nSTAYCONNECT_PHASE2_PORTAL=1\n' > "$d/scd.env"
+printf 'NETD_DB_URL=x\nSTAYCONNECT_PHASE3_MASTER=true\nNETD_PHASE3_PRODUCER_UID=0\n' > "$d/netd.env"
+printf 'ACCTD_DB_URL=x\nSTAYCONNECT_PHASE3_MASTER=true\n' > "$d/acctd.env"
+expect 0 "$d" "the commerce portal with the plane is accepted"
+
 # 4. A correctly enabled appliance passes.
 d="$(case_dir coherent)"
 printf 'STAYCONNECT_PHASE3_MASTER=1\nSTAYCONNECT_PHASE3_PMS_AUTH=1\n' > "$d/scd.env"

@@ -92,12 +92,14 @@ change should not lock you out. If you are still locked out of Admin Console:
 3. Inspect the in-flight revision:
    `SELECT seq,state,failure_reason FROM network_config_revisions
    WHERE state IN ('applying','pending_confirmation');`
-4. Force a rollback to the last good revision via netd (the same path
-   `POST /edge/v1/network/rollback` uses), which re-applies `previous_seq`'s
-   bundle.
-5. As a last resort, re-apply the bootstrap skeletons
-   (`deploy/netplan`, `deploy/nftables/stayconnect.nft`) to restore a known
-   baseline, then reconcile the DB intent.
+4. A revision still `applying` or `pending_confirmation` rolls back by itself when the confirm window
+   (120 s) expires, or on request (`POST /edge/v1/network/rollback`). An already **active** revision is
+   not rolled back — apply a new change instead.
+5. To return a running appliance to its last confirmed state, use netd's recovery commands as root:
+   `netd recover status`, then `netd recover reassert-confirmed`.
+   **Never** apply the files in `deploy/netplan/`, `deploy/nftables/stayconnect.nft`, `deploy/kea/kea-dhcp4.conf`
+   or `deploy/unbound/` — they are legacy skeletons (`ens160`, `flush ruleset`, 10.10.0.0/24) that erase the
+   rendered ruleset and every Client network.
 
 Because the site DB is the source of truth and each revision keeps its full
 bundle + `previous_seq`, recovery is always "re-apply a known-good revision,"

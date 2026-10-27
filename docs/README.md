@@ -20,6 +20,10 @@ The product words used throughout (Client, Admin Console, Client Portal, Site) a
 
 ## 1. Quick start — new site installation
 
+- [runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md](runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md) — **building a new
+  appliance (and a separate Central) from a blank VM**: planning, build, install, initial configuration, an executable
+  verification checklist, recovery/upgrade/rollback and the known defects of the current installer. Read this before
+  any fresh install.
 - [APPLIANCE_ONBOARDING_MANUAL.md](APPLIANCE_ONBOARDING_MANUAL.md) — the shortest
   UI-only path to bring one site online (zero-touch, two consoles).
 
@@ -103,7 +107,9 @@ The product words used throughout (Client, Admin Console, Client Portal, Site) a
 | Topic | Document |
 |---|---|
 | Product terminology — *Client*, *Admin Console*, *Client Portal*, *Site* (binding for product-facing text) | [PRODUCT_TERMINOLOGY.md](PRODUCT_TERMINOLOGY.md) |
-| Full system reference (historical snapshot, 2026-07-10) | [SYSTEM_OVERVIEW.md](SYSTEM_OVERVIEW.md) |
+| **Complete technical architecture and system handbook** (every component, versions, data flows, failure-impact matrix, verification status of each fact) — current | [architecture/ONEGATE_SYSTEM_HANDBOOK.md](architecture/ONEGATE_SYSTEM_HANDBOOK.md) |
+| Machine-readable component / dependency inventory | [inventory/onegate-components.json](inventory/onegate-components.json) |
+| Earlier full system reference (historical snapshot, 2026-07-10 — superseded by the handbook above) | [SYSTEM_OVERVIEW.md](SYSTEM_OVERVIEW.md) |
 | Central (licensing, activation, fleet status) — authoritative | [CENTRAL_CONTROL_PLANE.md](CENTRAL_CONTROL_PLANE.md) |
 | Cloud / control-plane architecture | [CLOUD_ARCHITECTURE.md](CLOUD_ARCHITECTURE.md) · [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md) |
 | Edge / appliance architecture | [EDGE_ARCHITECTURE.md](EDGE_ARCHITECTURE.md) · [EDGE_NETWORKING.md](EDGE_NETWORKING.md) · [CLIENT_NETWORKING.md](CLIENT_NETWORKING.md) |

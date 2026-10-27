@@ -155,3 +155,18 @@ DO $$ BEGIN
     RAISE NOTICE 'public.schema_migrations does not exist yet; re-run this file after the schema is built';
   END IF;
 END $$;
+
+-- ---------------------------------------------------------------------------------------------------------
+-- THE FORWARD MIGRATION EXECUTOR'S LEDGER PRIVILEGE, WHICH ONLY PRE-LIVE HAD
+-- ---------------------------------------------------------------------------------------------------------
+-- scripts/edge-migrate.sh applies a live-site migration as iam_v2_owner (--apply-role) and requires exactly
+-- SELECT and INSERT on the ledger for that role — read it, record one row — and refuses UPDATE/DELETE/TRUNCATE.
+-- PRE-LIVE holds that grant because it was made there by hand during the Phase-3 increments; no install path
+-- made it. Measured on a factory-clean database built from the baseline: the runner refused with "ledger
+-- absent" (information_schema hides a table the role has no privilege on), so a freshly installed appliance
+-- could never be upgraded through the authoritative runner. Exactly the two privileges, and nothing else.
+DO $$ BEGIN
+  IF to_regclass('public.schema_migrations') IS NOT NULL THEN
+    EXECUTE 'GRANT SELECT, INSERT ON public.schema_migrations TO iam_v2_owner';
+  END IF;
+END $$;

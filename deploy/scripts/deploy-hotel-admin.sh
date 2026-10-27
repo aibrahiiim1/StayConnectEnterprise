@@ -26,7 +26,11 @@ CURRENT_LINK="${HOTEL_ADMIN_CURRENT:-/opt/stayconnect/hotel-admin}"
 # mtime-based "second newest" is unreliable and can select the current release.
 PREVIOUS_LINK="${HOTEL_ADMIN_PREVIOUS:-$CURRENT_LINK.previous}"
 SERVICE="${HOTEL_ADMIN_SERVICE:-stayconnect-hotel-admin}"
-RUN_USER="${HOTEL_ADMIN_USER:-stayconnect}"
+# The account the release is chowned to is the account the unit runs as (stayconnect-hotel-admin); stayconnect is
+# the fallback only where that account does not exist (a development box).
+if [ -n "${HOTEL_ADMIN_USER:-}" ]; then RUN_USER="$HOTEL_ADMIN_USER"
+elif id stayconnect-hotel-admin >/dev/null 2>&1; then RUN_USER=stayconnect-hotel-admin
+else RUN_USER=stayconnect; fi
 # Releases that are retained as EVIDENCE but must never be served. Nothing here is reachable by the current or
 # previous symlink, by systemd or by Caddy: the runtime only ever resolves through CURRENT_LINK.
 ARCHIVE_DIR="${HOTEL_ADMIN_ARCHIVE:-/opt/stayconnect/releases/hotel-admin-archive}"

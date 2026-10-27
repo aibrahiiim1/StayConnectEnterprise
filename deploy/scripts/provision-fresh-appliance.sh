@@ -11,14 +11,23 @@
 #   Caddy crash-loop on start                                       -> /var/log/caddy ownership
 #   scd crash-loop on first boot                                    -> voucher DEK never bootstrapped
 #
-# It is idempotent: safe to re-run on a partially provisioned box.
+# It is idempotent: safe to re-run on a partially provisioned box. Every step either converges or refuses with
+# the reason; none of them regenerates an identity, a key, a password or a database that already exists. The
+# database step is deploy/scripts/site-db-init.sh, which applies the baseline as ONE transaction and never
+# re-applies it (proven by scripts/ci/site-db-init-selftest.sh).
 #
 # It does NOT invent identity or topology. It never sets a tenant or site, never writes a netplan file, and
-# never starts Kea, because guest topology comes from the operator through Hotel Admin. It stops at the
+# never starts Kea, because guest topology comes from the operator through the Admin Console. It stops at the
 # furthest state a factory-clean appliance can legitimately reach on its own.
 #
-# Usage (as root, on the appliance, with the repo's deploy/ tree and binaries already present):
+# THE SUPPORTED WAY TO RUN IT is deploy/scripts/appliance-install.sh from a release built by
+# deploy/scripts/appliance-build.sh: that verifies the release, stages it under /opt/stayconnect, supplies the
+# Central trust files, runs this script, installs the Admin Console and creates the first administrator.
+#
+# Usage (as root, on the appliance, with a release staged under /opt/stayconnect):
 #   provision-fresh-appliance.sh
+# Environment (all optional): CENTRAL_BASE CENTRAL_MTLS_BASE WAN_IFACE LAN_IFACE VENDOR_PUB ASSIGN_ROOT_PUB
+#   CENTRAL_CA ALLOW_SPLIT_DNS=1 OFFLINE_ACTIVATION_ONLY=1 REINITIALISE_UNUSED_DB=1
 set -euo pipefail
 
 SC=/opt/stayconnect
@@ -29,6 +38,29 @@ die() { echo "[provision] ABORT: $*" >&2; exit 1; }
 
 [ "$(id -u)" = 0 ] || die "run as root"
 [ -d "$DEPLOY" ] || die "missing $DEPLOY"
+
+# ---------------------------------------------------------------- 0. preconditions, before anything changes
+# A BASELINE THAT DOES NOT EMBODY THE NEWEST MIGRATION IS A RELEASE DEFECT (K1). Refuse before installing a
+# single package, so a bad release never leaves a half-provisioned box behind.
+# shellcheck source=lib-baseline.sh
+. "$DEPLOY/scripts/lib-baseline.sh"
+why="$(baseline_is_current "$SC/data-plane/migrations/baseline/0000_production_baseline.sql" "$SC/data-plane/migrations")" \
+  || die "$why"
+for b in scd edged acctd netd portald pmsd keybootstrap svc-run; do
+  [ -x "$SC/bin/$b" ] || die "missing $SC/bin/$b — stage a complete release first (deploy/scripts/appliance-install.sh)"
+done
+# The Central trust files are checked here too, so a missing one stops the install before it changes anything
+# (steps 5 and 6 install them and repeat the reason).
+have_trust() { [ -n "${2:-}" ] || [ -s "$DEPLOY/pki/$1" ] || [ -s "$3" ]; }
+have_trust assignment-registry-root.pub "${ASSIGN_ROOT_PUB:-}" "$ETC/assignment-registry-root.pub" \
+  || die "no assignment registry root anchor ($DEPLOY/pki/assignment-registry-root.pub or ASSIGN_ROOT_PUB=); see step 5 below for why it is required"
+if [ "${OFFLINE_ACTIVATION_ONLY:-0}" != 1 ]; then
+  have_trust central-ca.crt "${CENTRAL_CA:-}" /usr/local/share/ca-certificates/stayconnect-central-ca.crt \
+    || die "no Central CA ($DEPLOY/pki/central-ca.crt or CENTRAL_CA=); set OFFLINE_ACTIVATION_ONLY=1 for an offline-activated site"
+else
+  have_trust vendor-license.pub "${VENDOR_PUB:-}" "$ETC/vendor-license.pub" \
+    || die "OFFLINE_ACTIVATION_ONLY=1 needs the vendor's public key ($DEPLOY/pki/vendor-license.pub or VENDOR_PUB=)"
+fi
 # AN APPLIANCE CENTRAL REMOVED AFTER IT HELD A CUSTOMER still carries that customer's data (scd's
 # removed_from_central.go). Re-running this script over it would not make it factory-clean -- the database and
 # /etc/stayconnect would survive -- so it refuses. A factory-clean install starts from a blank disk:
@@ -38,9 +70,27 @@ die() { echo "[provision] ABORT: $*" >&2; exit 1; }
 # ---------------------------------------------------------------- 1. packages
 say "packages"
 export DEBIAN_FRONTEND=noninteractive
+# A FRESHLY BOOTED Ubuntu runs unattended-upgrades within minutes, and it holds the dpkg/apt locks; apt-get then
+# fails at once ("Could not get lock /var/lib/dpkg/lock-frontend ... unattended-upgr" — measured on a fresh VM).
+# Wait for the locks (up to 60 min: a stale image upgrades 150+ packages on first boot) instead, and let every
+# apt-get below wait for the dpkg lock as well.
+# Busy = a process holds a lock file open, OR the daily apt job / unattended-upgrade / apt / dpkg is running (the
+# daily job releases the locks between its update and install phases, so the locks alone are not enough).
+apt_busy() {
+  fuser /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock >/dev/null 2>&1 && return 0
+  pgrep -f '/usr/bin/unattended-upgrade( |$)|apt\.systemd\.daily|^/usr/bin/(apt|apt-get|dpkg) ' >/dev/null 2>&1
+}
+for _ in $(seq 1 720); do
+  apt_busy || break
+  [ "${_waited:-0}" = 1 ] || { say "waiting for another package manager (unattended-upgrades?) to release the apt/dpkg locks"; _waited=1; }
+  sleep 5
+done
+apt-get() { command apt-get -o DPkg::Lock::Timeout=3600 "$@"; }
 apt-get update -qq
 # conntrack: the fallback netd uses to end a revoked address's open flows when ctnetlink is unavailable (audit B-1).
-apt-get install -y -qq ca-certificates curl gnupg lsb-release nftables conntrack unbound jq python3 >/dev/null
+# dnsutils: dig, which the Central-endpoint split-DNS check needs (without it the check silently degraded).
+# age: decrypting a backup or configuration archive by hand during a restore. openssl: the certificate scripts.
+apt-get install -y -qq ca-certificates curl gnupg lsb-release nftables conntrack unbound jq python3 dnsutils age openssl >/dev/null
 if ! command -v docker >/dev/null; then
   install -m 0755 -d /etc/apt/keyrings
   curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
@@ -60,8 +110,14 @@ fi
 # KEA IS INSTALLED BUT NOT STARTED. It binds the LAN bridge, which does not exist until guest networking is
 # configured, so starting it here would only produce a crash-loop. Installing it means the DHCP screen can
 # work the moment the operator configures the LAN, instead of failing with a missing-socket error.
-command -v kea-dhcp4 >/dev/null || apt-get install -y -qq kea-dhcp4-server >/dev/null
-systemctl disable --now kea-dhcp4-server >/dev/null 2>&1 || true
+# ONLY WHEN THIS RUN INSTALLED IT. On a re-run, netd may already have enabled and started Kea for a confirmed
+# client network; disabling it then would cut DHCP for every Client on the site.
+if ! command -v kea-dhcp4 >/dev/null; then
+  apt-get install -y -qq kea-dhcp4-server >/dev/null
+  systemctl disable --now kea-dhcp4-server >/dev/null 2>&1 || true
+fi
+# scd Requires=nftables.service; enabled so the boot order is the unit graph's, not whichever unit asks first.
+systemctl enable nftables >/dev/null 2>&1 || true
 command -v node >/dev/null || { curl -fsSL https://deb.nodesource.com/setup_20.x | bash - >/dev/null; apt-get install -y -qq nodejs >/dev/null; }
 say "packages ok"
 
@@ -142,35 +198,25 @@ docker exec stayconnect-pg pg_isready -U stayconnect >/dev/null 2>&1 || die "pos
 say "infra ok"
 
 # ---------------------------------------------------------------- 4. database, from the FACTORY-CLEAN BASELINE
+# deploy/scripts/site-db-init.sh: the baseline as ONE transaction on a blank database, never re-applied to an
+# existing one, Gate-P converged every time, hypertables and iam_v2 ownership asserted. It refuses (and changes
+# nothing) when the schema is not what this release installs; REINITIALISE_UNUSED_DB=1 rebuilds such a schema
+# only after proving it holds no operators, tenants, clients, sessions or vouchers.
 say "database"
-PGX="docker exec -i stayconnect-pg psql -v ON_ERROR_STOP=1 -U stayconnect"
-BASELINE="$SC/data-plane/migrations/baseline/0000_production_baseline.sql"
-[ -f "$BASELINE" ] || die "missing $BASELINE (a new appliance is built from the baseline, never from 0001..0049)"
-$PGX -d stayconnect -tAc "SELECT 1 FROM pg_database WHERE datname='stayconnect_site'" | grep -q 1 \
-  || $PGX -d stayconnect -c "CREATE DATABASE stayconnect_site" >/dev/null
-SITE="$PGX -d stayconnect_site"
-# Removed first: `docker cp <dir> <container>:<path>` copies INTO <path> when it already exists, so a
-# re-run would nest the files at /tmp/gatep/gatep/... and leave the previous run's copy at the path the
-# lines below read. This script is meant to be re-runnable, and a re-run applying the PREVIOUS Gate-P was
-# measured happening on PRE-LIVE: the run reported success and the new grant was absent.
-docker exec stayconnect-pg rm -rf /tmp/gatep >/dev/null 2>&1 || true
-docker cp "$DEPLOY/gatep" stayconnect-pg:/tmp/gatep >/dev/null
-$SITE -f /tmp/gatep/gatep-roles.sql >/dev/null
-# The IAM roles run BEFORE the baseline (its privileges name them) and again AFTER (its guarded REFERENCES
-# grant needs public.guest_networks, which the baseline creates). The file is idempotent and order-tolerant.
-$SITE -f /tmp/gatep/gatep-iam-roles.sql >/dev/null
-docker cp "$BASELINE" stayconnect-pg:/tmp/baseline.sql >/dev/null
-$SITE -f /tmp/baseline.sql >/dev/null
-$SITE -f /tmp/gatep/gatep-iam-roles.sql >/dev/null
-$SITE -f /tmp/gatep/gatep-iam-ownership.sql >/dev/null
-$SITE -f /tmp/gatep/gatep-grants.sql >/dev/null
-# HYPERTABLES MUST BE REGISTERED, NOT MERELY SHAPED. A schema-only dump carries the table and its
-# ts_insert_blocker trigger but not the TimescaleDB registration, and the result refuses every INSERT into
-# audit_log and accounting_records while looking perfect in the catalog. The baseline now re-registers them;
-# this asserts it, because the failure is invisible until something tries to write.
-hyper="$($SITE -tAc "SELECT count(*) FROM timescaledb_information.hypertables")"
-[ "${hyper:-0}" -ge 2 ] || die "only ${hyper:-0} hypertables registered — audit_log/accounting_records would reject every write"
-say "database ok (factory-clean baseline; $hyper hypertables)"
+DBINIT_OUT="$(mktemp)"
+DBINIT_ARGS=(--migrations "$SC/data-plane/migrations")
+[ "${REINITIALISE_UNUSED_DB:-0}" = 1 ] && DBINIT_ARGS+=(--reinitialise-unused)
+if ! bash "$DEPLOY/scripts/site-db-init.sh" "${DBINIT_ARGS[@]}" 2>&1 | tee "$DBINIT_OUT"; then
+  rm -f "$DBINIT_OUT"; die "the site database is not ready (see above)"
+fi
+# A SCHEMA BUILT FROM A BASELINE HAS AN EMPTY MIGRATION LEDGER, so the upgrade procedure must be told which
+# migrations that baseline already contained. Recorded once, when the baseline was actually applied here.
+if grep -q 'baseline applied' "$DBINIT_OUT" && [ ! -s "$ETC/schema-baseline" ]; then
+  mkdir -p "$ETC" && baseline_through "$SC/data-plane/migrations/baseline/0000_production_baseline.sql" > "$ETC/schema-baseline"
+  chmod 0644 "$ETC/schema-baseline"
+fi
+rm -f "$DBINIT_OUT"
+say "database ok"
 
 # ---------------------------------------------------------------- 5. credentials + local key material
 say "credentials"
@@ -206,6 +252,9 @@ elif [ -s "$VENDOR_PUB_SLOT" ]; then
   bash "$DEPLOY/scripts/install-vendor-trust-key.sh" "$VENDOR_PUB_SLOT"
 elif [ -s "$ETC/vendor-license.pub" ]; then
   say "vendor trust key already installed ($(bash "$DEPLOY/scripts/install-vendor-trust-key.sh" --show | tail -1))"
+elif [ "${OFFLINE_ACTIVATION_ONLY:-0}" = 1 ]; then
+  die "OFFLINE_ACTIVATION_ONLY=1 but no vendor trust key: an offline activation package is believable only because it is
+       signed by a key pinned here first. Supply the vendor's PUBLIC key at $VENDOR_PUB_SLOT or VENDOR_PUB=/path."
 else
   say "NOTE: no vendor trust key installed. Online activation is unaffected; OFFLINE first activation will"
   say "      refuse every package until one is pinned. Put the vendor's PUBLIC key at"
@@ -225,9 +274,11 @@ elif [ -s "$ASSIGN_ROOT_SLOT" ]; then
 elif [ -s "$ETC/assignment-registry-root.pub" ]; then
   say "assignment root anchor already installed ($(bash "$DEPLOY/scripts/install-assignment-root-anchor.sh" --show | tail -1))"
 else
-  say "NOTE: no assignment registry root anchor. This appliance can register and be activated in the"
-  say "      control panel, but will NEVER adopt the assignment — it stays awaiting-assignment silently."
-  say "      Copy /etc/stayconnect/assignment-registry-root.pub from Central to $ASSIGN_ROOT_SLOT."
+  # Formerly a NOTE, and the install carried on: the appliance then registered, was activated in Central, and
+  # never converged, with nothing anywhere saying why. Every activation path needs this anchor, so it is required.
+  die "no assignment registry root anchor. Without it this appliance can be activated in Central but will NEVER
+       adopt its assignment. Supply Central's assignment-registry-root.pub (from /opt/stayconnect/central/appliance-trust/
+       on Central) at $ASSIGN_ROOT_SLOT or ASSIGN_ROOT_PUB=/path, verified against Central's FINGERPRINTS.txt."
 fi
 say "credentials ok"
 
@@ -305,10 +356,16 @@ if [ -n "${CENTRAL_CA:-}" ]; then
   bash "$DEPLOY/scripts/install-central-trust.sh" "$CENTRAL_CA"
 elif [ -s "$CENTRAL_CA_SLOT" ]; then
   bash "$DEPLOY/scripts/install-central-trust.sh" "$CENTRAL_CA_SLOT"
+elif [ -s /usr/local/share/ca-certificates/stayconnect-central-ca.crt ]; then
+  say "Central CA already trusted (/usr/local/share/ca-certificates/stayconnect-central-ca.crt)"
+elif [ "${OFFLINE_ACTIVATION_ONLY:-0}" = 1 ]; then
+  say "NOTE: OFFLINE_ACTIVATION_ONLY=1 and no Central CA: this appliance will not self-register online; it is"
+  say "      activated with an offline activation package (Admin Console -> Appliance & licence)."
 else
-  say "NOTE: no Central CA supplied, so this appliance cannot verify Central's certificate and will never"
-  say "      self-register. Put Central's CA at $CENTRAL_CA_SLOT (from"
-  say "      /opt/stayconnect/central/tls/ca.crt on Central) and re-run, or pass CENTRAL_CA=/path/ca.crt."
+  die "no Central CA supplied, so this appliance could never verify Central and would never self-register
+       (it would look like an unreachable Central and retry silently). Supply Central's TLS CA (central-tls-ca.crt
+       from /opt/stayconnect/central/appliance-trust/ on Central) at $CENTRAL_CA_SLOT or CENTRAL_CA=/path,
+       or set OFFLINE_ACTIVATION_ONLY=1 for a site that is activated offline."
 fi
 # NO TENANT OR SITE ID IS EVER WRITTEN HERE. Identity arrives only through enrollment -> claim -> signed
 # assignment. Seeding it would be indistinguishable from cloning another appliance.
@@ -362,9 +419,42 @@ EOF
 grep -qE '^NETD_MGMT_ADDR=' "$ETC/netd.env" || printf 'NETD_MGMT_ADDR=auto\n' >> "$ETC/netd.env"
 [ -f "$ETC/portald.env" ] || printf 'PORTALD_SCD_SOCKET=/run/stayconnect/scd.sock\n' > "$ETC/portald.env"
 [ -f "$ETC/pmsd.env" ] || cp "$DEPLOY/env/pmsd.env.dark" "$ETC/pmsd.env"
+
+# THE SUPPORTED PRODUCT PROFILE: CLIENT ACCESS WITH ENFORCEMENT.
+#
+# Without these lines a provisioned appliance signed Clients in and let none of them online: every IAM-v2 session
+# opens in PENDING_ENFORCEMENT and only the enforcement plane promotes it, and vouchers, Free packages and client
+# accounts are redeemed through the commerce routes (STAYCONNECT_PHASE2_*), which were never switched on here.
+# PRE-LIVE carries exactly these flags (set by hand). What is deliberately NOT here: the PMS connector and room
+# sign-in (STAYCONNECT_PHASE3_PMS_* / _CHECKOUT_GRACE, a commissioned and separately authorised step,
+# docs/runbooks/PMS-Interface-Commissioning.md) and anything financial (STAYCONNECT_PHASE4_*, real money).
+#
+# ensure_kv adds a key only when it is ABSENT and never changes an existing value, so an operator's choice on an
+# appliance that is already in service survives a re-run.
+ensure_kv() { # <file> <key> <value>
+  grep -qE "^$2=" "$ETC/$1" 2>/dev/null && return 0
+  printf '%s=%s\n' "$2" "$3" >> "$ETC/$1"
+}
+# The plane's producer is whichever account acctd runs as: the uid the kernel reports to netd over SO_PEERCRED.
+ACCTD_USER="$(sed -n 's/^User=\(.*\)$/\1/p' "$DEPLOY/systemd/stayconnect-acctd.service" | tail -1)"
+PRODUCER_UID="$(id -u "${ACCTD_USER:-root}")" || die "cannot resolve a uid for acctd's user '${ACCTD_USER:-root}'"
+ensure_kv scd.env     STAYCONNECT_PHASE2_MASTER true
+ensure_kv scd.env     STAYCONNECT_PHASE2_PORTAL true
+ensure_kv portald.env STAYCONNECT_PHASE2_MASTER true
+ensure_kv portald.env STAYCONNECT_PHASE2_PORTAL true
+ensure_kv edged.env   STAYCONNECT_PHASE2_MASTER true
+ensure_kv edged.env   STAYCONNECT_PHASE2_ADMIN  true
+ensure_kv netd.env    STAYCONNECT_PHASE3_MASTER true
+ensure_kv netd.env    NETD_PHASE3_PRODUCER_UID  "$PRODUCER_UID"
+ensure_kv acctd.env   STAYCONNECT_PHASE3_MASTER true
+bash "$DEPLOY/scripts/check-phase3-enforcement-plane.sh" "$ETC" >/dev/null \
+  || die "the environment is not coherent: $(bash "$DEPLOY/scripts/check-phase3-enforcement-plane.sh" "$ETC" 2>&1 | head -3)"
 chmod 640 "$ETC"/*.env && chown root:stayconnect "$ETC"/*.env
 grep -qE '^(SCD|EDGED|ACCTD)_(TENANT|SITE)_ID=' "$ETC"/*.env && die "an identity was seeded into the environment"
 say "environment ok (WAN=$WAN_IFACE, LAN=$LAN_IFACE, no identity pinned)"
+# The restrictive umask was for the environment files only (they carry database passwords). Everything after
+# this - units, Caddy configuration, the certificate manager files - must be readable by the accounts that use it.
+umask 022
 
 # ---------------------------------------------------------------- 7. units, proxy, certificate
 say "units + proxy"
@@ -378,56 +468,97 @@ install -m 0644 "$DEPLOY/caddy/stayconnect-caddy.edge.service" /etc/systemd/syst
 mkdir -p /etc/caddy/hotel-admin
 # The Caddyfile imports a vhost the cert manager generates, and the cert manager needs Caddy's local CA,
 # which only exists after Caddy has run once. An empty import breaks that cycle.
-[ -f /etc/caddy/hotel-admin/vhost.caddy ] || : > /etc/caddy/hotel-admin/vhost.caddy
+# Created with an explicit mode: this script runs under umask 027 from the environment step, which made the
+# placeholder root-only, and Caddy (user caddy) then refused the whole configuration it imports. Measured on a
+# fresh appliance VM.
+chmod 0755 /etc/caddy/hotel-admin
+[ -f /etc/caddy/hotel-admin/vhost.caddy ] || install -m 0644 /dev/null /etc/caddy/hotel-admin/vhost.caddy
+[ -s /etc/caddy/hotel-admin/vhost.caddy ] || chmod 0644 /etc/caddy/hotel-admin/vhost.caddy
 systemctl daemon-reload
 systemctl enable --now stayconnect-caddy >/dev/null
 for _ in $(seq 1 30); do [ -f /var/lib/caddy/.local/share/caddy/pki/authorities/local/intermediate.crt ] && break; sleep 2; done
-bash "$DEPLOY/scripts/hotel-admin-cert-manager.sh" rotate >/dev/null 2>&1 || true
+# THE FIRST CERTIFICATE IS FORCED; later runs use renew, so a re-run never replaces a healthy certificate that
+# staff browsers may already trust. install-service-units.sh enables the renewal timer with --now, and on a
+# freshly booted machine its first run fires before Caddy's local CA exists: it fails, and the manager then backs
+# off, so a plain renew here was skipped too and the Admin Console had no certificate at all (measured on a fresh
+# VM). With no certificate yet, rotate issues one regardless of back-off; with one, renew acts only when due.
+if [ -s /etc/caddy/hotel-admin/hotel-admin.crt ]; then cm=renew; else cm=rotate; fi
+# The manager exits 0 (nothing due) or 2 (renewed — what a first rotate always returns); 10 and 20 are failures.
+rc=0; bash "$DEPLOY/scripts/hotel-admin-cert-manager.sh" "$cm" >/dev/null 2>&1 || rc=$?
+case "$rc" in 0|2) ;; *) die "the Admin Console certificate could not be issued ($cm, exit $rc); see: $DEPLOY/scripts/hotel-admin-cert-manager.sh status";; esac
+# The early, expected failure of the timer's first run is history once a certificate exists; clear it so the
+# unit health check reports the present state.
+systemctl reset-failed stayconnect-hotel-admin-cert-renew.service >/dev/null 2>&1 || true
 chown -R caddy:caddy /var/log/caddy   # the cert-manager health check can create a root-owned log file
 systemctl reload stayconnect-caddy || systemctl restart stayconnect-caddy
 say "units + proxy ok"
 
 # ---------------------------------------------------------------- 8. services
 say "services"
+# pmsd is installed and NOT enabled: the PMS connector is commissioned deliberately (its own flags, keys and a
+# PMS window), never as a side effect of provisioning. The Admin Console unit is enabled here and started by
+# deploy-hotel-admin.sh once a console release exists.
 for u in stayconnect-scd stayconnect-edged stayconnect-acctd stayconnect-netd stayconnect-portald stayconnect-hotel-admin; do
   systemctl enable "$u" >/dev/null 2>&1 || true
 done
-systemctl restart stayconnect-scd
-sleep 10
-systemctl restart stayconnect-edged stayconnect-acctd stayconnect-netd stayconnect-portald || true
-sleep 5
+# stop / reset-failed / start --no-block, never a bare restart: with StartLimitIntervalSec=0 a `systemctl
+# restart` of a unit whose start is refused never returns, and this script would hang instead of reporting it.
+bounce() {
+  systemctl stop "$@" >/dev/null 2>&1 || true
+  systemctl reset-failed "$@" >/dev/null 2>&1 || true
+  systemctl start --no-block "$@"
+}
+wait_active() { # <seconds> <unit...>
+  local t="$1"; shift
+  for _ in $(seq 1 "$t"); do
+    local all=1; for u in "$@"; do systemctl is-active --quiet "$u" || all=0; done
+    [ "$all" = 1 ] && return 0; sleep 1
+  done
+  return 1
+}
+bounce stayconnect-scd
+wait_active 60 stayconnect-scd || true
+bounce stayconnect-netd stayconnect-acctd stayconnect-edged stayconnect-portald
+wait_active 60 stayconnect-scd stayconnect-edged stayconnect-netd stayconnect-portald stayconnect-caddy || true
+# acctd exits (and is restarted) while the appliance has no signed assignment: "activating" is its normal state
+# before activation, so it is reported, not required.
 fail=0
-for u in stayconnect-scd stayconnect-edged stayconnect-acctd stayconnect-netd stayconnect-portald stayconnect-caddy; do
+for u in stayconnect-scd stayconnect-edged stayconnect-netd stayconnect-portald stayconnect-caddy stayconnect-acctd; do
   st="$(systemctl is-active "$u" || true)"
   printf '  %-32s %s\n' "$u" "$st"
-  [ "$st" = active ] || fail=1
+  case "$u:$st" in
+    *:active) ;;
+    stayconnect-acctd:activating) ;;
+    *) fail=1 ;;
+  esac
 done
-[ "$fail" = 0 ] || die "one or more services are not active"
+[ "$fail" = 0 ] || die "one or more services are not active (journalctl -u <unit> -b)"
 # The production build must say so out loud; a development binary here is the one thing that silently
 # reintroduces a configurable guest-IAM authority.
-journalctl -u stayconnect-scd -n 200 --no-pager | grep -q 'build=production' \
-  || die "scd is not a production build — rebuild with -tags stayconnect_production"
+# The journal is captured BEFORE it is searched: `journalctl | grep -q` under pipefail fails whenever grep
+# finds the line and exits early, because journalctl then dies of SIGPIPE (measured on a fresh appliance VM).
+prod=0
+for _ in $(seq 1 20); do
+  scdlog="$(journalctl -u stayconnect-scd -b --no-pager 2>/dev/null || true)"
+  case "$scdlog" in *build=production*) prod=1; break;; esac
+  sleep 1
+done
+[ "$prod" = 1 ] || die "scd is not a production build — rebuild with -tags stayconnect_production"
 say "services ok (scd reports build=production)"
 
 echo
-say "PROVISIONED — factory clean, no tenant, no site, no licence. Activate it one of two ways:"
+WAN_IP="$(ip -o -4 addr show "$WAN_IFACE" | awk '{print $4}' | cut -d/ -f1 | head -1)"
+say "PROVISIONED — factory clean: no tenant, no site, no licence, no Client network."
 say ""
-say "  ONLINE (normal). This appliance registers itself at $CENTRAL_BASE and waits. In the control"
-say "  panel: Onboarding -> pick it under Pending activation -> choose Customer, Site and licence"
-say "  terms -> Activate. Nothing is typed on the appliance."
-say ""
-say "  OFFLINE (no route to Central). Hotel Admin -> Setup/Activation -> Download activation request,"
-say "  import it in the control panel, Activate, then upload the activation package back here."
-if [ -s "$ETC/vendor-license.pub" ]; then
-  say "  Vendor trust key is pinned, so offline activation is available."
+say "  Admin Console:  https://${WAN_IP}/   (certificate from this appliance's local CA)"
+if [ "${OFFLINE_ACTIVATION_ONLY:-0}" = 1 ]; then
+  say "  Activation:     OFFLINE — Admin Console -> Appliance & licence -> Offline activation -> download the"
+  say "                  request, import it in Central (Appliances -> Import activation request), Activate, and"
+  say "                  upload the activation package here."
 else
-  say "  NOTE: no vendor trust key is pinned, so OFFLINE activation will refuse every package. Online is fine."
+  say "  Activation:     this appliance registers itself at $CENTRAL_BASE and waits. In Central:"
+  say "                  Appliances -> the waiting appliance -> Activate (customer, site, licence terms)."
 fi
+say "  Then:           Admin Console -> Network -> Client networks (the prepared network, or a VLAN), Apply, Confirm."
 say ""
-say "Enrollment tokens are NOT part of either path — they are a recovery lever, under Advanced."
-say ""
-say "Then, when the hotel's guest networking is designed: LAN/guest networks through Hotel Admin."
-say "Until that exists, DHCP correctly reports 'waiting', not a failure — Kea serves the LAN bridge,"
-say "which does not exist yet, and it is not started against an unconfigured LAN to make health green."
-say ""
-say "Hotel Admin: https://$(ip -o -4 addr show "$WAN_IFACE" | awk '{print $4}' | cut -d/ -f1)/"
+say "Kea stays stopped until the first client network is confirmed; DHCP shows 'waiting' until then, by design."

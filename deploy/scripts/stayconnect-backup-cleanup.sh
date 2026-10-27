@@ -204,6 +204,11 @@ plan_appliance() {
   cur="$(symlink_target "$ROOT/hotel-admin")"
   prev="$(symlink_target "$ROOT/hotel-admin.previous")"
   if [ -d "$cur" ] && [ -d "$prev" ]; then ROLLBACK_VALID=true
+  elif [ -d "$cur" ] && [ ! -e "$ROOT/hotel-admin.previous" ] && \
+       [ "$(ls -1d "$ROOT"/releases/hotel-admin/*/ 2>/dev/null | wc -l | tr -d ' ')" = 1 ]; then
+    # A FRESH APPLIANCE: one console release, so no previous to roll back to and nothing this run could delete.
+    # Reporting that as a failure made every new appliance log a nightly FAILURE until its first console upgrade.
+    ROLLBACK_VALID=true
   else fail "hotel-admin rollback path invalid (current=$cur previous=$prev)"; fi
   retain_group "hotel-admin-release" "$KEEP_RELEASES" "$cur,$prev" $(ls -1d "$ROOT"/releases/hotel-admin/*/ 2>/dev/null | sed 's:/$::')
 

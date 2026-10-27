@@ -1,5 +1,13 @@
 # Deployment — Appliance (Edge)
 
+> **To install or upgrade an appliance, follow the
+> [Fresh VM Installation & Configuration Manual](runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md)** (one release from
+> `deploy/scripts/appliance-build.sh`, one `deploy/scripts/appliance-install.sh` run; `--upgrade` for upgrades). This page
+> describes the appliance's layout and is partly historical: PostgreSQL runs as the `stayconnect-pg` container
+> (`deploy/compose/infra.yml`), portald has its own user, a new appliance's schema comes from the factory baseline, netd
+> renders all network configuration (no skeleton file is applied), and the Admin Console is a Next server on `127.0.0.1:3100`
+> behind Caddy. Where this page and the manual differ, the manual wins.
+
 > Production layout for one site appliance (or HA pair). Everything the
 > client and the site staff touch runs here, against the site-local database.
 > Cloud counterpart: [DEPLOYMENT_CLOUD.md](DEPLOYMENT_CLOUD.md).

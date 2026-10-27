@@ -1,0 +1,1992 @@
+{
+  "schema_version": 1,
+  "document": "OneGate component and dependency inventory (machine-readable companion of the System Handbook)",
+  "reviewed_commit": "7e4686ae56a229ef05460e02675d1d17924f8c9c",
+  "generated": "2026-10-27",
+  "environments_inspected_read_only": [
+    {
+      "name": "PRE-LIVE appliance",
+      "address": "172.21.60.25",
+      "os": "Ubuntu 22.04.5 LTS",
+      "date": "2026-10-26"
+    },
+    {
+      "name": "OneGate Central",
+      "address": "172.21.96.196",
+      "os": "Ubuntu 22.04.5 LTS",
+      "date": "2026-10-26"
+    }
+  ],
+  "verification_labels": {
+    "CODE": "read in repository at the reviewed commit",
+    "LIVE": "observed read-only on PRE-LIVE or Central",
+    "DISPOSABLE": "measured on a disposable DB/container built from the repo",
+    "SYNTAX": "bash -n only",
+    "DOC": "stated by a document, not exercised",
+    "PO": "needs a Product-Owner decision",
+    "VM": "Executed on the fresh, isolated test VM pair (VMware ESXi, Ubuntu 22.04.5) on 2026-10-27; installation manual Appendix 3",
+    "SELFTEST": "Covered by a self-test in scripts/ci/ or a script --self-test"
+  },
+  "totals": {
+    "components": 89,
+    "by_status": {
+      "deployed": 65,
+      "historical": 6,
+      "optional": 14,
+      "not-implemented": 2,
+      "removed": 2
+    },
+    "by_host": {
+      "appliance": 53,
+      "external": 15,
+      "central": 20,
+      "workstation": 1
+    },
+    "by_kind": {
+      "daemon": 7,
+      "console": 2,
+      "tool": 36,
+      "proxy": 2,
+      "os-service": 8,
+      "kernel": 3,
+      "container": 4,
+      "timer": 3,
+      "optional-stack": 1,
+      "feature": 4,
+      "trust-object": 5,
+      "external": 14
+    },
+    "ports": 17,
+    "sockets": 5,
+    "appliance_to_central_endpoints": 12,
+    "secret_files": 10,
+    "known_install_gaps": 5,
+    "resolved_install_gaps": 9
+  },
+  "components": [
+    {
+      "id": "appliance.scd",
+      "name": "scd — session controller and guest authority",
+      "kind": "daemon",
+      "host": "appliance",
+      "technology": "Go 1.25, chi, pgx",
+      "status": "deployed",
+      "version": "0.0.3-dev",
+      "runs_as": "root",
+      "listens": [
+        "unix:/run/stayconnect/scd.sock (0660 root:stayconnect-scd)",
+        "tcp:127.0.0.1:9101 metrics (optional)"
+      ],
+      "config": [
+        "/etc/stayconnect/scd.env",
+        "/etc/stayconnect/{identity,license,assignment,certs,secrets,portal-tls}"
+      ],
+      "source": [
+        "data-plane/cmd/scd",
+        "deploy/systemd/stayconnect-scd.service"
+      ],
+      "depends_on": [
+        "appliance.postgres",
+        "os.nftables",
+        "central.ctrlapi (soft)",
+        "appliance.netd (flows end)"
+      ],
+      "if_stopped": "No new sign-ins/activations; admin actions that proxy to scd fail; existing Clients continue while acctd/netd renew leases (<=90 s); systemd restarts in 2 s",
+      "detection_recovery": "edged health probes the socket; journalctl -u stayconnect-scd; restart via stop/reset-failed/start --no-block",
+      "verification": [
+        "CODE",
+        "LIVE"
+      ]
+    },
+    {
+      "id": "appliance.netd",
+      "name": "netd — privileged network daemon",
+      "kind": "daemon",
+      "host": "appliance",
+      "technology": "Go 1.25, chi",
+      "status": "deployed",
+      "runs_as": "root",
+      "listens": [
+        "unix:/run/stayconnect/netd.sock (0660 root:stayconnect)"
+      ],
+      "config": [
+        "/etc/stayconnect/netd.env",
+        "/etc/stayconnect/generated/network/"
+      ],
+      "source": [
+        "data-plane/cmd/netd",
+        "data-plane/internal/netcfg",
+        "deploy/systemd/stayconnect-netd.service"
+      ],
+      "depends_on": [
+        "appliance.postgres (soft: last-confirmed.json)",
+        "os.kea",
+        "os.unbound",
+        "os.nftables",
+        "kernel.tc"
+      ],
+      "if_stopped": "No network changes; new sessions stay PENDING_ENFORCEMENT; authorised addresses lapse when nft timeouts (<=90 s) expire (fail-closed)",
+      "detection_recovery": "edged health (critical); netd recover status|reassert-confirmed; boot reconcile",
+      "verification": [
+        "CODE",
+        "LIVE"
+      ]
+    },
+    {
+      "id": "appliance.acctd",
+      "name": "acctd — accounting and enforcement producer",
+      "kind": "daemon",
+      "host": "appliance",
+      "technology": "Go 1.25",
+      "status": "deployed",
+      "runs_as": "root",
+      "config": [
+        "/etc/stayconnect/acctd.env",
+        "/var/lib/stayconnect/acctd-phase3-plan.json"
+      ],
+      "source": [
+        "data-plane/cmd/acctd",
+        "deploy/systemd/stayconnect-acctd.service"
+      ],
+      "depends_on": [
+        "appliance.postgres",
+        "appliance.netd",
+        "appliance.scd"
+      ],
+      "if_stopped": "No plan renewals (Client access lapses ~90 s); no quota/expiry enforcement or accounting",
+      "detection_recovery": "heartbeat file /run/stayconnect/health/acctd",
+      "verification": [
+        "CODE",
+        "LIVE"
+      ]
+    },
+    {
+      "id": "appliance.edged",
+      "name": "edged — Admin Console API",
+      "kind": "daemon",
+      "host": "appliance",
+      "technology": "Go 1.25, chi",
+      "status": "deployed",
+      "runs_as": "stayconnect (+group stayconnect-scd)",
+      "listens": [
+        "tcp:127.0.0.1:8090"
+      ],
+      "config": [
+        "/etc/stayconnect/edged.env"
+      ],
+      "source": [
+        "data-plane/cmd/edged",
+        "deploy/systemd/stayconnect-edged.service"
+      ],
+      "depends_on": [
+        "appliance.postgres",
+        "appliance.scd",
+        "appliance.netd"
+      ],
+      "if_stopped": "Admin Console unusable; all operators signed out on restart; Client plane unaffected",
+      "detection_recovery": "health supervisor lives here; systemctl",
+      "verification": [
+        "CODE",
+        "LIVE"
+      ]
+    },
+    {
+      "id": "appliance.portald",
+      "name": "portald — Client Portal",
+      "kind": "daemon",
+      "host": "appliance",
+      "technology": "Go 1.25, html/template",
+      "status": "deployed",
+      "runs_as": "stayconnect-portald (+group stayconnect-scd)",
+      "listens": [
+        "tcp:*:8380",
+        "tcp:*:8343"
+      ],
+      "config": [
+        "/etc/stayconnect/portald.env",
+        "/etc/stayconnect/portal-tls",
+        "/opt/stayconnect/portal-assets"
+      ],
+      "source": [
+        "data-plane/cmd/portald",
+        "deploy/systemd/stayconnect-portald.service"
+      ],
+      "depends_on": [
+        "appliance.scd (unix socket only)"
+      ],
+      "if_stopped": "New Clients cannot reach the sign-in page; authorised Clients unaffected; network apply rolls back (portal_listen)",
+      "detection_recovery": "edged health HTTP probe",
+      "verification": [
+        "CODE",
+        "LIVE"
+      ]
+    },
+    {
+      "id": "appliance.pmsd",
+      "name": "pmsd — PMS connector",
+      "kind": "daemon",
+      "host": "appliance",
+      "technology": "Go 1.25",
+      "status": "deployed",
+      "runs_as": "stayconnect-pmsd",
+      "listens": [
+        "unix:/run/stayconnect-pmsd/pmsd-posting.sock (only when transmit deployed)"
+      ],
+      "config": [
+        "/etc/stayconnect/pmsd.env"
+      ],
+      "source": [
+        "data-plane/cmd/pmsd",
+        "data-plane/internal/pmsd",
+        "deploy/systemd/stayconnect-pmsd.service"
+      ],
+      "depends_on": [
+        "appliance.postgres",
+        "external.pms"
+      ],
+      "if_stopped": "Mirror stops updating; room sign-in only while stored runtime row reads not-connected; no room charge",
+      "detection_recovery": "NOT in edged health list; journal / pms_interface_runtime",
+      "verification": [
+        "CODE",
+        "LIVE"
+      ],
+      "notes": "Installed but NOT enabled by the provisioner; enabled+active on PRE-LIVE; exits 0 when flags are off"
+    },
+    {
+      "id": "appliance.hotel-admin",
+      "name": "Admin Console (Next.js standalone)",
+      "kind": "console",
+      "host": "appliance",
+      "technology": "Next 15.5.27, React 18.3.1, Node 20",
+      "status": "deployed",
+      "version": "20.20.2 (node)",
+      "runs_as": "stayconnect-hotel-admin",
+      "listens": [
+        "tcp:127.0.0.1:3100"
+      ],
+      "config": [
+        "/opt/stayconnect/hotel-admin -> releases/hotel-admin/<stamp>",
+        "/etc/stayconnect/hotel-admin.env (optional)"
+      ],
+      "source": [
+        "hotel-admin/",
+        "deploy/scripts/deploy-hotel-admin.sh",
+        "deploy/systemd/stayconnect-hotel-admin.service"
+      ],
+      "depends_on": [
+        "appliance.edged",
+        "appliance.caddy"
+      ],
+      "if_stopped": "Console 502 via Caddy; edged still up on loopback",
+      "detection_recovery": "deploy-hotel-admin.sh rollback",
+      "verification": [
+        "CODE",
+        "LIVE"
+      ]
+    },
+    {
+      "id": "appliance.keybootstrap",
+      "name": "keybootstrap — local key bootstrap",
+      "kind": "tool",
+      "host": "appliance",
+      "technology": "Go",
+      "status": "deployed",
+      "runs_as": "root (run by provisioner)",
+      "config": [
+        "SCD_SECRETS_DIR=/etc/stayconnect/secrets"
+      ],
+      "source": [
+        "data-plane/cmd/keybootstrap"
+      ],
+      "depends_on": [
+        "appliance.postgres"
+      ],
+      "if_stopped": "scd cannot start without voucher/throttle/OTP keys",
+      "verification": [
+        "CODE",
+        "LIVE",
+        "VM"
+      ],
+      "notes": "Built by default (K3 fixed)"
+    },
+    {
+      "id": "appliance.svc-run",
+      "name": "svc-run — start-up back-off wrapper",
+      "kind": "tool",
+      "host": "appliance",
+      "technology": "Go",
+      "status": "deployed",
+      "source": [
+        "data-plane/cmd/svc-run"
+      ],
+      "if_stopped": "Caddy / Admin Console units fail ExecStartPre if absent",
+      "verification": [
+        "CODE",
+        "LIVE",
+        "VM"
+      ],
+      "notes": "Built by default (K3 fixed)"
+    },
+    {
+      "id": "appliance.sitemigrate",
+      "name": "sitemigrate — legacy tenant copy tool",
+      "kind": "tool",
+      "host": "appliance",
+      "technology": "Go",
+      "status": "historical",
+      "source": [
+        "data-plane/cmd/sitemigrate"
+      ],
+      "verification": [
+        "CODE"
+      ]
+    },
+    {
+      "id": "appliance.phase3-foundation",
+      "name": "phase3-foundation — manual nft foundation tool",
+      "kind": "tool",
+      "host": "appliance",
+      "technology": "Go",
+      "status": "historical",
+      "source": [
+        "data-plane/cmd/phase3-foundation"
+      ],
+      "verification": [
+        "CODE"
+      ],
+      "notes": "netd keeps the foundation durable in-process"
+    },
+    {
+      "id": "appliance.scd-enroll-test",
+      "name": "scd-enroll-test — test helper",
+      "kind": "tool",
+      "host": "appliance",
+      "technology": "Go",
+      "status": "historical",
+      "source": [
+        "data-plane/cmd/scd-enroll-test"
+      ],
+      "verification": [
+        "CODE"
+      ]
+    },
+    {
+      "id": "appliance.caddy",
+      "name": "Caddy (appliance)",
+      "kind": "proxy",
+      "host": "appliance",
+      "technology": "Caddy 2.11.4",
+      "status": "deployed",
+      "version": "2.11.4",
+      "runs_as": "caddy",
+      "listens": [
+        "tcp:*:443",
+        "tcp:*:80",
+        "udp:*:443",
+        "unix:/run/caddy/admin.sock"
+      ],
+      "config": [
+        "/etc/caddy/Caddyfile",
+        "/etc/caddy/hotel-admin/vhost.caddy"
+      ],
+      "source": [
+        "deploy/caddy/Caddyfile.edge",
+        "deploy/caddy/stayconnect-caddy.edge.service"
+      ],
+      "depends_on": [
+        "appliance.hotel-admin"
+      ],
+      "if_stopped": "Admin Console unreachable; Client Portal unaffected",
+      "detection_recovery": "edged health TLS probe",
+      "verification": [
+        "CODE",
+        "LIVE"
+      ]
+    },
+    {
+      "id": "os.kea",
+      "name": "Kea DHCPv4",
+      "kind": "os-service",
+      "host": "appliance",
+      "technology": "kea-dhcp4-server",
+      "status": "deployed",
+      "version": "2.0.2",
+      "runs_as": "_kea",
+      "listens": [
+        "udp:<gateway>:67",
+        "unix:/run/kea/kea4-ctrl-socket"
+      ],
+      "config": [
+        "/etc/kea/kea-dhcp4.conf (netd-written)"
+      ],
+      "source": [
+        "data-plane/internal/netcfg/render_kea.go"
+      ],
+      "depends_on": [
+        "appliance.netd"
+      ],
+      "if_stopped": "No DHCP for new Clients",
+      "detection_recovery": "netd health kea_running",
+      "verification": [
+        "CODE",
+        "LIVE"
+      ],
+      "notes": "Installed stopped+disabled by provisioner; started by netd on first apply"
+    },
+    {
+      "id": "os.unbound",
+      "name": "Unbound DNS",
+      "kind": "os-service",
+      "host": "appliance",
+      "technology": "unbound",
+      "status": "deployed",
+      "version": "1.13.1",
+      "runs_as": "unbound",
+      "listens": [
+        "tcp/udp:<gateway>:53",
+        "127.0.0.1:53",
+        "127.0.0.1:8953"
+      ],
+      "config": [
+        "/etc/unbound/unbound.conf.d/stayconnect-{guest,portal}.conf"
+      ],
+      "source": [
+        "data-plane/internal/netcfg/render_unbound.go"
+      ],
+      "depends_on": [
+        "appliance.netd"
+      ],
+      "if_stopped": "No Client DNS; captive detection breaks",
+      "detection_recovery": "edged DNS probe",
+      "verification": [
+        "CODE",
+        "LIVE"
+      ]
+    },
+    {
+      "id": "os.nftables",
+      "name": "nftables (table inet stayconnect)",
+      "kind": "kernel",
+      "host": "appliance",
+      "technology": "nftables 1.0.2",
+      "status": "deployed",
+      "version": "1.0.2",
+      "runs_as": "root",
+      "config": [
+        "/etc/stayconnect/generated/network/revision-N/stayconnect.nft"
+      ],
+      "source": [
+        "data-plane/internal/netcfg/render_nft.go",
+        "data-plane/internal/nftconverge"
+      ],
+      "depends_on": [
+        "appliance.netd"
+      ],
+      "if_stopped": "Rules persist until flushed; netd re-asserts every 10 s",
+      "detection_recovery": "sc_render_fp marker",
+      "verification": [
+        "CODE",
+        "LIVE"
+      ]
+    },
+    {
+      "id": "kernel.tc",
+      "name": "tc HTB + IFB shaping",
+      "kind": "kernel",
+      "host": "appliance",
+      "technology": "iproute2 tc",
+      "status": "deployed",
+      "runs_as": "root",
+      "source": [
+        "data-plane/internal/shape"
+      ],
+      "depends_on": [
+        "appliance.netd"
+      ],
+      "if_stopped": "Classes persist until reboot",
+      "verification": [
+        "CODE",
+        "LIVE"
+      ]
+    },
+    {
+      "id": "kernel.conntrack",
+      "name": "conntrack flush",
+      "kind": "kernel",
+      "host": "appliance",
+      "technology": "ctnetlink / conntrack",
+      "status": "deployed",
+      "runs_as": "root",
+      "source": [
+        "data-plane/internal/conntrack"
+      ],
+      "depends_on": [
+        "appliance.netd"
+      ],
+      "if_stopped": "Revoked Clients could keep established flows",
+      "verification": [
+        "CODE"
+      ]
+    },
+    {
+      "id": "os.netplan",
+      "name": "netplan / systemd-networkd",
+      "kind": "os-service",
+      "host": "appliance",
+      "technology": "netplan.io",
+      "status": "deployed",
+      "runs_as": "root",
+      "config": [
+        "/etc/netplan/50-stayconnect-guest.yaml",
+        "/etc/netplan/01-static.yaml"
+      ],
+      "source": [
+        "data-plane/internal/netcfg/render_netplan.go"
+      ],
+      "depends_on": [
+        "appliance.netd"
+      ],
+      "if_stopped": "Boot persistence of bridges/VLANs only",
+      "verification": [
+        "CODE",
+        "LIVE"
+      ]
+    },
+    {
+      "id": "os.docker",
+      "name": "Docker Engine + containerd",
+      "kind": "os-service",
+      "host": "appliance",
+      "technology": "docker-ce 29.7.2, containerd.io 2.3.3, compose plugin 5.5.0",
+      "status": "deployed",
+      "version": "29.7.2",
+      "runs_as": "root",
+      "source": [
+        "deploy/compose/infra.yml"
+      ],
+      "if_stopped": "Database and Redis containers stop",
+      "verification": [
+        "CODE",
+        "LIVE"
+      ]
+    },
+    {
+      "id": "os.sshd",
+      "name": "OpenSSH server",
+      "kind": "os-service",
+      "host": "appliance",
+      "technology": "openssh-server 8.9p1",
+      "status": "deployed",
+      "version": "8.9p1",
+      "runs_as": "root",
+      "listens": [
+        "tcp:*:22"
+      ],
+      "if_stopped": "No remote administration",
+      "verification": [
+        "LIVE"
+      ]
+    },
+    {
+      "id": "os.timesync",
+      "name": "systemd-timesyncd",
+      "kind": "os-service",
+      "host": "appliance",
+      "technology": "systemd 249",
+      "status": "deployed",
+      "version": "249.11",
+      "runs_as": "systemd-timesync",
+      "if_stopped": "Clock drift breaks licence clock high-water and JWT validity",
+      "verification": [
+        "LIVE"
+      ]
+    },
+    {
+      "id": "os.journald",
+      "name": "journald (MaxFileSec=1day)",
+      "kind": "os-service",
+      "host": "appliance",
+      "technology": "systemd",
+      "status": "deployed",
+      "runs_as": "root",
+      "config": [
+        "/etc/systemd/journald.conf.d/stayconnect-retention.conf"
+      ],
+      "source": [
+        "deploy/journald"
+      ],
+      "verification": [
+        "CODE",
+        "LIVE"
+      ]
+    },
+    {
+      "id": "appliance.postgres",
+      "name": "stayconnect-pg (PostgreSQL + TimescaleDB)",
+      "kind": "container",
+      "host": "appliance",
+      "technology": "timescale/timescaledb:2.16.1-pg16 (PostgreSQL 16.3)",
+      "status": "deployed",
+      "version": "16.3 / 2.16.1",
+      "runs_as": "docker",
+      "listens": [
+        "tcp:127.0.0.1:5432"
+      ],
+      "config": [
+        "volume stayconnect-infra_pgdata",
+        "DB stayconnect_site",
+        "/etc/stayconnect/secrets/pg-superuser.env"
+      ],
+      "source": [
+        "deploy/compose/infra.yml",
+        "deploy/gatep/"
+      ],
+      "depends_on": [
+        "os.docker"
+      ],
+      "if_stopped": "Guest auth fails; services retry; netd starts from last-confirmed.json",
+      "detection_recovery": "pg_isready healthcheck; edged ping",
+      "verification": [
+        "CODE",
+        "LIVE",
+        "DISPOSABLE"
+      ],
+      "notes": "49 public + 169 iam_v2 tables; hypertables accounting_records, audit_log; ledger head 0158 on PRE-LIVE"
+    },
+    {
+      "id": "appliance.redis",
+      "name": "stayconnect-redis",
+      "kind": "container",
+      "host": "appliance",
+      "technology": "redis:7-alpine",
+      "status": "deployed",
+      "version": "7",
+      "runs_as": "docker",
+      "listens": [
+        "tcp:127.0.0.1:6379"
+      ],
+      "config": [
+        "volume redisdata"
+      ],
+      "source": [
+        "deploy/compose/infra.yml"
+      ],
+      "depends_on": [
+        "os.docker"
+      ],
+      "if_stopped": "None — no appliance code uses Redis",
+      "verification": [
+        "CODE",
+        "LIVE"
+      ],
+      "notes": "Started by the provisioner; vestigial"
+    },
+    {
+      "id": "appliance.timer.backup-cleanup",
+      "name": "stayconnect-backup-cleanup.timer",
+      "kind": "timer",
+      "host": "appliance",
+      "technology": "systemd timer + shell",
+      "status": "deployed",
+      "runs_as": "root",
+      "config": [
+        "/etc/stayconnect/backup-retention.conf"
+      ],
+      "source": [
+        "deploy/systemd/stayconnect-backup-cleanup.timer"
+      ],
+      "if_stopped": "Backups/releases not pruned",
+      "verification": [
+        "CODE",
+        "LIVE"
+      ],
+      "notes": "03:30 +<=15 min"
+    },
+    {
+      "id": "appliance.timer.cert-renew",
+      "name": "stayconnect-hotel-admin-cert-renew.timer",
+      "kind": "timer",
+      "host": "appliance",
+      "technology": "systemd timer + shell",
+      "status": "deployed",
+      "runs_as": "root",
+      "config": [
+        "/etc/caddy/hotel-admin/"
+      ],
+      "source": [
+        "deploy/scripts/hotel-admin-cert-manager.sh"
+      ],
+      "depends_on": [
+        "appliance.caddy"
+      ],
+      "if_stopped": "Admin Console certificate not auto-renewed",
+      "verification": [
+        "CODE",
+        "LIVE"
+      ],
+      "notes": "boot+5 min, then every 6 h"
+    },
+    {
+      "id": "tool.provision",
+      "name": "provision-fresh-appliance.sh",
+      "kind": "tool",
+      "host": "appliance",
+      "technology": "bash",
+      "status": "deployed",
+      "source": [
+        "deploy/scripts/provision-fresh-appliance.sh"
+      ],
+      "verification": [
+        "CODE",
+        "VM"
+      ],
+      "notes": "Run by appliance-install.sh. Idempotent; database via site-db-init.sh; writes the product profile (commerce + enforcement plane) and checks it; installs dnsutils/age/openssl; hard-fails on missing trust"
+    },
+    {
+      "id": "tool.install-units",
+      "name": "install-service-units.sh",
+      "kind": "tool",
+      "host": "appliance",
+      "technology": "bash",
+      "status": "deployed",
+      "source": [
+        "deploy/scripts/install-service-units.sh"
+      ],
+      "verification": [
+        "CODE",
+        "SELFTEST",
+        "VM"
+      ],
+      "notes": "Installs units, *.service.d drop-ins, Kea/Unbound overrides and polkit (.pkla on polkit <= 0.105, .rules otherwise)"
+    },
+    {
+      "id": "tool.build-appliance",
+      "name": "build-appliance-binaries.sh",
+      "kind": "tool",
+      "host": "appliance",
+      "technology": "bash",
+      "status": "deployed",
+      "source": [
+        "scripts/build-appliance-binaries.sh"
+      ],
+      "verification": [
+        "CODE",
+        "VM"
+      ],
+      "notes": "Default SERVICES include keybootstrap and svc-run; Go caches in named Docker volumes; called by appliance-build.sh"
+    },
+    {
+      "id": "tool.deploy-hotel-admin",
+      "name": "deploy-hotel-admin.sh (package|install|rollback|verify)",
+      "kind": "tool",
+      "host": "appliance",
+      "technology": "bash",
+      "status": "deployed",
+      "source": [
+        "deploy/scripts/deploy-hotel-admin.sh"
+      ],
+      "verification": [
+        "CODE",
+        "VM"
+      ],
+      "notes": "RUN_USER defaults to stayconnect-hotel-admin when that account exists"
+    },
+    {
+      "id": "tool.edge-migrate",
+      "name": "edge-migrate.sh",
+      "kind": "tool",
+      "host": "appliance",
+      "technology": "bash",
+      "status": "deployed",
+      "source": [
+        "scripts/edge-migrate.sh"
+      ],
+      "verification": [
+        "CODE",
+        "VM"
+      ],
+      "notes": "Live-site mode needs a verified pre-change backup (exit 4); run per version by apply-pending-migrations.sh on upgrade; needs iam_v2_owner SELECT,INSERT on public.schema_migrations (granted by gatep-iam-roles.sql)"
+    },
+    {
+      "id": "tool.gatep",
+      "name": "Gate-P (gatep-*.sql, gatep-reconcile.sh, gatep-set-passwords.sh)",
+      "kind": "tool",
+      "host": "appliance",
+      "technology": "bash",
+      "status": "deployed",
+      "source": [
+        "deploy/gatep/, scripts/gatep-reconcile.sh"
+      ],
+      "verification": [
+        "CODE",
+        "SELFTEST",
+        "VM"
+      ],
+      "notes": "gatep-reconcile.sh accepts a git commit or an installed release (RELEASE.json + SHA256SUMS) as the commit guard"
+    },
+    {
+      "id": "tool.binary-rollback",
+      "name": "binary-rollback.sh",
+      "kind": "tool",
+      "host": "appliance",
+      "technology": "bash",
+      "status": "deployed",
+      "source": [
+        "scripts/binary-rollback.sh"
+      ],
+      "verification": [
+        "CODE",
+        "VM"
+      ],
+      "notes": "Verified on the test appliance: BINARY_ROLLBACK = PASS (5 binaries, disk and /proc)"
+    },
+    {
+      "id": "tool.enable-enforcement",
+      "name": "enable-phase3-enforcement-plane.sh",
+      "kind": "tool",
+      "host": "appliance",
+      "technology": "bash",
+      "status": "optional",
+      "source": [
+        "deploy/scripts/enable-phase3-enforcement-plane.sh"
+      ],
+      "verification": [
+        "CODE",
+        "SYNTAX"
+      ],
+      "notes": "Superseded for new installs: the provisioner writes the enforcement-plane profile itself"
+    },
+    {
+      "id": "tool.check-units",
+      "name": "check-appliance-units.sh",
+      "kind": "tool",
+      "host": "appliance",
+      "technology": "bash",
+      "status": "deployed",
+      "source": [
+        "deploy/scripts/check-appliance-units.sh"
+      ],
+      "verification": [
+        "CODE",
+        "VM"
+      ]
+    },
+    {
+      "id": "tool.wait-db",
+      "name": "wait-for-site-db.sh",
+      "kind": "tool",
+      "host": "appliance",
+      "technology": "bash",
+      "status": "deployed",
+      "source": [
+        "deploy/scripts/wait-for-site-db.sh"
+      ],
+      "verification": [
+        "CODE",
+        "SYNTAX"
+      ],
+      "notes": "Always exits 0"
+    },
+    {
+      "id": "tool.cert-manager",
+      "name": "hotel-admin-cert-manager.sh",
+      "kind": "tool",
+      "host": "appliance",
+      "technology": "bash",
+      "status": "deployed",
+      "source": [
+        "deploy/scripts/hotel-admin-cert-manager.sh"
+      ],
+      "verification": [
+        "CODE",
+        "SELFTEST",
+        "VM"
+      ],
+      "notes": "Fixes /var/log/caddy ownership after a root 'caddy validate' before reload"
+    },
+    {
+      "id": "tool.trust-installers",
+      "name": "install-vendor-trust-key.sh / install-assignment-root-anchor.sh / install-central-trust.sh",
+      "kind": "tool",
+      "host": "appliance",
+      "technology": "bash",
+      "status": "deployed",
+      "source": [
+        "deploy/scripts/"
+      ],
+      "verification": [
+        "CODE",
+        "SYNTAX"
+      ],
+      "notes": "appliance-install.sh installs the trust files from --trust-dir and checks them against FINGERPRINTS.txt"
+    },
+    {
+      "id": "tool.baseline-gen",
+      "name": "generate-production-baseline.sh",
+      "kind": "tool",
+      "host": "appliance",
+      "technology": "bash",
+      "status": "deployed",
+      "source": [
+        "scripts/generate-production-baseline.sh"
+      ],
+      "verification": [
+        "CODE",
+        "VM"
+      ],
+      "notes": "Baseline in tree is through 0158; factory-clean-baseline-verify.sh PASS (14058 facts)"
+    },
+    {
+      "id": "tool.phase1-bootstrap",
+      "name": "phase1-bootstrap.sh / phase3-bootstrap.sh",
+      "kind": "tool",
+      "host": "appliance",
+      "technology": "bash",
+      "status": "historical",
+      "source": [
+        "scripts/"
+      ],
+      "verification": [
+        "CODE"
+      ],
+      "notes": "Dev-only; never run on a real appliance"
+    },
+    {
+      "id": "tool.site-backup",
+      "name": "stayconnect-site-backup.sh",
+      "kind": "tool",
+      "host": "appliance",
+      "technology": "bash",
+      "status": "historical",
+      "source": [
+        "deploy/scripts/stayconnect-site-backup.sh"
+      ],
+      "verification": [
+        "CODE"
+      ],
+      "notes": "Retired; exits 2"
+    },
+    {
+      "id": "tool.install-pmsd-dark",
+      "name": "install-pmsd-dark.sh",
+      "kind": "tool",
+      "host": "appliance",
+      "technology": "bash",
+      "status": "historical",
+      "source": [
+        "scripts/install-pmsd-dark.sh"
+      ],
+      "verification": [
+        "CODE"
+      ],
+      "notes": "Phase-3 era"
+    },
+    {
+      "id": "appliance.observability",
+      "name": "Prometheus / Alertmanager / Grafana stack",
+      "kind": "optional-stack",
+      "host": "external",
+      "technology": "compose",
+      "status": "optional",
+      "version": "Prometheus 2.55.0, Alertmanager 0.27.0, Grafana 11.3.0",
+      "listens": [
+        "127.0.0.1:9090",
+        "127.0.0.1:9093",
+        "127.0.0.1:3001"
+      ],
+      "source": [
+        "deploy/observability"
+      ],
+      "verification": [
+        "CODE"
+      ],
+      "notes": "Not installed by any installer; dev-era"
+    },
+    {
+      "id": "feature.ha",
+      "name": "High availability",
+      "kind": "feature",
+      "host": "appliance",
+      "technology": "none",
+      "status": "not-implemented",
+      "verification": [
+        "CODE",
+        "DOC"
+      ],
+      "notes": "deploy/ha is historical; 'ha' module string has no consumer; decision ARCH-04"
+    },
+    {
+      "id": "feature.dhcp-relay",
+      "name": "DHCP relay data path",
+      "kind": "feature",
+      "host": "appliance",
+      "technology": "none",
+      "status": "not-implemented",
+      "verification": [
+        "CODE"
+      ],
+      "notes": "validation only"
+    },
+    {
+      "id": "feature.telemetry",
+      "name": "Telemetry / NATS / command channel / update agent",
+      "kind": "feature",
+      "host": "appliance",
+      "technology": "none",
+      "status": "removed",
+      "verification": [
+        "CODE",
+        "DOC"
+      ],
+      "notes": "Removed 2026-09-27; Central migration 0045; appliance migration 0093"
+    },
+    {
+      "id": "feature.email-otp",
+      "name": "Email one-time-code sign-in",
+      "kind": "feature",
+      "host": "appliance",
+      "technology": "none",
+      "status": "removed",
+      "verification": [
+        "CODE"
+      ],
+      "notes": "Replaced by email accounts; CHANNEL_REMOVED"
+    },
+    {
+      "id": "central.ctrlapi",
+      "name": "ctrlapi — Central control-plane API",
+      "kind": "daemon",
+      "host": "central",
+      "technology": "Go 1.25, chi, pgx, go-redis",
+      "status": "deployed",
+      "runs_as": "root",
+      "listens": [
+        "tcp:127.0.0.1:8080",
+        "tcp:*:9443 (mTLS)"
+      ],
+      "config": [
+        "/etc/stayconnect/ctrlapi.env",
+        "/etc/stayconnect/central-endpoint.env",
+        "/etc/stayconnect/pki/"
+      ],
+      "source": [
+        "control-plane/cmd/ctrlapi",
+        "deploy/systemd/stayconnect-ctrlapi.service"
+      ],
+      "depends_on": [
+        "central.postgres",
+        "central.redis"
+      ],
+      "if_stopped": "Console unusable; no licence/activation; appliances retry; sites unaffected",
+      "detection_recovery": "/readyz, central-deploy.sh smoke",
+      "verification": [
+        "CODE",
+        "LIVE"
+      ]
+    },
+    {
+      "id": "central.cloud-admin",
+      "name": "Central console (Next.js)",
+      "kind": "console",
+      "host": "central",
+      "technology": "Next 14.2.5, React 18.3.1, Node 20",
+      "status": "deployed",
+      "version": "20.20.2 (node)",
+      "runs_as": "stayconnect",
+      "listens": [
+        "tcp:127.0.0.1:3000"
+      ],
+      "source": [
+        "cloud-admin/",
+        "deploy/systemd/stayconnect-cloud-admin.service"
+      ],
+      "depends_on": [
+        "central.ctrlapi"
+      ],
+      "if_stopped": "No staff console",
+      "verification": [
+        "CODE",
+        "LIVE"
+      ]
+    },
+    {
+      "id": "central.caddy",
+      "name": "Caddy (Central)",
+      "kind": "proxy",
+      "host": "central",
+      "technology": "Caddy 2.11.4",
+      "status": "deployed",
+      "version": "2.11.4",
+      "runs_as": "caddy",
+      "listens": [
+        "tcp:*:443"
+      ],
+      "config": [
+        "/etc/caddy/Caddyfile (rendered)",
+        "/etc/caddy/tls/"
+      ],
+      "source": [
+        "deploy/caddy/Caddyfile.central"
+      ],
+      "depends_on": [
+        "central.ctrlapi",
+        "central.cloud-admin"
+      ],
+      "if_stopped": "No :443 console/API; :9443 unaffected (served by ctrlapi)",
+      "detection_recovery": "restart not reload (admin off)",
+      "verification": [
+        "CODE",
+        "LIVE"
+      ]
+    },
+    {
+      "id": "central.postgres",
+      "name": "sc-central-pg",
+      "kind": "container",
+      "host": "central",
+      "technology": "timescale/timescaledb:2.16.1-pg16",
+      "status": "deployed",
+      "version": "16.3 / 2.16.1",
+      "runs_as": "docker",
+      "listens": [
+        "tcp:127.0.0.1:5432"
+      ],
+      "config": [
+        "volume stayconnect-central_pgdata",
+        "DB stayconnect"
+      ],
+      "source": [
+        "deploy/compose/central-infra.yml"
+      ],
+      "depends_on": [
+        "os.docker"
+      ],
+      "if_stopped": "All Central down; sites unaffected",
+      "verification": [
+        "CODE",
+        "LIVE"
+      ],
+      "notes": "56 migrations, head 0056"
+    },
+    {
+      "id": "central.redis",
+      "name": "sc-central-redis",
+      "kind": "container",
+      "host": "central",
+      "technology": "redis:7-alpine (no persistence)",
+      "status": "deployed",
+      "version": "7",
+      "runs_as": "docker",
+      "listens": [
+        "tcp:127.0.0.1:6379"
+      ],
+      "source": [
+        "deploy/compose/central-infra.yml"
+      ],
+      "depends_on": [
+        "os.docker"
+      ],
+      "if_stopped": "Operators signed out",
+      "verification": [
+        "CODE",
+        "LIVE"
+      ]
+    },
+    {
+      "id": "central.ufw",
+      "name": "ufw firewall",
+      "kind": "os-service",
+      "host": "central",
+      "technology": "ufw 0.36.1",
+      "status": "deployed",
+      "version": "0.36.1",
+      "runs_as": "root",
+      "source": [
+        "deploy/scripts/central-firewall.sh"
+      ],
+      "verification": [
+        "CODE",
+        "LIVE"
+      ],
+      "notes": "22, 443, 9443"
+    },
+    {
+      "id": "central.timer.backup",
+      "name": "stayconnect-central-backup.timer",
+      "kind": "timer",
+      "host": "central",
+      "technology": "systemd timer + shell",
+      "status": "deployed",
+      "runs_as": "root",
+      "config": [
+        "/etc/stayconnect/backup-recipients.txt"
+      ],
+      "source": [
+        "deploy/scripts/central-backup.sh"
+      ],
+      "depends_on": [
+        "central.postgres"
+      ],
+      "verification": [
+        "CODE",
+        "LIVE"
+      ],
+      "notes": "daily 02:15"
+    },
+    {
+      "id": "central.tool.build",
+      "name": "central-build.sh",
+      "kind": "tool",
+      "host": "central",
+      "technology": "bash",
+      "status": "deployed",
+      "source": [
+        "deploy/scripts/central-build.sh"
+      ],
+      "verification": [
+        "CODE",
+        "VM"
+      ]
+    },
+    {
+      "id": "central.tool.install",
+      "name": "central-install.sh (new|restore)",
+      "kind": "tool",
+      "host": "central",
+      "technology": "bash",
+      "status": "deployed",
+      "source": [
+        "deploy/scripts/central-install.sh"
+      ],
+      "verification": [
+        "CODE",
+        "VM"
+      ],
+      "notes": "--mode new validated on a blank lab VM (smoke 7/7, preflight READY, 56 migrations)"
+    },
+    {
+      "id": "central.tool.deploy",
+      "name": "central-deploy.sh (deploy|rollback|smoke|status)",
+      "kind": "tool",
+      "host": "central",
+      "technology": "bash",
+      "status": "deployed",
+      "source": [
+        "deploy/scripts/central-deploy.sh"
+      ],
+      "verification": [
+        "CODE",
+        "SYNTAX"
+      ]
+    },
+    {
+      "id": "central.tool.migrate",
+      "name": "central-migrate.sh",
+      "kind": "tool",
+      "host": "central",
+      "technology": "bash",
+      "status": "deployed",
+      "source": [
+        "deploy/scripts/central-migrate.sh"
+      ],
+      "verification": [
+        "CODE",
+        "SYNTAX"
+      ]
+    },
+    {
+      "id": "central.tool.export",
+      "name": "central-export.sh",
+      "kind": "tool",
+      "host": "central",
+      "technology": "bash",
+      "status": "deployed",
+      "source": [
+        "deploy/scripts/central-export.sh"
+      ],
+      "verification": [
+        "CODE",
+        "SYNTAX"
+      ]
+    },
+    {
+      "id": "central.tool.preflight",
+      "name": "central-preflight.sh",
+      "kind": "tool",
+      "host": "central",
+      "technology": "bash",
+      "status": "deployed",
+      "source": [
+        "deploy/scripts/central-preflight.sh"
+      ],
+      "verification": [
+        "CODE",
+        "SYNTAX"
+      ]
+    },
+    {
+      "id": "central.tool.mint-tls",
+      "name": "central-mint-tls.sh",
+      "kind": "tool",
+      "host": "central",
+      "technology": "bash",
+      "status": "deployed",
+      "source": [
+        "deploy/scripts/central-mint-tls.sh"
+      ],
+      "verification": [
+        "CODE",
+        "SYNTAX"
+      ]
+    },
+    {
+      "id": "central.tool.vendor-key",
+      "name": "vendor-signing-key.sh",
+      "kind": "tool",
+      "host": "central",
+      "technology": "bash",
+      "status": "deployed",
+      "source": [
+        "deploy/scripts/vendor-signing-key.sh"
+      ],
+      "verification": [
+        "CODE",
+        "SYNTAX"
+      ]
+    },
+    {
+      "id": "trust.vendor-licence-key",
+      "name": "Vendor licence signing key (Ed25519)",
+      "kind": "trust-object",
+      "host": "central",
+      "technology": "PKI",
+      "status": "deployed",
+      "verification": [
+        "CODE",
+        "LIVE"
+      ],
+      "notes": "private: Central /etc/stayconnect/vendor-license.key; public: appliance /etc/stayconnect/vendor-license.pub"
+    },
+    {
+      "id": "trust.assignment-key",
+      "name": "Assignment signing key (Ed25519)",
+      "kind": "trust-object",
+      "host": "central",
+      "technology": "PKI",
+      "status": "deployed",
+      "verification": [
+        "CODE",
+        "LIVE"
+      ],
+      "notes": "private: Central /etc/stayconnect/assignment-signing.key; public: carried in the signed registry"
+    },
+    {
+      "id": "trust.registry-root",
+      "name": "Assignment registry root key",
+      "kind": "trust-object",
+      "host": "central",
+      "technology": "PKI",
+      "status": "deployed",
+      "verification": [
+        "CODE",
+        "LIVE"
+      ],
+      "notes": "private: Central /etc/stayconnect/assignment-registry-root.key; public: appliance /etc/stayconnect/assignment-registry-root.pub"
+    },
+    {
+      "id": "trust.central-tls-ca",
+      "name": "Central internal TLS CA",
+      "kind": "trust-object",
+      "host": "central",
+      "technology": "PKI",
+      "status": "deployed",
+      "verification": [
+        "CODE",
+        "LIVE"
+      ],
+      "notes": "private: Central /opt/stayconnect/central/tls/ca.key; public: appliance OS trust store (central-ca.crt)"
+    },
+    {
+      "id": "trust.appliance-ca",
+      "name": "Appliance CA (offline Root + online Intermediate)",
+      "kind": "trust-object",
+      "host": "central",
+      "technology": "PKI",
+      "status": "deployed",
+      "verification": [
+        "CODE",
+        "LIVE"
+      ],
+      "notes": "private: Central /etc/stayconnect/pki/{intermediate-ca.key}; Root key cold storage; public: delivered with each appliance certificate (certs/ca.crt)"
+    },
+    {
+      "id": "external.pms.protel",
+      "name": "Protel FIAS PMS (TCP)",
+      "kind": "external",
+      "host": "external",
+      "technology": "service",
+      "status": "deployed",
+      "verification": [
+        "CODE",
+        "DOC"
+      ],
+      "notes": "VerifiedLive"
+    },
+    {
+      "id": "external.pms.mews",
+      "name": "Mews PMS (REST)",
+      "kind": "external",
+      "host": "external",
+      "technology": "service",
+      "status": "optional",
+      "verification": [
+        "CODE"
+      ],
+      "notes": "VerifiedContract only"
+    },
+    {
+      "id": "external.pms.apaleo",
+      "name": "Apaleo PMS (REST)",
+      "kind": "external",
+      "host": "external",
+      "technology": "service",
+      "status": "optional",
+      "verification": [
+        "CODE"
+      ],
+      "notes": "VerifiedContract only"
+    },
+    {
+      "id": "external.pms.opera",
+      "name": "OPERA Cloud / OHIP PMS (REST)",
+      "kind": "external",
+      "host": "external",
+      "technology": "service",
+      "status": "optional",
+      "verification": [
+        "CODE"
+      ],
+      "notes": "VerifiedContract only"
+    },
+    {
+      "id": "external.pay.stripe",
+      "name": "Stripe Checkout",
+      "kind": "external",
+      "host": "external",
+      "technology": "service",
+      "status": "optional",
+      "verification": [
+        "CODE"
+      ],
+      "notes": "TEST mode only"
+    },
+    {
+      "id": "external.pay.paymob",
+      "name": "Paymob",
+      "kind": "external",
+      "host": "external",
+      "technology": "service",
+      "status": "optional",
+      "verification": [
+        "CODE"
+      ],
+      "notes": "TEST mode only"
+    },
+    {
+      "id": "external.notify.smtp",
+      "name": "SMTP / SendGrid email",
+      "kind": "external",
+      "host": "external",
+      "technology": "service",
+      "status": "optional",
+      "verification": [
+        "CODE"
+      ]
+    },
+    {
+      "id": "external.notify.twilio",
+      "name": "Twilio SMS / WhatsApp",
+      "kind": "external",
+      "host": "external",
+      "technology": "service",
+      "status": "optional",
+      "verification": [
+        "CODE"
+      ]
+    },
+    {
+      "id": "external.notify.meta-wa",
+      "name": "Meta WhatsApp",
+      "kind": "external",
+      "host": "external",
+      "technology": "service",
+      "status": "optional",
+      "verification": [
+        "CODE"
+      ]
+    },
+    {
+      "id": "external.social",
+      "name": "Google / Apple / Microsoft / Facebook OAuth",
+      "kind": "external",
+      "host": "external",
+      "technology": "service",
+      "status": "optional",
+      "verification": [
+        "CODE"
+      ]
+    },
+    {
+      "id": "external.acme",
+      "name": "Let's Encrypt (ACME DNS-01 via Central)",
+      "kind": "external",
+      "host": "external",
+      "technology": "service",
+      "status": "optional",
+      "verification": [
+        "CODE"
+      ]
+    },
+    {
+      "id": "external.cloudflare",
+      "name": "Cloudflare DNS (zone onegate.work)",
+      "kind": "external",
+      "host": "external",
+      "technology": "service",
+      "status": "optional",
+      "verification": [
+        "CODE"
+      ],
+      "notes": "token not configured on PRE-LIVE per memory"
+    },
+    {
+      "id": "external.registries",
+      "name": "Docker Hub / download.docker.com / dl.cloudsmith.io / deb.nodesource.com / Ubuntu mirrors",
+      "kind": "external",
+      "host": "external",
+      "technology": "service",
+      "status": "deployed",
+      "verification": [
+        "CODE",
+        "DOC"
+      ],
+      "notes": "needed at install time only"
+    },
+    {
+      "id": "external.github",
+      "name": "GitHub repository + Actions (aibrahiiim1/StayConnectEnterprise)",
+      "kind": "external",
+      "host": "external",
+      "technology": "service",
+      "status": "deployed",
+      "verification": [
+        "CODE",
+        "DOC"
+      ],
+      "notes": "authoritative repo; protected master"
+    },
+    {
+      "id": "tool.appliance-build",
+      "name": "appliance-build.sh — appliance release build",
+      "kind": "tool",
+      "host": "workstation",
+      "technology": "bash + pinned containers (golang:1.25.12, node:20.18.0-bookworm)",
+      "status": "deployed",
+      "source": [
+        "deploy/scripts/appliance-build.sh"
+      ],
+      "verification": [
+        "CODE",
+        "VM"
+      ],
+      "notes": "Fresh clone of one commit; 8 binaries + Admin Console + deploy tree + migrations + RELEASE.json + SHA256SUMS -> onegate-appliance-<sha12>.tar.gz; refuses a stale baseline"
+    },
+    {
+      "id": "tool.appliance-install",
+      "name": "appliance-install.sh — install / re-run / resume / --upgrade",
+      "kind": "tool",
+      "host": "appliance",
+      "technology": "bash",
+      "status": "deployed",
+      "source": [
+        "deploy/scripts/appliance-install.sh"
+      ],
+      "verification": [
+        "CODE",
+        "VM"
+      ],
+      "notes": "The one supported entry point; verifies the release, checks the platform (Ubuntu 22.04 amd64, 2 NICs, >=4 GiB, >=15 GiB), stages, pins trust, provisions, installs console, creates the first admin, records provenance"
+    },
+    {
+      "id": "tool.site-db-init",
+      "name": "site-db-init.sh — factory-clean site database",
+      "kind": "tool",
+      "host": "appliance",
+      "technology": "bash",
+      "status": "deployed",
+      "source": [
+        "deploy/scripts/site-db-init.sh",
+        "deploy/scripts/lib-baseline.sh"
+      ],
+      "verification": [
+        "CODE",
+        "SELFTEST",
+        "VM"
+      ],
+      "notes": "Baseline in one transaction on a blank schema only; complete = skip; partial = refuse (data-free rebuild with --reinitialise-unused); self-test 10/10"
+    },
+    {
+      "id": "tool.apply-pending-migrations",
+      "name": "apply-pending-migrations.sh",
+      "kind": "tool",
+      "host": "appliance",
+      "technology": "bash",
+      "status": "deployed",
+      "source": [
+        "deploy/scripts/apply-pending-migrations.sh"
+      ],
+      "verification": [
+        "CODE",
+        "SELFTEST",
+        "VM"
+      ],
+      "notes": "Floor = ledger max or /etc/stayconnect/schema-baseline; each pending migration through edge-migrate.sh live-site; then gatep-reconcile; self-test 5/5"
+    },
+    {
+      "id": "tool.create-first-admin",
+      "name": "create-first-admin.sh",
+      "kind": "tool",
+      "host": "appliance",
+      "technology": "bash",
+      "status": "deployed",
+      "source": [
+        "deploy/scripts/create-first-admin.sh",
+        "data-plane/cmd/edged (seed-admin --password-stdin)"
+      ],
+      "verification": [
+        "CODE",
+        "VM"
+      ],
+      "notes": "No password on a command line; >=12 chars; existing same admin = no-op; --reset = break-glass password reset"
+    },
+    {
+      "id": "tool.restore-appliance-config",
+      "name": "restore-appliance-config.sh",
+      "kind": "tool",
+      "host": "appliance",
+      "technology": "bash",
+      "status": "deployed",
+      "source": [
+        "deploy/scripts/restore-appliance-config.sh"
+      ],
+      "verification": [
+        "CODE",
+        "SELFTEST"
+      ],
+      "notes": "Restores etc-<stamp>.tgz.age under /etc and keeps this machine's DB credentials; self-test 10/10"
+    },
+    {
+      "id": "tool.client-journey-test",
+      "name": "client-journey-netns-test.sh",
+      "kind": "tool",
+      "host": "appliance",
+      "technology": "bash",
+      "status": "optional",
+      "source": [
+        "scripts/client-journey-netns-test.sh"
+      ],
+      "verification": [
+        "VM"
+      ],
+      "notes": "Test appliances only: a namespace Client on the Client bridge, DHCP -> DNS -> portal -> voucher -> entitlement -> enforcement -> Internet -> accounting"
+    }
+  ],
+  "ports": [
+    {
+      "host": "appliance",
+      "bind": "*:22",
+      "proto": "tcp",
+      "process": "sshd",
+      "exposure": "WAN/management NIC"
+    },
+    {
+      "host": "appliance",
+      "bind": "*:443 (+80, udp 443)",
+      "proto": "tcp",
+      "process": "caddy",
+      "exposure": "WAN; nft pins 443 to the management IP"
+    },
+    {
+      "host": "appliance",
+      "bind": "127.0.0.1:3100",
+      "proto": "tcp",
+      "process": "Admin Console (Next)",
+      "exposure": "loopback"
+    },
+    {
+      "host": "appliance",
+      "bind": "127.0.0.1:8090",
+      "proto": "tcp",
+      "process": "edged",
+      "exposure": "loopback"
+    },
+    {
+      "host": "appliance",
+      "bind": "*:8380",
+      "proto": "tcp",
+      "process": "portald HTTP",
+      "exposure": "Client networks (DNAT)"
+    },
+    {
+      "host": "appliance",
+      "bind": "*:8343",
+      "proto": "tcp",
+      "process": "portald HTTPS",
+      "exposure": "Client networks (DNAT)"
+    },
+    {
+      "host": "appliance",
+      "bind": "127.0.0.1:9101",
+      "proto": "tcp",
+      "process": "scd metrics",
+      "exposure": "loopback"
+    },
+    {
+      "host": "appliance",
+      "bind": "127.0.0.1:5432",
+      "proto": "tcp",
+      "process": "stayconnect-pg",
+      "exposure": "loopback"
+    },
+    {
+      "host": "appliance",
+      "bind": "127.0.0.1:6379",
+      "proto": "tcp",
+      "process": "stayconnect-redis (unused)",
+      "exposure": "loopback"
+    },
+    {
+      "host": "appliance",
+      "bind": "<gateway>:53 and 127.0.0.1:53, 127.0.0.1:8953",
+      "proto": "tcp/udp",
+      "process": "unbound",
+      "exposure": "Client networks / loopback"
+    },
+    {
+      "host": "appliance",
+      "bind": "<gateway>:67",
+      "proto": "udp",
+      "process": "kea-dhcp4",
+      "exposure": "Client networks"
+    },
+    {
+      "host": "central",
+      "bind": "*:22",
+      "proto": "tcp",
+      "process": "sshd",
+      "exposure": "ufw allow"
+    },
+    {
+      "host": "central",
+      "bind": "*:443",
+      "proto": "tcp/udp",
+      "process": "caddy",
+      "exposure": "ufw allow; console + appliance HTTPS protocol"
+    },
+    {
+      "host": "central",
+      "bind": "*:9443",
+      "proto": "tcp",
+      "process": "ctrlapi mTLS",
+      "exposure": "ufw allow; client certificate required"
+    },
+    {
+      "host": "central",
+      "bind": "127.0.0.1:8080",
+      "proto": "tcp",
+      "process": "ctrlapi",
+      "exposure": "loopback"
+    },
+    {
+      "host": "central",
+      "bind": "127.0.0.1:3000",
+      "proto": "tcp",
+      "process": "Central console",
+      "exposure": "loopback"
+    },
+    {
+      "host": "central",
+      "bind": "127.0.0.1:5432 / 6379",
+      "proto": "tcp",
+      "process": "containers",
+      "exposure": "loopback"
+    }
+  ],
+  "sockets": [
+    {
+      "path": "/run/stayconnect/scd.sock",
+      "mode": "0660",
+      "owner": "root:stayconnect-scd",
+      "peers": [
+        "portald",
+        "edged",
+        "acctd",
+        "root"
+      ]
+    },
+    {
+      "path": "/run/stayconnect/netd.sock",
+      "mode": "0660",
+      "owner": "root:stayconnect",
+      "peers": [
+        "edged",
+        "scd (flows)",
+        "acctd (plan, uid-checked)"
+      ]
+    },
+    {
+      "path": "/run/kea/kea4-ctrl-socket",
+      "owner": "kea",
+      "peers": [
+        "netd"
+      ]
+    },
+    {
+      "path": "/run/caddy/admin.sock",
+      "mode": "0700",
+      "owner": "caddy",
+      "peers": [
+        "cert manager reload"
+      ]
+    },
+    {
+      "path": "/run/stayconnect-pmsd/pmsd-posting.sock",
+      "mode": "0600",
+      "owner": "stayconnect-pmsd",
+      "peers": [
+        "scd posting worker (root)"
+      ],
+      "when": "room-charge transmit deployed"
+    }
+  ],
+  "appliance_to_central_endpoints": [
+    "POST /v1/appliances/register",
+    "POST /v1/appliance/csr",
+    "GET /v1/appliance/certificate",
+    "GET /v1/appliance/license",
+    "POST /v1/appliance/offline-reconcile",
+    "GET /v1/appliance/hello",
+    "GET /v1/appliance/assignment",
+    "GET /v1/appliance/assignment-registry",
+    "POST /v1/appliance/assignment/ack",
+    "POST /v1/appliance/portal-tls/sync",
+    "POST /v1/appliance/portal-tls/orders",
+    "GET /v1/appliance/portal-tls/orders/{id}"
+  ],
+  "appliance_secret_files": [
+    "throttle.key",
+    "voucher_dek.key",
+    "otp_hmac_1.key",
+    "signin_attempts_dek.key",
+    "payment_dek.key",
+    "anonymous_access.key",
+    "notify_dek.key",
+    "social_dek.key",
+    "operator_totp_dek.key",
+    "pg-superuser.env"
+  ],
+  "databases": {
+    "appliance": {
+      "image": "timescale/timescaledb:2.16.1-pg16",
+      "engine": "PostgreSQL 16.3",
+      "database": "stayconnect_site",
+      "public_tables": 49,
+      "iam_v2_tables": 169,
+      "iam_v2_views": 12,
+      "user_triggers": 231,
+      "append_only_triggers": 49,
+      "security_definer_functions_iam_v2": 234,
+      "hypertables": [
+        "accounting_records",
+        "audit_log"
+      ],
+      "migrations_up": 158,
+      "migration_range": "0001-0158",
+      "baseline_through": "0149",
+      "live_ledger_head": "0158",
+      "live_ledger_rows": 109,
+      "roles_login": [
+        "svc_scd",
+        "svc_edged",
+        "svc_acctd",
+        "svc_netd",
+        "svc_pmsd",
+        "svc_payment",
+        "svc_payment_outcome",
+        "svc_posting"
+      ],
+      "roles_nologin": [
+        "iam_v2_owner",
+        "iam_v2_migrator",
+        "iam_v2_rollback",
+        "sc_commerce_runtime",
+        "sc_payment_runtime",
+        "sc_payment_outcome",
+        "sc_posting_runtime",
+        "sc_financial_operator",
+        "sc_financial_readonly"
+      ]
+    },
+    "central": {
+      "image": "timescale/timescaledb:2.16.1-pg16",
+      "database": "stayconnect",
+      "migrations_up": 56,
+      "migration_range": "0001-0056",
+      "live_ledger_head": "0056"
+    }
+  },
+  "known_install_gaps": [
+    "G9 pmsd and the PMS surface flags stay off until a PMS is commissioned (by design; manual C.10)",
+    "G12 hostname and WAN netplan are the operator's (by design)",
+    "G15 no installer for observability/HA (not implemented)",
+    "G16 gatep-set-passwords.sh 'four roles' text (cosmetic)",
+    "F1 a waiting appliance reinstalled before activation gets the previous install's CSR signed at Activate (key mismatch); workaround Central 'Reissue certificate'; fix is a PO decision (enrollment)"
+  ],
+  "install_path_updated": "2026-10-27: fresh-VM installer mission (appliance-build.sh / appliance-install.sh), validated on a fresh VMware ESXi / Ubuntu 22.04.5 VM pair",
+  "validation_environment": {
+    "description": "isolated test pair; not PRE-LIVE, not the production Central; separate trust universe",
+    "hypervisor": "VMware ESXi",
+    "os": "Ubuntu 22.04.5 LTS (kernel 5.15)",
+    "appliance": {
+      "vcpu": 4,
+      "memory_gib": 12,
+      "disk_gb": 48,
+      "nics": 2
+    },
+    "central": {
+      "vcpu": 2,
+      "memory_gib": 5.9,
+      "disk_gb": 18,
+      "nics": 1
+    },
+    "date": "2026-10-27",
+    "appliance_2": {
+      "vcpu": 1,
+      "memory_gib": 7.8,
+      "disk_gb": 97,
+      "nics": 2,
+      "run": "pristine install of release 52243660, 276 s"
+    }
+  },
+  "resolved_install_gaps": [
+    "G1/G4/G5/G6/G8/G13/G17 -> appliance-build.sh + appliance-install.sh",
+    "G2/K3 -> keybootstrap and svc-run built by default",
+    "G3/K1 -> baseline regenerated through 0158; build and install refuse a stale baseline",
+    "K2 -> site-db-init.sh (one-transaction baseline, blank schema only)",
+    "K5 -> built at the release schema; schema-baseline marker; upgrades via apply-pending-migrations.sh",
+    "G7 -> install-service-units.sh installs drop-ins, overrides and polkit",
+    "G10 -> provisioner writes the commerce + enforcement-plane profile and checks it",
+    "G11 -> deploy-hotel-admin.sh RUN_USER",
+    "G14 -> restore-appliance-config.sh"
+  ]
+}

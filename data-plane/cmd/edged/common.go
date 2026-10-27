@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -10,6 +11,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -260,10 +262,16 @@ func runSeedAdmin(args []string) error {
 	email := fs.String("email", "", "site admin email / username")
 	password := fs.String("password", "", "password (min 10 chars unless --allow-weak)")
 	name := fs.String("name", "Site Admin", "display name")
+	passwordStdin := fs.Bool("password-stdin", false, "read the password from the first line of standard input instead of --password, so it never appears in the process list or shell history")
 	allowWeak := fs.Bool("allow-weak", false, "permit a password shorter than 10 chars — deliberate per-appliance provisioning only, NOT for production; the operator must change it at first sign-in")
 	_ = fs.Parse(args)
+	pw, err := seedAdminPassword(*password, *passwordStdin, os.Stdin)
+	if err != nil {
+		return err
+	}
+	*password = pw
 	if *email == "" || *password == "" {
-		return fmt.Errorf("--email and --password are required")
+		return fmt.Errorf("--email and a password (--password or --password-stdin) are required")
 	}
 	if len(*password) < 10 && !*allowWeak {
 		return fmt.Errorf("--password must be >= 10 chars (pass --allow-weak to override; not for production)")
@@ -319,6 +327,28 @@ func runSeedAdmin(args []string) error {
 	}
 	slog.Info("seeded site admin", "id", id, "must_change_password", mustChange) // the id, not the email: the journal is outside retention
 	return nil
+}
+
+// seedAdminPassword picks the seed-admin password from exactly one source. --password-stdin exists for the
+// installer: a password given as an argument is visible to every local user in the process list while the
+// command runs, and lands in shell history. Only the first line is read and only its line ending is removed,
+// so a password may contain spaces.
+func seedAdminPassword(flagValue string, fromStdin bool, stdin io.Reader) (string, error) {
+	if !fromStdin {
+		return flagValue, nil
+	}
+	if flagValue != "" {
+		return "", fmt.Errorf("--password and --password-stdin are mutually exclusive")
+	}
+	line, err := bufio.NewReader(io.LimitReader(stdin, 4096)).ReadString('\n')
+	if err != nil && err != io.EOF {
+		return "", fmt.Errorf("reading the password from standard input: %w", err)
+	}
+	line = strings.TrimRight(line, "\r\n")
+	if line == "" {
+		return "", fmt.Errorf("--password-stdin: standard input carried no password")
+	}
+	return line, nil
 }
 
 // writeAwaitingAssignment returns 200 with an empty result and a reason, not an error: an appliance awaiting

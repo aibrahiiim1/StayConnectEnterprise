@@ -236,6 +236,10 @@ VH
 
 caddy_validate_reload(){
   caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 || { echo "caddy validate failed"; return 1; }
+  # `caddy validate` runs here as ROOT and opens every log file the configuration names, creating any that are
+  # missing — root-owned. The service runs as caddy and then cannot open them, so the reload is refused. Measured
+  # on a fresh appliance: the first Admin Console certificate could never be installed. Hand them back first.
+  if id caddy >/dev/null 2>&1 && [ -d /var/log/caddy ]; then chown -R caddy:caddy /var/log/caddy 2>/dev/null || true; fi
   systemctl reload "$CADDY_SVC" >/dev/null 2>&1 || { echo "caddy reload failed"; return 1; }
   sleep 2; echo ""
 }
@@ -246,15 +250,25 @@ health_check(){ # ip expected_serial
   # Test-only injection (acceptance 16): force a post-switch health failure so the
   # transaction rolls back to .prev. Never set in production.
   [ -n "${HA_TEST_FAIL_HEALTH:-}" ] && { echo " forced-test-health-failure"; return 0; }
-  # DNS: serves expected serial + TLS validates hostname
-  local ds is
-  ds="$(echo | openssl s_client -connect 127.0.0.1:443 -servername "$DNS_SAN" 2>/dev/null | openssl x509 -noout -serial 2>/dev/null | cut -d= -f2)"
-  is="$(echo | openssl s_client -connect "$ip:443" 2>/dev/null | openssl x509 -noout -serial 2>/dev/null | cut -d= -f2)"
+  # DNS: serves expected serial + TLS validates hostname. Caddy swaps certificates asynchronously after a reload, so
+  # the new serial is waited for (up to ~20 s) rather than sampled once: a single sample 2 s after the reload saw the
+  # previous certificate on a fresh VM and rolled a good certificate back.
+  local ds is n=0
+  while :; do
+    ds="$(echo | openssl s_client -connect 127.0.0.1:443 -servername "$DNS_SAN" 2>/dev/null | openssl x509 -noout -serial 2>/dev/null | cut -d= -f2)"
+    is="$(echo | openssl s_client -connect "$ip:443" 2>/dev/null | openssl x509 -noout -serial 2>/dev/null | cut -d= -f2)"
+    { [ "$ds" = "$want" ] && [ "$is" = "$want" ]; } || [ "$n" -ge 10 ] && break
+    n=$((n+1)); sleep 2
+  done
   [ "$ds" = "$want" ] || fail="$fail dns-serial($ds!=$want)"
   [ "$is" = "$want" ] || fail="$fail ip-serial($is!=$want)"
   echo | openssl s_client -connect 127.0.0.1:443 -servername "$DNS_SAN" -verify_hostname "$DNS_SAN" -CAfile "$root" 2>/dev/null | grep -q "Verify return code: 0" || fail="$fail dns-verify"
   echo | openssl s_client -connect "$ip:443" -verify_ip "$ip" -CAfile "$root" 2>/dev/null | grep -q "Verify return code: 0" || fail="$fail ip-verify"
-  # app reachable via both (static 200, login endpoint up = 401 for empty creds, redirect 307)
+  # app reachable via both (static 200, login endpoint up = 401 for empty creds, redirect 307) — once an Admin Console
+  # release is installed. On a fresh install the first certificate is issued BEFORE the console exists (the installer
+  # installs the console afterwards), so those checks could only fail and roll the first certificate back; the TLS
+  # checks above still have to pass.
+  [ -e "${HA_CONSOLE_LINK:-/opt/stayconnect/hotel-admin}" ] || { echo "$fail"; return 0; }
   for pair in "--resolve $DNS_SAN:443:127.0.0.1|https://$DNS_SAN" "|https://$ip"; do
     local rz="${pair%%|*}" b="${pair##*|}"
     [ "$(curl -s $rz --cacert "$root" -o /dev/null -w '%{http_code}' "$b/icon.svg")" = "200" ] || fail="$fail static($b)"
@@ -534,9 +548,14 @@ cmd_renew(){ # force(0/1)
   do_renew "$ip" "$reason"; return $?
 }
 
+# ONE CHANGE AT A TIME. The renewal timer and an explicit rotate (the provisioner's first certificate) ran together
+# on a fresh VM: each minted a certificate, Caddy served the other's, and the health check rolled a good certificate
+# back. A mutating run waits for any other one (up to 5 min) and then re-decides from the current state.
+cert_lock() { exec 9>"${HA_LOCK_FILE:-/run/lock/stayconnect-hotel-admin-cert.lock}" && flock -w 300 9 \
+  || { log "ERR: another certificate operation is still running"; exit 20; }; }
 case "${1:-renew}" in
-  renew)  cmd_renew 0 ;;
-  rotate) cmd_renew 1 ;;
+  renew)  cert_lock; cmd_renew 0 ;;
+  rotate) cert_lock; cmd_renew 1 ;;
   check)  cmd_check ;;
   status) cmd_status ;;
   *) echo "usage: $0 {renew|rotate|check|status}" >&2; exit 20 ;;

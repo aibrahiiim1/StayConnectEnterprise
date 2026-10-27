@@ -1,7 +1,7 @@
 // edged is the Hotel Admin API, served on the management interface only (never the guest LAN or WAN).
 // Enforcement actions go to scd over its unix socket; everything else is site-DB CRUD.
 //
-// Subcommands: serve (default), seed-admin --email E --password P, reset-mfa --email E.
+// Subcommands: serve (default), seed-admin --email E (--password P | --password-stdin), reset-mfa --email E.
 package main
 
 import (
