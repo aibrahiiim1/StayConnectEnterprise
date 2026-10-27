@@ -150,6 +150,9 @@ stage_tree() {
     find "$prev/deploy/pki" -maxdepth 1 -type f \( -name '*.pub' -o -name '*.crt' \) -exec cp -n {} "$SC/deploy/pki/" \;
   fi
   cp -f "$REL/bundles/"hotel-admin-deploy.tgz* "$SC/bundles/"
+  # The release record travels WITH the tree it describes. Copied only at the end, an upgrade verified the NEW
+  # Gate-P files against the PREVIOUS release's SHA256SUMS (scripts/gatep-reconcile.sh in an installed release).
+  cp -f "$REL/RELEASE.json" "$REL/SHA256SUMS" "$SC/"
   # Keep the three newest previous trees; they are small, and only the last one is ever needed to compare.
   if [ -d "$SC/.previous" ]; then ls -1d "$SC/.previous"/*/ 2>/dev/null | sort | head -n -3 | xargs -r rm -rf || true; fi
   say "tree staged (previous tree: ${prev})"
