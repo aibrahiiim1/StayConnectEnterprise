@@ -61,7 +61,7 @@
     "appliance_to_central_endpoints": 12,
     "secret_files": 10,
     "known_install_gaps": 4,
-    "resolved_install_gaps": 10
+    "resolved_install_gaps": 13
   },
   "components": [
     {
@@ -1987,6 +1987,9 @@
     "G10 -> provisioner writes the commerce + enforcement-plane profile and checks it",
     "G11 -> deploy-hotel-admin.sh RUN_USER",
     "G14 -> restore-appliance-config.sh",
-    "F1 -> Central voids a replaced identity's pending CSRs and signs only the current identity's; the appliance refuses a foreign certificate and files its own (d799ff5f; manual A3.6)"
+    "F1 -> Central voids a replaced identity's pending CSRs and signs only the current identity's; the appliance refuses a foreign certificate and files its own (d799ff5f; manual A3.6)",
+    "R1 -> Central Redis auth file moved out of sticky /tmp (fs.protected_regular): Central survives a reboot (05481cb5; manual F.6, A3.7)",
+    "R2 -> appliance-install.sh stops when the first administrator is refused; re-run resumes (28cfc9f4; manual A3.7)",
+    "R3 -> manual verification commands corrected by executing them; client-journey --remove (28cfc9f4, 05481cb5; manual A3.7)"
   ]
 }

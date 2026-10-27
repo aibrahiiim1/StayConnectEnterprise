@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Authoritative procedure for building a **new** OneGate appliance (and a separate OneGate Central) from a blank VM |
-| **Validated** | On a dedicated, isolated test pair (a new Central and a new appliance on VMware ESXi, Ubuntu 22.04.5), 2026-10-27: build → install → activation → Client journey → re-run → reboot → backup/restore → upgrade → rollback → clean re-install. Evidence: Appendix 3 |
+| **Validated** | On a dedicated, isolated test pair (a new Central and a new appliance on VMware ESXi, Ubuntu 22.04.5), 2026-10-27: build → install → activation → Client journey → re-run → reboot → backup/restore → upgrade → rollback → clean re-install; then, the same day, every command of Parts B–F re-executed against the final release on the same pair (upgrades, rollback/roll-forward of both hosts, Central outage, reboots of both hosts, consoles in a browser). Evidence: Appendix 3 (A3.7) |
 | **Companion documents** | [System Handbook](../architecture/ONEGATE_SYSTEM_HANDBOOK.md) · [Component inventory](../inventory/onegate-components.json) |
 | **Audience** | An engineer who can use Linux, systemd, Docker and a hypervisor, and who has the repository, a Central to activate against, and Product-Owner authority for the target |
 
@@ -461,7 +461,7 @@ IDs are stable so a site file can reference them. "Expected" is what a healthy i
 | D2-18 | Admin Console certificate | `echo \| openssl s_client -connect <WAN-IP>:443 -servername hotel.stayconnect.local 2>/dev/null \| openssl x509 -noout -subject -ext subjectAltName` | SAN = `hotel.stayconnect.local` and the WAN IP |
 | D2-19 | Admin Console answers | `curl -ksS -o /dev/null -w '%{http_code}\n' https://<WAN-IP>/` and `curl -ksS https://<WAN-IP>/api/edge/v1/health` | `200`/`307` to `/login`; JSON from edged |
 | D2-20 | Admin Console release identity | `cat /opt/stayconnect/hotel-admin/hotel-admin-release.json \| jq '{source_commit,build_id,source_state}'` | your commit, `clean` |
-| D2-21 | Logs show no crash loop | `journalctl -p err -b --no-pager \| tail -50` | no repeating errors; `systemctl show -p NRestarts stayconnect-scd stayconnect-netd` small |
+| D2-21 | Logs show no crash loop | `journalctl -p err -b --no-pager \| tail -50` | no repeating errors; `systemctl show -p NRestarts stayconnect-scd stayconnect-netd` small. One `caddy : user NOT in sudoers` line per boot is Caddy declining to add its local root to the OS trust store — harmless. `dhclient … /tmp/<name>.lease` lines come from a namespace test client: remove it (D.3c) |
 
 ### D.3 Database and security boundary (software)
 
@@ -763,7 +763,14 @@ Failure modes: wrong `--mode`; a repository checkout instead of a release; check
 
 ### F.6 Upgrade, rollback, move and restore of Central
 
-* **Upgrade**: build a new release (F.2), ship, then `bash <release>/deploy/scripts/central-deploy.sh deploy --release <release>`. It verifies, renders and validates the Caddyfile, takes a pre-deploy dump, stops ctrlapi, migrates, installs, polls `/readyz`, switches the console and smokes. **The database is not rolled back** on failure (migrations are forward-only) — the pre-deploy dump is your way back. A changed `central-infra.yml` is reported, never auto-applied.
+* **Upgrade**: build a new release (F.2), ship, then `bash <release>/deploy/scripts/central-deploy.sh deploy --release <release>`. **[VM]** It verifies, renders and validates the Caddyfile, takes a pre-deploy dump, stops ctrlapi, migrates, installs, polls `/readyz`, switches the console and smokes. **The database is not rolled back** on failure (migrations are forward-only) — the pre-deploy dump is your way back. A changed `central-infra.yml` is reported, never auto-applied — apply it yourself in a window (it recreates only the containers whose definition changed; Redis keeps nothing, so staff are signed out). **[VM]**
+  ```bash
+  C=/opt/stayconnect/central/compose/central-infra.yml; diff $C <release>/deploy/compose/central-infra.yml
+  cp -a $C $C.bak-$(date -u +%Y%m%dT%H%M%SZ); install -m 0644 <release>/deploy/compose/central-infra.yml $C
+  docker compose -p stayconnect-central -f $C up -d redis        # name only the changed service; never `down -v`
+  ```
+  **Every Central installed before `05481cb5` must apply this once** (finding R1, A3.7): its Redis cannot restart, so the first reboot leaves
+  Central down. If that already happened, apply the file first (Redis comes back and ctrlapi recovers by itself), then `deploy`.
 * **Rollback of binaries**: `central-deploy.sh rollback` (previous ctrlapi `.bak`, previous console, previous tooling).
 * **Move to a new host (same identity; appliances need no change if the DNS name is unchanged)**: on the old host `central-export.sh --final` (stops and **disables** ctrlapi, console, Caddy so it can never issue again) → on the new host `central-install.sh --mode restore --bundle <file>.tar.gz.enc [--extra-names <ip>] --yes` → compare `FINGERPRINTS.txt` → switch DNS → leave the old host stopped. Restore only into an **empty** database; same TimescaleDB version; the marker `central-restored-from.json` makes a re-run safe. The 2026-09-27 move from `150.0.0.252` to `172.21.96.196` followed this path.
 * **Database-only restore**: stop ctrlapi and console; recreate the database; `CREATE EXTENSION timescaledb`; `timescaledb_pre_restore()`; `age -d` the dump with a recipient's private key (never kept on Central); `pg_restore`; `timescaledb_post_restore()`; verify hypertables; `central-deploy.sh rollback` for a matching binary. **Never `pg_restore --clean`.**
@@ -818,6 +825,7 @@ DSNs are `postgres://<svc_role>:<password>@127.0.0.1:5432/stayconnect_site?sslmo
 | Activated, no licence | vendor key not pinned (offline) or licence fetch failing | `ls /etc/stayconnect/vendor-license.pub`; scd log; Central *Licenses* |
 | "Wrong hardware" licence | disk cloned/moved to other hardware | Central Replace hardware / Rebind WAN MAC |
 | Central deleted the appliance | unknown ≥ 3 times over ≥ 10 min | blank-disk reinstall (E.3) |
+| Central down after a reboot or a Redis restart: `docker logs sc-central-redis` shows `can't create /tmp/redis-auth.conf: Permission denied`; ctrlapi logs `redis ping failed` | a Central compose file older than `05481cb5` (finding R1) | apply the current `central-infra.yml` (F.6); ctrlapi recovers when Redis is healthy |
 | Admin Console 502 | Next server not running / no release | `systemctl status stayconnect-hotel-admin`; `ls -l /opt/stayconnect/hotel-admin`; re-run the installer (step 6) |
 | Cannot sign in | no operator / wrong password / locked (5 failures → 15 min) | `create-first-admin.sh --email <same> --reset` sets a new password and clears the lock |
 | Network apply "rolled back" | a health check failed — `portal_listen` (portald down), `kea_running` (Kea not bound: bridge not up), `gateway_up`, `mgmt_reachable`, `portal_address` | *Config history* → the revision's events; fix; apply again |
@@ -915,6 +923,9 @@ clean run.
 * **Case 2 (rebuild with the same identity)** — `restore-appliance-config.sh` is self-tested (10/10) but was **not** run end to end on a VM:
   appliance 1's VM was decommissioned before it could be rebuilt, and a different VM is different hardware (a licence mismatch by design).
 * Offline activation, PMS, payments, social login, SMS/WhatsApp/email delivery, tagged VLANs on a physical switch, real devices (D.4): not exercised.
+* A **fresh install of the final release on a blank VM** was not repeated (A3.7): it needs the test appliance's snapshot reverted, which
+  destroys its identity, and that reset was not authorised. The install path changed since the blank run only by F1, R1 and R2, each
+  validated on the running pair.
 * Client-to-Client isolation on one bridge is **not** an appliance function (A.3 item 4): two namespace Clients on one bridge could reach each other.
 
 ### A3.6 F1 correction — reinstall before activation (2026-10-27)
@@ -942,3 +953,26 @@ Regression tests (fail on the previous code, pass now): `control-plane/internal/
 (reinstall before activation; a request older than the identity against FetchCertificate, *Activate*, *Reissue* and the appliance's own CSR)
 and `data-plane/internal/appliancecert/stale_csr_test.go` (foreign certificate refused and replaced; no request flooding; reconcile;
 `store` writes nothing for a foreign key).
+
+### A3.7 Installer acceptance on the final release (2026-10-27)
+
+The same isolated pair, identities and data preserved (no reset): Central `central.onegate.getsemantics.com` (public `41.128.240.133` and
+`172.21.96.96` are the same host — same SSH host key and machine-id) and appliance `172.21.96.97`. Every command of Parts B–F was run as
+written; each one that did not work as written is corrected above (R3). Final releases: `onegate-appliance-28cfc9f4cf2f`,
+`onegate-central-05481cb57334` (the appliance code is identical at both commits; `05481cb5` adds only the Central compose fix R1).
+
+| Area | Result |
+|---|---|
+| Identity of the targets | Central and appliance reachable on 22/443 (and 9443); release provenance read back from `RELEASE.json`, `DEPLOYED.json` and `/proc/<pid>/exe` |
+| Part D (appliance) and F.5 (Central) | every check passes with the corrected commands; from the WAN only 22 and 443 answer |
+| Admin Consoles in a browser | Admin Console sign-in → *Appliance & licence*: Activated, licence valid, Central **Connected**; *Client networks* Ready. Central console → *Appliances*: the appliance Activated, **Connected** (a throwaway lab operator on each, removed afterwards) |
+| Upgrades | appliance `d799ff5f → 701157ed → 28cfc9f4` (27 s, 26 s; 0 pending migrations, `GATEP_RECONCILE = OK`, a pre-upgrade `scd backup-now` encrypted and proven restorable each time; identity, certificate, mTLS key, `.dsn`, data key and licence unchanged); Central `d799ff5f → 28cfc9f4 → 05481cb5` (14 s, smoke 9/9, encrypted pre-deploy dump) |
+| Client journey | `client-journey-netns-test.sh` **12/12** after each step below; isolation from a signed-in Client: Admin Console, SSH, `:5432`, `:3100`, `:8090` and Central all unreachable; operator *Disconnect* → nft element gone, Internet stopped within 4 s; `--remove` leaves no namespace, veth or `dhclient` |
+| Central outage (D3b-06) | Central blackholed: the appliance reported it unreachable, the licence stayed valid, a new Client **12/12**; route removed → Central **connected** again after 11 s |
+| Installer re-run | 46 s, **0 of 27** files under `/etc/stayconnect` changed, administrator unchanged |
+| Admin refusal (R2) | a re-run naming a second administrator stopped with exit 1, resume marker kept; the original command then completed and cleared it |
+| Rollback | appliance `BINARY_ROLLBACK = PASS` to `701157ed` and `deploy-hotel-admin.sh rollback`, then `--upgrade` forward (28 s) — a signed-in Client online throughout; Central `central-deploy.sh rollback` to `d799ff5f` (smoke PASS) and deploy forward |
+| Appliance reboot | all units, Kea and Unbound active; confirmed network revision unchanged; licence valid; Central connected; both pre-reboot sessions re-authorised in nft; a new Client 12/12 |
+| Central reboot | **found R1**: Redis restart-looped (`can't create /tmp/redis-auth.conf`), ctrlapi with it, the appliance saw Central unreachable. Fixed (`05481cb5`), applied with the F.6 compose step: two Redis restarts healthy, a second reboot → every service back, smoke PASS, 0 Redis failures, the appliance reconnected |
+
+Not repeated here: a blank-VM install of the final release (A3.5), offline activation, and the D.4 witness items.
