@@ -1,0 +1,4 @@
+commit 5041aff6bfed87914ed2990b2db3586b5fff0384
+Date:   Wed Oct 28 01:55:53 2026 +0300
+
+    Governance: T0261 names the final head 8b18aec4 (Codex review fix) and its deployment
