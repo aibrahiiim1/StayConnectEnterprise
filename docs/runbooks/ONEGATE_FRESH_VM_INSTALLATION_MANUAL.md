@@ -266,10 +266,14 @@ What happens, in order, each step printing a heading and stopping at the first f
 | `scd.env`, `portald.env` | `STAYCONNECT_PHASE2_MASTER=true`, `STAYCONNECT_PHASE2_PORTAL=true` | Client commerce: packages, quote, confirm (the portal cannot list packages without them) |
 | `edged.env` | `STAYCONNECT_PHASE2_MASTER=true`, `STAYCONNECT_PHASE2_ADMIN=true` | the Admin Console's packages/plans/vouchers surfaces |
 | `netd.env`, `acctd.env` | `STAYCONNECT_PHASE3_MASTER=true`, `NETD_PHASE3_PRODUCER_UID=<uid of acctd's user>` | the **enforcement plane**: without it every session stays `PENDING_ENFORCEMENT` and no Client reaches the Internet |
+| `scd.env`, `edged.env` | `STAYCONNECT_PHASE3_MASTER=true`; scd `STAYCONNECT_PHASE3_PMS_AUTH=true`; edged `STAYCONNECT_PHASE3_ADMIN=true` | the **Hotel module is installed**: room sign-in and the *Hotel* section exist, and Central's licence (with the site's switch) decides whether they are used. Inert until a PMS is commissioned (C.10) |
 | (provisioner defaults) | `STAYCONNECT_IAMV2_MASTER/OTP/SOCIAL=true`, `SCD_DURABLE_THROTTLE`, `SCD_OTP_HMAC` | IAM v2 sign-in, throttling, OTP |
 
-**Not** enabled: the PMS surfaces (`STAYCONNECT_PHASE3_ADMIN/PMS_*`, `pmsd`) — Part C.10 — and every financial flag (`STAYCONNECT_PHASE4_*`, `STAYCONNECT_PAYMENT_LIVE_ALLOWED`) — **[PO]**.
-After writing the profile the provisioner runs `check-phase3-enforcement-plane.sh` and stops if the plane is incoherent.
+**Not** enabled: the PMS connector (`pmsd`, which alone talks to a PMS — commissioned in C.10) and every financial flag
+(`STAYCONNECT_PHASE4_*`, `STAYCONNECT_PAYMENT_LIVE_ALLOWED`: card payment and room charge — C.12, **[PO]**).
+The profile is written by `deploy/scripts/apply-product-profile.sh`, which a fresh install **and every `--upgrade`** run, so an appliance installed by
+an older release gets what the current one ships. It then runs `check-phase3-enforcement-plane.sh` and `check-phase6-guest-dependency.sh` and stops
+if the environment is incoherent.
 
 It deliberately **does not**: write netplan / nftables / Kea / Unbound configuration (netd renders those at the first Client-network apply), set the hostname, create a tenant, site, licence or Client network, enable `pmsd`, or configure any PMS. It refuses to run if `/etc/stayconnect/removed-from-central.json` exists.
 
@@ -392,12 +396,12 @@ After Confirm, on the VM: `ip -br addr` shows the bridge with the gateway addres
 
 You can prepare Room sign-in completely and leave it **inert** until a real PMS is available. **[NOT-EXERCISED here; derived from `docs/runbooks/PMS-Interface-Commissioning.md` and the code]**
 
-1. **Licence** must include `hospitality` (Central Activate). The *Hotel* pages (`/pms-interfaces`, `/room-sign-in`, `/pms-routing`, `/stays`, …) appear only then and only when the Phase-3 admin surface is enabled (below).
-2. **Enable the PMS surface flags** (otherwise the PMS admin routes are not mounted at all):
+1. **Licence** must include `hospitality` (Central Activate or *Change licence*). The Hotel module is installed by the product profile (B.5), so
+   the *Hotel* section (`/pms-interfaces`, `/room-sign-in`, `/pms-routing`, `/stays`, …) appears as soon as the licence includes it and the site has it
+   switched on (*Modules*). Without it, no network asks about room sign-in.
+2. **Configure the PMS connector** (`pmsd`, the only process that talks to a PMS; it stays dark until this step):
 
    ```text
-   # /etc/stayconnect/edged.env   → STAYCONNECT_PHASE3_MASTER=1   STAYCONNECT_PHASE3_ADMIN=1
-   # /etc/stayconnect/scd.env     → STAYCONNECT_PHASE3_MASTER=1   STAYCONNECT_PHASE3_PMS_AUTH=1
    # /etc/stayconnect/pmsd.env    → STAYCONNECT_PHASE3_MASTER=1 …_PMS_CONNECTOR=1 …_PMS_INGEST=1 …_CHECKOUT_GRACE=1
    #                                PMSD_DB_URL=<svc_pmsd DSN from /etc/stayconnect/.dsn>
    #                                PMSD_EVIDENCE_KEY_HEX=<32-byte hex>  PMSD_EVIDENCE_KEY_VERSION=1
@@ -412,6 +416,22 @@ You can prepare Room sign-in completely and leave it **inert** until a real PMS 
 7. When the real PMS window arrives: activate the interface, read the three runtime axes (target `CONNECTED / CONTINUOUS / IN_SYNC`), and run the PMS acceptance in Part D.4.
 
 Mews, Apaleo and OPERA Cloud connectors exist but have **never connected to a live property**; treat any use as a first-light test.
+
+### C.12 Modules: licence, installation and the site's switch
+
+*System → Modules* (`/modules`) shows four facts per module, and a module is **in use** only when all of them hold:
+
+| Column | Decided by | Changed by |
+|---|---|---|
+| **Available** | the appliance's installation | the release's product profile (B.5); an upgrade adds what a newer release ships |
+| **Licensed** | the signed licence from Central | Central → *Licenses* (*Change licence* / *Renew*); the appliance picks it up within minutes, or *Appliance & licence → Check now* |
+| **Switched on** | the site | *Modules* (or *Sign-in methods* for the identity add-ons) |
+| **Ready** | the module's own prerequisites | e.g. a delivery provider for one-time codes |
+
+What a release installs **[CODE][VM]**: paid access, the identity add-ons (SMS, WhatsApp, email accounts, social sign-in), white label, high
+availability and the **Hotel** module. Not installed: **card payment** (it calls a payment provider) and **room charge** (it posts charges to the PMS).
+Their *Modules* card says so. Licensing them is not enough, and this manual has no step that switches them on: that is a Product-Owner/vendor
+authorisation **[PO]**.
 
 ### C.11 Hardening you should do before handing over
 
@@ -791,8 +811,8 @@ Written by the provisioner only if absent (`[ -f ] ||`); never regenerated. The 
 
 | File | Keys the provisioner writes | Operator-added (when enabling features) |
 |---|---|---|
-| `scd.env` | `SCD_DB_URL`, `SCD_SOCKET=/run/stayconnect/scd.sock`, `SCD_CTRLAPI_BASE`, `SCD_MTLS_BASE`, `SCD_AUTO_REGISTER=true`, `SCD_METRICS_ADDR=127.0.0.1:9101`, `STAYCONNECT_IAMV2_MASTER/OTP/SOCIAL=true`, `SCD_PAYMENT_DB_URL`, `STAYCONNECT_PHASE4_PAYMENT_OUTCOME_DSN`, `SCD_POSTING_DB_URL`, `SCD_SECRETS_DIR`, `SCD_DURABLE_THROTTLE=true`, `SCD_OTP_HMAC=true`; profile: `STAYCONNECT_PHASE2_MASTER=true`, `STAYCONNECT_PHASE2_PORTAL=true` | `STAYCONNECT_PHASE3_MASTER/PMS_AUTH`, `STAYCONNECT_PHASE4_*` (**[PO]**), `STAYCONNECT_PHASE5_*`, `STAYCONNECT_PHASE6_*`, `STAYCONNECT_PAYMENT_LIVE_ALLOWED` (**[PO]**, never set in a pilot) |
-| `edged.env` | `EDGED_DB_URL`, `EDGED_SCD_SOCKET`, `EDGED_COOKIE_SECURE=true`, `STAYCONNECT_IAMV2_MASTER=true`; profile: `STAYCONNECT_PHASE2_MASTER=true`, `STAYCONNECT_PHASE2_ADMIN=true` | `STAYCONNECT_PHASE3_MASTER/ADMIN` (PMS, C.10), … `PMSD_SECRET_KEY_ID/_HEX` if an `AUTH_KEY` interface is authored |
+| `scd.env` | `SCD_DB_URL`, `SCD_SOCKET=/run/stayconnect/scd.sock`, `SCD_CTRLAPI_BASE`, `SCD_MTLS_BASE`, `SCD_AUTO_REGISTER=true`, `SCD_METRICS_ADDR=127.0.0.1:9101`, `STAYCONNECT_IAMV2_MASTER/OTP/SOCIAL=true`, `SCD_PAYMENT_DB_URL`, `STAYCONNECT_PHASE4_PAYMENT_OUTCOME_DSN`, `SCD_POSTING_DB_URL`, `SCD_SECRETS_DIR`, `SCD_DURABLE_THROTTLE=true`, `SCD_OTP_HMAC=true`; profile: `STAYCONNECT_PHASE2_MASTER=true`, `STAYCONNECT_PHASE2_PORTAL=true`, `STAYCONNECT_PHASE3_MASTER=true`, `STAYCONNECT_PHASE3_PMS_AUTH=true` | `STAYCONNECT_PHASE4_*` (**[PO]**), `STAYCONNECT_PHASE5_*`, `STAYCONNECT_PHASE6_*`, `STAYCONNECT_PAYMENT_LIVE_ALLOWED` (**[PO]**, never set in a pilot) |
+| `edged.env` | `EDGED_DB_URL`, `EDGED_SCD_SOCKET`, `EDGED_COOKIE_SECURE=true`, `STAYCONNECT_IAMV2_MASTER=true`; profile: `STAYCONNECT_PHASE2_MASTER=true`, `STAYCONNECT_PHASE2_ADMIN=true`, `STAYCONNECT_PHASE3_MASTER=true`, `STAYCONNECT_PHASE3_ADMIN=true` | … `PMSD_SECRET_KEY_ID/_HEX` if an `AUTH_KEY` interface is authored |
 | `acctd.env` | `ACCTD_DB_URL`, `ACCTD_SCD_SOCKET`; profile: `STAYCONNECT_PHASE3_MASTER=true` (enforcement plane) | `ACCTD_TICK_SECONDS` (1–10) |
 | `portald.env` | `PORTALD_SCD_SOCKET`; profile: `STAYCONNECT_PHASE2_MASTER=true`, `STAYCONNECT_PHASE2_PORTAL=true` | `PORTALD_HTTP_ADDR`, `PORTALD_HTTPS_ADDR`, `PORTALD_FQDN` (defaults are right) |
 | `netd.env` | `NETD_DB_URL`, `NETD_WAN_IFACE`, `NETD_MGMT_IFACE` (= WAN), `NETD_MGMT_ADDR=auto`, `NETD_LAN_PHYS`; profile: `STAYCONNECT_PHASE3_MASTER=true`, `NETD_PHASE3_PRODUCER_UID=<uid of acctd's user>` (enforcement plane) | `NETD_CONFIRM_SECONDS` (default 120) |
@@ -844,6 +864,8 @@ DSNs are `postgres://<svc_role>:<password>@127.0.0.1:5432/stayconnect_site?sslmo
 | Voucher rejected | wrong network offer, expired, revoked, throttled | scd log; *Guest sign-in attempts* |
 | No OTP / verification email | no enabled sender (the stub only writes `/var/log/stayconnect/otp-mail.log`) | *Delivery* |
 | Social login not offered | portal HTTPS inactive or hostname not in the provider's callback hosts | *Portal HTTPS*, provider console |
+| *Modules*: licensed but **Available: No**; no *Hotel* section | the installation does not have the module: Hotel on a release before the module fix (upgrade, E.5); card payment / room charge are never installed by a release (C.12) | *Modules* card words; `grep PHASE3 /etc/stayconnect/scd.env /etc/stayconnect/edged.env` |
+| *Client networks* asks to configure room sign-in on a site without the Hotel module | releases before the module fix | upgrade; room sign-in is shown only with the Hotel module in use |
 | Room sign-in always "not verified" | by design uniform; check mirror freshness, routing policy (`NONE`/undecided), licence `hospitality`, interface not `ACTIVE`, ambiguity | `/pms-routing/readiness`; `iam_v2.pms_interface_runtime`; scd log |
 | `systemctl restart X` hangs | `StartLimitIntervalSec=0` with a *refused* start | `systemctl stop X; systemctl reset-failed X; systemctl start --no-block X` |
 | Admin Console certificate warning | Caddy local CA not trusted by the PC; SAN drift after an IP change | trust the local root; `/usr/local/sbin/stayconnect-hotel-admin-cert-manager status\|renew\|rotate` |

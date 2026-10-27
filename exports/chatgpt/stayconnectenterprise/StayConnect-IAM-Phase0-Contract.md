@@ -5,7 +5,7 @@
 > **Amended by Amendment A1, D46 (2026-09-29).** FIAS guest posting targets the reservation: posting identity `(PMS interface, G#)`; the room is refreshed before sending; no folio model. The sections below carry the amended wording.
 
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
-<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0260 -->
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0261 -->
 **Current phase:** 7 — Cleanup, final docs, full-system re-acceptance
 **Current activity:** `FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE`
 **Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 ACCEPTED_AND_CLOSED · 4 ACCEPTED_AND_CLOSED · 5 ACCEPTED_AND_CLOSED · 6 ACCEPTED_AND_CLOSED · 7 ACCEPTED_AND_CLOSED
@@ -15,7 +15,7 @@
 **RETIRED development reference appliance (the retired development reference appliance):** RETIRED 2026-09-12 and NOT an operational target: not to be contacted, not diagnosed against, and not a source of anything. Its accepted evidence is HISTORICAL and preserved exactly as recorded -- retiring a target does not falsify what it proved. It held the live-dark runtime that evidence describes, including its superseded guest-IAM schema (68 iam_v2 tables live at its last read). Never an installation source.
 **Lifecycle:** PRE-LIVE (D24): no real hotel guest or staff depends on StayConnect for live service yet.
 **Single next authorized action:** Work normal missions under the PRODUCT-OWNER-LED DELIVERY model D42 (2026-09-26): implement, target-test, deploy completed changes to PRE-LIVE 172.21.60.25 under the standing deployment decision, stop at READY FOR PRODUCT OWNER TESTING, and merge only after explicit Product Owner acceptance (po-merge-approved). The comprehensive validation runs only on 'FULL CHECK THE WHOLE CODE'. No agent requests PRE-LIVE deployment approval again.
-**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D75`.
+**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D76`.
 <!-- END GENERATED PROJECT STATE -->
 
 

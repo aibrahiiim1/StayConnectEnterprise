@@ -68,3 +68,25 @@ describe("Modules on a café", () => {
     expect(within(records).queryByRole("link", { name: "Guest sign-in attempts" })).toBeNull();
   });
 });
+
+describe("Modules licensed but not installed", () => {
+  it("says what switches each one on, instead of only that the appliance does not run it", async () => {
+    (api.get as ReturnType<typeof vi.fn>).mockImplementation((p: string) => {
+      if (p === "/auth/whoami") return Promise.resolve({ roles: ["site_admin"] });
+      const off = { deployed: false, licensed: true, enabled: true, ready: false, reasons: ["NOT_DEPLOYED"] };
+      return Promise.resolve({
+        site_type: "HOTEL", license_state: "Active", deployment: {},
+        modules: {
+          hospitality: mod("hospitality", "Hotel", { switchable: true, ...off }),
+          card_payment: mod("card_payment", "Card payment", { switchable: true, ...off }),
+          room_charge: mod("room_charge", "Room charge", { switchable: true, ...off }),
+        },
+      });
+    });
+    render(<ModulesPage />);
+    expect(await screen.findByText(/predates the Hotel module/)).toBeInTheDocument();
+    expect(screen.getByText(/Card payment calls a payment provider/)).toBeInTheDocument();
+    expect(screen.getByText(/Room charge posts charges to the PMS/)).toBeInTheDocument();
+    expect(screen.queryByText("This appliance does not run this module.")).toBeNull();
+  });
+});

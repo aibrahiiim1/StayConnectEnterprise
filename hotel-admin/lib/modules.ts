@@ -33,6 +33,19 @@ export const MODULE_REASON_WORDS: Record<string, string> = {
   LOCAL_STATE_UNAVAILABLE: "The site's switch could not be read.",
 };
 
+// A licence alone does not install a module: these say what does, per module, when the appliance does not run it.
+const NOT_DEPLOYED_BY_MODULE: Record<string, string> = {
+  hospitality: "Licensed, but this appliance's installation predates the Hotel module. Upgrade it with the current release (installation manual E.5) and it becomes available.",
+  card_payment: "Licensed, but not switched on in this appliance's installation. Card payment calls a payment provider, so it is enabled only with the vendor's authorisation (installation manual C.12).",
+  room_charge: "Licensed, but not switched on in this appliance's installation. Room charge posts charges to the PMS, so it is enabled only with the vendor's authorisation (installation manual C.12).",
+};
+
+/** The words for one reason on one module; a module-specific explanation wins over the generic one. */
+export function moduleReasonWords(moduleId: string, reason: string): string | undefined {
+  if (reason === "NOT_DEPLOYED" && NOT_DEPLOYED_BY_MODULE[moduleId]) return NOT_DEPLOYED_BY_MODULE[moduleId];
+  return MODULE_REASON_WORDS[reason];
+}
+
 export const READINESS_WORDS: Record<string, string> = {
   CARD_NOT_DEPLOYED: "Card payment does not run on this appliance.",
   PAYMENT_KEY_MISSING: "This appliance has no payment key, so provider credentials cannot be stored.",

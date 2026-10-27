@@ -154,3 +154,27 @@ func TestOverviewAttentionFollowsModules(t *testing.T) {
 		t.Fatalf("no room-sign-in readiness items without the licence; history work stays: %+v", got)
 	}
 }
+
+// A site whose licence lacks the Hotel module (or that has it not deployed, or switched off) is not asked to route room
+// sign-in: the Default Network shows no room sign-in check and no "Configure room sign-in".
+func TestRoomSignInInScopeOnlyWithTheHotelModuleInUse(t *testing.T) {
+	for name, c := range map[string]struct {
+		st   moduleState
+		want bool
+	}{
+		"in use":       {moduleState{Licensed: true, Deployed: true, Enabled: true}, true},
+		"not licensed": {moduleState{Licensed: false, Deployed: true, Enabled: true}, false},
+		"not deployed": {moduleState{Licensed: true, Deployed: false, Enabled: true}, false},
+		"switched off": {moduleState{Licensed: true, Deployed: true, Enabled: false}, false},
+	} {
+		s := &server{modCache: &moduleCache{}, scd: fakeSCDModules(t, 200, report(map[string]moduleState{"hospitality": c.st}))}
+		if got := s.roomSignInInScope(context.Background()); got != c.want {
+			t.Fatalf("%s: got %v want %v", name, got, c.want)
+		}
+	}
+	// Unreadable state changes nothing: the room sign-in facts stay shown.
+	s := &server{modCache: &moduleCache{}, scd: fakeSCDModules(t, 500, map[string]string{"error": "x"})}
+	if !s.roomSignInInScope(context.Background()) {
+		t.Fatal("unreadable module state must keep room sign-in shown")
+	}
+}

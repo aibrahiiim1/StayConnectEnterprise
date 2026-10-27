@@ -1,0 +1,34 @@
+{
+  "transition_id": "T0261",
+  "seq": 261,
+  "timestamp": "2026-10-27T22:27:31Z",
+  "timestamp_derivation": "Computed from the workstation clock after the change was verified on the test appliance, and before the commit that introduces this receipt.",
+  "record_type": "MODULES_FOLLOW_THE_LICENCE",
+  "authorisation": "D76 under The Product Owner's request of 2026-10-28 after testing the test appliance: the Client networks page asked to configure room sign-in although the licence had no Hotel module, and after the licence was changed to include every module the Modules page still showed Hotel, Card payment and Room charge as not available and no Hotel section appeared -- 'check these issues, fix, update the installation and the manual as needed, then merge and deploy'.",
+  "context": "The installer (PR #256) wrote a product profile that left the Hotel surface off, to be switched on by hand at PMS commissioning. A licence therefore could not make the Hotel module available, and edged showed room sign-in whether or not the module was in use.",
+  "root_cause": "Module availability is the deployment ceiling read from scd's environment (STAYCONNECT_PHASE3_MASTER for the Hotel module), and the Hotel section needs edged's STAYCONNECT_PHASE3_ADMIN; neither was in the installed profile. Separately, the room sign-in assessment was built for every network without asking whether the Hotel module was in use.",
+  "validation_environment": "The test appliance 172.21.96.97 (lab Central central.onegate.getsemantics.com), upgraded with appliance-install.sh --upgrade to onegate-appliance-577a8ffe3ed6, then onegate-appliance-8b18aec418bb (the Codex review fix) after an encrypted, proven-restorable backup. No PRE-LIVE or production change.",
+  "verification": "edged TestRoomSignInInScopeOnlyWithTheHotelModuleInUse and the full edged unit suite pass; hotel-admin modules-page (3) and network suites (16) pass, TypeScript clean; apply-product-profile.sh self-test in Ubuntu 22.04 (adds only missing keys, keeps an operator's false, idempotent, refuses an incoherent environment). Live: the upgrade added the four Hotel keys, units PASS; scd ceiling hospitality=true, room sign-in routes mounted, pmsd inactive; Modules: Hotel In use (available, licensed, on, ready); card payment and room charge Not available with the new words; the Hotel section in the navigation (browser). With the Hotel module switched off the Default Network shows no room sign-in check or configure action and the list no brief; switched on again, both return; site switches restored. Codex review (P1): a disabled master with an added child flag would stop scd/edged; fixed (children only under an enabled master; an incoherent file refused before any restart), self-tested in four cases, and the final release 8b18aec4 deployed: profile unchanged, Hotel in use, a new Client 12/12.",
+  "follow_up": "Card payment and room charge stay uninstalled until the Product Owner authorises them. PRE-LIVE already carries the Hotel flags and was not changed.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0260."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "base": "474b782a058eeb8679bd3b94c1ea3f6982d0bf64",
+  "base_note": "Master after the merge of PR #259.",
+  "head": "8b18aec4",
+  "head_note": "The last content commit of branch fix/modules-licence-driven. Governance commits follow it.",
+  "previous_delivery": "T0260",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}

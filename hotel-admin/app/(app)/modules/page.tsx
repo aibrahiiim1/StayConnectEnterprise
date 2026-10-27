@@ -19,7 +19,7 @@ import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
 import { useCapabilities } from "@/lib/capabilities";
-import { MODULE_REASON_WORDS, READINESS_WORDS, SITE_TYPE_LABELS, type ModuleReport, type ModuleState } from "@/lib/modules";
+import { moduleReasonWords, READINESS_WORDS, SITE_TYPE_LABELS, type ModuleReport, type ModuleState } from "@/lib/modules";
 
 const CONFIGURE: Record<string, { href: string; label: string }> = {
   hospitality: { href: "/pms-interfaces", label: "PMS connection" },
@@ -238,7 +238,7 @@ function ModuleCard({
         </dl>
         {reasons.length > 0 && (
           <ul className="list-disc space-y-0.5 ps-5 text-xs text-muted-foreground">
-            {reasons.map((r) => <li key={r}>{MODULE_REASON_WORDS[r] ?? <code>{r}</code>}</li>)}
+            {reasons.map((r) => <li key={r}>{moduleReasonWords(mod.id, r) ?? <code>{r}</code>}</li>)}
           </ul>
         )}
         {!mod.ready && (mod.readiness ?? []).length > 0 && (
