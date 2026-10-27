@@ -110,3 +110,19 @@ describe("Modules with no implementation in this release", () => {
     }
   });
 });
+
+describe("A configurable module that may not run", () => {
+  it("shows the readiness reason and never the bare NOT_READY code", async () => {
+    (api.get as ReturnType<typeof vi.fn>).mockImplementation((p: string) => {
+      if (p === "/auth/whoami") return Promise.resolve({ roles: ["site_admin"] });
+      return Promise.resolve({
+        site_type: "HOTEL", license_state: "Active", deployment: {},
+        modules: { card_payment: mod("card_payment", "Card payment", { deployed: true, licensed: true, enabled: true, switchable: true,
+          ready: false, reasons: ["NOT_READY"], readiness: ["PROVIDER_CALLS_NOT_AUTHORISED"] }) },
+      });
+    });
+    render(<ModulesPage />);
+    expect(await screen.findByText(/not authorised to contact a payment provider/)).toBeInTheDocument();
+    expect(screen.queryByText("NOT_READY")).toBeNull();
+  });
+});
