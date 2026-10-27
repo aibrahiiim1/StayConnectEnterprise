@@ -7,12 +7,23 @@
 # sign-in, the entitlement, the enforced session (nft + tc), Internet access after sign-in and accounting.
 #
 # TEST APPLIANCES ONLY: it adds a namespace and a veth to a Client bridge and consumes a voucher. The namespace is
-# left in place so the session can be inspected; remove it with `ip netns del <name>; ip link del <name>a`.
+# left in place so the session can be inspected; remove it with `client-journey-netns-test.sh --remove <name>`, which
+# also stops the namespace's dhclient (deleting only the namespace leaves dhclient renewing, and logging an error,
+# for ever).
 #
 # Usage (root): client-journey-netns-test.sh <name> <voucher-code>      e.g.  client-journey-netns-test.sh cj1 K7Q2-...
+#               client-journey-netns-test.sh --remove <name>
 # Needs: dhclient (isc-dhcp-client), curl, socat (optional, for the Kea lease query).
 # Exit: 0 every check passed · 1 a check failed
 set -uo pipefail
+if [ "${1:-}" = "--remove" ]; then
+  N="${2:?usage: client-journey-netns-test.sh --remove <name>}"
+  ip netns pids "$N" 2>/dev/null | xargs -r kill 2>/dev/null
+  ip netns del "$N" 2>/dev/null; ip link del "${N}a" 2>/dev/null
+  rm -rf "/etc/netns/$N" "/tmp/$N".*
+  echo "client-journey $N: removed"
+  exit 0
+fi
 N="${1:?usage: client-journey-netns-test.sh <name> <voucher-code>}"; CODE="${2:?usage: client-journey-netns-test.sh <name> <voucher-code>}"
 P="docker exec -i stayconnect-pg psql -X -tAq -U stayconnect -d stayconnect_site -c"
 BR="$($P "SELECT bridge_name FROM guest_networks WHERE enabled ORDER BY created_at LIMIT 1" </dev/null)"
@@ -24,7 +35,7 @@ bad(){ fail=$((fail+1)); echo "  FAIL  $*"; }
 nsx(){ ip netns exec "$N" "$@"; }
 
 echo "== client $N on $BR (gateway $GW)"
-ip netns del "$N" 2>/dev/null; ip link del "${N}a" 2>/dev/null
+ip netns pids "$N" 2>/dev/null | xargs -r kill 2>/dev/null; ip netns del "$N" 2>/dev/null; ip link del "${N}a" 2>/dev/null
 ip link add "${N}a" type veth peer name "${N}c"; ip link set "${N}a" master "$BR"; ip link set "${N}a" up
 ip netns add "$N"; ip link set "${N}c" netns "$N"; nsx ip link set lo up; nsx ip link set "${N}c" up
 MAC="$(nsx cat /sys/class/net/${N}c/address)"

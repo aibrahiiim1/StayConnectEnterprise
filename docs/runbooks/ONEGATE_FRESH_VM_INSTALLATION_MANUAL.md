@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Authoritative procedure for building a **new** OneGate appliance (and a separate OneGate Central) from a blank VM |
-| **Validated** | On a dedicated, isolated test pair (a new Central and a new appliance on VMware ESXi, Ubuntu 22.04.5), 2026-10-27: build → install → activation → Client journey → re-run → reboot → backup/restore → upgrade → rollback → clean re-install. Evidence: Appendix 3 |
+| **Validated** | On a dedicated, isolated test pair (a new Central and a new appliance on VMware ESXi, Ubuntu 22.04.5), 2026-10-27: build → install → activation → Client journey → re-run → reboot → backup/restore → upgrade → rollback → clean re-install; then, the same day, every command of Parts B–F re-executed against the final release on the same pair (upgrades, rollback/roll-forward of both hosts, Central outage, reboots of both hosts, consoles in a browser). Evidence: Appendix 3 (A3.7) |
 | **Companion documents** | [System Handbook](../architecture/ONEGATE_SYSTEM_HANDBOOK.md) · [Component inventory](../inventory/onegate-components.json) |
 | **Audience** | An engineer who can use Linux, systemd, Docker and a hypervisor, and who has the repository, a Central to activate against, and Product-Owner authority for the target |
 
@@ -196,7 +196,7 @@ Go module and build caches live in the named Docker volumes `onegate-appliance-g
 ip -br link                                   # exactly two physical NICs
 ip route show default                         # via the WAN NIC
 getent hosts <central-name>                   # resolves to Central (public or internal address, as designed)
-curl -sS --cacert central-tls-ca.crt https://<central-name>/readyz      # Central answers
+curl -sSk https://<central-name>/readyz                    # Central answers (its CA is checked by the installer, B.5)
 timeout 5 bash -c '</dev/tcp/<central-name>/9443' && echo "9443 open"          # the mutual-TLS listener is reachable
 ```
 
@@ -205,7 +205,11 @@ port-forward only shows up later, as an appliance that never registers or never 
 
 ### B.4 Copy the release and the trust files to the VM (WS) — **[VM]**
 
+Root SSH with a key is assumed (Ubuntu's default `PermitRootLogin prohibit-password` refuses a root password); otherwise copy as your
+sudo user and move the files into `/root` on the VM.
+
 ```bash
+ssh root@<vm> 'install -d -m 0700 /root/central-trust'
 scp dist/appliance/onegate-appliance-<sha12>.tar.gz* root@<vm>:/root/
 scp vendor-license.pub assignment-registry-root.pub central-tls-ca.crt FINGERPRINTS.txt root@<vm>:/root/central-trust/
 ssh root@<vm> 'cd /root && sha256sum -c onegate-appliance-<sha12>.tar.gz.sha256 && tar -xzf onegate-appliance-<sha12>.tar.gz'
@@ -223,7 +227,8 @@ shred -u /root/.admin-pw
 
 Options you may need: `--central-base https://<name>` for a Central other than the release's (a lab or second Central; the mutual-TLS endpoint then
 defaults to `<name>:9443` and never to the release's) · `--wan-iface/--lan-iface` · `--offline-activation-only` (no Central CA required; the vendor
-key is) · `--yes` (no confirmation prompt). The last lines of a successful install are:
+key is) · `--yes` (no confirmation prompt). A successful install ends with (a unit-status list sits between these two lines, and a
+"next:" hint follows):
 
 ```text
 APPLIANCE_UNITS = PASS
@@ -245,7 +250,7 @@ What happens, in order, each step printing a heading and stopping at the first f
    Caddy and the dual-SAN Admin Console certificate (`hotel.stayconnect.local` + the WAN IP) ·
    start `scd edged acctd netd portald caddy` and require each `active` and `scd` logged `build=production`.
 6. **Admin Console** — `deploy-hotel-admin.sh install` (scratch-port boot, capability contract, atomic switch, smoke, automatic rollback on failure); skipped when that exact build is already live.
-7. **First administrator** — `create-first-admin.sh` (12+ characters; the password goes to `edged seed-admin --password-stdin`, never onto a command line).
+7. **First administrator** — `create-first-admin.sh` (12+ characters; the password goes to `edged seed-admin --password-stdin`, never onto a command line). A refusal (password too short or equal to the email, another administrator already exists) **stops the install**; fix it and run the same command again — it resumes. **[VM]**
 8. **Record** — `/opt/stayconnect/RELEASE.json`, `SHA256SUMS` and `DEPLOYED_BINARIES.sha256` (service, sha256, embedded revision, tags) are written; `check-appliance-units.sh` must pass.
 
 **The product profile the installer enables** (`ensure_kv`: a key is added only when absent, so an operator's later choice is never overwritten):
@@ -430,7 +435,7 @@ IDs are stable so a site file can reference them. "Expected" is what a healthy i
 | D1-05 | Clock | `timedatectl` | `System clock synchronized: yes`, UTC |
 | D1-06 | Forwarding sysctl | `sysctl net.ipv4.ip_forward net.netfilter.nf_conntrack_max` | `1` and `262144` |
 | D1-07 | Disk headroom | `df -h /` | ≥ 40 % free on a new box |
-| D1-08 | Only expected inbound listeners | `ss -ltnup` | on the WAN address: `22` and `443`; everything else loopback or bound to a gateway address (Handbook §6.1) |
+| D1-08 | Only expected inbound listeners | `ss -ltnup`; then **from another host on the WAN network**: `for p in 22 80 443 53 8380 8343 8090 3100 5432; do timeout 3 bash -c "</dev/tcp/<WAN-IP>/$p" 2>/dev/null && echo "$p open"; done` | listeners: `22`; Caddy `*:80`, `*:443` (TCP and UDP); portald `*:8380`, `*:8343`; Kea/Unbound on gateway addresses; everything else `127.0.0.1`. From the WAN only **22 and 443** answer — the rendered nftables input chain closes the rest (Handbook §6.1) |
 
 ### D.2 Installed software and services (software)
 
@@ -443,7 +448,7 @@ IDs are stable so a site file can reference them. "Expected" is what a healthy i
 | D2-05 | Timers | `systemctl list-timers 'stayconnect-*'` | `backup-cleanup` and `hotel-admin-cert-renew` scheduled |
 | D2-06 | No failed units | `systemctl --failed; bash /opt/stayconnect/deploy/scripts/check-appliance-units.sh` | none failed; script exit 0 |
 | D2-07 | Production build profile | `journalctl -u stayconnect-scd -b --no-pager \| grep -m1 'build=production'` | one line (the provisioner requires it) |
-| D2-08 | Binary provenance | `cat /opt/stayconnect/DEPLOYED_BINARIES.sha256; sha256sum /opt/stayconnect/bin/*; for b in scd edged netd; do grep -aom1 'vcs.revision=[0-9a-f]*' /proc/$(systemctl show -p MainPID --value stayconnect-$b)/exe; done` | the recorded sha256 match the files; the **running** processes embed the release commit; `RELEASE.json` names the same commit |
+| D2-08 | Binary provenance | `cat /opt/stayconnect/DEPLOYED_BINARIES.sha256; sha256sum /opt/stayconnect/bin/*; for b in scd edged netd; do grep -aom1 'vcs.revision=[0-9a-f]*' /proc/$(systemctl show -p MainPID --value stayconnect-$b)/exe; done; jq -r .source_commit /opt/stayconnect/RELEASE.json` | the recorded sha256 match the files; the **running** processes embed the release commit; `RELEASE.json` names the same commit |
 | D2-09 | Sockets and modes | `stat -c '%a %U:%G %n' /run/stayconnect/scd.sock /run/stayconnect/netd.sock /run/kea/kea4-ctrl-socket` | scd `660 root:stayconnect-scd`; netd `660 root:stayconnect`; Kea socket exists after C.6 |
 | D2-10 | Loopback-only services | `ss -ltn \| grep -E ':(8090\|3100\|9101\|5432\|6379)'` | each bound to `127.0.0.1` |
 | D2-11 | Portal listeners | `ss -ltn \| grep -E ':(8380\|8343)'` | both present (`*`) |
@@ -456,7 +461,7 @@ IDs are stable so a site file can reference them. "Expected" is what a healthy i
 | D2-18 | Admin Console certificate | `echo \| openssl s_client -connect <WAN-IP>:443 -servername hotel.stayconnect.local 2>/dev/null \| openssl x509 -noout -subject -ext subjectAltName` | SAN = `hotel.stayconnect.local` and the WAN IP |
 | D2-19 | Admin Console answers | `curl -ksS -o /dev/null -w '%{http_code}\n' https://<WAN-IP>/` and `curl -ksS https://<WAN-IP>/api/edge/v1/health` | `200`/`307` to `/login`; JSON from edged |
 | D2-20 | Admin Console release identity | `cat /opt/stayconnect/hotel-admin/hotel-admin-release.json \| jq '{source_commit,build_id,source_state}'` | your commit, `clean` |
-| D2-21 | Logs show no crash loop | `journalctl -p err -b --no-pager \| tail -50` | no repeating errors; `systemctl show -p NRestarts stayconnect-scd stayconnect-netd` small |
+| D2-21 | Logs show no crash loop | `journalctl -p err -b --no-pager \| tail -50` | no repeating errors; `systemctl show -p NRestarts stayconnect-scd stayconnect-netd` small. One `caddy : user NOT in sudoers` line per boot is Caddy declining to add its local root to the OS trust store — harmless. `dhclient … /tmp/<name>.lease` lines come from a namespace test client: remove it (D.3c) |
 
 ### D.3 Database and security boundary (software)
 
@@ -486,14 +491,15 @@ IDs are stable so a site file can reference them. "Expected" is what a healthy i
 | D3b-03 | mTLS certificate | `/etc/stayconnect/certs/client.crt` exists; `openssl x509 -in … -noout -dates -issuer` valid, issued by the appliance Intermediate |
 | D3b-04 | Licence | `/etc/stayconnect/license/current.json`; page shows Active with the sold modules and max clients |
 | D3b-05 | Hello | Central shows the appliance **connected** within 5 min |
-| D3b-06 | Local-first | `bash scripts/central-outage-local-first-test.sh` (run as root; **blackholes Central, signs a voucher in and asserts a real session row**) — *only on a test appliance that you may disturb* |
+| D3b-06 | Local-first (*only on a test appliance that you may disturb*) | `C=$(getent hosts <central-name> \| awk '{print $1; exit}'); ip route add blackhole $C/32` → wait until *Appliance & licence* shows Central unreachable → `bash /opt/stayconnect/scripts/client-journey-netns-test.sh lf1 <voucher>` → `ip route del blackhole $C/32; bash /opt/stayconnect/scripts/client-journey-netns-test.sh --remove lf1` | while Central is unreachable the licence stays Active and the Client passes the whole journey; after the route is removed Central shows **connected** again **[VM]** |
 
 ### D.3c Client network and Client journey (software, with a test client)
 
 Use a laptop or phone on the Client network, **or** the namespace client shipped in the release — **test appliances only** (it plugs a veth into the Client bridge and consumes a voucher):
 
 ```bash
-bash /opt/stayconnect/scripts/client-journey-netns-test.sh cj1 <voucher-code>     # → "client-journey cj1: 12 passed, 0 failed"
+bash /opt/stayconnect/scripts/client-journey-netns-test.sh cj1 <voucher-code>     # → "client-journey cj1: 12 passed, 0 failed" (13 with socat)
+bash /opt/stayconnect/scripts/client-journey-netns-test.sh --remove cj1            # afterwards: namespace, veth and its dhclient
 ```
 
 It covers D3c-04…07 (DHCP, DNS, portal interception, HTTPS blocked before sign-in, captive probe, voucher sign-in, entitlement, nft + tc enforcement, Internet, accounting). Use a **test voucher** from a **Free** package.
@@ -566,7 +572,7 @@ keys (E.3).
 
 ### E.2 Reading failures — where the evidence is
 
-See Appendix 2 for the log map. First look at: `systemctl --failed`, `journalctl -b -u stayconnect-<unit>`, Admin Console *Diagnostics* (`/health`), the *Config history* page for network revisions, `netd recover status`, `docker logs stayconnect-pg`, and Central's console *Appliances* entry (state, last seen).
+See Appendix 2 for the log map. First look at: `systemctl --failed`, `journalctl -b -u stayconnect-<unit>`, Admin Console *Diagnostics* (`/health`), the *Config history* page for network revisions, `/opt/stayconnect/bin/netd recover status`, `docker logs stayconnect-pg`, and Central's console *Appliances* entry (state, last seen).
 
 ### E.3 Reinstall and factory-clean
 
@@ -593,7 +599,7 @@ The product's own backup writes an encrypted copy of `/etc/stayconnect` (`etc-<s
 `deploy/scripts/restore-appliance-config.sh` (Case 2). Keep the files of a backup together, **off the appliance**: `db-<stamp>.sql.gz.age`, its
 `.verified` and `.meta.json`, and `etc-<stamp>.tgz.age`.
 
-**Case 1 — restore into the same, healthy appliance (supported; drill-tested by `scripts/ledger-restore-drill.sh`):** Admin Console → *Backups* → choose the backup → *Restore* (password + typed backup name + holder key). The product loads the dump into a **staging** database, replays the erasure ledger there, quiesces edged/pmsd/acctd/portald, swaps databases, reinstates privileges, registers hypertables and enters **financial-recovery mode** (money movement held until an operator reconciles). Command line equivalent: `scd backup-restore --name <backup> --identity-file <holder-private-key>`. Allow up to ~2 h 15 min. The previous database is kept (`stayconnect_site_before_…`) for 14 days. **[VM]**: a restore on the test appliance brought the voucher count back to the backup's (8 → 6), kept both hypertables, `APPLIANCE_UNITS = PASS`, and a new Client then passed the full journey; the appliance entered financial-recovery mode as designed.
+**Case 1 — restore into the same, healthy appliance (supported; drill-tested by `scripts/ledger-restore-drill.sh`):** Admin Console → *Backups* → choose the backup → *Restore* (password + typed backup name + holder key). The product loads the dump into a **staging** database, replays the erasure ledger there, quiesces edged/pmsd/acctd/portald, swaps databases, reinstates privileges, registers hypertables and enters **financial-recovery mode** (money movement held until an operator reconciles). Command line equivalent: `set -a; . /etc/stayconnect/scd.env; set +a; /opt/stayconnect/bin/scd backup-restore --name <backup> --identity-file <holder-private-key>`. Allow up to ~2 h 15 min. The previous database is kept (`stayconnect_site_before_…`) for 14 days. **[VM]**: a restore on the test appliance brought the voucher count back to the backup's (8 → 6), kept both hypertables, `APPLIANCE_UNITS = PASS`, and a new Client then passed the full journey; the appliance entered financial-recovery mode as designed.
 
 **Case 2 — rebuild the machine but keep the same identity and data** — **[SELFTEST]**, not yet run end to end on a VM (Appendix 3, A3.5); obtain Product-Owner/vendor sign-off before doing it to a production appliance — **[PO]**:
 
@@ -622,6 +628,13 @@ The product's own backup writes an encrypted copy of `/etc/stayconnect` (`etc-<s
 ### E.5 Upgrades (appliance) — **[VM]**
 
 Always: take a **manual backup** first (it also proves a backup key holder exists — without one every migration refuses), and schedule a window.
+Admin Console → *Backups* → *Back up now*, or as root:
+
+```bash
+set -a; . /etc/stayconnect/scd.env; set +a
+/opt/stayconnect/bin/scd backup-now --reason "before upgrading to <new-sha12>"   # → "… encrypted and proven restorable"
+```
+
 Then build the new release (B.1), copy it to the VM, and:
 
 ```bash
@@ -635,7 +648,7 @@ and never migrated since, `/etc/stayconnect/schema-baseline`; each pending migra
 (`gatep-reconcile.sh --expect-commit <release commit>`, hash-guarded against the installed release's `RELEASE.json` + `SHA256SUMS`, one
 transaction) → install the binaries with `install(1)`, keeping each old one as `<bin>.bak-<stamp>` → install units → restart in dependency order
 (`netd`, `scd`, `acctd`, `portald`, `edged`, and `pmsd` if enabled) → install the Admin Console → record the release → `check-appliance-units.sh`.
-**If a migration or the reconcile fails, the binaries are not replaced.** The last lines print the exact binary-rollback command.
+**If a migration or the reconcile fails, the binaries are not replaced.** Before step 8 it prints the exact binary-rollback command — copy it into your log.
 
 Measured: an upgrade with no pending migration took ~25 s; a signed-in Client stayed online across it; identity, certificate and `.dsn` were
 unchanged. `apply-pending-migrations.sh --list` prints the pending set without changing anything.
@@ -650,7 +663,7 @@ unchanged. `apply-pending-migrations.sh --list` prints the pending set without c
 |---|---|
 | Binaries | the command `--upgrade` printed: `bash /opt/stayconnect/scripts/binary-rollback.sh --bin-dir /opt/stayconnect/bin --source-suffix .bak-<stamp> --unit scd=stayconnect-scd --unit edged=stayconnect-edged --unit netd=stayconnect-netd --unit portald=stayconnect-portald --unit acctd=stayconnect-acctd` (add `--dry-run` first). Verifies the sha256 on disk **and** `/proc/<pid>/exe` — "healthy" is not "rolled back". **[VM]**: `BINARY_ROLLBACK = PASS`, the Client stayed online. Roll forward again with `appliance-install.sh --upgrade` from the newer release. A rollback is safe only across releases with the same schema — after a migration, restore the pre-change backup instead |
 | Admin Console | `deploy-hotel-admin.sh rollback` (uses the explicit `.previous` pointer) |
-| A Client-network change | automatic within 120 s if unconfirmed; after confirmation there is no rollback of an *active* revision — apply a new change, or `netd recover reassert-confirmed` to re-assert the last confirmed state |
+| A Client-network change | automatic within 120 s if unconfirmed; after confirmation there is no rollback of an *active* revision — apply a new change, or `/opt/stayconnect/bin/netd recover reassert-confirmed` to re-assert the last confirmed state |
 | A WAN/LAN change | automatic within 120 s if unconfirmed |
 | A migration | `edge-migrate.sh --down --only <head-version> … --ack-down I_UNDERSTAND_LIVE_SITE_DOWN_MIGRATION --expect-sha256 <sha of .down.sql>` — head of the ledger only, role with ledger `DELETE` (`iam_v2_rollback`); some downs refuse or restore structure only. Prefer **restore from the pre-change backup** |
 | Everything | restore the pre-change backup (E.4 Case 1) |
@@ -727,7 +740,7 @@ Failure modes: wrong `--mode`; a repository checkout instead of a release; check
 1. **Export** the identity-bearing set: `bash deploy/scripts/central-export.sh --out <encrypted media>` (passphrase ≥ 12 characters; read-back verified). It is the **most sensitive file in the product**: it holds every key a fleet pins. Store the passphrase separately.
 2. **Move the appliance Root CA key to cold storage** (`/etc/stayconnect/pki-offline/root-ca.key`) and delete it from the host once the offline copy is confirmed (`docs/CA_CEREMONY_RUNBOOK.md`). Never regenerate the Root.
 3. **Publish `FINGERPRINTS.txt` out of band** (vendor key id, assignment key id, registry root key id, Root CA and TLS CA fingerprints). Appliance installers compare against it (B.5).
-4. Create `/etc/stayconnect/backup-recipients.txt` (age public keys of the people who may restore) and re-run `bash /opt/stayconnect/central/tooling/central-backup.sh --reason first` (path per your install) so backups become encrypted.
+4. Create `/etc/stayconnect/backup-recipients.txt` (age public keys of the people who may restore) and re-run `bash /opt/stayconnect/central/tooling/deploy/scripts/central-backup.sh --reason first` so backups become encrypted.
 5. Give the three public trust files (`vendor-license.pub`, `assignment-registry-root.pub`, `central-tls-ca.crt`) and `FINGERPRINTS.txt` to whoever installs appliances: they are the `--trust-dir` of B.4/B.5.
 6. Enable operator **two-step sign-in** for platform accounts (*Account → Security*); create named operators; retire the seeded admin if it is a shared account.
 7. Portal certificates (optional): *System → Portal certificates* — Cloudflare API token, ACME contact, staging first, then production and CAA. **[PO]** for the token and zone.
@@ -740,17 +753,24 @@ Failure modes: wrong `--mode`; a repository checkout instead of a release; check
 | F-01 | `systemctl is-active stayconnect-ctrlapi stayconnect-cloud-admin stayconnect-caddy docker` | all `active`; `caddy.service` masked |
 | F-02 | `ss -ltnup` | `127.0.0.1:8080` ctrlapi, `*:9443` ctrlapi, `127.0.0.1:3000` console, `*:443` caddy, `127.0.0.1:5432/6379` containers, `:22` |
 | F-03 | `docker ps` | `sc-central-pg … timescaledb:2.16.1-pg16 healthy`, `sc-central-redis … redis:7-alpine healthy` |
-| F-04 | `bash deploy/scripts/central-preflight.sh` | all PASS (keys present and 0600, vendor key 64 bytes, assignment key ≠ vendor key, chain valid, schema complete) |
-| F-05 | `bash /opt/stayconnect/central/tooling/central-deploy.sh smoke` | `/readyz` sign-in available, `/login` 200, console assets, `/metrics` **not** exposed, `:9443` certificate verifies |
+| F-04 | `T=/opt/stayconnect/central/tooling/deploy/scripts; CENTRAL_ENDPOINT_CONFIG=/etc/stayconnect/central-endpoint.env bash $T/central-preflight.sh --pg-exec "docker exec -i sc-central-pg" --db stayconnect` (the variable matters on a Central installed with `--endpoint-config`: without it the check compares against the release's default name and FAILs) | `READY`, all PASS (keys present and 0600, vendor key 64 bytes, assignment key ≠ vendor key, chain valid, schema complete) |
+| F-05 | `bash $T/central-deploy.sh smoke` | `/readyz` sign-in available, `/login` 200, console assets, `/metrics` **not** exposed, `:9443` certificate verifies |
 | F-06 | `ufw status` | 22, 443, 9443 only |
 | F-07 | `ls -l /etc/stayconnect` | `vendor-license.key`, `assignment-signing.key`, `assignment-registry-root.key`, `operator-mfa.key`, `pki/` — keys `-rw-------`; `pki-offline/` empty after F.4-2 |
-| F-08 | `ls /opt/stayconnect/central/appliance-trust/` | the three public files + `FINGERPRINTS.txt` |
+| F-08 | `ls /opt/stayconnect/central/appliance-trust/` | `vendor-license.pub`, `assignment-registry-root.pub`, `central-tls-ca.crt`, `appliance-root-ca.crt` + `FINGERPRINTS.txt` |
 | F-09 | `systemctl list-timers 'stayconnect-*'` | central-backup (daily ~02:15) and backup-cleanup |
-| F-10 | `central-migrate.sh status` | 56 applied, no checksum mismatch |
+| F-10 | `bash $T/central-migrate.sh --pg-exec "docker exec -i sc-central-pg" --db stayconnect status` | `56 applied, 0 pending, 0 modified` |
 
 ### F.6 Upgrade, rollback, move and restore of Central
 
-* **Upgrade**: build a new release (F.2), ship, then `bash <release>/deploy/scripts/central-deploy.sh deploy --release <release>`. It verifies, renders and validates the Caddyfile, takes a pre-deploy dump, stops ctrlapi, migrates, installs, polls `/readyz`, switches the console and smokes. **The database is not rolled back** on failure (migrations are forward-only) — the pre-deploy dump is your way back. A changed `central-infra.yml` is reported, never auto-applied.
+* **Upgrade**: build a new release (F.2), ship, then `bash <release>/deploy/scripts/central-deploy.sh deploy --release <release>`. **[VM]** It verifies, renders and validates the Caddyfile, takes a pre-deploy dump, stops ctrlapi, migrates, installs, polls `/readyz`, switches the console and smokes. **The database is not rolled back** on failure (migrations are forward-only) — the pre-deploy dump is your way back. A changed `central-infra.yml` is reported, never auto-applied — apply it yourself in a window (it recreates only the containers whose definition changed; Redis keeps nothing, so staff are signed out). **[VM]**
+  ```bash
+  C=/opt/stayconnect/central/compose/central-infra.yml; diff $C <release>/deploy/compose/central-infra.yml
+  cp -a $C $C.bak-$(date -u +%Y%m%dT%H%M%SZ); install -m 0644 <release>/deploy/compose/central-infra.yml $C
+  docker compose -p stayconnect-central -f $C up -d redis        # name only the changed service; never `down -v`
+  ```
+  **Every Central installed before `05481cb5` must apply this once** (finding R1, A3.7): its Redis cannot restart, so the first reboot leaves
+  Central down. If that already happened, apply the file first (Redis comes back and ctrlapi recovers by itself), then `deploy`.
 * **Rollback of binaries**: `central-deploy.sh rollback` (previous ctrlapi `.bak`, previous console, previous tooling).
 * **Move to a new host (same identity; appliances need no change if the DNS name is unchanged)**: on the old host `central-export.sh --final` (stops and **disables** ctrlapi, console, Caddy so it can never issue again) → on the new host `central-install.sh --mode restore --bundle <file>.tar.gz.enc [--extra-names <ip>] --yes` → compare `FINGERPRINTS.txt` → switch DNS → leave the old host stopped. Restore only into an **empty** database; same TimescaleDB version; the marker `central-restored-from.json` makes a re-run safe. The 2026-09-27 move from `150.0.0.252` to `172.21.96.196` followed this path.
 * **Database-only restore**: stop ctrlapi and console; recreate the database; `CREATE EXTENSION timescaledb`; `timescaledb_pre_restore()`; `age -d` the dump with a recipient's private key (never kept on Central); `pg_restore`; `timescaledb_post_restore()`; verify hypertables; `central-deploy.sh rollback` for a matching binary. **Never `pg_restore --clean`.**
@@ -789,7 +809,7 @@ DSNs are `postgres://<svc_role>:<password>@127.0.0.1:5432/stayconnect_site?sslmo
 | Operator actions | Admin Console *Activity* (`audit_log`) |
 | Client sign-in refusals | **Not on screen by design** — Admin Console *Guest sign-in attempts* / *Guest sign-in checks*, scd/portald logs |
 | Health | Admin Console *Diagnostics*; `check-appliance-units.sh --json` |
-| Netd recovery | `netd recover status` · `netd recover reassert-confirmed` |
+| Netd recovery | `/opt/stayconnect/bin/netd recover status` · `… recover reassert-confirmed` (the product binaries are not on `PATH`) |
 | Central | Central console *Appliances* (state, last seen), *Activity*, *Backup health*; `journalctl -u stayconnect-ctrlapi` |
 
 ### A2.2 Symptom table
@@ -805,10 +825,11 @@ DSNs are `postgres://<svc_role>:<password>@127.0.0.1:5432/stayconnect_site?sslmo
 | Activated, no licence | vendor key not pinned (offline) or licence fetch failing | `ls /etc/stayconnect/vendor-license.pub`; scd log; Central *Licenses* |
 | "Wrong hardware" licence | disk cloned/moved to other hardware | Central Replace hardware / Rebind WAN MAC |
 | Central deleted the appliance | unknown ≥ 3 times over ≥ 10 min | blank-disk reinstall (E.3) |
+| Central down after a reboot or a Redis restart: `docker logs sc-central-redis` shows `can't create /tmp/redis-auth.conf: Permission denied`; ctrlapi logs `redis ping failed` | a Central compose file older than `05481cb5` (finding R1) | apply the current `central-infra.yml` (F.6); ctrlapi recovers when Redis is healthy |
 | Admin Console 502 | Next server not running / no release | `systemctl status stayconnect-hotel-admin`; `ls -l /opt/stayconnect/hotel-admin`; re-run the installer (step 6) |
 | Cannot sign in | no operator / wrong password / locked (5 failures → 15 min) | `create-first-admin.sh --email <same> --reset` sets a new password and clears the lock |
 | Network apply "rolled back" | a health check failed — `portal_listen` (portald down), `kea_running` (Kea not bound: bridge not up), `gateway_up`, `mgmt_reachable`, `portal_address` | *Config history* → the revision's events; fix; apply again |
-| Apply says busy/blocked | another change in flight, or an incomplete rollback marker | wait / `netd recover status` → `reassert-confirmed` |
+| Apply says busy/blocked | another change in flight, or an incomplete rollback marker | wait / `/opt/stayconnect/bin/netd recover status` → `reassert-confirmed` |
 | Confirm says "not applied" | netd restarted inside the window | roll back and apply again |
 | Clients get no DHCP | ESXi LAN portgroup security not Accept ×3; wrong VLAN; Kea not listening | D4-01; `ss -ulnp \| grep ':67'`; Kea log |
 | Lease but no portal | DNAT/portal not listening; Chrome silent drop of 443 is by design | `nft list chain inet stayconnect prerouting_nat`; `ss -tlnp \| grep 838` |
@@ -902,6 +923,9 @@ clean run.
 * **Case 2 (rebuild with the same identity)** — `restore-appliance-config.sh` is self-tested (10/10) but was **not** run end to end on a VM:
   appliance 1's VM was decommissioned before it could be rebuilt, and a different VM is different hardware (a licence mismatch by design).
 * Offline activation, PMS, payments, social login, SMS/WhatsApp/email delivery, tagged VLANs on a physical switch, real devices (D.4): not exercised.
+* A **fresh install of the final release on a blank VM** was not repeated (A3.7): it needs the test appliance's snapshot reverted, which
+  destroys its identity, and that reset was not authorised. The install path changed since the blank run only by F1, R1 and R2, each
+  validated on the running pair.
 * Client-to-Client isolation on one bridge is **not** an appliance function (A.3 item 4): two namespace Clients on one bridge could reach each other.
 
 ### A3.6 F1 correction — reinstall before activation (2026-10-27)
@@ -929,3 +953,26 @@ Regression tests (fail on the previous code, pass now): `control-plane/internal/
 (reinstall before activation; a request older than the identity against FetchCertificate, *Activate*, *Reissue* and the appliance's own CSR)
 and `data-plane/internal/appliancecert/stale_csr_test.go` (foreign certificate refused and replaced; no request flooding; reconcile;
 `store` writes nothing for a foreign key).
+
+### A3.7 Installer acceptance on the final release (2026-10-27)
+
+The same isolated pair, identities and data preserved (no reset): Central `central.onegate.getsemantics.com` (public `41.128.240.133` and
+`172.21.96.96` are the same host — same SSH host key and machine-id) and appliance `172.21.96.97`. Every command of Parts B–F was run as
+written; each one that did not work as written is corrected above (R3). Final releases: `onegate-appliance-28cfc9f4cf2f`,
+`onegate-central-05481cb57334` (the appliance code is identical at both commits; `05481cb5` adds only the Central compose fix R1).
+
+| Area | Result |
+|---|---|
+| Identity of the targets | Central and appliance reachable on 22/443 (and 9443); release provenance read back from `RELEASE.json`, `DEPLOYED.json` and `/proc/<pid>/exe` |
+| Part D (appliance) and F.5 (Central) | every check passes with the corrected commands; from the WAN only 22 and 443 answer |
+| Admin Consoles in a browser | Admin Console sign-in → *Appliance & licence*: Activated, licence valid, Central **Connected**; *Client networks* Ready. Central console → *Appliances*: the appliance Activated, **Connected** (a throwaway lab operator on each, removed afterwards) |
+| Upgrades | appliance `d799ff5f → 701157ed → 28cfc9f4` (27 s, 26 s; 0 pending migrations, `GATEP_RECONCILE = OK`, a pre-upgrade `scd backup-now` encrypted and proven restorable each time; identity, certificate, mTLS key, `.dsn`, data key and licence unchanged); Central `d799ff5f → 28cfc9f4 → 05481cb5` (14 s, smoke 9/9, encrypted pre-deploy dump) |
+| Client journey | `client-journey-netns-test.sh` **12/12** after each step below; isolation from a signed-in Client: Admin Console, SSH, `:5432`, `:3100`, `:8090` and Central all unreachable; operator *Disconnect* → nft element gone, Internet stopped within 4 s; `--remove` leaves no namespace, veth or `dhclient` |
+| Central outage (D3b-06) | Central blackholed: the appliance reported it unreachable, the licence stayed valid, a new Client **12/12**; route removed → Central **connected** again after 11 s |
+| Installer re-run | 46 s, **0 of 27** files under `/etc/stayconnect` changed, administrator unchanged |
+| Admin refusal (R2) | a re-run naming a second administrator stopped with exit 1, resume marker kept; the original command then completed and cleared it |
+| Rollback | appliance `BINARY_ROLLBACK = PASS` to `701157ed` and `deploy-hotel-admin.sh rollback`, then `--upgrade` forward (28 s) — a signed-in Client online throughout; Central `central-deploy.sh rollback` to `d799ff5f` (smoke PASS) and deploy forward |
+| Appliance reboot | all units, Kea and Unbound active; confirmed network revision unchanged; licence valid; Central connected; both pre-reboot sessions re-authorised in nft; a new Client 12/12 |
+| Central reboot | **found R1**: Redis restart-looped (`can't create /tmp/redis-auth.conf`), ctrlapi with it, the appliance saw Central unreachable. Fixed (`05481cb5`), applied with the F.6 compose step: two Redis restarts healthy, a second reboot → every service back, smoke PASS, 0 Redis failures, the appliance reconnected |
+
+Not repeated here: a blank-VM install of the final release (A3.5), offline activation, and the D.4 witness items.

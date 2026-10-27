@@ -262,10 +262,10 @@ PY
   step "7. first administrator"
   if [ -n "$ADMIN_EMAIL" ]; then
     args=(--email "$ADMIN_EMAIL"); [ -n "$ADMIN_PWFILE" ] && args+=(--password-file "$ADMIN_PWFILE")
-    if ! bash "$SC/deploy/scripts/create-first-admin.sh" "${args[@]}"; then
-      say "NOTE: no administrator was created (above). Create one later with:"
-      say "      bash $SC/deploy/scripts/create-first-admin.sh --email <email>"
-    fi
+    # A box nobody can sign in to is not installed: stop here (the in-progress marker stays, so the same command
+    # resumes once the cause above is fixed — e.g. a password under 12 characters, or another administrator exists).
+    bash "$SC/deploy/scripts/create-first-admin.sh" "${args[@]}" \
+      || die "the first administrator was not created (reason above). Fix it and run the same command again; it resumes here."
   else
     say "no --admin-email: create the first administrator with  bash $SC/deploy/scripts/create-first-admin.sh --email <email>"
   fi
@@ -304,4 +304,4 @@ for u in stayconnect-scd stayconnect-edged stayconnect-netd stayconnect-portald 
   printf '  %-30s %s\n' "$u" "$(systemctl is-active "$u" || true)"
 done
 say "installed release $COMMIT"
-say "next: Central -> Appliances -> Activate this appliance; then Admin Console -> Network -> Client networks."
+[ "$UPGRADE" = 1 ] || say "next: Central -> Appliances -> Activate this appliance; then Admin Console -> Network -> Client networks."

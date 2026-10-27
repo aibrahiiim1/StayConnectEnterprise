@@ -76,13 +76,18 @@ services:
       - -c
       - |
         set -e
+        # NOT /tmp: it is sticky and world-writable, and with the host's fs.protected_regular=2 (Ubuntu's default) not
+        # even root may re-open there a file another user owns. The file left by the previous start (owned by redis)
+        # refused every restart of this container, so after a reboot Redis -- and ctrlapi, which needs it -- never came
+        # back. A root-owned 0755 directory has no such rule; the file itself stays 0600 redis.
+        install -d -m 0755 -o root -g root /usr/local/etc/redis
         umask 077
-        printf 'requirepass "%s"\n' "$$(tr -d '\r\n' < /run/secrets/redis_password)" > /tmp/redis-auth.conf
-        chown redis:redis /tmp/redis-auth.conf
+        printf 'requirepass "%s"\n' "$$(tr -d '\r\n' < /run/secrets/redis_password)" > /usr/local/etc/redis/auth.conf
+        chown redis:redis /usr/local/etc/redis/auth.conf
         # NO PERSISTENCE (GDPR final audit): Redis holds staff sessions (email, name, roles) and sign-in counters. A
         # file would keep an expired or signed-out session's payload after the staff account is anonymised. A restart
         # signs everyone out and resets the counters, which is the price of keeping no copy.
-        exec docker-entrypoint.sh redis-server /tmp/redis-auth.conf --appendonly no --save "" --loglevel warning
+        exec docker-entrypoint.sh redis-server /usr/local/etc/redis/auth.conf --appendonly no --save "" --loglevel warning
     ports:
       - "127.0.0.1:6379:6379"
     volumes:

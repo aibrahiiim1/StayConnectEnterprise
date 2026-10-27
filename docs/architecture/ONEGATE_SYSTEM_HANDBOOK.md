@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Authoritative current-state reference (not a historical snapshot) |
-| **Reviewed against** | `master` at `7e4686ae56a229ef05460e02675d1d17924f8c9c` (2026-10-26); install path (sections 7.5, 16, 22–24) updated by the fresh-VM installer mission, 2026-10-27; certificate enrollment (section 9.3, finding F1) corrected 2026-10-27 |
+| **Reviewed against** | `master` at `7e4686ae56a229ef05460e02675d1d17924f8c9c` (2026-10-26); install path (sections 7.5, 16, 22–24) updated by the fresh-VM installer mission, 2026-10-27; certificate enrollment (section 9.3, finding F1) corrected 2026-10-27; installer acceptance on the test pair (R1–R3, manual A3.7) 2026-10-27 |
 | **Fresh-VM validation** | A new Central and a new appliance on VMware ESXi / Ubuntu 22.04.5, isolated from PRE-LIVE and the production Central, 2026-10-27 — labelled **[VM]** (installation manual Appendix 3) |
 | **Live environments inspected (read-only)** | PRE-LIVE appliance `172.21.60.25` and OneGate Central `172.21.96.196`, 2026-10-26 |
 | **Companion documents** | [Fresh VM Installation & Configuration Manual](../runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md) · [Machine-readable inventory](../inventory/onegate-components.json) |
@@ -1234,6 +1234,9 @@ mission closed them in code and proved the result on a fresh VM pair (manual App
 | new | live-site migrations needed a ledger grant made only by hand on PRE-LIVE | `gatep-iam-roles.sql` grants `iam_v2_owner` `SELECT, INSERT` on `public.schema_migrations` |
 | new | Gate-P reconcile refused an installed release (no `.git`) | `gatep-reconcile.sh` verifies the release's `RELEASE.json` + `SHA256SUMS` |
 | F1 | a waiting appliance reinstalled before activation got the previous installation's CSR signed at *Activate* (certificate for a key nobody holds; `client keypair: tls: private key does not match public key`) | Central voids a replaced identity's pending requests and never reports or signs a request older than the current identity; the appliance refuses a foreign certificate and files its own (section 9.3). **[VM]** reinstall before activation on the test pair converged with no *Reissue certificate* (manual A3.6) |
+| R1 | **Central never came back after a reboot**: the Redis entrypoint re-created `/tmp/redis-auth.conf`, which Ubuntu's `fs.protected_regular=2` forbids even root to do over a file another user owns in a sticky directory; Redis restart-looped and ctrlapi (which pings Redis at start) with it | the auth file lives in a root-owned `/usr/local/etc/redis/` (`deploy/compose/central-infra.yml`). An existing Central applies the changed compose file once (manual F.6). **[VM]** two container restarts and a reboot of the test Central: all services back, smoke PASS, the appliance reconnected |
+| R2 | `appliance-install.sh` reported `installed release` although the first administrator was refused (short password, another administrator) — a box nobody can sign in to | a refusal stops the install with the resume marker kept; the same command resumes. **[VM]** |
+| R3 | the manual's verification commands did not all run as written (Central tooling paths, `central-migrate` and preflight arguments, `RELEASE.json` key, bare `netd`/`scd`, B.3/B.4 order, D1-08 expectation, a Central-outage script that named the production Central and a dev account); the Client test left its `dhclient` running | every command corrected and re-executed on the test pair (manual A3.7); `client-journey-netns-test.sh --remove`; D3b-06 rewritten on the shipped Client test |
 
 Still open, by design: **G9** (`pmsd` and the PMS flags stay off until a PMS is commissioned — manual C.10), **G12** (hostname and WAN netplan are
 the operator's), **G15** (no observability stack, no HA).

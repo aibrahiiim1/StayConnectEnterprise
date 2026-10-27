@@ -1,0 +1,34 @@
+{
+  "transition_id": "T0260",
+  "seq": 260,
+  "timestamp": "2026-10-27T20:15:52Z",
+  "timestamp_derivation": "Computed from the workstation clock after the acceptance on the test pair finished, and before the commit that introduces this receipt.",
+  "record_type": "INSTALLER_ACCEPTANCE",
+  "authorisation": "The Product Owner's mission of 2026-10-27 'Finalize and verify OneGate's fresh installation process', scoped to the test Central 41.128.240.133 and the test appliance 172.21.96.97: review the installer, manual, configuration, activation and end-to-end acceptance, fix confirmed gaps, update documentation, test and complete protected delivery. It does NOT authorise a destructive reset, a Root CA change, any PRE-LIVE or production change, or Go-Live.",
+  "context": "The fresh-VM installer (PR #256, 5b4c5c67) and the F1 enrollment correction (PR #257, 701157ed, T0259) were merged earlier the same day. This receipt records executing the installation manual end to end against the final release on the same test pair, and the three findings that run produced.",
+  "root_cause": "R1: Central's Redis entrypoint re-created /tmp/redis-auth.conf; with fs.protected_regular=2 even root may not re-open a file another user owns in a sticky directory, so every Redis restart after the first failed and ctrlapi restart-looped: a Central never came back after a reboot. R2: appliance-install.sh reported success although the first administrator was refused. R3: several of the manual's verification and recovery commands did not run as written.",
+  "validation_environment": "Isolated test pair, never connected to PRE-LIVE 172.21.60.25 or the production Central 172.21.96.196: Central central.onegate.getsemantics.com (41.128.240.133 and 172.21.96.96 are the same host: same SSH host key and machine-id), release onegate-central-05481cb57334; appliance 172.21.96.97, release onegate-appliance-28cfc9f4cf2f. No reset; identities, certificates and data preserved.",
+  "verification": "Manual Part D and F.5 pass with the corrected commands; both consoles signed in through a browser (Activated, licence valid, Central connected). Appliance upgrades d799ff5f -> 701157ed -> 28cfc9f4 (0 pending migrations, GATEP_RECONCILE OK, pre-upgrade backup encrypted and proven restorable, identity unchanged); Central d799ff5f -> 28cfc9f4 -> 05481cb5 (smoke 9/9). Client journey 12/12 after each step; isolation from a signed-in Client; operator disconnect; Central outage (licence valid, a new Client 12/12, reconnected 11 s after the route returned); installer re-run 0 of 27 files changed; a refused second administrator stops the install and the same command resumes; binary and console rollback and roll-forward with a Client online; Central rollback and roll-forward; appliance reboot (revision unchanged, sessions re-authorised, a new Client 12/12); Central reboot found R1, fixed and proven by two Redis restarts and a second reboot. Evidence: manual A3.7.",
+  "follow_up": "A blank-VM install of the final release was not repeated: it needs the test appliance's snapshot reverted, a destructive reset this mission did not authorise. The production Central carries the pre-R1 compose file and would not come back from a reboot until it applies the current central-infra.yml (manual F.6) -- a separate Product-Owner decision. Offline activation and the D.4 witness items remain unexercised.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0259."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "base": "701157ed57c5182f0333be5d63fefec7a570c058",
+  "base_note": "Master after the merge of PR #257.",
+  "head": "daf0e04a",
+  "head_note": "The last content commit of branch fix/installer-acceptance. Governance commits follow it.",
+  "previous_delivery": "T0259",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}
