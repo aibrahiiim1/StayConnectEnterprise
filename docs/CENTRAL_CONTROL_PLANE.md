@@ -97,7 +97,10 @@ power on ──► appliance registers itself (signed, hardware-bound, no token)
   presented hardware fingerprint equals the one Central recorded for that row. Anything else — another fingerprint,
   none, or no recorded fingerprint — is refused `403 identity_replacement_refused`, raises one
   `identity_replacement_refused` security alert (repeats within 24 h fold into it), and is audited; an accepted
-  replacement is audited `appliance.identity_replaced` and the old key is retired. The way out for a genuine box is
+  replacement is audited `appliance.identity_replaced` and the old key is retired. The previous installation's pending
+  certificate requests are voided in the same transaction (`csr_voided`; the audit counts them as
+  `voided_certificate_requests`): they carry an mTLS key that no longer exists. Central reports and signs only requests
+  filed by the current identity (at or after `registered_at`). The way out for a genuine box is
   to delete the waiting record; it then registers as new.
 * **A retired appliance that registers again** (factory reset, new key) becomes a **new appliance row**. The retired row
   keeps its customer, licence history, audit trail and alerts; none of it is shown on the new row

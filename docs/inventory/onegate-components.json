@@ -60,8 +60,8 @@
     "sockets": 5,
     "appliance_to_central_endpoints": 12,
     "secret_files": 10,
-    "known_install_gaps": 5,
-    "resolved_install_gaps": 9
+    "known_install_gaps": 4,
+    "resolved_install_gaps": 10
   },
   "components": [
     {
@@ -1949,8 +1949,7 @@
     "G9 pmsd and the PMS surface flags stay off until a PMS is commissioned (by design; manual C.10)",
     "G12 hostname and WAN netplan are the operator's (by design)",
     "G15 no installer for observability/HA (not implemented)",
-    "G16 gatep-set-passwords.sh 'four roles' text (cosmetic)",
-    "F1 a waiting appliance reinstalled before activation gets the previous install's CSR signed at Activate (key mismatch); workaround Central 'Reissue certificate'; fix is a PO decision (enrollment)"
+    "G16 gatep-set-passwords.sh 'four roles' text (cosmetic)"
   ],
   "install_path_updated": "2026-10-27: fresh-VM installer mission (appliance-build.sh / appliance-install.sh), validated on a fresh VMware ESXi / Ubuntu 22.04.5 VM pair",
   "validation_environment": {
@@ -1987,6 +1986,7 @@
     "G7 -> install-service-units.sh installs drop-ins, overrides and polkit",
     "G10 -> provisioner writes the commerce + enforcement-plane profile and checks it",
     "G11 -> deploy-hotel-admin.sh RUN_USER",
-    "G14 -> restore-appliance-config.sh"
+    "G14 -> restore-appliance-config.sh",
+    "F1 -> Central voids a replaced identity's pending CSRs and signs only the current identity's; the appliance refuses a foreign certificate and files its own (d799ff5f; manual A3.6)"
   ]
 }

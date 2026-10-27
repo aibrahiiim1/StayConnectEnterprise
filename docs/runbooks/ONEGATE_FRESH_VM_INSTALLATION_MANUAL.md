@@ -801,7 +801,7 @@ DSNs are `postgres://<svc_role>:<password>@127.0.0.1:5432/stayconnect_site?sslmo
 | Upgrade stops: "… is not listed in the release's SHA256SUMS" / "differs from what release … shipped" | a Gate-P file in `/opt/stayconnect/deploy/gatep` was edited, or the tree is not the installed release | re-run `--upgrade` from an unmodified release |
 | Appliance never appears in Central | Central CA not installed, DNS/split-DNS, outbound 443 blocked | `journalctl -u stayconnect-scd \| grep -i regist`; `curl --cacert … https://<central>/readyz`; `ls /usr/local/share/ca-certificates/stayconnect-central-ca.crt` |
 | Appears, but never gets a Customer/Site after Activate | `assignment-registry-root.pub` missing (log: "no trusted registry and no root anchor - assignment agent disabled") | B.5; `install-assignment-root-anchor.sh --show`; restart scd |
-| Activated, licence Active, but never *connected*; scd logs `client keypair: tls: private key does not match public key` | the appliance was reinstalled before activation and Central signed the previous install's CSR (finding F1) | Central → appliance → *Reissue certificate* |
+| Activated, licence Active, but never *connected*; scd logs `client keypair: tls: private key does not match public key` (releases before `d799ff5f`) or `Central issued a certificate for a key this appliance does not hold` | the appliance was reinstalled before activation and Central signed the previous install's CSR (finding F1, fixed in `d799ff5f`: Central no longer signs such a request, and the appliance asks for its own) | upgrade Central and the appliance; on older releases Central → appliance → *Reissue certificate* |
 | Activated, no licence | vendor key not pinned (offline) or licence fetch failing | `ls /etc/stayconnect/vendor-license.pub`; scd log; Central *Licenses* |
 | "Wrong hardware" licence | disk cloned/moved to other hardware | Central Replace hardware / Rebind WAN MAC |
 | Central deleted the appliance | unknown ≥ 3 times over ≥ 10 min | blank-disk reinstall (E.3) |
@@ -857,7 +857,7 @@ Release **`onegate-appliance-52243660bb6f`** (commit `52243660`), appliance 2 re
 | Product profile | commerce flags in scd/portald/edged, enforcement plane in netd/acctd (`NETD_PHASE3_PRODUCER_UID=0`: acctd runs as root); `check-phase3-enforcement-plane.sh` OK |
 | Admin Console | dual-SAN certificate `hotel.stayconnect.local` + `172.21.96.97`; `https://172.21.96.97/` → 307 to sign-in |
 | Registration | self-registered, *waiting*, within seconds of the install |
-| Activation | Central *Replace hardware* on appliance 1's record, *Activate* appliance 2 at the same site → signed assignment applied (scd re-exec), licence **Active**, mTLS certificate, licence fetch cut over to `:9443`, Central **connected** — after one *Reissue certificate* (A3.5 finding F1) |
+| Activation | Central *Replace hardware* on appliance 1's record, *Activate* appliance 2 at the same site → signed assignment applied (scd re-exec), licence **Active**, mTLS certificate, licence fetch cut over to `:9443`, Central **connected** — after one *Reissue certificate* (A3.5 finding F1; fixed since, A3.6) |
 | Client network | factory network activated → apply (5/5 health checks) → confirm: revision 1 active, `br-g-03bdf735` 10.20.0.1/20, Kea and Unbound active |
 | Package + vouchers | plan `LAB-1H` (10/5 Mbit/s, 2 devices), Free package `LAB-FREE-1H`, vouchers issued |
 | **Client journey** (`client-journey-netns-test.sh`) | **12/12**: DHCP lease, DNS, HTTP intercepted to the portal, HTTPS blocked before sign-in, captive probe 302, voucher → `/success`, session **active**, entitlement **ACTIVE**, nft `phase3_auth_ipv4`, tc HTB class, **HTTPS 200 to the Internet**, accounting 0.9 MB |
@@ -894,15 +894,38 @@ clean run.
 
 ### A3.5 Findings outside the installer, and what was not exercised
 
-* **F1 — stale CSR after a reinstall before activation (Central/appliance enrollment).** Appliance 2's hardware registered three times
-  (each snapshot revert generated a new identity and mTLS key under the same hardware serial). Central kept the CSR of the **first** attempt
-  pending, and signed it on *Activate*; the appliance's current key did not match (`client keypair: tls: private key does not match public
-  key`) and, because Central reported its request as pending, it never sent a CSR for its own key. Recovered with the supported operator action
-  *Reissue certificate* (revokes, the appliance submits a CSR, Central auto-signs). The enrollment protocol is a controlled area, so the fix — Central
-  superseding the pending CSRs of a waiting appliance whose identity key changes, or the appliance re-submitting when an issued certificate
-  does not match its key — is a **Product-Owner decision**; until then: *if an appliance is reinstalled before it is activated and, after
-  Activate, does not reach* connected, *use* Reissue certificate.
+* **F1 — stale CSR after a reinstall before activation (Central/appliance enrollment) — FIXED, A3.6.** Appliance 2's hardware registered three
+  times (each snapshot revert generated a new identity and mTLS key under the same hardware serial). Central kept the CSR of the **first**
+  attempt pending and signed it on *Activate*; the appliance's current key did not match (`client keypair: tls: private key does not match
+  public key`) and, because Central reported its request as pending, it never sent a CSR for its own key. Recovered then with *Reissue
+  certificate*; corrected in `d799ff5f` and validated in A3.6.
 * **Case 2 (rebuild with the same identity)** — `restore-appliance-config.sh` is self-tested (10/10) but was **not** run end to end on a VM:
   appliance 1's VM was decommissioned before it could be rebuilt, and a different VM is different hardware (a licence mismatch by design).
 * Offline activation, PMS, payments, social login, SMS/WhatsApp/email delivery, tagged VLANs on a physical switch, real devices (D.4): not exercised.
 * Client-to-Client isolation on one bridge is **not** an appliance function (A.3 item 4): two namespace Clients on one bridge could reach each other.
+
+### A3.6 F1 correction — reinstall before activation (2026-10-27)
+
+Central upgraded with `central-deploy.sh` to `onegate-central-d799ff5fc737` (migrations unchanged at 56, smoke 9/9, encrypted pre-deploy
+dump); appliance 2 upgraded with `appliance-install.sh --upgrade` to `onegate-appliance-d799ff5fc737` (25 s, `APPLIANCE_UNITS = PASS`, five
+binaries embedding `d799ff5f`, its own certificate reloaded and mTLS verified). The reinstall was reproduced at the identity level on the
+running VM (no snapshot revert was available): `scd` stopped, the record retired on Central, then `identity/`, `certs/`, `assignment/` and
+`license/` moved aside (kept) twice, so the same hardware registered as installation A and then as installation B.
+
+| Step | Result |
+|---|---|
+| Installation A | registered as a new waiting record (`appliance.registered_after_retirement`), filed CSR A → `pending` |
+| Reinstall before activation (installation B) | same record adopted the new identity (`appliance.identity_replaced`, `voided_certificate_requests: 1`); CSR A → `rejected`, event `csr_voided`; Central answered `none`, so B filed **its own** CSR |
+| *Activate* (same customer and site) | signed **B's** request; A's stays rejected; certificate events `csr_submitted → csr_voided → csr_submitted → issued` |
+| Appliance | certificate public key = local `mtls-client.key` (sha256 prefix `a0393b95…` on both); "certificate acquired after waiting", "mTLS transport verified", licence fetch cut over to `:9443`; signed assignment applied (scd re-exec); licence **Active**; Central **connected**; **0** *Reissue certificate* actions |
+| Client | after a reboot, a new namespace Client **12/12** (voucher sign-in, session active, nft + tc, HTTPS 200, accounting) |
+
+Two effects of the identity-level shortcut, which a real reinstall (fresh site database and services) does not have: `acctd` and `netd`
+kept the previous appliance id until restarted, and `netd`'s activation journal named the previous appliance, so `netd` refused to authorise
+Clients (fail-closed) until the journal was moved aside; the site database's appliance mirror row also kept the previous id. Changing an
+appliance's identity under a running installation is not a supported path (a retired box is reinstalled), so these are recorded, not changed.
+
+Regression tests (fail on the previous code, pass now): `control-plane/internal/api/stale_csr_integration_test.go`
+(reinstall before activation; a request older than the identity against FetchCertificate, *Activate*, *Reissue* and the appliance's own CSR)
+and `data-plane/internal/appliancecert/stale_csr_test.go` (foreign certificate refused and replaced; no request flooding; reconcile;
+`store` writes nothing for a foreign key).
