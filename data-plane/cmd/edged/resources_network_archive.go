@@ -220,6 +220,29 @@ func (s *server) getDefaultReadiness(w http.ResponseWriter, r *http.Request) {
 
 	// PMS room sign-in. The routing of retired networks is kept on them, untouched. The Default Network's own policy is chosen by the operator under Configure room
 	// sign-in (none, one dedicated PMS, or a strict shared set), after a preview; nothing is copied from a retired network.
+	// Without the Hotel module there is nothing to route: no room sign-in check and no "Configure room sign-in".
+	if s.roomSignInInScope(ctx) {
+		s.addDefaultRoomSignIn(ctx, id, &out, add)
+	}
+
+	pinned, perr := s.packagesPinnedElsewhere(ctx, id)
+	if pinned != nil {
+		out.PinnedOnOld = pinned
+	}
+	switch {
+	case perr != nil:
+		add("packages", "Package eligibility", "attention", "Package rules could not be read, so nothing is claimed about them.")
+	case len(pinned) > 0:
+		add("packages", "Package eligibility", "unresolved", fmt.Sprintf("%d package(s) are limited to other networks by their rules and are not offered here. Their rules were not widened: add this network in a new revision of the package if they should be offered.", len(pinned)))
+	default:
+		add("packages", "Package eligibility", "ok", "No package rule limits a package to other networks only; packages are offered here according to their other rules.")
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// addDefaultRoomSignIn adds the Default Network's room sign-in check and the assessment the console's "Configure room sign-in"
+// reads. Only called while the Hotel module is in use (roomSignInInScope).
+func (s *server) addDefaultRoomSignIn(ctx context.Context, id string, out *defaultReadiness, add func(i, l, st, d string)) {
 	assess, aerr := s.roomSignInAssessment(ctx)
 	var rn *rsNetwork
 	if aerr == nil {
@@ -255,20 +278,6 @@ func (s *server) getDefaultReadiness(w http.ResponseWriter, r *http.Request) {
 	default:
 		add("pms", "Room sign-in", "unresolved", rn.Summary)
 	}
-
-	pinned, perr := s.packagesPinnedElsewhere(ctx, id)
-	if pinned != nil {
-		out.PinnedOnOld = pinned
-	}
-	switch {
-	case perr != nil:
-		add("packages", "Package eligibility", "attention", "Package rules could not be read, so nothing is claimed about them.")
-	case len(pinned) > 0:
-		add("packages", "Package eligibility", "unresolved", fmt.Sprintf("%d package(s) are limited to other networks by their rules and are not offered here. Their rules were not widened: add this network in a new revision of the package if they should be offered.", len(pinned)))
-	default:
-		add("packages", "Package eligibility", "ok", "No package rule limits a package to other networks only; packages are offered here according to their other rules.")
-	}
-	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *server) signinSummary(ctx context.Context, network string) (string, error) {

@@ -278,8 +278,11 @@ else
     || die "migrations did not complete; the binaries were NOT replaced. Fix the cause and re-run --upgrade."
   step "5. binaries"
   changed="$(install_binaries)"
-  step "6. units"
+  step "6. units and the product profile"
   bash "$SC/deploy/scripts/install-service-units.sh" "$SC/deploy"
+  # What this release ships to a fresh install, an upgraded appliance gets too (keys only added when absent).
+  bash "$SC/deploy/scripts/apply-product-profile.sh" "$SC/deploy" /etc/stayconnect \
+    || die "the product profile was refused (above); the new binaries are installed but the services were not restarted"
   step "7. restart in dependency order"
   for u in stayconnect-netd stayconnect-scd stayconnect-acctd stayconnect-portald stayconnect-edged; do
     systemctl stop "$u" >/dev/null 2>&1 || true; systemctl reset-failed "$u" >/dev/null 2>&1 || true

@@ -420,35 +420,9 @@ grep -qE '^NETD_MGMT_ADDR=' "$ETC/netd.env" || printf 'NETD_MGMT_ADDR=auto\n' >>
 [ -f "$ETC/portald.env" ] || printf 'PORTALD_SCD_SOCKET=/run/stayconnect/scd.sock\n' > "$ETC/portald.env"
 [ -f "$ETC/pmsd.env" ] || cp "$DEPLOY/env/pmsd.env.dark" "$ETC/pmsd.env"
 
-# THE SUPPORTED PRODUCT PROFILE: CLIENT ACCESS WITH ENFORCEMENT.
-#
-# Without these lines a provisioned appliance signed Clients in and let none of them online: every IAM-v2 session
-# opens in PENDING_ENFORCEMENT and only the enforcement plane promotes it, and vouchers, Free packages and client
-# accounts are redeemed through the commerce routes (STAYCONNECT_PHASE2_*), which were never switched on here.
-# PRE-LIVE carries exactly these flags (set by hand). What is deliberately NOT here: the PMS connector and room
-# sign-in (STAYCONNECT_PHASE3_PMS_* / _CHECKOUT_GRACE, a commissioned and separately authorised step,
-# docs/runbooks/PMS-Interface-Commissioning.md) and anything financial (STAYCONNECT_PHASE4_*, real money).
-#
-# ensure_kv adds a key only when it is ABSENT and never changes an existing value, so an operator's choice on an
-# appliance that is already in service survives a re-run.
-ensure_kv() { # <file> <key> <value>
-  grep -qE "^$2=" "$ETC/$1" 2>/dev/null && return 0
-  printf '%s=%s\n' "$2" "$3" >> "$ETC/$1"
-}
-# The plane's producer is whichever account acctd runs as: the uid the kernel reports to netd over SO_PEERCRED.
-ACCTD_USER="$(sed -n 's/^User=\(.*\)$/\1/p' "$DEPLOY/systemd/stayconnect-acctd.service" | tail -1)"
-PRODUCER_UID="$(id -u "${ACCTD_USER:-root}")" || die "cannot resolve a uid for acctd's user '${ACCTD_USER:-root}'"
-ensure_kv scd.env     STAYCONNECT_PHASE2_MASTER true
-ensure_kv scd.env     STAYCONNECT_PHASE2_PORTAL true
-ensure_kv portald.env STAYCONNECT_PHASE2_MASTER true
-ensure_kv portald.env STAYCONNECT_PHASE2_PORTAL true
-ensure_kv edged.env   STAYCONNECT_PHASE2_MASTER true
-ensure_kv edged.env   STAYCONNECT_PHASE2_ADMIN  true
-ensure_kv netd.env    STAYCONNECT_PHASE3_MASTER true
-ensure_kv netd.env    NETD_PHASE3_PRODUCER_UID  "$PRODUCER_UID"
-ensure_kv acctd.env   STAYCONNECT_PHASE3_MASTER true
-bash "$DEPLOY/scripts/check-phase3-enforcement-plane.sh" "$ETC" >/dev/null \
-  || die "the environment is not coherent: $(bash "$DEPLOY/scripts/check-phase3-enforcement-plane.sh" "$ETC" 2>&1 | head -3)"
+# THE SUPPORTED PRODUCT PROFILE (client access with enforcement, the Hotel module installed, nothing financial):
+# one script, so a fresh install and every upgrade write the same thing (deploy/scripts/apply-product-profile.sh).
+bash "$DEPLOY/scripts/apply-product-profile.sh" "$DEPLOY" "$ETC" || die "the product profile was refused (above)"
 chmod 640 "$ETC"/*.env && chown root:stayconnect "$ETC"/*.env
 grep -qE '^(SCD|EDGED|ACCTD)_(TENANT|SITE)_ID=' "$ETC"/*.env && die "an identity was seeded into the environment"
 say "environment ok (WAN=$WAN_IFACE, LAN=$LAN_IFACE, no identity pinned)"

@@ -237,7 +237,9 @@ func (s *server) buildNetworkOverview(ctx context.Context, diag netdDiagReport, 
 	_ = s.archiveRetired(ctx, s.db)
 	archivedIDs, defaultID := s.archivedSet(ctx), s.defaultNetworkID(ctx)
 	roomBy := map[string]*roomSignInBrief{}
-	if a, aerr := s.roomSignInAssessment(ctx); aerr == nil {
+	if !s.roomSignInInScope(ctx) {
+		// no Hotel module: no network has a room sign-in brief
+	} else if a, aerr := s.roomSignInAssessment(ctx); aerr == nil {
 		for _, rn := range a.Networks {
 			roomBy[rn.NetworkID] = briefOf(rn)
 		}

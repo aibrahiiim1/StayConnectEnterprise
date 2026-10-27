@@ -126,6 +126,20 @@ func (s *server) moduleReport(ctx context.Context) (*moduleReport, bool) {
 	return &rep, true
 }
 
+// roomSignInInScope: room sign-in exists only where the Hotel module is licensed, deployed and switched on. A site without it
+// is not asked to route room sign-in at all. Unreadable module state (or no module cache) keeps the room sign-in facts shown.
+func (s *server) roomSignInInScope(ctx context.Context) bool {
+	if s.modCache == nil {
+		return true
+	}
+	rep, ok := s.moduleReport(ctx)
+	if !ok {
+		return true
+	}
+	h := rep.Modules["hospitality"]
+	return h.Licensed && h.Deployed && h.Enabled
+}
+
 func (s *server) invalidateModules() {
 	if s.modCache == nil {
 		return

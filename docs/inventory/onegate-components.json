@@ -61,7 +61,7 @@
     "appliance_to_central_endpoints": 12,
     "secret_files": 10,
     "known_install_gaps": 4,
-    "resolved_install_gaps": 13
+    "resolved_install_gaps": 15
   },
   "components": [
     {
@@ -1946,7 +1946,7 @@
     }
   },
   "known_install_gaps": [
-    "G9 pmsd and the PMS surface flags stay off until a PMS is commissioned (by design; manual C.10)",
+    "G9 pmsd stays dark until a PMS is commissioned (by design; manual C.10); the Hotel module itself is installed (M1)",
     "G12 hostname and WAN netplan are the operator's (by design)",
     "G15 no installer for observability/HA (not implemented)",
     "G16 gatep-set-passwords.sh 'four roles' text (cosmetic)"
@@ -1990,6 +1990,8 @@
     "F1 -> Central voids a replaced identity's pending CSRs and signs only the current identity's; the appliance refuses a foreign certificate and files its own (d799ff5f; manual A3.6)",
     "R1 -> Central Redis auth file moved out of sticky /tmp (fs.protected_regular): Central survives a reboot (05481cb5; manual F.6, A3.7)",
     "R2 -> appliance-install.sh stops when the first administrator is refused; re-run resumes (28cfc9f4; manual A3.7)",
-    "R3 -> manual verification commands corrected by executing them; client-journey --remove (28cfc9f4, 05481cb5; manual A3.7)"
+    "R3 -> manual verification commands corrected by executing them; client-journey --remove (28cfc9f4, 05481cb5; manual A3.7)",
+    "M1 -> the product profile installs the Hotel module and every upgrade applies it (apply-product-profile.sh); card payment and room charge stay uninstalled with words saying why (manual C.12)",
+    "M2 -> room sign-in shown only while the Hotel module is in use (edged roomSignInInScope)"
   ]
 }
