@@ -30,7 +30,9 @@ say() { echo "[first-admin] $*"; }
 refuse() { echo "[first-admin] REFUSED: $*" >&2; exit 1; }
 [ "$(id -u)" = 0 ] || refuse "run as root"
 [ -n "$EMAIL" ] || refuse "--email is required"
-case "$EMAIL" in *@*.*) ;; *) refuse "--email must be an email address (it is the sign-in name)";; esac
+# One @, a dotted domain, nothing else: a pasted "email: x@y" or a stray space would otherwise become the sign-in name.
+printf '%s' "$EMAIL" | grep -Eq '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$' \
+  || refuse "--email must be a plain email address such as admin@example.com (it is the sign-in name); got: $EMAIL"
 ENVF=/etc/stayconnect/edged.env
 EDGED=/opt/stayconnect/bin/edged
 [ -r "$ENVF" ] || refuse "$ENVF is missing — provision the appliance first"
