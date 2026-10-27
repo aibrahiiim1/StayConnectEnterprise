@@ -3,18 +3,17 @@
 | | |
 |---|---|
 | **Status** | Authoritative procedure for building a **new** OneGate appliance (and a separate OneGate Central) from a blank VM |
-| **Reviewed against** | `master` at `7e4686ae56a229ef05460e02675d1d17924f8c9c` (2026-10-26) |
+| **Validated** | On a dedicated, isolated test pair (a new Central and a new appliance on VMware ESXi, Ubuntu 22.04.5), 2026-10-27: build → install → activation → Client journey → re-run → reboot → backup/restore → upgrade → rollback → clean re-install. Evidence: Appendix 3 |
 | **Companion documents** | [System Handbook](../architecture/ONEGATE_SYSTEM_HANDBOOK.md) · [Component inventory](../inventory/onegate-components.json) |
 | **Audience** | An engineer who can use Linux, systemd, Docker and a hypervisor, and who has the repository, a Central to activate against, and Product-Owner authority for the target |
 
-> ### Read this first — what this manual can and cannot promise
+> ### Read this first
 >
-> * **No disposable full VM was available while writing it.** Steps are therefore labelled with how far they were verified
->   (legend below). The database portion of the install was **rehearsed on a disposable TimescaleDB container** and **uncovered a
->   defect in the current provisioner** (Part B, *Known defect K1*): on `master` the provisioner's database step fails on a
->   blank VM until the migrations after the baseline are applied first. The manual gives the working order.
-> * The repository's installation is a **choreography of scripts plus manual steps**, not a single command. Where a step has no
->   automation, the manual says **MANUAL (gap)** and gives the exact commands.
+> * An appliance is installed from **one release artefact** (`onegate-appliance-<sha12>.tar.gz`, built by
+>   `deploy/scripts/appliance-build.sh`) with **one command** (`deploy/scripts/appliance-install.sh`). The same command
+>   re-runs safely, resumes an interrupted install, and upgrades (`--upgrade`).
+> * Steps carry a verification label (legend below). **[VM]** means the step was executed exactly as written on a fresh VM
+>   during the validation in Appendix 3.
 > * Nothing here authorises Go-Live, live PMS posting, LIVE card payments, a Root-CA change or any action on a real production
 >   environment. A **new** appliance built with this manual is **not** PRE-LIVE `172.21.60.25` and must not be pointed at it.
 > * Secrets: every key, password and token is shown as a placeholder (`<…>`). Never paste a real secret into a ticket, a commit
@@ -24,9 +23,9 @@
 
 | Label | Meaning |
 |---|---|
-| **[REHEARSED-DB]** | Executed on a disposable TimescaleDB 2.16.1 / PostgreSQL 16 container built from this repository during this mission |
-| **[SYNTAX]** | Script syntax checked (`bash -n`) in this mission; behaviour not exercised |
+| **[VM]** | Executed as written on a fresh test VM pair (Appendix 3) |
 | **[CODE]** | Behaviour confirmed by reading the script/unit in the repository |
+| **[SELFTEST]** | Covered by a self-test in `scripts/ci/` or the script's own `--self-test` |
 | **[LIVE-REF]** | The resulting state was observed on the running PRE-LIVE appliance or Central (read-only) |
 | **[NOT-EXERCISED]** | Documented from the repository; **not** run on a fresh VM — treat as procedure to be validated on first use |
 | **[PO]** | Needs an explicit Product-Owner decision/authorisation |
@@ -51,29 +50,27 @@
 ```mermaid
 flowchart TD
   A["A. Plan: hypervisor, 2 NICs, DNS to Central, NTP, outbound HTTPS"] --> B1
-  subgraph WS["Build workstation (git, docker, node)"]
-    B1["Build 8 binaries (scd edged netd portald acctd pmsd + keybootstrap svc-run)"]
-    B2["Package Admin Console bundle (.tgz + .sha256)"]
+  subgraph WS["Build workstation (git, docker, python3)"]
+    B1["appliance-build.sh: fresh clone of one commit →<br/>8 binaries + Admin Console + deploy tree + migrations →<br/>onegate-appliance-&lt;sha12&gt;.tar.gz"]
   end
-  B1 --> V
-  B2 --> V
-  subgraph VM["Blank Ubuntu 22.04 VM"]
-    V["Stage /opt/stayconnect: deploy/, migrations, binaries, trust files"]
-    V --> P["provision-fresh-appliance.sh (packages, users, DB, keys, env, units, Caddy)"]
-    P --> M["Apply migrations 0150-0158 + re-run Gate-P (baseline is behind)"]
-    M --> H["Install Admin Console bundle; start it"]
-    H --> S["edged seed-admin (first operator)"]
+  CT["Central's public trust files<br/>(vendor key, registry root, TLS CA, FINGERPRINTS.txt)"] --> I
+  B1 --> I
+  subgraph VM["Blank Ubuntu 22.04 VM, two NICs"]
+    I["appliance-install.sh --trust-dir … --admin-email …"]
+    I --> I1["verify release · check platform · stage /opt/stayconnect · pin trust"]
+    I1 --> I2["provision: packages, accounts, database (baseline), keys, env + product profile, units, Caddy, certificate, services"]
+    I2 --> I3["Admin Console · first administrator · record release · verify units"]
   end
-  S --> R["Appliance self-registers with Central → 'Waiting for activation'"]
+  I3 --> R["Appliance self-registers with Central → 'Waiting for activation'"]
   R --> AC["Central operator: Activate (customer, site, licence)"]
   AC --> C["Appliance adopts signed assignment + licence + mTLS certificate"]
-  C --> N["Admin Console: WAN/LAN, Client network, packages, sign-in methods, portal, PMS"]
+  C --> N["Admin Console: Client network, packages, sign-in methods, portal, PMS"]
   N --> D["D. Verify (software) → then real-device / PMS acceptance"]
 ```
 
-**Order that works on current `master`** (Part B details each): *plan → build → stage → trust files → `dnsutils` → provision* — **but see Known defect K1: apply the post-baseline migrations before Gate-P** — *→ Admin Console bundle → first operator → Central activation → configure*.
-
-Time budget (reference, not a promise): build 10–20 min, provisioning 10–15 min including container image pulls, activation minutes once an operator acts.
+Time budget measured on the test pair: release build **≈ 12 min** (warm Go caches; the first build downloads the toolchains);
+appliance install **≈ 9 min** on a blank VM (most of it apt and container pulls); activation **< 2 min** after the Central
+operator acts; upgrade **≈ 25 s** when no migration is pending.
 
 ---
 
@@ -83,26 +80,27 @@ Time budget (reference, not a promise): build 10–20 min, provisioning 10–15 
 
 | Item | Requirement | Source |
 |---|---|---|
-| Hypervisor | **VMware ESXi / vSphere** is the only platform the project documents and has run on (PRE-LIVE). Other hypervisors/bare metal are **not documented — [PO]/unverified.** | PRE-LIVE; `docs/DEPLOYMENT_APPLIANCE.md` |
-| Guest OS | **Ubuntu Server 22.04 LTS (amd64).** Every artefact targets 22.04 (Docker apt repository by `lsb_release -cs`, Kea 2.0.2 from the 22.04 archive). 24.04 is **not verified** — Kea/Unbound/netplan versions differ. | provisioner; **[LIVE-REF]** PRE-LIVE 22.04.5, kernel 5.15 |
-| CPU / RAM / disk | Documented pilot-verified minimum: **2 vCPU / 4 GB / 40 GB** (mid-size site, hundreds of devices). Observed on PRE-LIVE: 1 vCPU, 7.8 GiB, 48 GB root LV (54 % used with 4 weeks of data, 3.9 GB journals, 461 MB set-aside DB). Treat 2 vCPU / 8 GB / 60 GB as a comfortable reference; there is **no official sizing statement beyond the pilot figure — [PO]**. Backups (pre-change, pre-restore, scheduled) and the set-aside database need headroom. | `DEPLOYMENT_APPLIANCE.md §8`; **[LIVE-REF]** |
-| Architecture | amd64 only (the build and Docker apt line are hard-coded) | **[CODE]** |
-| Disk layout | LVM root is what PRE-LIVE uses; the product does not require a particular layout. `/var/lib/docker` holds the database volume — it must be on durable storage. | **[LIVE-REF]** |
-| Firmware/clock | UTC; **time synchronisation is mandatory** — the licence engine keeps a 48 h clock high-water and refuses large backwards jumps. `systemd-timesyncd` (PRE-LIVE) or chrony. | **[CODE]**, **[LIVE-REF]** |
+| Hypervisor | **VMware ESXi / vSphere** — the platform PRE-LIVE runs on and the platform the validation used. Other hypervisors/bare metal are **not validated — [PO]**. | **[VM]**, PRE-LIVE |
+| Guest OS | **Ubuntu Server 22.04 LTS (amd64)** — validated on 22.04.5, kernel 5.15. The installer refuses anything else unless `--allow-unsupported-platform` is given, and the result is then not a supported installation. 24.04 is **not validated** (Kea/Unbound/netplan/polkit versions differ). | **[VM]**, **[CODE]** |
+| Minimum | The installer refuses **< 4 GiB memory** (3500 MiB measured) or **< 15 GiB free on `/`**. Documented pilot minimum: **2 vCPU / 4 GB / 40 GB**. | **[CODE]**, `DEPLOYMENT_APPLIANCE.md §8` |
+| Validated size | **4 vCPU / 12 GB / 48 GB** (test appliance; the install used 7.1 GB of disk). PRE-LIVE runs 1 vCPU / 7.8 GiB / 48 GB. There is **no official sizing statement beyond the pilot figure — [PO]**. Backups (pre-change, pre-restore, scheduled) and the set-aside database after a restore need headroom. | **[VM]**, **[LIVE-REF]** |
+| Architecture | amd64 only (the build and Docker apt line are hard-coded; the installer checks) | **[CODE]** |
+| Disk layout | The Ubuntu default LVM root works; the product does not require a particular layout. `/var/lib/docker` holds the database volume — it must be on durable storage. | **[VM]** |
+| Clock | UTC; **time synchronisation is mandatory** — the licence engine keeps a 48 h clock high-water and refuses large backwards jumps. The installer warns when the clock is not synchronised. | **[CODE]** |
 
 ### A.2 Exactly two NICs
 
-OneGate's design rule is **two NICs and no more**.
+OneGate's design rule is **two NICs and no more**. The installer counts physical NICs and refuses any other number.
 
 | NIC | Role | Typical name | Addressing |
 |---|---|---|---|
 | **NIC 1 — WAN + management** | default route; SSH; Admin Console (HTTPS 443 pinned to its IPv4); the link to Central; the PMS if it is reached through the hotel LAN | `ens160` | Static (or DHCP) address with a default gateway and DNS able to resolve Central |
 | **NIC 2 — LAN / Client** | carries Client networks; **no IP address** on the NIC itself — addresses live on bridges netd creates | `ens192` | None |
 
-* The provisioner takes **WAN = interface of the default route** and **LAN = the first other interface, alphabetically**, skipping `lo`, `docker*`, `br-*`, `veth*`. If your VM has any other NIC, the heuristic can choose the wrong one. **Do not add a third NIC.** If interface names differ from `ens160`/`ens192`, check `netd.env` after provisioning (Part B.8). **[CODE]**
+* Detection: **WAN = interface of the default route**, **LAN = the other physical interface**. `--wan-iface` / `--lan-iface` override it. **[CODE][VM]**
 * Management and WAN are the **same** interface. Admin Console, SSH and the Central link share it. **[CODE]**
 
-### A.3 ESXi virtual networking **[NOT-EXERCISED on a fresh host; the settings are from PRE-LIVE experience — DOC memory/`SYSTEM_OVERVIEW.md`]**
+### A.3 ESXi virtual networking **[NOT-EXERCISED on a physical switch; the settings are from PRE-LIVE experience]**
 
 1. **WAN portgroup (NIC 1):** an ordinary portgroup on the management/uplink network. Default security settings are fine.
 2. **LAN portgroup (NIC 2):** carries the Client traffic.
@@ -111,289 +109,186 @@ OneGate's design rule is **two NICs and no more**.
    * **Access / untagged:** portgroup VLAN ID = the Client VLAN (or 0 for an untagged LAN). On the appliance the *prepared* untagged Client network (`10.20.0.0/20`) uses this. One Client network per NIC.
    * **Trunk:** portgroup VLAN ID **4095** (all VLANs) so the VM sees tagged frames; netd then creates `ens192.<vid>` sub-interfaces and a bridge per VLAN. Use this for several Client VLANs. *PRE-LIVE runs VLAN 90 this way (`ens192.90` → `br-g90-a811`).* Tagged-VLAN delivery on the switch/ESXi side is **recorded as unverified** by the project itself.
    * Both can coexist: an untagged network enslaves the parent NIC to its bridge while tagged VLANs ride sub-interfaces of the same parent.
-4. Wi-Fi access points / switches: map each SSID to its VLAN; AP-level client isolation is *in addition* to the appliance's own isolation (`docs/ARUBA_SSID_VLAN_MAPPING.md`).
+4. Wi-Fi access points / switches: map each SSID to its VLAN, and **turn on AP/switch client isolation** — Clients on the same bridge exchange frames at layer 2 without passing through the appliance's firewall, so isolation *between two Clients on one segment* is the access layer's job (Handbook §10.4; `docs/ARUBA_SSID_VLAN_MAPPING.md`).
 5. Do **not** run another DHCP server on a Client VLAN that OneGate serves with Kea (unless you configure the network as *external DHCP*).
 
 ### A.4 Addressing, DNS, NTP, firewall
 
 | Need | Detail | Label |
 |---|---|---|
-| WAN IP/prefix/gateway | Static is recommended: the Admin Console certificate, the nft `443` pin and the Central link follow this address. Changing it later is a staged change with a confirm window (Part E). | **[CODE]** |
-| DNS on the WAN NIC | Resolvers that **resolve `sc-central.echofusion.com`** (or your Central's name). The provisioner checks every upstream resolver and **hard-stops if they disagree** about the name (needs `dig`; set `ALLOW_SPLIT_DNS=1` only knowingly). PRE-LIVE is served by the FortiGate gateway DNS (`172.21.60.1`). | **[CODE]** |
-| Central reachability | Outbound **TCP 443** to Central for register/CSR/licence/assignment/hello/portal-TLS, and **TCP 9443** (mutual TLS) once a certificate exists. The name must be a **hostname, not an IP**. Central never connects inbound to the appliance. | **[CODE]** |
-| Package/image sources | The provisioner needs outbound HTTPS to the Ubuntu mirrors, `download.docker.com`, `dl.cloudsmith.io` (Caddy), `deb.nodesource.com`, and Docker Hub (images `timescale/timescaledb:2.16.1-pg16`, `redis:7-alpine`). **No offline install path exists. [PO] if the site is air-gapped.** | **[CODE]** |
+| WAN IP/prefix/gateway | Static is recommended: the Admin Console certificate, the nft `443` pin and the Central link follow this address. Changing it later is a staged change with a confirm window (Part C.5). | **[CODE]** |
+| DNS on the WAN NIC | Resolvers that **resolve your Central's name** (`sc-central.echofusion.com` for the production Central). The provisioner queries every upstream resolver and **stops if they disagree** about the name (set `ALLOW_SPLIT_DNS=1` only knowingly). | **[CODE][VM]** |
+| Central reachability | Outbound **TCP 443** to Central for register/CSR/licence/assignment/hello/portal-TLS, and **TCP 9443** (mutual TLS) once a certificate exists. The name must be a **hostname, not an IP**. Central never connects inbound to the appliance. **If Central sits behind NAT, both 443 and 9443 must be forwarded to the Central host** (the validation found 443 forwarded to the wrong host once — check, do not assume). | **[CODE][VM]** |
+| Package/image sources | Outbound HTTPS to the Ubuntu mirrors, `download.docker.com`, `dl.cloudsmith.io` (Caddy), `deb.nodesource.com`, and Docker Hub (images `timescale/timescaledb:2.16.1-pg16`, `redis:7-alpine`). **No offline install path exists. [PO] if the site is air-gapped.** | **[CODE][VM]** |
 | NTP | Outbound UDP 123 to the site's/clock source | — |
-| Inbound to the appliance | **22/tcp** (SSH; not address-pinned) and **443/tcp** (Admin Console, pinned to the WAN IP by the rendered firewall). Nothing else on the WAN. Restrict who may reach these at the upstream firewall. | **[CODE]**, **[LIVE-REF]** |
+| Inbound to the appliance | **22/tcp** (SSH; not address-pinned) and **443/tcp** (Admin Console, pinned to the WAN IP by the rendered firewall). Nothing else on the WAN. Restrict who may reach these at the upstream firewall. | **[CODE][VM]** |
 | PMS | Protel FIAS is a **TCP** link from the appliance to the PMS host:port (reached over the WAN NIC unless a route says otherwise). REST PMS kinds need outbound HTTPS to the vendor. | **[CODE]** |
 | Portal public name (optional, later) | `<label>.gw.onegate.work` is issued by Central; resolvers must allow answers pointing at private addresses (DNS-rebinding protection) for that zone. | **[DOC]** |
 
 ### A.5 What to have in hand before you start
 
-1. **The exact commit** to install (record it) and a **clean checkout** of it on the build workstation (the build scripts refuse a dirty tree).
-2. A running **OneGate Central** (Part F) whose DNS name you will use, **and its three public trust files**: `vendor-license.pub`, `assignment-registry-root.pub`, `central-tls-ca.crt` (from Central's `/opt/stayconnect/central/appliance-trust/`). Verify their fingerprints out of band against Central's `FINGERPRINTS.txt`. **[CODE][DOC deploy/pki/README.md]**
+1. **The exact commit** to install (record it). The release build takes a fresh clone of it, so your working tree does not matter, but the commit must be pushed or present locally.
+2. A running **OneGate Central** (Part F) whose DNS name you will use, **and its public trust files** from Central's `/opt/stayconnect/central/appliance-trust/`: `vendor-license.pub`, `assignment-registry-root.pub`, `central-tls-ca.crt` and `FINGERPRINTS.txt`. Compare `FINGERPRINTS.txt` **out of band** with the one Central's operator published (the installer then checks every file against it).
 3. An operator on Central with `platform_owner`/`platform_admin` (to Activate).
 4. The customer, site, licence terms (clients online, validity, grace, modules) you will activate.
-5. The initial **site administrator** email and a strong password (≥ 10 characters).
+5. The initial **site administrator** email and a strong password (**≥ 12 characters**, not the email).
 6. For PMS later: host/port of the Protel FIAS interface (and whether TLS with a pinned certificate is used), plus a PMS-side window to commission it. *No real PMS connection is needed to install.*
-7. A build workstation with: `git`, Docker (Linux containers), `bash`, `sha256sum`, Node 20 + npm (for the Admin Console package), `scp`/`ssh` to the VM.
+7. A build workstation (Linux, or Windows with Git Bash + Docker Desktop) with `git`, Docker (Linux containers), `bash`, `python3`, `sha256sum`, and `ssh`/`scp` to the VM. Go and Node run in pinned containers; nothing else is needed locally.
 
 ### A.6 Things you must **not** do
 
 * Do not run `scripts/phase1-bootstrap.sh` or `scripts/phase3-bootstrap.sh` (dev-only; seed a dev tenant and default-password admin).
 * Do not apply `deploy/nftables/stayconnect.nft`, `deploy/netplan/02-lan-bridge.yaml`, `deploy/kea/kea-dhcp4.conf` or `deploy/unbound/unbound-stayconnect.conf` — they are legacy skeletons that would overwrite what `netd` renders and wipe every Client network.
 * Do not copy any file from, or point the new appliance at, the retired development reference appliance or the former Central `150.0.0.252`.
-* Do not use PRE-LIVE `172.21.60.25` as a donor of identity, keys or configuration.
+* Do not use PRE-LIVE `172.21.60.25` as a donor of identity, keys, database or configuration.
 * Do not hand-edit `/etc/stayconnect/identity`, `assignment` or `license`.
+* Do not assemble an appliance by copying binaries and scripts by hand — install a release (Part B).
 
 
 ---
 
 ## Part B — Fresh appliance installation
 
-> **Roles.** *WS* = the build workstation. *VM* = the new appliance, as `root`. Replace `<…>` placeholders. Commands that
-> contain `<secret>` placeholders must be typed from your vault — never stored in shell history files you keep.
+> **Roles.** *WS* = the build workstation. *VM* = the new appliance, as `root`. Replace `<…>` placeholders.
 
-### B.0 Known defects in the current installer (measured — read before you start)
+### B.0 What the installer replaced (defects found in the earlier procedure, all fixed)
 
-| ID | Defect (on `master 7e4686ae`) | How it was found | Effect | Workaround in this manual |
-|---|---|---|---|---|
-| **K1** | The factory baseline `data-plane/migrations/baseline/0000_production_baseline.sql` was last generated "through 0149", but the tree has migrations to **0158**. `deploy/gatep/gatep-grants.sql` (applied by the provisioner right after the baseline) references objects created by 0155 (`iam_v2.guest_network_pms_policy`). | **[REHEARSED-DB]**: provisioner database steps replayed on a blank TimescaleDB 2.16.1 container. The baseline loads, then `gatep-grants.sql` fails with `relation "iam_v2.guest_network_pms_policy" does not exist` (`svc-scd-iamv2-guest-auth-grants.sql:87`). | `provision-fresh-appliance.sh` **aborts at "database"** on a blank VM (`ON_ERROR_STOP=1` + `set -e`). | B.7 — stage a baseline regenerated from the same commit |
-| **K2** | The provisioner advertises itself as re-runnable but re-applies the baseline unconditionally. A second run fails with `schema "iam_v2" already exists`. | **[REHEARSED-DB]** | After K1 aborts, simply re-running does not recover. | B.7 avoids the first failure; B.7-recovery wipes the half-built DB |
-| **K3** | `build-appliance-binaries.sh` does not build `keybootstrap` and `svc-run`, which the provisioner and the Caddy / Admin Console units need. | **[CODE]** | `set -e` abort at "credentials" (missing `keybootstrap`), or `203/EXEC` on units. | B.1 passes `SERVICES=` explicitly |
-| **K4** | No installer creates the first operator, copies the tree/binaries to `/opt/stayconnect`, installs the Admin Console bundle, installs trust files (git-ignored), installs polkit/Kea/Unbound overrides, or `dnsutils`. | **[CODE]** | Manual steps below. | B.4–B.5, B.9–B.11 |
-| **K5** | Even after the database is correct, `live-site` migrations through `edge-migrate.sh` demand a verified pre-change backup that needs a backup key holder created in the Admin Console — impossible before the first operator exists. | **[CODE]** | Do **not** plan to migrate a blank box through `edge-migrate.sh`; build it at the target schema (B.7). Day-2 migrations are fine (Part E). | B.7 |
+| ID | Was | Now |
+|---|---|---|
+| **K1** | The committed factory baseline stopped at 0149 while the tree had migrations to 0158; Gate-P then failed on a blank database. | The baseline is regenerated through **0158** and proven identical to the upgrade path (`factory-clean-baseline-verify.sh`: PASS, 14 058 facts). The build **and** the installer refuse a release whose baseline does not embody the newest migration (`deploy/scripts/lib-baseline.sh`). |
+| **K2** | The provisioner re-applied the baseline on every run (`schema "iam_v2" already exists`). | `deploy/scripts/site-db-init.sh` applies the baseline in **one transaction** only to a blank schema; a complete schema is left alone; a half-built one is refused (or, with `--reinitialise-unused-db`, rebuilt only when it provably holds no data). Self-test 10/10. |
+| **K3** | The binary build omitted `keybootstrap` and `svc-run`. | Built by default; the release refuses to exist without all eight. |
+| **K4** | Copying the tree, the binaries, the trust files and the console; polkit, Kea/Unbound and drop-in overrides; `dnsutils`; the first operator — all by hand. | One release, one command. Trust files are verified against `FINGERPRINTS.txt`; overrides and polkit (`.pkla` on polkit 0.105) are installed by `install-service-units.sh`; the first administrator by `create-first-admin.sh` (no password on a command line). |
+| **K5** | A blank box could not be migrated through `edge-migrate.sh` (it needs a verified pre-change backup, impossible before an operator exists). | A blank box is built **at** the release's schema by the baseline (no migration runs); the database records the baseline coverage in `/etc/stayconnect/schema-baseline`. Day-2 migrations go through `edge-migrate.sh` as before (Part E.5). |
+| G10 | The enforcement plane and the commerce flags were left off: a Client "signed in" and never got the Internet. | The provisioner writes the supported product profile (B.5) and runs the enforcement-plane coherence check. |
+| — | The Admin Console certificate was minted before Caddy could reload; Caddy failed on a vhost written `0640`; a first-run backup-cleanup reported a false failure; a re-run refused the existing admin. | All found on the first real install and fixed (Appendix 3). |
 
-> Fixing K1/K2/K3 properly means regenerating and committing the baseline and changing the provisioner/build script. That is a
-> **controlled schema/installer change reserved for a Product-Owner decision** (Handbook §24.2) and was deliberately **not**
-> made in this documentation-only mission.
-
-### B.1 Build the binaries (WS) — **[CODE][SYNTAX]**
+### B.1 Build the release (WS) — **[VM]**
 
 ```bash
 git clone https://github.com/aibrahiiim1/StayConnectEnterprise.git && cd StayConnectEnterprise
-git checkout <approved-commit-sha>                 # record this SHA in your install log
-test -z "$(git status --porcelain)" || { echo "dirty tree – the build refuses"; exit 1; }
-
-# Default SERVICES omit keybootstrap and svc-run (defect K3) – name them explicitly:
-SERVICES="scd edged pmsd portald netd acctd keybootstrap svc-run" \
-  bash scripts/build-appliance-binaries.sh ../sc-appliance-build
-# Expected last line:  APPLIANCE_BUILD = PASS
-sha256sum ../sc-appliance-build/* > ../sc-appliance-build/SHA256SUMS
+git checkout <approved-commit-sha>                     # record this SHA in your install log
+bash deploy/scripts/appliance-build.sh                  # → dist/appliance/onegate-appliance-<sha12>.tar.gz (+ .sha256)
 ```
 
-What it does: `golang:1.25.12` container, `CGO_ENABLED=0 GOOS=linux GOARCH=amd64`, `go build -trimpath -tags stayconnect_production`,
-**no `-ldflags`**, then reads `go version -m` and requires `vcs.revision == HEAD`, `vcs.modified=false` and the production tag. A dirty tree is refused (exit 2).
-`sitemigrate` is a legacy tool and is **not** needed.
+What it does (**[CODE]**): takes a **fresh clone** of the commit (a dirty working tree is irrelevant and cannot leak in); refuses a baseline older than
+the newest migration; builds `scd edged netd portald acctd pmsd keybootstrap svc-run` in `golang:1.25.12` with `CGO_ENABLED=0 -trimpath -tags stayconnect_production`
+and reads back each binary's embedded `vcs.revision` (must equal the commit), `vcs.modified=false` and the production tag; packages the Admin Console in
+`node:20.18.0-bookworm` (`npm ci` on the committed lockfile, `next build`, capability contract); takes the deploy tree, migrations and installer scripts
+with `git archive` (the `deploy/pki` slots are emptied — trust files are never shipped); writes `RELEASE.json` (commit, toolchains, per-binary sha256,
+revision and tags, console `build_id`, baseline coverage, supported platform) and `SHA256SUMS` over every file. Nothing is built on the appliance.
 
-### B.2 Package the Admin Console (WS) — **[CODE][SYNTAX]**
+Go module and build caches live in the named Docker volumes `onegate-appliance-gocache` / `onegate-appliance-gomodcache`, so a second build is fast.
 
-```bash
-bash deploy/scripts/deploy-hotel-admin.sh package hotel-admin
-# produces hotel-admin/hotel-admin-deploy.tgz and hotel-admin-deploy.tgz.sha256
-```
-
-Needs git (provable commit, clean tree), Node 20 + npm (`npm ci` + `npm run build` under `capability-contract.json`). The bundle carries a
-machine-readable `hotel-admin-release.json` (source commit, build id). **Nothing is built on the appliance.**
-
-### B.3 Prepare the operating system (VM) — **[NOT-EXERCISED]**
+### B.2 Prepare the operating system (VM) — **[VM]**
 
 1. Install **Ubuntu Server 22.04 LTS amd64**, minimal + OpenSSH. Create the two NICs per Part A.2 / A.3.
-2. Give NIC 1 (WAN) its **static address, gateway and resolvers** (the provisioner never writes netplan for the WAN). Leave NIC 2 **unconfigured** (no address, no netplan entry that configures it).
-3. Set the timezone to UTC and confirm time sync:
-   ```bash
-   timedatectl set-timezone Etc/UTC; timedatectl | grep -E 'synchronized|NTP'    # expect "System clock synchronized: yes"
-   ```
-4. Hostname: **the product does not use the OS hostname** for identity (serial/MACs/DMI are used). Set a sensible one (`hostnamectl set-hostname <site>-og1`). **[UNVERIFIED how the project intends it]**
-5. Update and install the packages the provisioner does *not* install (defect K4):
-   ```bash
-   apt-get update && apt-get -y upgrade
-   apt-get -y install dnsutils openssl iproute2 netplan.io rsync tar age   # dnsutils → the split-DNS check works; age → manual restore of backups
-   ```
-6. Confirm only **two** NICs and their names: `ip -br link`. If they are not `ens160` / `ens192`, note the names — you will verify `netd.env` in B.8.
-7. Reboot once to prove the static address and DNS survive: `ip -br addr; resolvectl status`.
+2. Give NIC 1 (WAN) its **address, gateway and resolvers** in netplan (the installer never writes the WAN). Leave NIC 2 **unconfigured**.
+3. Timezone UTC and time sync: `timedatectl set-timezone Etc/UTC; timedatectl | grep synchronized` → `yes`.
+4. Hostname: the product does not use the OS hostname for identity (serial/MACs/DMI are used); set a sensible one.
+5. `apt-get update && apt-get -y upgrade` is recommended; the installer installs every package it needs itself.
 
-### B.4 Stage the repository files onto the VM (MANUAL — defect G1) — **[NOT-EXERCISED]**
-
-The provisioner expects the tree under `/opt/stayconnect`. Nothing copies it for you.
+### B.3 Pre-flight (VM) — **[VM]**
 
 ```bash
-# from WS, in the repository checkout at <approved-commit-sha>
-ssh root@<vm> 'install -d -m 0755 /opt/stayconnect /opt/stayconnect/bin /opt/stayconnect/data-plane /opt/stayconnect/scripts'
-rsync -a --delete --exclude 'pki/' deploy/    root@<vm>:/opt/stayconnect/deploy/   # --exclude keeps trust files from B.5 on a re-sync
-rsync -a --delete data-plane/migrations/        root@<vm>:/opt/stayconnect/data-plane/migrations/
-rsync -a scripts/edge-migrate.sh scripts/gatep-reconcile.sh scripts/binary-rollback.sh \
-      root@<vm>:/opt/stayconnect/scripts/        # needed later for Part E (edge-migrate.sh resolves migrations relative to its parent directory)
-scp ../sc-appliance-build/{scd,edged,pmsd,portald,netd,acctd,keybootstrap,svc-run} root@<vm>:/opt/stayconnect/bin/
-scp hotel-admin/hotel-admin-deploy.tgz hotel-admin/hotel-admin-deploy.tgz.sha256 root@<vm>:/root/
-ssh root@<vm> 'chmod 0755 /opt/stayconnect/bin/* && sha256sum /opt/stayconnect/bin/* | head'
+ip -br link                                   # exactly two physical NICs
+ip route show default                         # via the WAN NIC
+getent hosts <central-name>                   # resolves to Central (public or internal address, as designed)
+curl -sS --cacert central-tls-ca.crt https://<central-name>/readyz      # Central answers
+timeout 5 bash -c '</dev/tcp/<central-name>/9443' && echo "9443 open"          # the mutual-TLS listener is reachable
 ```
 
-Compare the printed hashes with `SHA256SUMS` from B.1. Keep a record of `commit → binary sha256` — the repository does not write `DEPLOYED_BINARIES.sha256`; on PRE-LIVE it is maintained by hand (columns: service, sha256, `vcs.revision`, tags, modified, written).
+The installer repeats the platform checks and refuses on failure; the Central checks matter because a blocked 443/9443 or a wrong
+port-forward only shows up later, as an appliance that never registers or never converts to mutual TLS.
 
-### B.5 Install the Central trust material into the deploy tree (MANUAL — defect G6) — **[NOT-EXERCISED]**
-
-`deploy/pki/` is git-ignored; a fresh checkout contains only a README. Take the three **public** files from Central (`/opt/stayconnect/central/appliance-trust/`), **verify their fingerprints out of band** against Central's `FINGERPRINTS.txt`, then:
+### B.4 Copy the release and the trust files to the VM (WS) — **[VM]**
 
 ```bash
-install -d -m 0755 /opt/stayconnect/deploy/pki
-install -m 0644 vendor-license.pub            /opt/stayconnect/deploy/pki/vendor-license.pub          # 32 raw bytes
-install -m 0644 assignment-registry-root.pub  /opt/stayconnect/deploy/pki/assignment-registry-root.pub # 32 raw bytes
-install -m 0644 central-tls-ca.crt            /opt/stayconnect/deploy/pki/central-ca.crt              # NOTE the slot name differs from Central's file name
-sha256sum /opt/stayconnect/deploy/pki/*
+scp dist/appliance/onegate-appliance-<sha12>.tar.gz* root@<vm>:/root/
+scp vendor-license.pub assignment-registry-root.pub central-tls-ca.crt FINGERPRINTS.txt root@<vm>:/root/central-trust/
+ssh root@<vm> 'cd /root && sha256sum -c onegate-appliance-<sha12>.tar.gz.sha256 && tar -xzf onegate-appliance-<sha12>.tar.gz'
 ```
 
-* The installers refuse a 64-byte file (that would be a private key) and refuse to replace a *different* key without `--force`.
-* **If you skip this**, the provisioner only prints a note and continues — and the appliance then **never registers** (no Central CA) or **never adopts its assignment** (no registry root), with no loud error. Offline first-activation additionally needs `vendor-license.pub`.
-
-### B.6 Pre-flight checks (VM) — **[NOT-EXERCISED]**
+### B.5 Install (VM) — **[VM]**
 
 ```bash
-getent hosts sc-central.echofusion.com                                   # resolves to Central
-for r in $(resolvectl status | awk '/DNS Servers/{for(i=3;i<=NF;i++)print $i}'); do dig +short @"$r" sc-central.echofusion.com; done   # all agree
-curl -sS --cacert /opt/stayconnect/deploy/pki/central-ca.crt https://sc-central.echofusion.com/readyz   # Central answers (JSON)
-curl -sSI https://download.docker.com | head -1; curl -sSI https://dl.cloudsmith.io | head -1; curl -sSI https://deb.nodesource.com | head -1
-ip -br link | grep -v lo       # exactly two NICs (+ none other)
-df -h / ; free -h              # headroom
+umask 077; printf '%s\n' '<site-admin-password>' > /root/.admin-pw     # or omit --admin-password-file and type it twice
+bash /root/onegate-appliance-<sha12>/deploy/scripts/appliance-install.sh \
+     --trust-dir /root/central-trust \
+     --admin-email <site-admin-email> --admin-password-file /root/.admin-pw
+shred -u /root/.admin-pw
 ```
 
-Stop if any check fails — each one corresponds to a way the provisioner or the later Central link fails silently.
+Options you may need: `--central-base https://<name>` for a Central other than the release's (a lab or second Central; the mutual-TLS endpoint then
+defaults to `<name>:9443` and never to the release's) · `--wan-iface/--lan-iface` · `--offline-activation-only` (no Central CA required; the vendor
+key is) · `--yes` (no confirmation prompt). The last lines of a successful install are:
 
+```text
+APPLIANCE_UNITS = PASS
+[appliance-install] installed release <commit>
+```
 
-### B.7 Provision the appliance
+What happens, in order, each step printing a heading and stopping at the first failure with the reason (**[CODE][VM]**):
 
-`provision-fresh-appliance.sh` is the only installer. As root on the VM:
+1. **Release** — `SHA256SUMS` verified; every binary embeds the release commit, unmodified and production-tagged.
+2. **Platform** — Ubuntu 22.04 amd64, exactly two physical NICs, ≥ 4 GiB memory, ≥ 15 GiB free, a default route; clock sync warned.
+3. **Stage** — the release tree goes to `/opt/stayconnect` (a previous tree is kept in `/opt/stayconnect/.previous/<stamp>`); binaries are installed with `install(1)`.
+4. **Trust** — the three public files are installed in `deploy/pki/` and each is checked against `FINGERPRINTS.txt` (key id = first 8 bytes of sha256 of the raw key; SHA-256 fingerprint of the CA). A missing registry root or (unless `--offline-activation-only`) Central CA is a hard failure.
+5. **Provision** (`deploy/scripts/provision-fresh-appliance.sh`) —
+   packages (`nftables conntrack unbound jq python3 dnsutils age openssl`, Docker, Caddy, Kea 2.0.2 — disabled until the first Client network —, Node 20) ·
+   accounts and directories · TimescaleDB/Redis containers (random superuser password) ·
+   **database**: `site-db-init.sh` — waits for a *stable* server (initdb's temporary server is not), loads roles, the baseline in one transaction, ownership and the Gate-P grants (hash-verified), asserts 2 hypertables and that every `iam_v2` object belongs to `iam_v2_owner`, and writes `/etc/stayconnect/schema-baseline` ·
+   credentials (`gatep-set-passwords.sh` → `/etc/stayconnect/.dsn`) and the nine key files (`keybootstrap`) ·
+   env files and the **product profile** (below) · units, drop-ins, Kea/Unbound overrides, polkit ·
+   Caddy and the dual-SAN Admin Console certificate (`hotel.stayconnect.local` + the WAN IP) ·
+   start `scd edged acctd netd portald caddy` and require each `active` and `scd` logged `build=production`.
+6. **Admin Console** — `deploy-hotel-admin.sh install` (scratch-port boot, capability contract, atomic switch, smoke, automatic rollback on failure); skipped when that exact build is already live.
+7. **First administrator** — `create-first-admin.sh` (12+ characters; the password goes to `edged seed-admin --password-stdin`, never onto a command line).
+8. **Record** — `/opt/stayconnect/RELEASE.json`, `SHA256SUMS` and `DEPLOYED_BINARIES.sha256` (service, sha256, embedded revision, tags) are written; `check-appliance-units.sh` must pass.
+
+**The product profile the installer enables** (`ensure_kv`: a key is added only when absent, so an operator's later choice is never overwritten):
+
+| File | Keys | Why |
+|---|---|---|
+| `scd.env`, `portald.env` | `STAYCONNECT_PHASE2_MASTER=true`, `STAYCONNECT_PHASE2_PORTAL=true` | Client commerce: packages, quote, confirm (the portal cannot list packages without them) |
+| `edged.env` | `STAYCONNECT_PHASE2_MASTER=true`, `STAYCONNECT_PHASE2_ADMIN=true` | the Admin Console's packages/plans/vouchers surfaces |
+| `netd.env`, `acctd.env` | `STAYCONNECT_PHASE3_MASTER=true`, `NETD_PHASE3_PRODUCER_UID=<uid of acctd's user>` | the **enforcement plane**: without it every session stays `PENDING_ENFORCEMENT` and no Client reaches the Internet |
+| (provisioner defaults) | `STAYCONNECT_IAMV2_MASTER/OTP/SOCIAL=true`, `SCD_DURABLE_THROTTLE`, `SCD_OTP_HMAC` | IAM v2 sign-in, throttling, OTP |
+
+**Not** enabled: the PMS surfaces (`STAYCONNECT_PHASE3_ADMIN/PMS_*`, `pmsd`) — Part C.10 — and every financial flag (`STAYCONNECT_PHASE4_*`, `STAYCONNECT_PAYMENT_LIVE_ALLOWED`) — **[PO]**.
+After writing the profile the provisioner runs `check-phase3-enforcement-plane.sh` and stops if the plane is incoherent.
+
+It deliberately **does not**: write netplan / nftables / Kea / Unbound configuration (netd renders those at the first Client-network apply), set the hostname, create a tenant, site, licence or Client network, enable `pmsd`, or configure any PMS. It refuses to run if `/etc/stayconnect/removed-from-central.json` exists.
+
+### B.6 Re-running, resuming and interrupted installs — **[VM][SELFTEST]**
+
+* **Re-run with the same release**: converges and regenerates nothing that exists — identity, keys, passwords, DSNs, env values, database and certificate are kept (measured: only the licence/assignment refresh timestamps changed). The administrator step reports `already exists — unchanged`.
+* **Interrupted install** (power loss, a failed package mirror, Ctrl-C): `/opt/stayconnect/.install-in-progress` marks it; simply run the same command again — it resumes. An interrupted database step is either complete (the baseline is one transaction) or blank.
+* **A half-built database from an old procedure** is refused with an explanation. `--reinitialise-unused-db` rebuilds it **only** if it holds no operators, tenants, Clients, sessions or vouchers.
+* **A different release on an installed box**: refused — use `--upgrade` (E.5).
+
+### B.7 Check what the install left behind — **[VM]**
 
 ```bash
-bash /opt/stayconnect/deploy/scripts/provision-fresh-appliance.sh      # optional env: CENTRAL_BASE CENTRAL_MTLS_BASE WAN_IFACE LAN_IFACE ALLOW_SPLIT_DNS=1
+grep -E 'NETD_(WAN|MGMT|LAN)' /etc/stayconnect/netd.env                 # WAN/LAN names correct? NETD_MGMT_ADDR=auto
+bash /opt/stayconnect/deploy/scripts/check-appliance-units.sh            # APPLIANCE_UNITS = PASS
+cat /opt/stayconnect/DEPLOYED_BINARIES.sha256                            # service, sha256, embedded commit, tags
+journalctl -u stayconnect-scd --since -10min | grep -iE 'regist|waiting'  # registered, waiting for activation
 ```
 
-What it does (**[CODE]**; each step prints a heading): (1) apt packages — `ca-certificates curl gnupg lsb-release nftables conntrack unbound jq python3`, Docker (`docker-ce`, `docker-ce-cli`, `containerd.io`, `docker-compose-plugin` from `download.docker.com`), Caddy (from Cloudsmith; the stock `caddy.service` is disabled and masked by the shipped unit), `kea-dhcp4-server` (installed then **disabled and stopped**), Node 20 (NodeSource) · (2) layout and service accounts — `stayconnect`, `stayconnect-portald`, `stayconnect-pmsd`, group `stayconnect-scd`; directories under `/opt/stayconnect`, `/etc/stayconnect` (secrets `0700`), `/var/log/stayconnect`, `/var/lib/kea`, `/var/log/caddy` · (3) infra — random superuser password in `/etc/stayconnect/secrets/pg-superuser.env`, `docker compose -f deploy/compose/infra.yml up -d`, waits ≤ 120 s for `pg_isready` · (4) **database** — creates `stayconnect_site`; runs `gatep-roles.sql`, `gatep-iam-roles.sql`, the baseline, `gatep-iam-roles.sql` again, `gatep-iam-ownership.sql`, `gatep-grants.sql`; asserts ≥ 2 hypertables · (5) credentials and keys — `gatep-set-passwords.sh` writes `/etc/stayconnect/.dsn`; `keybootstrap` creates the nine key files and the OTP generation-1 row; installs the three trust files if present · (6) service environment files (Appendix 1), Central endpoint validation, DNS checks · (7) tmpfiles, sysctl, **`install-service-units.sh`**, Caddy unit + Caddyfile, mints the Admin Console certificate, enables Caddy · (8) enables `scd edged acctd netd portald hotel-admin`, restarts the five Go daemons (`scd` first, then the rest) and **fails** unless each of `scd edged acctd netd portald caddy` is `active` and `scd` logged `build=production`.
-
-It deliberately **does not**: copy files into `/opt/stayconnect`, build anything, write netplan / nftables / Kea / Unbound configuration, set the hostname, create a tenant, site, licence or operator, apply migrations beyond the baseline, install polkit rules, install the Admin Console, enable `pmsd`, or configure any PMS. It also refuses to run if `/etc/stayconnect/removed-from-central.json` exists.
-
-**Because of defects K1/K2, step (4) fails on current `master`.** Choose **one** of the two paths below **before** running the command above.
-
-#### Path A (preferred): provision from a baseline regenerated at the target commit
-
-1. On the WS, in a **throwaway clone** of the exact commit (the generator writes into that checkout's `data-plane/migrations/baseline/`; do not run it in your working tree):
-   ```bash
-   git clone --local <your-checkout> /tmp/og-baseline && cd /tmp/og-baseline && git checkout <approved-commit-sha>
-   bash scripts/generate-production-baseline.sh          # Docker; builds the whole upgrade path 0001→0158 in a cleanroom container and dumps its end state (tens of minutes)
-   bash scripts/factory-clean-baseline-verify.sh         # proves the baseline path and the upgrade path agree object for object
-   sha256sum data-plane/migrations/baseline/0000_production_baseline.sql
-   ```
-2. In B.4, stage **that** file as `/opt/stayconnect/data-plane/migrations/baseline/0000_production_baseline.sql` (instead of the committed one) and record its sha256 in the install log.
-3. Run the provisioner unmodified. Its database step now finds every object `gatep-grants.sql` needs.
-4. **Result in this mission [REHEARSED-DB]:** the generator ran to completion on `7e4686ae` (`EXIT 0`; 3 extensions, 11 migration-created roles, 2 hypertables, 82 `scrub_registry` seed rows; 33,744 lines; its header now reads `0001..0158` instead of `0001..0149`). Replaying the provisioner's database sequence on a blank TimescaleDB 2.16.1 / PostgreSQL 16 container with that file **succeeded end to end**: roles → baseline → ownership → `gatep-grants.sql` all OK; `iam_v2` **169** tables, `public` **49**; **2** hypertables registered; the post-baseline objects present (`guest_network_pms_policy`, `network_archive`, `delete_unused_pms_interface`); **0** `iam_v2` relations or functions owned by anyone but `iam_v2_owner`; an `INSERT` into `audit_log` accepted; ledger empty (as designed). `factory-clean-baseline-verify.sh` (object-for-object comparison of the two paths) was **not** run — run it before trusting a regenerated file.
-5. **[PO]** The committed baseline in git is *not* changed by this procedure; the Product Owner should either accept an install from a generated-but-uncommitted baseline or commit the regenerated file first (the proper fix, Handbook §24.2).
-
-#### Path B (fallback; rehearsed on a disposable database): finish the database by hand, then resume the provisioner without its database section
-
-1. Run the provisioner once. It will install packages, create accounts and the compose stack, create `stayconnect_site`, load roles and the baseline, and then **stop** at `gatep-grants.sql` with `relation "iam_v2.guest_network_pms_policy" does not exist`. Everything it did up to that point is kept.
-2. Complete the schema **in this order** (rehearsed: baseline → `0150…0158` → ownership → grants succeeds, giving 169 `iam_v2` tables, 2 hypertables, nine ledger rows through `0158`). `edge-migrate.sh` in `live-site` mode would demand a verified pre-change backup that cannot exist yet (**K5**), so on this *never-activated, data-free* database the migrations are applied with the runner's `disposable` mode (the operator creates the harness marker) — **[PO] accept this one-time use on a factory-clean database**:
-   ```bash
-   export EDGE_PSQL='docker exec -i stayconnect-pg psql -v ON_ERROR_STOP=1 -U stayconnect -d stayconnect_site'
-   $EDGE_PSQL -c 'CREATE TABLE IF NOT EXISTS public._scratch_marker(x int)'
-   for v in $(ls /opt/stayconnect/data-plane/migrations/*.up.sql | sed 's#.*/##; s#\.up\.sql##' | awk '$0>="0150"'); do
-     sha=$(sha256sum /opt/stayconnect/data-plane/migrations/$v.up.sql | cut -d' ' -f1)
-     bash /opt/stayconnect/scripts/edge-migrate.sh --only "$v" --expect-db stayconnect_site \
-          --target-kind disposable --ack-target I_UNDERSTAND_DISPOSABLE_DATABASE --expect-sha256 "$sha" || { echo "FAILED $v"; break; }
-   done
-   $EDGE_PSQL -c 'DROP TABLE public._scratch_marker'          # remove the harness marker immediately
-   docker cp /opt/stayconnect/deploy/gatep stayconnect-pg:/tmp/gatep
-   for f in gatep-iam-ownership.sql gatep-grants.sql; do $EDGE_PSQL -f /tmp/gatep/$f || { echo "FAILED $f"; break; }; done
-   ```
-   (Each migration takes about a minute; `0155` and `0156` take the longest.) **Re-running ownership after the migrations is required**: in the rehearsal five functions created by 0150–0158 were not owned by `iam_v2_owner` until `gatep-iam-ownership.sql` ran again.
-3. Assert: `$EDGE_PSQL -tAc "select count(*) from timescaledb_information.hypertables"` → `2`; `select count(*) from public.schema_migrations` → `9`; D3-04 → `t,t,t`.
-4. Resume the rest of the provisioner **without** its database section (the script cannot be re-run whole — **K2**). Generate a resume copy and review it:
-   ```bash
-   sed -E '/^# -+ 4\. database/,/^# -+ 5\. credentials/{/^# -+ 5\. credentials/!d}' \
-       /opt/stayconnect/deploy/scripts/provision-fresh-appliance.sh > /root/provision-resume.sh
-   bash -n /root/provision-resume.sh && diff <(sed -n '1,400p' /opt/stayconnect/deploy/scripts/provision-fresh-appliance.sh) /root/provision-resume.sh | head -50
-   bash /root/provision-resume.sh
-   ```
-   (Verified in this mission: the pattern removes exactly the "database" section, the result parses with `bash -n`, and no later step references the removed variables.) The package/layout/infra steps are idempotent and re-run harmlessly.
-
-### B.8 Check what provisioning left behind — **[LIVE-REF] for the resulting state**
-
-```bash
-cat /etc/stayconnect/netd.env | grep -E 'NETD_(WAN|MGMT|LAN)'        # WAN/LAN names correct? NETD_MGMT_ADDR=auto
-systemctl is-active stayconnect-{scd,edged,acctd,netd,portald,caddy}  # all active
-systemctl is-enabled stayconnect-hotel-admin stayconnect-pmsd         # hotel-admin enabled (not yet running); pmsd NOT enabled
-docker ps; ss -ltnup | grep -E ':(443|8090|8380|8343|5432|9101)'
-```
-
-If `NETD_WAN_IFACE`/`NETD_LAN_PHYS` are wrong (a third interface or different names), fix `netd.env` and restart netd (`systemctl stop stayconnect-netd; systemctl reset-failed stayconnect-netd; systemctl start --no-block stayconnect-netd`) **before** creating any Client network.
-
-State at this point: services running, **no tenant / site / licence / operator / Client network**, Kea installed but stopped, `scd` waiting for registration, the Admin Console certificate minted but the console not yet installed. Kea and Unbound are brought under netd control at the first network apply.
-
-### B.9 Optional OS-level extras (MANUAL — defect G7) — **[NOT-EXERCISED]**
-
-Install only what you need; none is required for a first Client to sign in.
-
-```bash
-# Allow the Admin Console "Restart service" action (user stayconnect → systemd manage-units).
-# Ubuntu 22.04 ships polkit 0.105, which has NO JavaScript rules.d: use the .pkla (it grants manage-units to the user;
-# the per-unit whitelist is enforced inside edged). The 49-...rules file applies only to polkit >= 0.106.
-install -D -m 0644 /opt/stayconnect/deploy/polkit/50-stayconnect-health.pkla /etc/polkit-1/localauthority/50-local.d/50-stayconnect-health.pkla
-# Restart policies for Kea and Unbound (Restart=on-failure, svc-run back-off)
-install -D -m 0644 /opt/stayconnect/deploy/kea/systemd/override.conf     /etc/systemd/system/kea-dhcp4-server.service.d/override.conf
-install -D -m 0644 /opt/stayconnect/deploy/unbound/systemd/override.conf /etc/systemd/system/unbound.service.d/override.conf
-# Let scd write the Admin Console vhost during certificate operations
-install -D -m 0644 /opt/stayconnect/deploy/systemd/stayconnect-scd.service.d/hotel-admin-cert.conf /etc/systemd/system/stayconnect-scd.service.d/hotel-admin-cert.conf
-systemctl daemon-reload
-```
-
-(`pmsd` is intentionally **not** in the polkit unit list. Which polkit file PRE-LIVE actually uses was not inspected — **[UNVERIFIED]**.)
-
-### B.10 Install the Admin Console bundle (VM) — **[CODE][SYNTAX]**
-
-```bash
-sha256sum -c /root/hotel-admin-deploy.tgz.sha256
-HOTEL_ADMIN_USER=stayconnect-hotel-admin \
-  bash /opt/stayconnect/deploy/scripts/deploy-hotel-admin.sh install /root/hotel-admin-deploy.tgz
-```
-
-It verifies the checksum and bundle structure, extracts to `/opt/stayconnect/releases/hotel-admin/<stamp>`, boots the candidate on a scratch port and checks the capability contract, flips the `/opt/stayconnect/hotel-admin` symlink atomically, restarts **only** `stayconnect-hotel-admin`, smoke-tests it, rolls back automatically on failure, then runs the backup-cleanup. It refuses to run from `/root` as the working directory — run it from `/opt/stayconnect/deploy/scripts` or `/`. `HOTEL_ADMIN_USER` is set because the script otherwise chowns the release to `stayconnect` while the unit runs as `stayconnect-hotel-admin` (**G11**).
-
-### B.11 Create the first operator (MANUAL — defect G4) — **[CODE]**
-
-No installer creates an operator, and there is no setup wizard. As root, using the DSN the provisioner wrote:
-
-```bash
-set -a; . /etc/stayconnect/edged.env; set +a          # EDGED_DB_URL must be the generated svc_edged DSN, not the old default
-/opt/stayconnect/bin/edged seed-admin --email <site-admin-email> --password '<>=10 chars>' --name 'Site Admin'
-```
-
-* Creates `operators` + role `site_admin`. A password shorter than 10 characters requires `--allow-weak` and forces a password change at first sign-in. Re-running with the same email **resets the password and clears any lockout**.
-* Operators are local to the appliance and independent of Central operators.
-* Do not put the password in a script or shell history you retain.
-
-### B.12 Enable the enforcement plane (and Client commerce) — **MANUAL — defect G10 — [CODE]**
-
-Without this a Client "signs in" but is never given the Internet (sessions stay `PENDING_ENFORCEMENT`), and without the Phase-2 portal flag the portal cannot list packages.
-
-```bash
-APPLY=0 bash /opt/stayconnect/deploy/scripts/enable-phase3-enforcement-plane.sh     # dry run: shows what it will write
-bash /opt/stayconnect/deploy/scripts/enable-phase3-enforcement-plane.sh             # writes netd.env (STAYCONNECT_PHASE3_MASTER, NETD_PHASE3_PRODUCER_UID=<uid of acctd's user>) and acctd.env (STAYCONNECT_PHASE3_MASTER);
-                                                                                    # restarts netd then acctd only if they started before their env changed
-bash /opt/stayconnect/deploy/scripts/check-phase3-enforcement-plane.sh /etc/stayconnect   # coherence check (also run by install-service-units.sh)
-```
-
-The script's own header says it is for "an appliance that already runs a Phase-3 guest surface"; on a fresh box with **only** voucher/account/email sign-in the guest surface flag is `STAYCONNECT_IAMV2_MASTER` and enforcement still needs the plane above. Commerce (packages, quote, confirm) additionally needs, in `scd.env` and `edged.env`: `STAYCONNECT_PHASE2_MASTER=true`, `STAYCONNECT_PHASE2_PORTAL=true` (scd/portal) and `STAYCONNECT_PHASE2_ADMIN=true` (edged), then restart scd, edged and portald. **[UNVERIFIED]** — the repository contains no single document that lists the exact flag set for a minimal fresh appliance; the set above is derived from `deploy/scripts/enable-phase3-enforcement-plane.sh`, `data-plane/internal/iamv2/commerce_config.go` and the portal's behaviour, and must be confirmed on first use. After enabling, run D3c-06/07.
-
-### B.13 Hand over to configuration
-
-The appliance now shows **Waiting for activation** (it registers itself every 30 s → 5 min until Central answers). Continue with **Part C**. Keep an install log with: commit SHA, binary and Admin Console hashes, baseline sha256 (Path A) or migration list (Path B), Central endpoint, operator created, flags enabled, and who did what and when.
+State at this point: services running, the Admin Console reachable at `https://<WAN-IP>/`, one administrator, **no tenant / site / licence / Client
+network**, Kea installed but stopped, `scd` registered and **waiting for activation**. Continue with **Part C**. Keep an install log with: the
+release commit and `.tar.gz` sha256, the Central endpoint, the trust fingerprints you compared, the administrator created, and who did what and when.
 
 
 ---
 
 ## Part C — Initial configuration
 
-Everything in Part C is done in a browser (two consoles) and is **[NOT-EXERCISED]** on a fresh VM in this mission; the screens and routes named
-are those in the repository (`hotel-admin/components/nav.tsx`). The appliance is **factory-clean** until Central activates it: no tenant, no
-site, no licence, no Client network.
+Everything in Part C is done in a browser (two consoles). The validation (Appendix 3) drove C.3, C.6 and C.9 through the **same HTTP APIs the
+consoles call** (with the same password step-up), so those steps are **[VM]** for their effect; the screens and routes named are those in the
+repository (`hotel-admin/components/nav.tsx`). The appliance is **factory-clean** until Central activates it: no tenant, no site, no licence,
+no Client network.
 
 ### C.1 Identity: what "factory-clean" means and what must never be typed
 
@@ -404,7 +299,7 @@ site, no licence, no Client network.
 ### C.2 First sign-in to the Admin Console
 
 1. Browse to `https://<WAN-IP>/` (or `https://hotel.stayconnect.local/` if you map that name to the WAN IP in your DNS/hosts — the appliance's own Unbound does **not** serve that name to the WAN side). The certificate is signed by **Caddy's local CA**; trust `/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt` on the staff PC or accept the warning once. **[UNVERIFIED how staff PCs are expected to receive that root]**
-2. Sign in as the operator created in B.11. If the password was shorter than 10 characters (`--allow-weak`) you are forced to choose a new one (≥ 10 characters) before anything else.
+2. Sign in as the administrator created in B.5. (Forgot it, or locked out? `bash /opt/stayconnect/deploy/scripts/create-first-admin.sh --email <same> --reset` sets a new password and clears the lockout — root only, recorded in the journal.)
 3. Recommended: enable the optional **two-step sign-in** (TOTP) under *Account*; store the recovery codes (shown once). There is no setting to *require* it for everyone.
 4. Session limits default to 30 min idle / 12 h absolute. Keep an eye on *Operators* to add real staff (roles: Site IT manager, Client services operator, Client relations operator, Voucher operator, Payments operator, Viewer) and **disable or change the seeded account** once they exist.
 
@@ -417,11 +312,11 @@ site, no licence, no Client network.
 3. **Activate** (needs a `platform_owner`/`platform_admin` and password step-up): choose or create the **Customer** and **Site** (Site = one physical property; a Customer must be explicit); set **clients online at once** (0 = unlimited), **valid days / until**, **grace days**, and **licensed modules** (`hospitality` for PMS/room sign-in; `paid_access`, `card_payment`, `room_charge`, OTP/social add-ons as sold). Site Type is descriptive only.
 4. One transaction produces the **signed assignment**, the **signed licence** (schema 4) and an audit entry. A site that already holds *another customer's* data is refused (`409 holds_other_customer_data`).
 
-**Offline (no route to Central):** *Appliance & licence → Offline activation → Download activation request* → import it in Central (*Appliances → Import activation request*) → Activate → download the **activation package** → upload it on the appliance. Requires `vendor-license.pub` already pinned (B.5). Licence renewal offline = Central *Offline licence file* → *Upload licence file*.
+**Offline (no route to Central):** *Appliance & licence → Offline activation → Download activation request* → import it in Central (*Appliances → Import activation request*) → Activate → download the **activation package** → upload it on the appliance. Requires `vendor-license.pub` already pinned (B.5, `--offline-activation-only`). **[NOT-EXERCISED]** Licence renewal offline = Central *Offline licence file* → *Upload licence file*.
 
 ### C.4 Confirm the appliance converged (software facts)
 
-Within minutes of activation (assignment poll 30 s, licence 1 min until held):
+Within minutes of activation (assignment poll 30 s, licence 1 min until held) — **[VM]**: assignment, licence and the mutual-TLS certificate arrived in under two minutes, and scd then moved to `:9443`:
 
 ```bash
 ls -l /etc/stayconnect/assignment/ /etc/stayconnect/license/ /etc/stayconnect/certs/     # assignment.json, registry.json; current.json, state.json; client.crt, ca.crt, mtls-client.key
@@ -477,7 +372,8 @@ After Confirm, on the VM: `ip -br addr` shows the bridge with the gateway addres
 4. Optional *Delivery* (`/notifications`): SMTP / SendGrid / Twilio / WhatsApp providers — **without one, no OTP or verification email is ever issued**. Optional *Identity providers* (`/social-providers`), *Payment methods* (`/payment-methods`, **TEST mode only** unless the Product Owner authorises LIVE), *Allowed sites* (walled garden).
 5. Test with a **voucher on a test device** on the new Client network (Part D.3).
 
-> **Do not skip:** on a freshly provisioned appliance the *enforcement plane* is **not** enabled by the provisioner. Until it is (B.12) a successful sign-in produces a session that stays `PENDING_ENFORCEMENT` and the device never gets Internet.
+> The enforcement plane and the commerce flags are part of the profile the installer writes (B.5). If a session ever stays
+> `PENDING_ENFORCEMENT`, run `bash /opt/stayconnect/deploy/scripts/check-phase3-enforcement-plane.sh /etc/stayconnect` (Appendix 2).
 
 ### C.10 PMS Interface onboarding without a live PMS
 
@@ -495,7 +391,7 @@ You can prepare Room sign-in completely and leave it **inert** until a real PMS 
    #                                PMSD_EVENT_IDENTITY_KEY_HEX=<32-byte hex>  PMSD_EVENT_IDENTITY_KEY_VERSION=1
    ```
 
-   Generate the two HMAC keys with `openssl rand -hex 32` and record them in your vault (they are **not** in any backup the product writes by itself). Do **not** set `PMSD_SECRET_KEY_*` for a `credential_mode=NONE` (Protel FIAS) interface. Enabling PMS authentication does not disable voucher/account sign-in. Remember the enforcement-plane flags (B.12).
+   Generate the two HMAC keys with `openssl rand -hex 32` and record them in your vault (they live in `pmsd.env`, which the encrypted configuration archive carries; keep a vault copy as well). Do **not** set `PMSD_SECRET_KEY_*` for a `credential_mode=NONE` (Protel FIAS) interface. Enabling PMS authentication does not disable voucher/account sign-in. The enforcement-plane flags are already set by the installer (B.5).
 3. **Author without activating.** In *PMS connection* create the interface (display label, kind `protel-fias`, endpoint `host:port`, source timezone, base currency/exponent) → **Publish** the revision. **Leave the lifecycle at `AUTH_DISABLED`** (never `ACTIVE`): `pmsd` dials only `ACTIVE` interfaces, so nothing connects and nothing is posted. Activating against a non-existent host only produces endless reconnect attempts and link-down alerts.
 4. **Grace preflight** (once, when you intend to go live): `SELECT iam_v2.bootstrap_emergency_grace('<tenant>','<site>'); SELECT iam_v2.emergency_grace_health('<tenant>','<site>');` (must be `OK`).
 5. **Routing**: *PMS routing* → per Client network choose `NONE`, `DEDICATED` (one interface) or `SHARED_STRICT` (2–3), **Preview → Apply**. A network with no decision offers room sign-in to nobody.
@@ -538,14 +434,14 @@ IDs are stable so a site file can reference them. "Expected" is what a healthy i
 
 | ID | Check | Command | Expected |
 |---|---|---|---|
-| D2-01 | Package versions | `dpkg-query -W docker-ce caddy kea-dhcp4-server unbound nftables nodejs` | Docker 29.x, Caddy 2.11.x, Kea **2.0.2**, Unbound 1.13.x, nftables 1.0.x, Node 20.x |
+| D2-01 | Package versions | `dpkg-query -W docker-ce caddy kea-dhcp4-server unbound nftables nodejs polkitd` | Docker 29.x, Caddy 2.11.x, Kea **2.0.2**, Unbound 1.13.x, nftables 1.0.x, Node 20.x, polkit 0.105 (validated: 29.9.2, 2.11.7, 2.0.2, 1.13.1, 1.0.2, 20.20.2) |
 | D2-02 | Containers | `docker ps --format '{{.Names}} {{.Image}} {{.Status}}'` | `stayconnect-pg  timescale/timescaledb:2.16.1-pg16 … healthy` and `stayconnect-redis  redis:7-alpine` (Redis is unused by the appliance) |
-| D2-03 | Units active | `for u in scd netd acctd edged portald hotel-admin caddy; do systemctl is-active stayconnect-$u; done` | all `active` (`hotel-admin` only after B.10) |
+| D2-03 | Units active | `for u in scd netd acctd edged portald hotel-admin caddy; do systemctl is-active stayconnect-$u; done` | all `active` |
 | D2-04 | Units enabled | `systemctl is-enabled stayconnect-{scd,netd,acctd,edged,portald,hotel-admin,caddy}` | `enabled`; `stayconnect-pmsd` enabled only if you chose to (C.10); stock `caddy.service` **disabled** |
 | D2-05 | Timers | `systemctl list-timers 'stayconnect-*'` | `backup-cleanup` and `hotel-admin-cert-renew` scheduled |
 | D2-06 | No failed units | `systemctl --failed; bash /opt/stayconnect/deploy/scripts/check-appliance-units.sh` | none failed; script exit 0 |
 | D2-07 | Production build profile | `journalctl -u stayconnect-scd -b --no-pager \| grep -m1 'build=production'` | one line (the provisioner requires it) |
-| D2-08 | Binary provenance | on the WS: `go version -m ./scd` for each binary copied back (or compare `sha256sum` with B.1) | `vcs.revision` = your commit, `vcs.modified=false`, `-tags=stayconnect_production` |
+| D2-08 | Binary provenance | `cat /opt/stayconnect/DEPLOYED_BINARIES.sha256; sha256sum /opt/stayconnect/bin/*; for b in scd edged netd; do grep -aom1 'vcs.revision=[0-9a-f]*' /proc/$(systemctl show -p MainPID --value stayconnect-$b)/exe; done` | the recorded sha256 match the files; the **running** processes embed the release commit; `RELEASE.json` names the same commit |
 | D2-09 | Sockets and modes | `stat -c '%a %U:%G %n' /run/stayconnect/scd.sock /run/stayconnect/netd.sock /run/kea/kea4-ctrl-socket` | scd `660 root:stayconnect-scd`; netd `660 root:stayconnect`; Kea socket exists after C.6 |
 | D2-10 | Loopback-only services | `ss -ltn \| grep -E ':(8090\|3100\|9101\|5432\|6379)'` | each bound to `127.0.0.1` |
 | D2-11 | Portal listeners | `ss -ltn \| grep -E ':(8380\|8343)'` | both present (`*`) |
@@ -575,6 +471,7 @@ IDs are stable so a site file can reference them. "Expected" is what a healthy i
 | D3-07 | `iam_v2` owner | `$P "select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace join pg_roles r on r.oid=c.relowner where n.nspname='iam_v2' and r.rolname<>'iam_v2_owner' and c.relkind in ('r','v','S')"` | `0` |
 | D3-08 | Writer boundary holds | `journalctl -u stayconnect-scd -u stayconnect-netd -u stayconnect-acctd -b \| grep -i writerguard` | no refusal lines |
 | D3-09 | Audit table writable | after you sign in once: `$P "select count(*) from audit_log"` | ≥ 1 (proves the hypertable accepts inserts) |
+| D3-12 | Schema coverage recorded | `cat /etc/stayconnect/schema-baseline; $P "select coalesce(max(version),'(empty)') from public.schema_migrations"` | the release's newest migration (e.g. `0158`); the ledger empty on a box built from the baseline, or the newest version after an upgrade |
 | D3-10 | Database default password gone | Admin Console *Overview* shows no "default database password" warning | no warning |
 | D3-11 | Superuser password is not the dev default | `grep -c '^STAYCONNECT_PG_PASSWORD=stayconnect$' /etc/stayconnect/secrets/pg-superuser.env` | `0` |
 
@@ -591,7 +488,13 @@ IDs are stable so a site file can reference them. "Expected" is what a healthy i
 
 ### D.3c Client network and Client journey (software, with a test client)
 
-Use a laptop or phone on the Client network, **or** the repository's namespace client (`scripts/phase1-test-client.sh`) — and a **test voucher** from a **Free** package.
+Use a laptop or phone on the Client network, **or** the namespace client shipped in the release — **test appliances only** (it plugs a veth into the Client bridge and consumes a voucher):
+
+```bash
+bash /opt/stayconnect/scripts/client-journey-netns-test.sh cj1 <voucher-code>     # → "client-journey cj1: 12 passed, 0 failed"
+```
+
+It covers D3c-04…07 (DHCP, DNS, portal interception, HTTPS blocked before sign-in, captive probe, voucher sign-in, entitlement, nft + tc enforcement, Internet, accounting). Use a **test voucher** from a **Free** package.
 
 | ID | Check | Expected |
 |---|---|---|
@@ -603,6 +506,8 @@ Use a laptop or phone on the Client network, **or** the repository's namespace c
 | D3c-06 | Voucher sign-in end-to-end | voucher accepted → package chosen/redeemed → `/success` |
 | D3c-07 | Session **enforced** | `docker exec -i stayconnect-pg psql … -tAc "select state,count(*) from iam_v2.sessions group by 1"` shows `active`, **not** `PENDING_ENFORCEMENT`; `nft list set inet stayconnect phase3_auth_ipv4` lists the client; the client can reach the Internet |
 | D3c-08 | Teardown | Disconnect the session in *Active sessions*: the nft element disappears and the Internet stops within seconds (conntrack flushed) |
+| D3c-09 | Management plane unreachable from a Client | from the signed-in client: `curl -m5 -k https://<WAN-IP>/`, `timeout 5 bash -c '</dev/tcp/<WAN-IP>/22'`, `timeout 5 bash -c '</dev/tcp/<gateway>/5432'` | all time out / refused (the Admin Console, SSH and the database are not reachable from a Client network) |
+| D3c-10 | Survives a reboot | `reboot`; then D2-03, `jq .revision /etc/stayconnect/generated/network/last-confirmed.json` (unchanged), and a new client journey | all units active, the confirmed revision re-asserted, licence still Active, a new client passes |
 
 ### D.4 Acceptance that software cannot prove (witness on real equipment)
 
@@ -613,7 +518,7 @@ These stay **open** until a person has observed them; record who, when and on wh
 | D4-01 | **Physical/ESXi port-group**: tagged frames for each Client VLAN actually reach the VM (`tcpdump -nei ens192 vlan`); LAN portgroup security settings = Accept ×3; DHCP DORA completes for an unrelated client | depends on the vSwitch, physical switch trunking and AP |
 | D4-02 | **SSID → VLAN mapping** on the real APs; roaming between APs | AP configuration |
 | D4-03 | **iOS, Android, Windows (NCSI), macOS, ChromeOS** auto-pop of the portal (option 114 and DNAT fallback); desktop Chrome/Edge login tab | OS captive-portal behaviour varies; Windows NCSI "not verified" in the project's own documents |
-| D4-04 | **Client isolation** between two real devices on the same SSID/AP | AP-level isolation is separate from the appliance rule |
+| D4-04 | **Client isolation** between two real devices on the same SSID/AP | Clients on one bridge exchange frames at layer 2 without crossing the appliance's firewall (measured on the test appliance: two namespace clients on one bridge could ping each other). Same-segment isolation is the AP/switch's job — witness it on the real access layer. Isolation from the appliance's management plane *is* the appliance's job and was verified (D3c) |
 | D4-05 | **Real email**: verification and reset links from a real mailbox; **real SMS/WhatsApp** delivery with the production provider | needs real provider accounts |
 | D4-06 | **Real social login round-trip** per provider (callback host in the provider console, HTTPS portal active) | needs real provider applications and public DNS |
 | D4-07 | **Card payment in TEST mode** through the hosted page; LIVE mode only with Product-Owner authorisation | provider account and money |
@@ -634,22 +539,28 @@ These stay **open** until a person has observed them; record who, when and on wh
 
 ## Part E — Recovery, maintenance, upgrade, rollback and restore
 
-### E.1 When the install fails part-way
+### E.1 When the install fails part-way — **[VM]**
 
-The provisioner stops at the first error (`set -e`, `ON_ERROR_STOP=1`) and prints the failing step. State left behind and how to continue:
+`appliance-install.sh` stops at the first error and prints the failing line and command (`ERR` trap). **Fix the cause and run the
+same command again**: it resumes (the `.install-in-progress` marker), and every step converges without regenerating identity,
+keys, passwords or the database. During the validation the first install was interrupted nine times by real defects and each
+re-run converged.
 
-| Fails at | What already exists | Recover |
+| Fails at | Typical cause | Recover |
 |---|---|---|
-| Packages (docker/caddy/nodesource unreachable) | partial apt state | Fix connectivity/DNS/proxy; re-run the provisioner (package steps are idempotent). **[CODE]** |
-| Layout/users | directories and accounts | Re-run (idempotent) |
-| Infra (compose / `pg_isready` > 120 s) | volume `stayconnect-infra_pgdata`, possibly a generated `pg-superuser.env` | `docker logs stayconnect-pg`; fix disk/memory; re-run. A pre-existing volume **keeps its old password** — never delete `pgdata` casually: **never `docker compose down -v`** on a box that holds data |
-| **Database (K1/K2)** | `stayconnect_site`, roles, baseline, maybe part of Gate-P | See B.7-recovery. Plain re-run fails with `schema "iam_v2" already exists` |
-| Credentials: `keybootstrap` not found | database ready | Copy the binary (`K3`), re-run **only if** the database step is skipped/idempotent in your workflow (K2) — otherwise run the remaining steps by hand from the script text |
-| Env/units/Caddy | env files, units | Re-run is safe for these steps (existing env files are never overwritten) |
-| Service start (a unit not `active`, or no `build=production`) | everything installed | `journalctl -u stayconnect-<svc> -b`; fix; `systemctl stop … ; reset-failed … ; start --no-block …` |
-| Hotel Admin install | previous release (if any) | `deploy-hotel-admin.sh` auto-rolls back; re-run `install` with a corrected tarball |
+| 1. release | damaged copy, edited file, a binary from another commit | copy the `.tar.gz` again; `sha256sum -c` it |
+| 2. platform | a third NIC, < 4 GiB, < 15 GiB free, no default route | fix the VM; `--allow-unsupported-platform` exists but the result is unsupported |
+| 4. trust | a file missing or not matching `FINGERPRINTS.txt` | get the files from Central again; compare the fingerprints out of band |
+| 5. packages | a mirror, Docker Hub, Cloudsmith or NodeSource unreachable | fix DNS/proxy/egress; re-run |
+| 5. database | the server is not stable, a baseline older than the release's newest migration, a half-built schema from an old procedure | re-run; build a fresh release; `--reinitialise-unused-db` (data-free only) |
+| 5. Central endpoint / DNS | resolvers disagree about the Central name; the release's Central is not the one you activate against | fix DNS; `--central-base` |
+| 5. certificate / Caddy | Caddy cannot validate or reload | `journalctl -u stayconnect-caddy`; re-run |
+| 5. services | a unit not `active`, or `scd` did not log `build=production` | `journalctl -u stayconnect-<svc> -b`; re-run |
+| 6. Admin Console | the candidate failed its smoke test | it rolled back by itself; read the output; re-run |
+| 7. administrator | a password shorter than 12 characters or equal to the email | re-run with a valid password |
 
-A repeated, identical failure is **never** solved by deleting `/etc/stayconnect` on a box that has been activated: that destroys the identity and keys (E.3).
+**Never** `docker compose down -v` and never delete `/etc/stayconnect` on a box that has been activated: that destroys the identity and the
+keys (E.3).
 
 ### E.2 Reading failures — where the evidence is
 
@@ -676,40 +587,58 @@ See Appendix 2 for the log map. First look at: `systemctl --failed`, `journalctl
 | The **erasure ledger** primary file and its **secondary copy** | A restore replays it; with no trustworthy copy a restore stops |
 | `/etc/stayconnect/financial-restore-generation.json` | Deliberately **not** backed up; must keep counting |
 
-The product's own backup writes an encrypted copy of `/etc/stayconnect` (`etc-<stamp>.tgz.age`) beside every database backup, **but no code extracts it** — restoring configuration from that archive is a **manual** step (G14).
+The product's own backup writes an encrypted copy of `/etc/stayconnect` (`etc-<stamp>.tgz.age`) beside every database backup. It is restored by
+`deploy/scripts/restore-appliance-config.sh` (Case 2). Keep the files of a backup together, **off the appliance**: `db-<stamp>.sql.gz.age`, its
+`.verified` and `.meta.json`, and `etc-<stamp>.tgz.age`.
 
-**Case 1 — restore into the same, healthy appliance (supported; drill-tested by `scripts/ledger-restore-drill.sh`):** Admin Console → *Backups* → choose the backup → *Restore* (password + typed backup name + holder key). The product loads the dump into a **staging** database, replays the erasure ledger there, quiesces edged/pmsd/acctd/portald, swaps databases, reinstates privileges, registers hypertables and enters **financial-recovery mode** (money movement held until an operator reconciles). Command line equivalent: `scd backup-restore --name <backup> --identity-file <holder-private-key>`. Allow up to ~2 h 15 min. The previous database is kept (`stayconnect_site_before_…`) for 14 days.
+**Case 1 — restore into the same, healthy appliance (supported; drill-tested by `scripts/ledger-restore-drill.sh`):** Admin Console → *Backups* → choose the backup → *Restore* (password + typed backup name + holder key). The product loads the dump into a **staging** database, replays the erasure ledger there, quiesces edged/pmsd/acctd/portald, swaps databases, reinstates privileges, registers hypertables and enters **financial-recovery mode** (money movement held until an operator reconciles). Command line equivalent: `scd backup-restore --name <backup> --identity-file <holder-private-key>`. Allow up to ~2 h 15 min. The previous database is kept (`stayconnect_site_before_…`) for 14 days. **[VM]**: a restore on the test appliance brought the voucher count back to the backup's (8 → 6), kept both hypertables, `APPLIANCE_UNITS = PASS`, and a new Client then passed the full journey; the appliance entered financial-recovery mode as designed.
 
-**Case 2 — rebuild the machine but keep the same identity and data (manual; not exercised; obtain Product-Owner/vendor sign-off first — [PO]):**
+**Case 2 — rebuild the machine but keep the same identity and data** — obtain Product-Owner/vendor sign-off before doing it to a production appliance — **[PO]**:
 
-1. Build a fresh VM per Part B up to and including provisioning (this creates *new* keys and a new identity).
-2. **Do not activate.** Stop the services: `systemctl stop stayconnect-{hotel-admin,edged,portald,acctd,netd,scd,pmsd}`.
-3. Decrypt and restore the configuration archive from the latest backup (holder private key required): `age -d -i <holder-key> etc-<stamp>.tgz.age | tar -xz -C / ` (inspect the listing first: `… | tar -tz`). This replaces the new keys/identity/certs/assignment/licence with the old ones.
-4. Start `scd`, then restore the database with `scd backup-restore …` (the DEKs now match the sealed data). Re-apply Gate-P (`E.5`), start the rest, run Part D.
-5. Hardware binding: if the new VM has a **different serial/hardware fingerprint** the licence is a hard mismatch — Central must **Replace hardware** or **Rebind**; a changed WAN MAC alone is a soft mismatch (Central *Rebind WAN MAC*).
-6. Anything that cannot be reconciled → fall back to Case 3.
+1. Install the same or a newer release on the new machine (Part B). This creates *new* keys and a *new* identity, which the next step replaces. **Do not activate it** in Central.
+2. Copy the backup set (`db-…sql.gz.age` + `.verified` + `.meta.json`, `etc-….tgz.age`), the erasure-ledger secondary copy, and a backup holder's **private** key to the machine (`/root`, mode 0600).
+3. Restore the configuration — the script stops the services, saves the current `/etc/stayconnect` to `/etc/stayconnect.before-restore-<stamp>`, extracts the archive **under `/etc`** (its paths are `stayconnect/…`), and **keeps this machine's database credentials** (every `*_DB_URL`/`*_DSN` line, `.dsn` and `secrets/pg-superuser.env`), because PostgreSQL on the new machine holds the new passwords and `pg_dump` carries none:
+   ```bash
+   bash /opt/stayconnect/deploy/scripts/restore-appliance-config.sh --archive /root/etc-<stamp>.tgz.age --identity /root/holder.key --list   # look first
+   bash /opt/stayconnect/deploy/scripts/restore-appliance-config.sh --archive /root/etc-<stamp>.tgz.age --identity /root/holder.key --yes
+   ```
+4. Put the erasure ledger back where the restore expects it (`/var/lib/stayconnect/ledger/erasure-ledger.jsonl`, `0600 root`), from its secondary copy.
+5. Start `scd`, put the backup files where scd keeps backups (`/opt/stayconnect/backups/db/`, `root:stayconnect 0640`), and restore the database — the data-encryption keys now match the sealed data:
+   ```bash
+   systemctl start stayconnect-scd
+   set -a; . /etc/stayconnect/scd.env; set +a
+   /opt/stayconnect/bin/scd backup-restore --name db-<stamp>.sql.gz.age --identity-file /root/holder.key
+   ```
+6. Start the rest (`netd acctd portald edged hotel-admin`), run `check-appliance-units.sh` and Part D. The appliance reports to Central as the **old** appliance; the licence must match the hardware (below).
+7. Hardware binding: a **different serial/hardware fingerprint** is a hard licence mismatch — Central must **Replace hardware** or **Rebind**; a changed WAN MAC alone is a soft mismatch (Central *Rebind WAN MAC*). Anything that cannot be reconciled → Case 3.
+8. Shred the holder private key from the machine.
 
 **Case 3 — lost appliance, accept a new identity (supported):** factory-clean install (E.3) → Activate → configure (Part C) → restore the database content you need from a backup *only if* its sealed secrets are not required, otherwise re-enter provider credentials and re-issue vouchers.
 
 **TimescaleDB rule for any manual restore:** never `pg_restore --clean`; recreate the database, `CREATE EXTENSION timescaledb`, `SELECT timescaledb_pre_restore()` … load … `SELECT timescaledb_post_restore()`, re-apply Gate-P, assert 2 hypertables; same extension version required.
 
-### E.5 Upgrades (appliance)
+### E.5 Upgrades (appliance) — **[VM]**
 
-Always: record the current provenance first (`sha256sum /opt/stayconnect/bin/*`), take a **manual backup**, and schedule a window. **Deploy a backward-compatible API before the UI that depends on it** (deploying the Admin Console without its edged half exposed a 404 once).
+Always: take a **manual backup** first (it also proves a backup key holder exists — without one every migration refuses), and schedule a window.
+Then build the new release (B.1), copy it to the VM, and:
 
-1. **Build** the new commit on the WS (B.1/B.2). **Stage** to a new directory on the VM (`/root/stage-<sha>/`).
-2. **Database migrations first, forward-only, one at a time**, on the VM from the staged repository layout:
-   ```bash
-   export EDGE_PSQL='docker exec -i stayconnect-pg psql -v ON_ERROR_STOP=1 -U stayconnect -d stayconnect_site'
-   v=<NNNN_migration_name>; sha=$(sha256sum /opt/stayconnect/data-plane/migrations/$v.up.sql | cut -d' ' -f1)
-   bash /opt/stayconnect/scripts/edge-migrate.sh --only "$v" --expect-db stayconnect_site \
-        --target-kind live-site --ack-target I_UNDERSTAND_LIVE_DARK_SITE_MIGRATION \
-        --apply-role iam_v2_owner --expect-sha256 "$sha"
-   ```
-   The runner takes a **mandatory verified pre-change backup first** (exit 4 and no change if it cannot — add a backup key holder first), refuses a superuser executor, locks, applies and writes one ledger row. `public`-schema migrations are applied by hand as superuser. Then re-apply the privileges: `bash /opt/stayconnect/scripts/gatep-reconcile.sh --container stayconnect-pg --db stayconnect_site --user stayconnect --expect-commit <sha>` (hash-guarded, one transaction, `--dry-run` first).
-3. **Binaries**: for each service `install -m 0755 <new> /opt/stayconnect/bin/<svc>` after saving the old as `<svc>.bak-<tag>` (**never `cp`**: a running executable cannot be overwritten). Restart order: `netd`, `scd`, `acctd`, `portald`, `edged` (and `pmsd`): `systemctl stop X; systemctl reset-failed X; systemctl start --no-block X`. Wait for the units to settle.
-4. **Admin Console**: `bash /opt/stayconnect/deploy/scripts/deploy-hotel-admin.sh install /root/hotel-admin-deploy.tgz` (auto-rollback on failed smoke).
-5. **Verify**: Part D.2/D.3 (at minimum D2-03, D2-07, D2-08, D3-02, D3-04) and refresh `DEPLOYED_BINARIES.sha256` by hand with the new hashes, commits and tags.
+```bash
+bash /root/onegate-appliance-<new-sha12>/deploy/scripts/appliance-install.sh --upgrade
+```
+
+In order (**[CODE][VM]**): verify the release → stage the new tree beside the old (`/opt/stayconnect/.previous/<stamp>`) → **apply the pending
+migrations** with `deploy/scripts/apply-pending-migrations.sh` — the floor is the ledger's newest version, or, on a box built from the baseline
+and never migrated since, `/etc/stayconnect/schema-baseline`; each pending migration goes through `edge-migrate.sh` in `live-site` mode
+(mandatory verified pre-change backup, sha256 of the exact file, advisory lock, `iam_v2_owner` executor, one ledger row) → **reconcile Gate-P**
+(`gatep-reconcile.sh --expect-commit <release commit>`, hash-guarded against the installed release's `RELEASE.json` + `SHA256SUMS`, one
+transaction) → install the binaries with `install(1)`, keeping each old one as `<bin>.bak-<stamp>` → install units → restart in dependency order
+(`netd`, `scd`, `acctd`, `portald`, `edged`, and `pmsd` if enabled) → install the Admin Console → record the release → `check-appliance-units.sh`.
+**If a migration or the reconcile fails, the binaries are not replaced.** The last lines print the exact binary-rollback command.
+
+Measured: an upgrade with no pending migration took ~25 s; a signed-in Client stayed online across it; identity, certificate and `.dsn` were
+unchanged. `apply-pending-migrations.sh --list` prints the pending set without changing anything.
+
+**Deploy a backward-compatible API before the UI that depends on it** — the installer does this by restarting edged before the console switch.
 
 **Compatibility gates you must respect:** a `netd` older than the nft converger is refused if the legacy `auth_ipv4` set is non-empty/unreadable (it would de-authorise every online Client); `scd`/`edged` older than migration 0155 are refused while any `SHARED_STRICT` policy exists.
 
@@ -717,7 +646,7 @@ Always: record the current provenance first (`sha256sum /opt/stayconnect/bin/*`)
 
 | What | How |
 |---|---|
-| Binaries | `bash /opt/stayconnect/scripts/binary-rollback.sh --bin-dir /opt/stayconnect/bin --source-suffix .bak-<tag> --unit scd=stayconnect-scd --unit netd=stayconnect-netd …` (add `--dry-run` first). Verifies the sha256 on disk **and** `/proc/<pid>/exe` — "healthy" is not "rolled back" |
+| Binaries | the command `--upgrade` printed: `bash /opt/stayconnect/scripts/binary-rollback.sh --bin-dir /opt/stayconnect/bin --source-suffix .bak-<stamp> --unit scd=stayconnect-scd --unit edged=stayconnect-edged --unit netd=stayconnect-netd --unit portald=stayconnect-portald --unit acctd=stayconnect-acctd` (add `--dry-run` first). Verifies the sha256 on disk **and** `/proc/<pid>/exe` — "healthy" is not "rolled back". **[VM]**: `BINARY_ROLLBACK = PASS`, the Client stayed online. Roll forward again with `appliance-install.sh --upgrade` from the newer release. A rollback is safe only across releases with the same schema — after a migration, restore the pre-change backup instead |
 | Admin Console | `deploy-hotel-admin.sh rollback` (uses the explicit `.previous` pointer) |
 | A Client-network change | automatic within 120 s if unconfirmed; after confirmation there is no rollback of an *active* revision — apply a new change, or `netd recover reassert-confirmed` to re-assert the last confirmed state |
 | A WAN/LAN change | automatic within 120 s if unconfirmed |
@@ -748,18 +677,18 @@ Always: record the current provenance first (`sha256sum /opt/stayconnect/bin/*`)
 
 | Item | Requirement | Label |
 |---|---|---|
-| Host | Ubuntu **22.04** (live) — the installer also lists 24.04 and Debian 12; one NIC; root access. Observed Central: 1 vCPU, 7.8 GiB RAM, 18 GB root LV (41 % used after ~4 weeks) | **[LIVE-REF][CODE]**; no official sizing — **[PO]** |
+| Host | Ubuntu **22.04** (validated on 22.04.5) — the installer also lists 24.04 and Debian 12; one NIC; root access. Validated lab Central: 2 vCPU, 5.9 GiB RAM, 18 GB root LV (39 % used after install). Production Central: 1 vCPU, 7.8 GiB, 18 GB | **[VM][LIVE-REF]**; no official sizing — **[PO]** |
 | Addressing | One static IPv4; DNS **A record** for the Central name (e.g. `sc-central.echofusion.com`) that every appliance's resolvers can resolve. The name is the only thing appliances pin — if the host moves, change the DNS, not the appliances | **[CODE]** |
-| Endpoint config | The Central name is read from the release's `deploy/config/central-endpoint.env` (`CENTRAL_BASE`, `CENTRAL_MTLS_BASE`, `CTRLAPI_APPLIANCE_BASE`); a new environment needs its own value (`--endpoint-config` is for labs only). Must be https + FQDN, no IP, no path | **[CODE]** |
+| Endpoint config | The Central name is read from the release's `deploy/config/central-endpoint.env` (`CENTRAL_BASE`, `CENTRAL_MTLS_BASE`, `CTRLAPI_APPLIANCE_BASE`); a new environment needs its own value — for a lab, `--endpoint-config <file>` (the validation used one naming the lab Central), and on the appliance side `appliance-install.sh --central-base`. Must be https + FQDN, no IP, no path | **[CODE][VM]** |
 | Console name | e.g. `central.onegate.getsemantics.com` (documented as **not configured yet**; needs DNS + certificate + redeploy) — pass with `--admin-name` | **[DOC]** |
 | TLS for `:443` | `--tls internal` (default; Central's own CA, which appliances install) or `--tls acme` (public certificate; needs public DNS and `:80/:443`) | **[CODE]** |
-| Firewall | `ufw`: allow **22** (and the real sshd port), **443**, **9443**; default deny. Never expose 5432, 6379, 8080, 3000 | **[CODE][LIVE-REF]** |
+| Firewall / NAT | `ufw`: allow **22** (and the real sshd port), **443**, **9443**; default deny. Never expose 5432, 6379, 8080, 3000. Behind NAT, forward **both** 443 and 9443 to the Central host and check each from outside with a temporary listener before you install (the validation found 443 forwarded to the appliance instead) | **[CODE][VM]** |
 | Outbound | Docker Hub (`timescale/timescaledb:2.16.1-pg16`, `redis:7-alpine`), apt mirrors; Cloudflare/ACME only if you use portal certificates | **[CODE]** |
 | Time | Synchronised (licence validity, JWT lifetime 60 s) | **[CODE]** |
 | Backup recipients | Create age public keys **before** you rely on backups; until `/etc/stayconnect/backup-recipients.txt` exists dumps are **unencrypted** (a warning only) | **[CODE]** |
 | Off-host storage | Destination for dumps and export bundles — a Product-Owner decision | **[PO]** |
 
-### F.2 Build the release (WS) — **[CODE][SYNTAX]**
+### F.2 Build the release (WS) — **[VM]**
 
 ```bash
 git checkout <approved-commit-sha>; test -z "$(git status --porcelain)"
@@ -770,7 +699,7 @@ sha256sum -c dist/central/onegate-central-<sha12>.tar.gz.sha256
 
 The build is from a **fresh clone of the exact commit** in containers (`golang:1.25.12`, `node:20.18.0-bookworm-slim`), refuses a dirty tree, verifies the commit is embedded in the binary, and never overwrites an existing release directory.
 
-### F.3 Install — **[NOT-EXERCISED on a fresh host in this mission; the pipeline is [CODE][SYNTAX]; the running result is [LIVE-REF] on `172.21.96.196`]**
+### F.3 Install — **[VM]** (`--mode new` on a blank lab VM; the `restore` mode is **[LIVE-REF]** — the 2026-09-27 move)
 
 ```bash
 scp dist/central/onegate-central-<sha12>.tar.gz* root@<central>:/root/
@@ -787,6 +716,8 @@ The installer's 14 steps (idempotent; never regenerates an existing secret/key/C
 
 1. verify the release (`SHA256SUMS`, clean source state, binary embeds the commit, console `BUILD_ID`) · 2. host prerequisites (`--install-prereqs` apt-installs docker, compose v2, caddy, Node 20, age; refuses a host whose `sc-central-pg` was not created from `central-infra.yml`) · 3. user `stayconnect`, directories, **generated `db_password`/`redis_password` files** (`openssl rand -hex 32`, only if absent) · 4. install tooling and `ctrlapi` (previous kept as `.bak-<stamp>`) · 5. `docker compose up` and wait healthy · 6. **identity** — vendor licence key, assignment signing key, registry root key, internal TLS CA; `ctrlapi`'s first start creates the appliance Root + Intermediate CA and moves the Root key to `/etc/stayconnect/pki-offline` · 7. `central-migrate.sh up` + `verify` (56 migrations) · 8. render `/etc/stayconnect/ctrlapi.env` (0600) and `central-endpoint.env` · 9. install units, **mask the stock `caddy.service`**, enable ctrlapi/cloud-admin/caddy/backup timers · 10. console release directory + atomic symlink · 11. start ctrlapi, write `ca-bundle.crt` (intermediate + root) and restart · 12. seed the first platform admin (unless one exists / `--skip-admin`) · 13. console up, internal TLS issuance, render + validate the Caddyfile, restart Caddy, `ufw` enable, timers, **first backup** · 14. publish the **public** trust files to `/opt/stayconnect/central/appliance-trust/`, write `DEPLOYED.json`, run `central-deploy.sh smoke` and `central-preflight.sh` — **the install fails if they fail.**
 
+Lab install (what the validation ran): `--mode new --tls internal --endpoint-config <lab central-endpoint.env> --extra-names <public-ip>,<private-ip> --install-prereqs`; result: smoke 7/7 PASS, preflight READY, 56 migrations, `ufw` 22/443/9443.
+
 Failure modes: wrong `--mode`; a repository checkout instead of a release; checksum mismatch; a database with data in restore mode; TimescaleDB version mismatch; `CHANGE_ME` left in an existing `ctrlapi.env`; `ctrlapi` not ready in 90 s; preflight FAIL.
 
 ### F.4 After the install — **key custody is part of the install**
@@ -795,7 +726,7 @@ Failure modes: wrong `--mode`; a repository checkout instead of a release; check
 2. **Move the appliance Root CA key to cold storage** (`/etc/stayconnect/pki-offline/root-ca.key`) and delete it from the host once the offline copy is confirmed (`docs/CA_CEREMONY_RUNBOOK.md`). Never regenerate the Root.
 3. **Publish `FINGERPRINTS.txt` out of band** (vendor key id, assignment key id, registry root key id, Root CA and TLS CA fingerprints). Appliance installers compare against it (B.5).
 4. Create `/etc/stayconnect/backup-recipients.txt` (age public keys of the people who may restore) and re-run `bash /opt/stayconnect/central/tooling/central-backup.sh --reason first` (path per your install) so backups become encrypted.
-5. Copy the three public trust files (`vendor-license.pub`, `assignment-registry-root.pub`, `central-tls-ca.crt`) into the **appliance** deploy trees you will provision (B.5).
+5. Give the three public trust files (`vendor-license.pub`, `assignment-registry-root.pub`, `central-tls-ca.crt`) and `FINGERPRINTS.txt` to whoever installs appliances: they are the `--trust-dir` of B.4/B.5.
 6. Enable operator **two-step sign-in** for platform accounts (*Account → Security*); create named operators; retire the seeded admin if it is a shared account.
 7. Portal certificates (optional): *System → Portal certificates* — Cloudflare API token, ACME contact, staging first, then production and CAA. **[PO]** for the token and zone.
 8. Off-host copy of `/opt/stayconnect/backups/db` and the export bundle **[PO]**.
@@ -828,15 +759,15 @@ Failure modes: wrong `--mode`; a repository checkout instead of a release; check
 
 ## Appendix 1 — Environment files reference
 
-Written by the provisioner only if absent (`[ -f ] ||`); never regenerated. Modes: `root:stayconnect 0640` (`scd.env` is `0600` on PRE-LIVE). **None may contain `*_TENANT_ID` / `*_SITE_ID`.**
+Written by the provisioner only if absent (`[ -f ] ||`); never regenerated. The product-profile keys (B.5) are then added to a file only when the key is absent (`ensure_kv`). Modes: `root:stayconnect 0640` (`scd.env` is `0600` on PRE-LIVE). **None may contain `*_TENANT_ID` / `*_SITE_ID`.**
 
 | File | Keys the provisioner writes | Operator-added (when enabling features) |
 |---|---|---|
-| `scd.env` | `SCD_DB_URL`, `SCD_SOCKET=/run/stayconnect/scd.sock`, `SCD_CTRLAPI_BASE`, `SCD_MTLS_BASE`, `SCD_AUTO_REGISTER=true`, `SCD_METRICS_ADDR=127.0.0.1:9101`, `STAYCONNECT_IAMV2_MASTER/OTP/SOCIAL=true`, `SCD_PAYMENT_DB_URL`, `STAYCONNECT_PHASE4_PAYMENT_OUTCOME_DSN`, `SCD_POSTING_DB_URL`, `SCD_SECRETS_DIR`, `SCD_DURABLE_THROTTLE=true`, `SCD_OTP_HMAC=true` | `STAYCONNECT_PHASE2_MASTER/PORTAL/ADMIN` (commerce portal), `STAYCONNECT_PHASE3_MASTER/PMS_AUTH`, `STAYCONNECT_PHASE4_*` (**[PO]**), `STAYCONNECT_PHASE5_*`, `STAYCONNECT_PHASE6_*`, `STAYCONNECT_PAYMENT_LIVE_ALLOWED` (**[PO]**, never set in a pilot) |
-| `edged.env` | `EDGED_DB_URL`, `EDGED_SCD_SOCKET`, `EDGED_COOKIE_SECURE=true`, `STAYCONNECT_IAMV2_MASTER=true` | `STAYCONNECT_PHASE2_MASTER/ADMIN`, `STAYCONNECT_PHASE3_MASTER/ADMIN`, … `PMSD_SECRET_KEY_ID/_HEX` if an `AUTH_KEY` interface is authored |
-| `acctd.env` | `ACCTD_DB_URL`, `ACCTD_SCD_SOCKET` | `STAYCONNECT_PHASE3_MASTER=true` (enforcement plane — B.12), `ACCTD_TICK_SECONDS` (1–10) |
-| `portald.env` | `PORTALD_SCD_SOCKET` | `PORTALD_HTTP_ADDR`, `PORTALD_HTTPS_ADDR`, `PORTALD_FQDN` (defaults are right) |
-| `netd.env` | `NETD_DB_URL`, `NETD_WAN_IFACE`, `NETD_MGMT_IFACE` (= WAN), `NETD_MGMT_ADDR=auto`, `NETD_LAN_PHYS` | `STAYCONNECT_PHASE3_MASTER=true`, `NETD_PHASE3_PRODUCER_UID=<uid of acctd's user>` (enforcement plane), `NETD_CONFIRM_SECONDS` (default 120) |
+| `scd.env` | `SCD_DB_URL`, `SCD_SOCKET=/run/stayconnect/scd.sock`, `SCD_CTRLAPI_BASE`, `SCD_MTLS_BASE`, `SCD_AUTO_REGISTER=true`, `SCD_METRICS_ADDR=127.0.0.1:9101`, `STAYCONNECT_IAMV2_MASTER/OTP/SOCIAL=true`, `SCD_PAYMENT_DB_URL`, `STAYCONNECT_PHASE4_PAYMENT_OUTCOME_DSN`, `SCD_POSTING_DB_URL`, `SCD_SECRETS_DIR`, `SCD_DURABLE_THROTTLE=true`, `SCD_OTP_HMAC=true`; profile: `STAYCONNECT_PHASE2_MASTER=true`, `STAYCONNECT_PHASE2_PORTAL=true` | `STAYCONNECT_PHASE3_MASTER/PMS_AUTH`, `STAYCONNECT_PHASE4_*` (**[PO]**), `STAYCONNECT_PHASE5_*`, `STAYCONNECT_PHASE6_*`, `STAYCONNECT_PAYMENT_LIVE_ALLOWED` (**[PO]**, never set in a pilot) |
+| `edged.env` | `EDGED_DB_URL`, `EDGED_SCD_SOCKET`, `EDGED_COOKIE_SECURE=true`, `STAYCONNECT_IAMV2_MASTER=true`; profile: `STAYCONNECT_PHASE2_MASTER=true`, `STAYCONNECT_PHASE2_ADMIN=true` | `STAYCONNECT_PHASE3_MASTER/ADMIN` (PMS, C.10), … `PMSD_SECRET_KEY_ID/_HEX` if an `AUTH_KEY` interface is authored |
+| `acctd.env` | `ACCTD_DB_URL`, `ACCTD_SCD_SOCKET`; profile: `STAYCONNECT_PHASE3_MASTER=true` (enforcement plane) | `ACCTD_TICK_SECONDS` (1–10) |
+| `portald.env` | `PORTALD_SCD_SOCKET`; profile: `STAYCONNECT_PHASE2_MASTER=true`, `STAYCONNECT_PHASE2_PORTAL=true` | `PORTALD_HTTP_ADDR`, `PORTALD_HTTPS_ADDR`, `PORTALD_FQDN` (defaults are right) |
+| `netd.env` | `NETD_DB_URL`, `NETD_WAN_IFACE`, `NETD_MGMT_IFACE` (= WAN), `NETD_MGMT_ADDR=auto`, `NETD_LAN_PHYS`; profile: `STAYCONNECT_PHASE3_MASTER=true`, `NETD_PHASE3_PRODUCER_UID=<uid of acctd's user>` (enforcement plane) | `NETD_CONFIRM_SECONDS` (default 120) |
 | `pmsd.env` | a copy of `deploy/env/pmsd.env.dark` (no flags — dark) | PMS flags, `PMSD_DB_URL`, `PMSD_EVIDENCE_KEY_*`, `PMSD_EVENT_IDENTITY_KEY_*` (C.10) |
 | `hotel-admin.env` | not written (the unit's `EnvironmentFile` is optional) | `EDGE_UPSTREAM` (default `http://127.0.0.1:8090`) |
 
@@ -863,22 +794,22 @@ DSNs are `postgres://<svc_role>:<password>@127.0.0.1:5432/stayconnect_site?sslmo
 
 | Symptom | Likely cause | Check → fix |
 |---|---|---|
-| Provisioner aborts at "database" with `relation "iam_v2.guest_network_pms_policy" does not exist` | **K1** (stale baseline) | B.7 |
-| Re-run fails `schema "iam_v2" already exists` | **K2** | B.7-recovery |
-| `keybootstrap: not found` / `203/EXEC` on Caddy or Admin Console | **K3** (`keybootstrap`, `svc-run` not built) | B.1 with `SERVICES=` |
+| Install or build stops: "the baseline embodies migrations up to … but the release ships up to …" | the release was built from a commit whose baseline is older than its newest migration | regenerate the baseline (`scripts/generate-production-baseline.sh` + `factory-clean-baseline-verify.sh`), commit, rebuild |
+| Install stops: "the iam_v2 schema has N tables but this release's baseline defines M" | a half-built schema from an interrupted *old-procedure* install | `--reinitialise-unused-db` (refused if it holds data) |
+| Upgrade stops: "… is not listed in the release's SHA256SUMS" / "differs from what release … shipped" | a Gate-P file in `/opt/stayconnect/deploy/gatep` was edited, or the tree is not the installed release | re-run `--upgrade` from an unmodified release |
 | Appliance never appears in Central | Central CA not installed, DNS/split-DNS, outbound 443 blocked | `journalctl -u stayconnect-scd \| grep -i regist`; `curl --cacert … https://<central>/readyz`; `ls /usr/local/share/ca-certificates/stayconnect-central-ca.crt` |
 | Appears, but never gets a Customer/Site after Activate | `assignment-registry-root.pub` missing (log: "no trusted registry and no root anchor - assignment agent disabled") | B.5; `install-assignment-root-anchor.sh --show`; restart scd |
 | Activated, no licence | vendor key not pinned (offline) or licence fetch failing | `ls /etc/stayconnect/vendor-license.pub`; scd log; Central *Licenses* |
 | "Wrong hardware" licence | disk cloned/moved to other hardware | Central Replace hardware / Rebind WAN MAC |
 | Central deleted the appliance | unknown ≥ 3 times over ≥ 10 min | blank-disk reinstall (E.3) |
-| Admin Console 502 | Next server not running / no release | `systemctl status stayconnect-hotel-admin`; `ls -l /opt/stayconnect/hotel-admin`; B.10 |
-| Cannot sign in | no operator / wrong password / locked (5 failures → 15 min) | B.11; re-running `edged seed-admin` resets the password and clears the lock |
+| Admin Console 502 | Next server not running / no release | `systemctl status stayconnect-hotel-admin`; `ls -l /opt/stayconnect/hotel-admin`; re-run the installer (step 6) |
+| Cannot sign in | no operator / wrong password / locked (5 failures → 15 min) | `create-first-admin.sh --email <same> --reset` sets a new password and clears the lock |
 | Network apply "rolled back" | a health check failed — `portal_listen` (portald down), `kea_running` (Kea not bound: bridge not up), `gateway_up`, `mgmt_reachable`, `portal_address` | *Config history* → the revision's events; fix; apply again |
 | Apply says busy/blocked | another change in flight, or an incomplete rollback marker | wait / `netd recover status` → `reassert-confirmed` |
 | Confirm says "not applied" | netd restarted inside the window | roll back and apply again |
 | Clients get no DHCP | ESXi LAN portgroup security not Accept ×3; wrong VLAN; Kea not listening | D4-01; `ss -ulnp \| grep ':67'`; Kea log |
 | Lease but no portal | DNAT/portal not listening; Chrome silent drop of 443 is by design | `nft list chain inet stayconnect prerouting_nat`; `ss -tlnp \| grep 838` |
-| Signed in, no Internet, session `PENDING_ENFORCEMENT` | **enforcement plane flags missing** (G10), acctd/netd not talking, writerguard refusal | B.12; `journalctl -u stayconnect-netd -u stayconnect-acctd`; `check-phase3-enforcement-plane.sh /etc/stayconnect` |
+| Signed in, no Internet, session `PENDING_ENFORCEMENT` | enforcement-plane flags removed by hand, acctd/netd not talking, writerguard refusal | Appendix 1 (profile keys); `journalctl -u stayconnect-netd -u stayconnect-acctd`; `check-phase3-enforcement-plane.sh /etc/stayconnect` |
 | "Internet packages are not available right now" | Phase-2 portal flags off, or no eligible/Free package | C.9; scd.env |
 | Voucher rejected | wrong network offer, expired, revoked, throttled | scd log; *Guest sign-in attempts* |
 | No OTP / verification email | no enabled sender (the stub only writes `/var/log/stayconnect/otp-mail.log`) | *Delivery* |

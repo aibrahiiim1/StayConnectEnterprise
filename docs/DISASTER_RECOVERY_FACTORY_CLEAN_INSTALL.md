@@ -5,6 +5,11 @@
 existing machine. This is the procedure behind the **Fresh Production Appliance Deployment** strategy
 (D35/T0075) and it is also the disaster-recovery path for a lost appliance.
 
+> **The executable procedure is the [Fresh VM Installation & Configuration Manual](runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md)**
+> (one release built by `deploy/scripts/appliance-build.sh`, installed by `deploy/scripts/appliance-install.sh`; validated on a fresh VM
+> pair, 2026-10-27). This document keeps the *principles* of a factory-clean install and the evidence behind the schema path; where the two
+> differ on a step, the manual wins.
+
 > The DEVELOPMENT appliance (now retired) is **reference evidence only**. It is never an installation source.
 > Its database contains development tenants, operators, plans, vouchers and PMS probes; copying any of it
 > would carry those identities into a production system.
@@ -21,7 +26,7 @@ existing machine. This is the procedure behind the **Fresh Production Appliance 
 | Admin Console bundle | built from `hotel-admin/` (Next standalone) | — |
 | systemd units | `deploy/systemd/*.service`, `deploy/kea/systemd/override.conf` | — |
 | Database roles + privileges | `deploy/gatep/gatep-roles.sql`, `gatep-iam-roles.sql`, `gatep-grants.sql` (+ its includes) | passwords generated **on the appliance**, never committed |
-| Network baseline | `deploy/netplan/`, `deploy/nftables/`, `deploy/sysctl/`, `deploy/tmpfiles/` | WAN/LAN addressing confirmed on site |
+| Network baseline | `deploy/sysctl/`, `deploy/tmpfiles/`; Client-network netplan, nftables, Kea and Unbound are **rendered by netd** at the first apply (the files in `deploy/netplan/`, `deploy/nftables/`, `deploy/kea/kea-dhcp4.conf`, `deploy/unbound/` are legacy skeletons and are **never** applied) | WAN addressing configured on site before the install |
 | Reverse proxy | `deploy/caddy/` + the managed Admin Console vhost | certificate minted on the appliance |
 | DHCP | `deploy/kea/` | leases are runtime state |
 | **Appliance identity** | — | **token-less self-registration → Activate in Central → signed assignment** |
@@ -31,7 +36,8 @@ existing machine. This is the procedure behind the **Fresh Production Appliance 
 | **Client access config, packages, plans, PMS interfaces, networks** | — | Admin Console configuration |
 | **Clients, accounts, vouchers, sessions, folios** | — | real operation only |
 
-**Verified:** a factory-clean build seeds **only** the `schema_migrations` ledger. Every identity-bearing
+**Verified:** a factory-clean build seeds no identity-bearing data, and the `schema_migrations` ledger is **empty** by design (the baseline
+records its coverage in `/etc/stayconnect/schema-baseline` instead; later migrations add ledger rows). Every identity-bearing
 table is empty — `tenants=0 sites=0 appliances=0 operators=0 guest_accounts=0 vouchers=0 ticket_templates=0`.
 
 `edged` resolves identity from the **signed assignment** first; a generic appliance with none runs in
@@ -52,7 +58,8 @@ conflating them is what the Zero-Legacy criterion rejects.
 
 ```
 0. timescale/timescaledb:2.16.1-pg16                    the appliance's own image (§4E)
-1. deploy/gatep/gatep-roles.sql                         the four runtime service roles, no passwords
+1. deploy/gatep/gatep-roles.sql                         the runtime service roles (svc_scd, svc_edged, svc_netd, svc_acctd,
+                                                        svc_pmsd, svc_payment, svc_payment_outcome, svc_posting, sc_posting_runtime), no passwords
 2. deploy/gatep/gatep-iam-roles.sql                     iam_v2_owner + iam_v2_migrator
 3. data-plane/migrations/baseline/0000_production_baseline.sql
                                                         the CURRENT schema, and only the current schema
@@ -60,6 +67,10 @@ conflating them is what the Zero-Legacy criterion rejects.
 5. deploy/gatep/gatep-iam-ownership.sql                 assert iam_v2 ownership (§4F)
 6. deploy/gatep/gatep-grants.sql                        least-privilege grants + fail-closed assertions
 ```
+
+`deploy/scripts/site-db-init.sh` runs exactly this sequence (step 3 as **one transaction**, step 6 through `scripts/gatep-reconcile.sh`), only on a
+blank schema; it leaves a complete schema alone and refuses a half-built one. The baseline must embody the newest migration in the release
+(`deploy/scripts/lib-baseline.sh`; through **0158** today).
 
 **The superseded guest-IAM tables are never constructed on this path — not even transiently.** That is
 stronger than "the final catalog is clean", and the difference is not academic: a create-then-drop install
@@ -386,59 +397,33 @@ production build (`-tags stayconnect_production`); the Hotel-Admin Next build an
 
 ## 6. Disaster-recovery / fresh-install procedure
 
-1. **Provision the server.** Fresh OS. Exactly **two NICs**: WAN (also management) and LAN. No third NIC.
-2. **Install packages** and the PostgreSQL container per `deploy/compose/infra.yml`.
-3. **Create the database and roles.** Apply `deploy/gatep/gatep-roles.sql` with passwords generated *on the
-   appliance*; never reuse a committed or copied secret.
-4. **Build the schema** in the order of §2. Record every step in `schema_migrations`.
-5. **Reconcile privileges with `scripts/gatep-reconcile.sh`**, which applies `deploy/gatep/gatep-grants.sql`
-   for you. Do not invoke the SQL by hand: the runner is what verifies that the revoke script and every file
-   it `\ir`-includes come from the same committed revision, staging them into a fresh empty directory and
-   hashing each one on both sides of the copy before a transaction is opened. Combining a current revoke with
-   stale re-grant files is a real failure mode — it happened, via a `docker cp` that nested one level deeper
-   than intended, and it cost `svc_scd` the PMS authentication path until the current files were reapplied.
+Follow the [installation manual](runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md): Part A (plan: two NICs, DNS to Central), Part B (build the
+release; one `appliance-install.sh` run), Part C (Central activation, Client network, packages), Part D (verification). The points below are
+why the installer does what it does; none of them is a separate manual step any more.
 
-   The reconcile is one transaction. It re-asserts least privilege and ends in fail-closed assertions; a
-   failure rolls back the revoke along with everything else, so the effective privilege set is exactly what it
-   was beforehand. A failure here is still a stop, not a warning — but it is no longer an outage.
+* **Passwords are generated on the appliance** (`gatep-set-passwords.sh`); never reuse a committed or copied secret.
+* **Privileges are reconciled with `scripts/gatep-reconcile.sh`**, never by invoking the SQL by hand: the runner verifies that the revoke script
+  and every file it `\ir`-includes come from the same revision — a git commit, or an installed release's `RELEASE.json` + `SHA256SUMS` — stages
+  them into a fresh directory and hashes each one on both sides of the copy before a transaction is opened. Combining a current revoke with stale
+  re-grant files is a real failure mode — it happened, via a `docker cp` that nested one level deeper than intended, and it cost `svc_scd` the
+  PMS authentication path until the current files were reapplied.
 
-   Two of those closing assertions matter when reading a failure. The **B-7 assertion** (migration 0124)
-   refuses the reconcile if any runtime role regains a privilege its binary does not use: the entitlement state
-   writer outside `svc_scd`/`svc_pmsd`, any `iam_v2` table write for `svc_netd` or `svc_acctd`, table-level
-   UPDATE on `iam_v2.entitlements` or `iam_v2.sessions` (column-level only: `status` for the row lock that
-   `svc_scd`/`svc_pmsd` take, the three session columns the checkout conversion sets, the one the transfer
-   re-points), the PMS settings writers outside `svc_edged`, or PUBLIC EXECUTE on the invoker adjustment
-   writers. Each `deploy/gatep` file names the statement that uses every grant it keeps. And every grant on an
-   object created by migrations 0116–0125 is **guarded on that object** (audit B-20), so the reconcile also
-   runs on a database rolled back below any of them: the grant is skipped with a NOTICE, not failed.
-6. **Build the binaries with `scripts/build-appliance-binaries.sh`** — it is the recipe, and it is the recipe
-   precisely because typing `go build` by hand is what went wrong. An audit of the PRE-LIVE appliance found
-   five of its six binaries built WITHOUT the production tag, one carrying no VCS stamp at all and built with
-   a toolchain this project does not use, and one whose bytes could not be reproduced from the commit it
-   named. The script pins the toolchain in a container, passes `-tags stayconnect_production`, refuses a
-   dirty tree, and reads the provenance back out of every binary it produced so a build that quietly lost the
-   tag or the stamp fails there instead of on an appliance.
-   The tag is not optional and not cosmetic: without it the guest IAM authority stays configurable and the
-   superseded path is one environment variable away (§4G). Confirm it after start-up — the `edged` and `scd`
-   logs must report `build=production` in the IAM-v2 flag summary.
-   Do **not** add `-ldflags`: it is not recorded in Go's build metadata, so a stripped binary and an
-   unstripped one are indistinguishable from the artifact, and the ability to check a running binary against
-   its source later is worth more than the few megabytes. Install binaries and
-   units from `deploy/systemd/`; install the Admin Console bundle with `deploy/scripts/deploy-hotel-admin.sh
-   install`.
-7. **Network baseline** from `deploy/netplan/`, `deploy/nftables/`, `deploy/kea/`, `deploy/caddy/`.
-8. Start scd: the appliance **registers itself** with Central (no token) and shows *Waiting for activation*;
-   a platform admin **activates** it in Central ([CENTRAL_CONTROL_PLANE.md](CENTRAL_CONTROL_PLANE.md) §4).
-   Wait for the **signed assignment** to resolve tenant and site. Do **not** set `EDGED_TENANT_ID` /
-   `EDGED_SITE_ID` — a production build ignores them.
-9. **Confirm the licence** in Admin Console → **Appliance & licence** (it arrives by itself after activation; an
-   offline site uploads the activation package or licence file there).
-10. **Configure the site** through Admin Console: activate the prepared Access network (or create your own), packages, access policy, PMS interfaces.
-    The recovery operations in Client networks → Recovery return a *running* appliance to a known network state without a reinstall; they do not replace
-    this procedure ([CLIENT_NETWORKING.md](CLIENT_NETWORKING.md) §5).
-11. **Acceptance test**, then a Product-Owner **Go-Live** decision. IAM-v2 is the only guest IAM authority: on
-    a production build it cannot be configured off, and an attempt to do so is a startup refusal (§4G).
-    first operation; legacy guest-auth is never configured on.
+  The reconcile is one transaction. It re-asserts least privilege and ends in fail-closed assertions; a failure rolls back the revoke along with
+  everything else. Two of those closing assertions matter when reading a failure. The **B-7 assertion** (migration 0124) refuses the reconcile if
+  any runtime role regains a privilege its binary does not use: the entitlement state writer outside `svc_scd`/`svc_pmsd`, any `iam_v2` table
+  write for `svc_netd` or `svc_acctd`, table-level UPDATE on `iam_v2.entitlements` or `iam_v2.sessions` (column-level only), the PMS settings
+  writers outside `svc_edged`, or PUBLIC EXECUTE on the invoker adjustment writers. And every grant on an object created by migrations 0116–0125
+  is **guarded on that object** (audit B-20), so the reconcile also runs on a database rolled back below any of them.
+* **Binaries come from `scripts/build-appliance-binaries.sh`** (via `appliance-build.sh`) — because typing `go build` by hand is what went wrong:
+  an audit of the PRE-LIVE appliance found five of its six binaries built WITHOUT the production tag, one carrying no VCS stamp at all, and one
+  whose bytes could not be reproduced from the commit it named. The tag is not optional: without it the guest IAM authority stays configurable
+  (§4G). The installer refuses a binary without it and requires `scd` to log `build=production`. Do **not** add `-ldflags`: it is not recorded
+  in Go's build metadata.
+* **The network is rendered by netd** at the first Client-network apply; no netplan/nftables/Kea skeleton is applied.
+* The appliance **registers itself** with Central (no token) and shows *Waiting for activation*; a platform admin **activates** it in Central
+  ([CENTRAL_CONTROL_PLANE.md](CENTRAL_CONTROL_PLANE.md) §4). Do **not** set `EDGED_TENANT_ID` / `EDGED_SITE_ID` — a production build ignores them.
+* **Acceptance test**, then a Product-Owner **Go-Live** decision. IAM-v2 is the only guest IAM authority: on a production build it cannot be
+  configured off (§4G).
 
 **Never** restore a database dump, `/etc/stayconnect`, an identity or assignment document, or a licence from
 another appliance in order to reproduce it. Restoring a backup is only valid for recovering *that same*
@@ -459,7 +444,7 @@ cases:
 - **After Admin Console shows *Removed from OneGate Central*.** Central deleted this appliance's record after it
   had held a customer. It keeps that customer's data, admits no new clients, refuses licence and activation
   files and never registers again; the marker is `/etc/stayconnect/removed-from-central.json`.
-  `deploy/scripts/provision-fresh-appliance.sh` **refuses** to run over such an appliance, because
+  `deploy/scripts/provision-fresh-appliance.sh` (and so `appliance-install.sh`) **refuses** to run over such an appliance, because
   re-provisioning over it would keep the database and `/etc/stayconnect` — reinstall from a blank disk.
 - **Re-using a retired appliance.** Its identity key is recorded as retired in Central and refused on
   registration (`403 identity_retired`); only a new key — a factory reset — lets it register again.

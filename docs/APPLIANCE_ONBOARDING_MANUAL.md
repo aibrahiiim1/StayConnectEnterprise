@@ -4,7 +4,10 @@ The complete production process to bring a new site online. It uses **only** two
 web consoles — no CLI, SQL, SSH, environment editing, certificate copying, or
 UUIDs. Both consoles refresh themselves.
 
-> **Normal installs are zero-touch — nothing is typed on the appliance at all.** A
+> **Onboarding is zero-touch once the appliance is installed.** Installing the software on a blank VM is one
+> root command (`appliance-install.sh` — see the
+> [Fresh VM Installation & Configuration Manual](runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md), Part B), which
+> also creates the first Admin Console administrator. From then on nothing is typed on the appliance: a
 > factory-clean box with internet registers itself with Central (no token) and
 > waits under **Appliances** as *Waiting for activation*, where one **Activate**
 > step assigns and licenses it. A site without internet uses offline activation

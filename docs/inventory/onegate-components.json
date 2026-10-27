@@ -2,7 +2,7 @@
   "schema_version": 1,
   "document": "OneGate component and dependency inventory (machine-readable companion of the System Handbook)",
   "reviewed_commit": "7e4686ae56a229ef05460e02675d1d17924f8c9c",
-  "generated": "2026-10-26",
+  "generated": "2026-10-27",
   "environments_inspected_read_only": [
     {
       "name": "PRE-LIVE appliance",
@@ -23,26 +23,29 @@
     "DISPOSABLE": "measured on a disposable DB/container built from the repo",
     "SYNTAX": "bash -n only",
     "DOC": "stated by a document, not exercised",
-    "PO": "needs a Product-Owner decision"
+    "PO": "needs a Product-Owner decision",
+    "VM": "Executed on the fresh, isolated test VM pair (VMware ESXi, Ubuntu 22.04.5) on 2026-10-27; installation manual Appendix 3",
+    "SELFTEST": "Covered by a self-test in scripts/ci/ or a script --self-test"
   },
   "totals": {
-    "components": 82,
+    "components": 89,
     "by_status": {
-      "deployed": 59,
+      "deployed": 65,
       "historical": 6,
-      "optional": 13,
+      "optional": 14,
       "not-implemented": 2,
       "removed": 2
     },
     "by_host": {
-      "appliance": 47,
+      "appliance": 53,
       "external": 15,
-      "central": 20
+      "central": 20,
+      "workstation": 1
     },
     "by_kind": {
       "daemon": 7,
       "console": 2,
-      "tool": 29,
+      "tool": 36,
       "proxy": 2,
       "os-service": 8,
       "kernel": 3,
@@ -57,7 +60,8 @@
     "sockets": 5,
     "appliance_to_central_endpoints": 12,
     "secret_files": 10,
-    "known_install_gaps": 19
+    "known_install_gaps": 4,
+    "resolved_install_gaps": 9
   },
   "components": [
     {
@@ -300,9 +304,10 @@
       "if_stopped": "scd cannot start without voucher/throttle/OTP keys",
       "verification": [
         "CODE",
-        "LIVE"
+        "LIVE",
+        "VM"
       ],
-      "notes": "NOT built by build-appliance-binaries.sh default SERVICES (defect K3)"
+      "notes": "Built by default (K3 fixed)"
     },
     {
       "id": "appliance.svc-run",
@@ -317,9 +322,10 @@
       "if_stopped": "Caddy / Admin Console units fail ExecStartPre if absent",
       "verification": [
         "CODE",
-        "LIVE"
+        "LIVE",
+        "VM"
       ],
-      "notes": "NOT built by default SERVICES (K3)"
+      "notes": "Built by default (K3 fixed)"
     },
     {
       "id": "appliance.sitemigrate",
@@ -732,9 +738,9 @@
       ],
       "verification": [
         "CODE",
-        "SYNTAX"
+        "VM"
       ],
-      "notes": "Defects K1/K2: aborts on a blank VM at master 7e4686ae"
+      "notes": "Run by appliance-install.sh. Idempotent; database via site-db-init.sh; writes the product profile (commerce + enforcement plane) and checks it; installs dnsutils/age/openssl; hard-fails on missing trust"
     },
     {
       "id": "tool.install-units",
@@ -748,9 +754,10 @@
       ],
       "verification": [
         "CODE",
-        "SYNTAX"
+        "SELFTEST",
+        "VM"
       ],
-      "notes": "Does not install .service.d drop-ins, polkit, Kea/Unbound overrides"
+      "notes": "Installs units, *.service.d drop-ins, Kea/Unbound overrides and polkit (.pkla on polkit <= 0.105, .rules otherwise)"
     },
     {
       "id": "tool.build-appliance",
@@ -764,9 +771,9 @@
       ],
       "verification": [
         "CODE",
-        "SYNTAX"
+        "VM"
       ],
-      "notes": "Default SERVICES omit keybootstrap, svc-run"
+      "notes": "Default SERVICES include keybootstrap and svc-run; Go caches in named Docker volumes; called by appliance-build.sh"
     },
     {
       "id": "tool.deploy-hotel-admin",
@@ -780,9 +787,9 @@
       ],
       "verification": [
         "CODE",
-        "SYNTAX"
+        "VM"
       ],
-      "notes": "Default RUN_USER=stayconnect vs unit user stayconnect-hotel-admin"
+      "notes": "RUN_USER defaults to stayconnect-hotel-admin when that account exists"
     },
     {
       "id": "tool.edge-migrate",
@@ -796,9 +803,9 @@
       ],
       "verification": [
         "CODE",
-        "SYNTAX"
+        "VM"
       ],
-      "notes": "Live-site mode needs a verified pre-change backup (exit 4)"
+      "notes": "Live-site mode needs a verified pre-change backup (exit 4); run per version by apply-pending-migrations.sh on upgrade; needs iam_v2_owner SELECT,INSERT on public.schema_migrations (granted by gatep-iam-roles.sql)"
     },
     {
       "id": "tool.gatep",
@@ -812,8 +819,10 @@
       ],
       "verification": [
         "CODE",
-        "SYNTAX"
-      ]
+        "SELFTEST",
+        "VM"
+      ],
+      "notes": "gatep-reconcile.sh accepts a git commit or an installed release (RELEASE.json + SHA256SUMS) as the commit guard"
     },
     {
       "id": "tool.binary-rollback",
@@ -827,8 +836,9 @@
       ],
       "verification": [
         "CODE",
-        "SYNTAX"
-      ]
+        "VM"
+      ],
+      "notes": "Verified on the test appliance: BINARY_ROLLBACK = PASS (5 binaries, disk and /proc)"
     },
     {
       "id": "tool.enable-enforcement",
@@ -844,7 +854,7 @@
         "CODE",
         "SYNTAX"
       ],
-      "notes": "Not run by the provisioner"
+      "notes": "Superseded for new installs: the provisioner writes the enforcement-plane profile itself"
     },
     {
       "id": "tool.check-units",
@@ -858,7 +868,7 @@
       ],
       "verification": [
         "CODE",
-        "SYNTAX"
+        "VM"
       ]
     },
     {
@@ -889,8 +899,10 @@
       ],
       "verification": [
         "CODE",
-        "SYNTAX"
-      ]
+        "SELFTEST",
+        "VM"
+      ],
+      "notes": "Fixes /var/log/caddy ownership after a root 'caddy validate' before reload"
     },
     {
       "id": "tool.trust-installers",
@@ -906,7 +918,7 @@
         "CODE",
         "SYNTAX"
       ],
-      "notes": "Inputs in deploy/pki/ are git-ignored"
+      "notes": "appliance-install.sh installs the trust files from --trust-dir and checks them against FINGERPRINTS.txt"
     },
     {
       "id": "tool.baseline-gen",
@@ -920,9 +932,9 @@
       ],
       "verification": [
         "CODE",
-        "SYNTAX"
+        "VM"
       ],
-      "notes": "Baseline in tree is through 0149"
+      "notes": "Baseline in tree is through 0158; factory-clean-baseline-verify.sh PASS (14058 facts)"
     },
     {
       "id": "tool.phase1-bootstrap",
@@ -1233,7 +1245,7 @@
       ],
       "verification": [
         "CODE",
-        "SYNTAX"
+        "VM"
       ]
     },
     {
@@ -1248,8 +1260,9 @@
       ],
       "verification": [
         "CODE",
-        "SYNTAX"
-      ]
+        "VM"
+      ],
+      "notes": "--mode new validated on a blank lab VM (smoke 7/7, preflight READY, 56 migrations)"
     },
     {
       "id": "central.tool.deploy",
@@ -1571,6 +1584,121 @@
         "DOC"
       ],
       "notes": "authoritative repo; protected master"
+    },
+    {
+      "id": "tool.appliance-build",
+      "name": "appliance-build.sh — appliance release build",
+      "kind": "tool",
+      "host": "workstation",
+      "technology": "bash + pinned containers (golang:1.25.12, node:20.18.0-bookworm)",
+      "status": "deployed",
+      "source": [
+        "deploy/scripts/appliance-build.sh"
+      ],
+      "verification": [
+        "CODE",
+        "VM"
+      ],
+      "notes": "Fresh clone of one commit; 8 binaries + Admin Console + deploy tree + migrations + RELEASE.json + SHA256SUMS -> onegate-appliance-<sha12>.tar.gz; refuses a stale baseline"
+    },
+    {
+      "id": "tool.appliance-install",
+      "name": "appliance-install.sh — install / re-run / resume / --upgrade",
+      "kind": "tool",
+      "host": "appliance",
+      "technology": "bash",
+      "status": "deployed",
+      "source": [
+        "deploy/scripts/appliance-install.sh"
+      ],
+      "verification": [
+        "CODE",
+        "VM"
+      ],
+      "notes": "The one supported entry point; verifies the release, checks the platform (Ubuntu 22.04 amd64, 2 NICs, >=4 GiB, >=15 GiB), stages, pins trust, provisions, installs console, creates the first admin, records provenance"
+    },
+    {
+      "id": "tool.site-db-init",
+      "name": "site-db-init.sh — factory-clean site database",
+      "kind": "tool",
+      "host": "appliance",
+      "technology": "bash",
+      "status": "deployed",
+      "source": [
+        "deploy/scripts/site-db-init.sh",
+        "deploy/scripts/lib-baseline.sh"
+      ],
+      "verification": [
+        "CODE",
+        "SELFTEST",
+        "VM"
+      ],
+      "notes": "Baseline in one transaction on a blank schema only; complete = skip; partial = refuse (data-free rebuild with --reinitialise-unused); self-test 10/10"
+    },
+    {
+      "id": "tool.apply-pending-migrations",
+      "name": "apply-pending-migrations.sh",
+      "kind": "tool",
+      "host": "appliance",
+      "technology": "bash",
+      "status": "deployed",
+      "source": [
+        "deploy/scripts/apply-pending-migrations.sh"
+      ],
+      "verification": [
+        "CODE",
+        "SELFTEST",
+        "VM"
+      ],
+      "notes": "Floor = ledger max or /etc/stayconnect/schema-baseline; each pending migration through edge-migrate.sh live-site; then gatep-reconcile; self-test 5/5"
+    },
+    {
+      "id": "tool.create-first-admin",
+      "name": "create-first-admin.sh",
+      "kind": "tool",
+      "host": "appliance",
+      "technology": "bash",
+      "status": "deployed",
+      "source": [
+        "deploy/scripts/create-first-admin.sh",
+        "data-plane/cmd/edged (seed-admin --password-stdin)"
+      ],
+      "verification": [
+        "CODE",
+        "VM"
+      ],
+      "notes": "No password on a command line; >=12 chars; existing same admin = no-op; --reset = break-glass password reset"
+    },
+    {
+      "id": "tool.restore-appliance-config",
+      "name": "restore-appliance-config.sh",
+      "kind": "tool",
+      "host": "appliance",
+      "technology": "bash",
+      "status": "deployed",
+      "source": [
+        "deploy/scripts/restore-appliance-config.sh"
+      ],
+      "verification": [
+        "CODE",
+        "SELFTEST"
+      ],
+      "notes": "Restores etc-<stamp>.tgz.age under /etc and keeps this machine's DB credentials; self-test 10/10"
+    },
+    {
+      "id": "tool.client-journey-test",
+      "name": "client-journey-netns-test.sh",
+      "kind": "tool",
+      "host": "appliance",
+      "technology": "bash",
+      "status": "optional",
+      "source": [
+        "scripts/client-journey-netns-test.sh"
+      ],
+      "verification": [
+        "VM"
+      ],
+      "notes": "Test appliances only: a namespace Client on the Client bridge, DHCP -> DNS -> portal -> voucher -> entitlement -> enforcement -> Internet -> accounting"
     }
   ],
   "ports": [
@@ -1818,24 +1946,39 @@
     }
   },
   "known_install_gaps": [
-    "G1 tree/binaries not copied by any script",
-    "G2/K3 keybootstrap+svc-run not built by default",
-    "G3/K1 baseline stale (0149); gatep-grants.sql fails on it, so the provisioner aborts on a blank VM (measured)",
-    "K2 provisioner not re-runnable after DB step (measured)",
-    "K5 live-site migration gate needs a backup key holder that cannot exist on a blank box",
-    "G4 no first-operator automation",
-    "G5 Admin Console bundle not installed by provisioner",
-    "G6 deploy/pki trust files git-ignored",
-    "G7 polkit/Kea/Unbound overrides/scd drop-in not installed",
-    "G8 dnsutils not installed",
-    "G9 pmsd not enabled",
-    "G10 enforcement-plane flags not written",
-    "G11 hotel-admin deploy user mismatch",
-    "G12 hostname/WAN netplan manual",
-    "G13 DEPLOYED_BINARIES hand-kept",
-    "G14 no code to restore etc-*.tgz.age",
-    "G15 no installer for observability/HA",
-    "G16 gatep-set-passwords text stale",
-    "G17 provisioner closing text stale"
+    "G9 pmsd and the PMS surface flags stay off until a PMS is commissioned (by design; manual C.10)",
+    "G12 hostname and WAN netplan are the operator's (by design)",
+    "G15 no installer for observability/HA (not implemented)",
+    "G16 gatep-set-passwords.sh 'four roles' text (cosmetic)"
+  ],
+  "install_path_updated": "2026-10-27: fresh-VM installer mission (appliance-build.sh / appliance-install.sh), validated on a fresh VMware ESXi / Ubuntu 22.04.5 VM pair",
+  "validation_environment": {
+    "description": "isolated test pair; not PRE-LIVE, not the production Central; separate trust universe",
+    "hypervisor": "VMware ESXi",
+    "os": "Ubuntu 22.04.5 LTS (kernel 5.15)",
+    "appliance": {
+      "vcpu": 4,
+      "memory_gib": 12,
+      "disk_gb": 48,
+      "nics": 2
+    },
+    "central": {
+      "vcpu": 2,
+      "memory_gib": 5.9,
+      "disk_gb": 18,
+      "nics": 1
+    },
+    "date": "2026-10-27"
+  },
+  "resolved_install_gaps": [
+    "G1/G4/G5/G6/G8/G13/G17 -> appliance-build.sh + appliance-install.sh",
+    "G2/K3 -> keybootstrap and svc-run built by default",
+    "G3/K1 -> baseline regenerated through 0158; build and install refuse a stale baseline",
+    "K2 -> site-db-init.sh (one-transaction baseline, blank schema only)",
+    "K5 -> built at the release schema; schema-baseline marker; upgrades via apply-pending-migrations.sh",
+    "G7 -> install-service-units.sh installs drop-ins, overrides and polkit",
+    "G10 -> provisioner writes the commerce + enforcement-plane profile and checks it",
+    "G11 -> deploy-hotel-admin.sh RUN_USER",
+    "G14 -> restore-appliance-config.sh"
   ]
 }

@@ -22,7 +22,7 @@
 #   bundles/hotel-admin-deploy.tgz   the Admin Console (Next standalone) + .sha256
 #   deploy/                          units, Caddy, compose, gatep, env templates, scripts (incl. appliance-install.sh)
 #   data-plane/migrations/           baseline + numbered migrations
-#   scripts/                         edge-migrate.sh, gatep-reconcile.sh, binary-rollback.sh
+#   scripts/                         edge-migrate.sh, gatep-reconcile.sh, binary-rollback.sh, client-journey-netns-test.sh
 #   ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md
 #
 # Reproducibility: a FRESH CLONE of the exact commit (a dirty tree is refused); binaries from
@@ -87,7 +87,7 @@ CONSOLE_JSON="$(tar -xOzf "$REL/bundles/hotel-admin-deploy.tgz" ./hotel-admin-re
 # ---------------------------------------------------------------- 3. the tree (committed content only)
 mkdir -p "$REL/data-plane" "$REL/scripts"
 ( cd "$SRC" && git archive --format=tar HEAD deploy data-plane/migrations ) | tar -xf - -C "$REL"
-for f in edge-migrate.sh gatep-reconcile.sh binary-rollback.sh; do cp "$SRC/scripts/$f" "$REL/scripts/$f"; done
+for f in edge-migrate.sh gatep-reconcile.sh binary-rollback.sh client-journey-netns-test.sh; do cp "$SRC/scripts/$f" "$REL/scripts/$f"; done
 cp "$SRC/docs/runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md" "$REL/"
 # deploy/pki carries slots only (git-ignored contents); the trust files are supplied at install time.
 find "$REL/deploy/pki" -type f ! -name README.md ! -name .gitignore -delete
