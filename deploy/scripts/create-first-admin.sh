@@ -43,6 +43,11 @@ existing="$(docker exec -i stayconnect-pg psql -X -tAq -U stayconnect -d staycon
 # The address goes in as a psql variable on stdin (interpolated and quoted by psql, never spliced into SQL).
 mine="$(printf '%s\n' "SELECT count(*) FROM operators WHERE lower(email)=lower(:'e');" \
   | docker exec -i stayconnect-pg psql -X -tAq -U stayconnect -d stayconnect_site -v e="$EMAIL" 2>/dev/null || echo 0)"
+if [ "${existing:-0}" != 0 ] && [ "$RESET" != 1 ] && [ "${mine:-0}" != 0 ]; then
+  # A re-run of the installer with the same administrator: nothing to do, and not an error.
+  say "site administrator $EMAIL already exists — unchanged (use --reset to set a new password)"
+  exit 0
+fi
 if [ "${existing:-0}" != 0 ] && [ "$RESET" != 1 ]; then
   refuse "this appliance already has $existing active site administrator(s). To reset one's password use --reset
          (break-glass, audited by the journal); further accounts are created in the Admin Console -> Operators."

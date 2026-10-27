@@ -236,6 +236,10 @@ VH
 
 caddy_validate_reload(){
   caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 || { echo "caddy validate failed"; return 1; }
+  # `caddy validate` runs here as ROOT and opens every log file the configuration names, creating any that are
+  # missing — root-owned. The service runs as caddy and then cannot open them, so the reload is refused. Measured
+  # on a fresh appliance: the first Admin Console certificate could never be installed. Hand them back first.
+  if id caddy >/dev/null 2>&1 && [ -d /var/log/caddy ]; then chown -R caddy:caddy /var/log/caddy 2>/dev/null || true; fi
   systemctl reload "$CADDY_SVC" >/dev/null 2>&1 || { echo "caddy reload failed"; return 1; }
   sleep 2; echo ""
 }

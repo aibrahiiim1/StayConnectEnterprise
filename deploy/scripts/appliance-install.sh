@@ -34,19 +34,21 @@
 #   --admin-email E            create the first site administrator (password asked on the terminal, or --admin-password-file)
 #   --admin-password-file F    a 0600 file whose first line is the password
 #   --wan-iface X --lan-iface Y   override interface detection
-#   --central-base URL         override the release's Central endpoint (labs only; https + FQDN)
+#   --central-base URL         override the release's Central endpoint (a test or second Central; https + FQDN).
+#                              The mutual-TLS endpoint then defaults to URL:9443, never to the release's.
+#   --central-mtls-base URL    override the mutual-TLS endpoint as well
 #   --offline-activation-only  a site activated with an offline package (no Central CA needed; vendor key required)
 #   --reinitialise-unused-db   rebuild a half-built site database that provably holds no data (interrupted old install)
 #   --allow-unsupported-platform   proceed on another OS/version/NIC count (NOT a supported installation)
 #   --upgrade                  upgrade an installed appliance to this release
 #   --yes                      do not ask for confirmation
-set -euo pipefail
+set -Eeuo pipefail   # -E: the ERR trap below also fires inside functions
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REL="$(cd "$HERE/../.." && pwd)"
 SC=/opt/stayconnect
 ETC=/etc/stayconnect
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-TRUST=""; ADMIN_EMAIL=""; ADMIN_PWFILE=""; WAN=""; LAN=""; CBASE=""; OFFLINE=0; REINIT=0; UNSUPPORTED=0; UPGRADE=0; YES=0
+TRUST=""; ADMIN_EMAIL=""; ADMIN_PWFILE=""; WAN=""; LAN=""; CBASE=""; CMTLS=""; OFFLINE=0; REINIT=0; UNSUPPORTED=0; UPGRADE=0; YES=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --trust-dir) TRUST="${2:?}"; shift 2;;
@@ -55,6 +57,7 @@ while [ $# -gt 0 ]; do
     --wan-iface) WAN="${2:?}"; shift 2;;
     --lan-iface) LAN="${2:?}"; shift 2;;
     --central-base) CBASE="${2:?}"; shift 2;;
+    --central-mtls-base) CMTLS="${2:?}"; shift 2;;
     --offline-activation-only) OFFLINE=1; shift;;
     --reinitialise-unused-db) REINIT=1; shift;;
     --allow-unsupported-platform) UNSUPPORTED=1; shift;;
@@ -67,6 +70,8 @@ done
 say()  { echo "[appliance-install] $*"; }
 step() { echo; echo "[appliance-install] ==== $*"; }
 die()  { echo "[appliance-install] ABORT: $*" >&2; exit 1; }
+# No failure may be silent: set -e ends the script at the first failing command, and this names where.
+trap 'rc=$?; echo "[appliance-install] ABORT: unexpected failure (exit $rc) at line $LINENO: $BASH_COMMAND" >&2' ERR
 [ "$(id -u)" = 0 ] || die "run as root"
 case "$(pwd -P)" in /root|/root/*) cd /;; esac   # deploy-hotel-admin.sh refuses to run from /root
 
@@ -119,6 +124,9 @@ else
     cur="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["source_commit"])' "$SC/RELEASE.json")"
     [ "$cur" = "$COMMIT" ] || die "this appliance runs release $cur; use --upgrade to move it to $COMMIT"
     say "re-running release $COMMIT (converges; regenerates nothing that exists)"
+  elif [ "$INSTALLED" = 1 ] && [ "$(cat "$SC/.install-in-progress" 2>/dev/null)" = "$COMMIT" ]; then
+    # A first installation of THIS release was interrupted after the credentials step: resume it.
+    say "resuming an interrupted installation of $COMMIT (converges; regenerates nothing that exists)"
   elif [ "$INSTALLED" = 1 ]; then
     die "this appliance is already provisioned but has no recorded release; use --upgrade"
   fi
@@ -143,7 +151,7 @@ stage_tree() {
   fi
   cp -f "$REL/bundles/"hotel-admin-deploy.tgz* "$SC/bundles/"
   # Keep the three newest previous trees; they are small, and only the last one is ever needed to compare.
-  ls -1d "$SC/.previous"/*/ 2>/dev/null | sort | head -n -3 | xargs -r rm -rf
+  if [ -d "$SC/.previous" ]; then ls -1d "$SC/.previous"/*/ 2>/dev/null | sort | head -n -3 | xargs -r rm -rf || true; fi
   say "tree staged (previous tree: ${prev})"
 }
 install_binaries() { # copy binaries, keeping a differing installed one as <bin>.bak-$STAMP
@@ -158,6 +166,7 @@ install_binaries() { # copy binaries, keeping a differing installed one as <bin>
 }
 record_release() {
   cp -f "$REL/RELEASE.json" "$REL/SHA256SUMS" "$SC/"
+  rm -f "$SC/.install-in-progress"
   {
     echo "# service  sha256  vcs.revision  tags  modified  written $STAMP"
     for b in scd edged pmsd portald netd acctd keybootstrap svc-run; do
@@ -186,6 +195,9 @@ install_console() {
 }
 
 if [ "$UPGRADE" != 1 ]; then
+  # Marks a FIRST installation of this release as begun, so an interrupted one can be resumed by re-running
+  # it and is never mistaken for an unrecorded older installation. Removed when the release is recorded.
+  install -d -m 0755 "$SC" && printf '%s\n' "$COMMIT" > "$SC/.install-in-progress"
   stage_tree
   install_binaries >/dev/null
 
@@ -235,6 +247,7 @@ PY
   [ -n "$WAN" ] && PENV+=("WAN_IFACE=$WAN")
   [ -n "$LAN" ] && PENV+=("LAN_IFACE=$LAN")
   [ -n "$CBASE" ] && PENV+=("CENTRAL_BASE=$CBASE")
+  [ -n "$CMTLS" ] && PENV+=("CENTRAL_MTLS_BASE=$CMTLS")
   [ "$OFFLINE" = 1 ] && PENV+=("OFFLINE_ACTIVATION_ONLY=1")
   [ "$REINIT" = 1 ] && PENV+=("REINITIALISE_UNUSED_DB=1")
   env "${PENV[@]}" bash "$SC/deploy/scripts/provision-fresh-appliance.sh"

@@ -47,9 +47,17 @@ sc_load_central_endpoint() {
       val="$(printf '%s' "$val" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s/^"//; s/"$//')"
       case "$key" in
         CENTRAL_BASE|CENTRAL_MTLS_BASE|CTRLAPI_APPLIANCE_BASE)
+          # A CENTRAL_BASE from the environment names a DIFFERENT Central than the file does. Taking the
+          # file's mTLS endpoint alongside it would split one appliance across two Centrals (registration at
+          # one, mutual TLS at the other) — measured on a test install whose override would have sent :9443
+          # to the production Central. With an overridden base the file contributes nothing.
+          [ -n "$from_env" ] && continue
           [ -n "$(eval "printf '%s' \"\${$key:-}\"")" ] || export "$key=$val" ;;
       esac
     done < "$cfg"
+  fi
+  if [ -n "$from_env" ] && [ -z "${CENTRAL_MTLS_BASE:-}" ]; then
+    export CENTRAL_MTLS_BASE="${CENTRAL_BASE}:9443"
   fi
 
   if [ -z "${CENTRAL_BASE:-}" ]; then

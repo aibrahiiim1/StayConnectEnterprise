@@ -436,6 +436,9 @@ bash "$DEPLOY/scripts/check-phase3-enforcement-plane.sh" "$ETC" >/dev/null \
 chmod 640 "$ETC"/*.env && chown root:stayconnect "$ETC"/*.env
 grep -qE '^(SCD|EDGED|ACCTD)_(TENANT|SITE)_ID=' "$ETC"/*.env && die "an identity was seeded into the environment"
 say "environment ok (WAN=$WAN_IFACE, LAN=$LAN_IFACE, no identity pinned)"
+# The restrictive umask was for the environment files only (they carry database passwords). Everything after
+# this - units, Caddy configuration, the certificate manager files - must be readable by the accounts that use it.
+umask 022
 
 # ---------------------------------------------------------------- 7. units, proxy, certificate
 say "units + proxy"
@@ -449,13 +452,26 @@ install -m 0644 "$DEPLOY/caddy/stayconnect-caddy.edge.service" /etc/systemd/syst
 mkdir -p /etc/caddy/hotel-admin
 # The Caddyfile imports a vhost the cert manager generates, and the cert manager needs Caddy's local CA,
 # which only exists after Caddy has run once. An empty import breaks that cycle.
-[ -f /etc/caddy/hotel-admin/vhost.caddy ] || : > /etc/caddy/hotel-admin/vhost.caddy
+# Created with an explicit mode: this script runs under umask 027 from the environment step, which made the
+# placeholder root-only, and Caddy (user caddy) then refused the whole configuration it imports. Measured on a
+# fresh appliance VM.
+chmod 0755 /etc/caddy/hotel-admin
+[ -f /etc/caddy/hotel-admin/vhost.caddy ] || install -m 0644 /dev/null /etc/caddy/hotel-admin/vhost.caddy
+[ -s /etc/caddy/hotel-admin/vhost.caddy ] || chmod 0644 /etc/caddy/hotel-admin/vhost.caddy
 systemctl daemon-reload
 systemctl enable --now stayconnect-caddy >/dev/null
 for _ in $(seq 1 30); do [ -f /var/lib/caddy/.local/share/caddy/pki/authorities/local/intermediate.crt ] && break; sleep 2; done
-# renew, not rotate: it mints the certificate when it is missing and otherwise only when it is due, so a re-run
-# does not replace a healthy certificate staff browsers may already trust.
-bash "$DEPLOY/scripts/hotel-admin-cert-manager.sh" renew >/dev/null 2>&1 || say "NOTE: the Admin Console certificate was not issued yet; the renew timer retries every 6 h"
+# THE FIRST CERTIFICATE IS FORCED; later runs use renew, so a re-run never replaces a healthy certificate that
+# staff browsers may already trust. install-service-units.sh enables the renewal timer with --now, and on a
+# freshly booted machine its first run fires before Caddy's local CA exists: it fails, and the manager then backs
+# off, so a plain renew here was skipped too and the Admin Console had no certificate at all (measured on a fresh
+# VM). With no certificate yet, rotate issues one regardless of back-off; with one, renew acts only when due.
+if [ -s /etc/caddy/hotel-admin/hotel-admin.crt ]; then cm=renew; else cm=rotate; fi
+bash "$DEPLOY/scripts/hotel-admin-cert-manager.sh" "$cm" >/dev/null 2>&1 \
+  || die "the Admin Console certificate could not be issued ($cm); see: $DEPLOY/scripts/hotel-admin-cert-manager.sh status"
+# The early, expected failure of the timer's first run is history once a certificate exists; clear it so the
+# unit health check reports the present state.
+systemctl reset-failed stayconnect-hotel-admin-cert-renew.service >/dev/null 2>&1 || true
 chown -R caddy:caddy /var/log/caddy   # the cert-manager health check can create a root-owned log file
 systemctl reload stayconnect-caddy || systemctl restart stayconnect-caddy
 say "units + proxy ok"
@@ -502,8 +518,15 @@ done
 [ "$fail" = 0 ] || die "one or more services are not active (journalctl -u <unit> -b)"
 # The production build must say so out loud; a development binary here is the one thing that silently
 # reintroduces a configurable guest-IAM authority.
-for _ in $(seq 1 20); do journalctl -u stayconnect-scd -b --no-pager | grep -q 'build=production' && break; sleep 1; done
-journalctl -u stayconnect-scd -b --no-pager | grep -q 'build=production'   || die "scd is not a production build — rebuild with -tags stayconnect_production"
+# The journal is captured BEFORE it is searched: `journalctl | grep -q` under pipefail fails whenever grep
+# finds the line and exits early, because journalctl then dies of SIGPIPE (measured on a fresh appliance VM).
+prod=0
+for _ in $(seq 1 20); do
+  scdlog="$(journalctl -u stayconnect-scd -b --no-pager 2>/dev/null || true)"
+  case "$scdlog" in *build=production*) prod=1; break;; esac
+  sleep 1
+done
+[ "$prod" = 1 ] || die "scd is not a production build — rebuild with -tags stayconnect_production"
 say "services ok (scd reports build=production)"
 
 echo

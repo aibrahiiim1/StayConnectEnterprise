@@ -80,7 +80,20 @@ rows_or() {
   if [ "$(q "SELECT to_regclass('$1') IS NOT NULL")" = t ]; then q "SELECT count(*) FROM $1"; else echo "$2"; fi
 }
 
-docker exec "$CONTAINER" pg_isready -U "$PGUSER_ROLE" >/dev/null 2>&1 || fail "postgres in $CONTAINER is not ready"
+# STABLY READY, NOT MERELY "READY ONCE". On a container's first start initdb runs a temporary server, which
+# answers pg_isready, then stops it and starts the real one. Measured on a fresh appliance VM: the provisioner's
+# readiness check passed against the temporary server and this step then found nothing listening. So: three
+# consecutive successful queries, bounded at 120 s.
+ok=0
+for _ in $(seq 1 120); do
+  if docker exec "$CONTAINER" psql -X -tAq -U "$PGUSER_ROLE" -d postgres -c 'SELECT 1' </dev/null >/dev/null 2>&1; then
+    ok=$((ok + 1)); [ "$ok" -ge 3 ] && break
+  else
+    ok=0
+  fi
+  sleep 1
+done
+[ "$ok" -ge 3 ] || fail "postgres in $CONTAINER did not become stably ready within 120 s"
 
 # ---- stage a file set into the container and prove it arrived byte-identical
 STAGE_REMOTE="/tmp/site-db-init.$$"
