@@ -48,7 +48,14 @@ func main() {
 		poolErr  error
 	)
 	getPool := func(ctx context.Context) (*pgxpool.Pool, error) {
-		poolOnce.Do(func() { pool, poolErr = pgxpool.New(ctx, dsn) })
+		poolOnce.Do(func() {
+			pc, err := poolConfig(dsn)
+			if err != nil {
+				poolErr = err
+				return
+			}
+			pool, poolErr = pgxpool.NewWithConfig(ctx, pc)
+		})
 		return pool, poolErr
 	}
 
@@ -173,6 +180,23 @@ func main() {
 		os.Exit(1)
 	}
 	log.Info("pmsd: stopped cleanly")
+}
+
+// defaultPoolMaxConns sizes the shared pool explicitly (audit P7 L11): each interface worker holds one connection
+// for its lock for the whole cycle, beside the applier, the relay authoriser and the repository writes. pgx's default
+// (max(4, CPUs)) can be all lockers on a small appliance or exceed svc_pmsd's CONNECTION LIMIT 10 on a large one.
+// A pool_max_conns in PMSD_DB_URL still wins.
+const defaultPoolMaxConns = 8
+
+func poolConfig(dsn string) (*pgxpool.Config, error) {
+	pc, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return nil, err
+	}
+	if !strings.Contains(dsn, "pool_max_conns") {
+		pc.MaxConns = defaultPoolMaxConns
+	}
+	return pc, nil
 }
 
 // minKeyBytes is the documented key size (openssl rand -hex 32).

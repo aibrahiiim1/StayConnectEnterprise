@@ -5,6 +5,18 @@ import (
 	"testing"
 )
 
+// Audit P7 L11: the pool is sized explicitly unless the DSN says otherwise.
+func TestPoolConfig(t *testing.T) {
+	pc, err := poolConfig("postgres://u:p@127.0.0.1:5432/db?sslmode=disable")
+	if err != nil || pc.MaxConns != defaultPoolMaxConns {
+		t.Fatalf("MaxConns=%v err=%v, want %d", pc, err, defaultPoolMaxConns)
+	}
+	pc, err = poolConfig("postgres://u:p@127.0.0.1:5432/db?sslmode=disable&pool_max_conns=3")
+	if err != nil || pc.MaxConns != 3 {
+		t.Fatalf("an explicit pool_max_conns must win: %v %v", pc, err)
+	}
+}
+
 // Audit P7 L8: a key setting is decoded and checked at start-up; the error names no value.
 func TestDecodeKeyEnv(t *testing.T) {
 	good := strings.Repeat("ab", 32)
