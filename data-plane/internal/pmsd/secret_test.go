@@ -46,8 +46,11 @@ func TestAEAD_OwnerBoundAAD(t *testing.T) {
 func TestOwnerAAD_Deterministic(t *testing.T) {
 	a := Interface{TenantID: "t", SiteID: "s", ID: "i"}
 	sg := SecretGeneration{ID: "g"}
-	if string(ownerAAD(a, sg)) != string(ownerAAD(a, sg)) {
-		t.Fatal("AAD must be deterministic")
+	// Pinned to the exact wire form (length-prefixed fields, 0x1f separators), so a change to the AAD -- which would
+	// make every stored secret undecryptable -- fails here (audit P7 CC2).
+	want := "\x00\x12pms-secret-aead:v1\x1f\x00\x01t\x1f\x00\x01s\x1f\x00\x01i\x1f\x00\x01g\x1f"
+	if got := string(ownerAAD(Interface{TenantID: "t", SiteID: "s", ID: "i"}, SecretGeneration{ID: "g"})); got != want {
+		t.Fatalf("AAD = %q, want %q", got, want)
 	}
 	// field-boundary ambiguity check: ("ts","","i") must differ from ("t","s","i")
 	amb := Interface{TenantID: "ts", SiteID: "", ID: "i"}
