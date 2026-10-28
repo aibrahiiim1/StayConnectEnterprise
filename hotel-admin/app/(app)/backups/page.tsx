@@ -41,6 +41,7 @@ type Artifact = {
   name: string; kind?: string; size_bytes: number; modified_at?: string;
   verified_at?: string | null; verified_tables?: number | null;
   backup_kind?: string; reason?: string; by?: string;
+  downloadable?: boolean; download_refusal?: string;
 };
 type Maintenance = { active: boolean; reason?: string; since?: string; backup?: string; unknown?: boolean };
 type RestoreStep = { step: string; ok: boolean; detail?: string };
@@ -306,6 +307,9 @@ export default function BackupsPage() {
                             ? <StatusBadge tone="ok">Verified</StatusBadge>
                             : <StatusBadge>Not checked</StatusBadge>}
                           {isEncrypted(a.name) && <Badge tone="info">Encrypted</Badge>}
+                          {a.kind === "database" && !isEncrypted(a.name) && (
+                            <StatusBadge tone="warn" title="Not downloadable. A new backup is always encrypted to your backup key holders.">Not encrypted</StatusBadge>
+                          )}
                         </div>
                       </TD>
                       <TD numeric className="hidden sm:table-cell">{formatBytes(a.size_bytes)}</TD>
@@ -325,7 +329,7 @@ export default function BackupsPage() {
                             onSelect: () => startVerify(a.name),
                           }}
                           items={[
-                            { label: "Download…", icon: <Download />, hidden: !canDownload, onSelect: () => startDownload(a) },
+                            { label: "Download…", icon: <Download />, hidden: !canDownload || !a.downloadable, onSelect: () => startDownload(a) },
                             {
                               label: "Restore…",
                               icon: <RotateCcw />,
@@ -374,7 +378,7 @@ export default function BackupsPage() {
         )}
         actions={inspecting && (writable || canDownload) ? (
           <>
-            {canDownload && (
+            {canDownload && inspecting.downloadable && (
               <Button variant="secondary" onClick={() => { const a = inspecting; setInspecting(null); startDownload(a); }}>
                 <Download /> Download…
               </Button>
@@ -406,6 +410,7 @@ export default function BackupsPage() {
                 { label: "Verified", value: inspecting.verified_at ? formatDate(inspecting.verified_at) : "Not checked" },
                 { label: "Tables loaded", value: inspecting.verified_tables, hidden: !inspecting.verified_tables },
                 { label: "Encryption", value: isEncrypted(inspecting.name) ? "Encrypted to the hotel’s keys" : "Not encrypted" },
+                { label: "Download", value: inspecting.download_refusal, hidden: !inspecting.download_refusal },
               ]}
             />
           </DetailsSection>

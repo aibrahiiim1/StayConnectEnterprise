@@ -1281,6 +1281,8 @@ export type BackupArtifact = {
   size_bytes: number;
   modified_at: string;
   downloadable: boolean;
+  encrypted?: boolean;
+  download_refusal?: string;
 };
 
 export type BackupVerifyResult = {
