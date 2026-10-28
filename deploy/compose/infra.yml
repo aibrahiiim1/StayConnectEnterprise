@@ -39,7 +39,10 @@ services:
         max-size: 10m
         max-file: "3"
 
+  # Nothing on the appliance uses Redis (audit AD-63, D10-L2). It is kept only for a development Central that
+  # runs on the same host: start it with `docker compose --profile central-dev -f infra.yml up -d`.
   redis:
+    profiles: ["central-dev"]
     image: redis:7-alpine
     container_name: stayconnect-redis
     restart: unless-stopped

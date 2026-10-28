@@ -528,6 +528,8 @@ All open decisions are in **`AUDIT_DECISIONS.md`**: 68 items, `AD-1` … `AD-68`
 
 ## Security hardening list of 2026-07-11 (folded in)
 
+> **SUPERSEDED (AD-68, option b).** The 2026-07-11 hardening list, its "Additional hardening (target architecture)" items and the pilot-cutover checklist are superseded by the verification checklist of the installation manual ([ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md](runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md), Part D and F.5). The list below is kept unchanged as a historical record; it is no longer a live checklist, and no item here is deleted or closed by this note.
+
 `docs/SECURITY_HARDENING.md` (source: `git show 1d69508a847248ec63ceed01e06ec8f8f1661fb0:docs/SECURITY_HARDENING.md`) was a
 pilot-era list. Its statuses below come from the system handbook §23 assessment and the current tree; nothing is
 closed on a guess.
