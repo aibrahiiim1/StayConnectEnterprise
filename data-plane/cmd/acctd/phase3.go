@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/enforce"
@@ -31,7 +32,9 @@ type phase3 struct {
 	acctDegraded string
 	// lastPassOK lets health tell silence from success.
 	lastPassOK time.Time
-	enf        *enforce.Enforcer
+	// expiryDegraded is non-empty while an entitlement's expiry keeps failing sweep after sweep.
+	expiryDegraded string
+	enf            *enforce.Enforcer
 	// site is the single site this appliance serves; expiry enforcement is scoped to it.
 	tenant, site string
 	// scope and plans scope a submitted plan and give it a durable monotonic generation so netd can refuse a
@@ -85,6 +88,11 @@ func (p *phase3) enforceExpiries(ctx context.Context) {
 		return
 	}
 	due, err := p.enf.EnforceExpiries(ctx, p.tenant, p.site)
+	// Audit P4 M3: an entitlement skipped by several sweeps in a row is surfaced on health, not only logged.
+	p.expiryDegraded = ""
+	if p.enf.StuckExpiries() > 0 {
+		p.expiryDegraded = reasonExpiryStuck
+	}
 	if err != nil {
 		// Loud, but it must not stop the loop; the next tick retries.
 		slog.Error("phase3: expiry enforcement failed", "err", err)
@@ -277,18 +285,17 @@ func (p *phase3) degradedSummary() string {
 	if p == nil {
 		return ""
 	}
-	if p.acctDegraded == "" && p.degraded == "" && !p.lastPassOK.IsZero() &&
+	if p.acctDegraded == "" && p.degraded == "" && p.expiryDegraded == "" && !p.lastPassOK.IsZero() &&
 		time.Since(p.lastPassOK) > accountingFreshness {
 		return reasonNoRecentPass
 	}
-	switch {
-	case p.acctDegraded != "" && p.degraded != "":
-		return p.acctDegraded + "; " + p.degraded
-	case p.acctDegraded != "":
-		return p.acctDegraded
-	default:
-		return p.degraded
+	var parts []string
+	for _, s := range []string{p.acctDegraded, p.degraded, p.expiryDegraded} {
+		if s != "" {
+			parts = append(parts, s)
+		}
 	}
+	return strings.Join(parts, "; ")
 }
 
 // ownsAccounting: when Phase 3 owns accounting no other writer may run, or one physical delta would be

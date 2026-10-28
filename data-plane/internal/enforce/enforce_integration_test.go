@@ -4,7 +4,9 @@ package enforce
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -233,6 +235,74 @@ func TestIntegration_WindowExpiryEndsAtTheTrueTime(t *testing.T) {
 	}
 	if len(again) != 0 {
 		t.Fatalf("a repeated sweep re-enforced %d expiries", len(again))
+	}
+}
+
+// Audit P4 M3: an entitlement whose expiry fails every time must not stop the other expiries on the site.
+func TestIntegration_OneFailingExpiryDoesNotStopTheOthers(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	ctx := context.Background()
+	f := seed(t, p, 5000, 2000, 0)
+	elapsed := time.Now().Add(-20 * time.Minute).Truncate(time.Microsecond)
+	broken, _ := grant(t, p, f, &elapsed, time.Now().Add(-2*time.Hour))
+
+	// A second stay on the same site, so the healthy entitlement does not share the broken one's stay.
+	g := f
+	tx := opTx(t, p, "stay")
+	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reservation_id,
+		external_stay_identity,status,lifecycle_version,last_applied_event_version)
+		VALUES (gen_random_uuid(),$1,$2,$3,'R2','S2','IN_HOUSE',1,0) RETURNING id::text`,
+		f.tenant, f.site, f.iface).Scan(&g.stay); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.devices(id,tenant_id,site_id,appliance_id,mac)
+		VALUES (gen_random_uuid(),$1,$2,gen_random_uuid(),'02:00:00:00:30:02'::macaddr) RETURNING id::text`,
+		f.tenant, f.site).Scan(&g.device); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	healthy, _ := grant(t, p, g, &elapsed, time.Now().Add(-2*time.Hour))
+
+	// A test-only trigger makes ending the broken entitlement fail on every attempt.
+	trig := "aud_fail_" + strings.ReplaceAll(broken, "-", "")[:12]
+	if _, err := p.Exec(ctx, fmt.Sprintf(`CREATE FUNCTION public.%[1]s() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN IF NEW.id = '%[2]s'::uuid AND NEW.status = 'TERMINATED' THEN RAISE EXCEPTION 'test: refused'; END IF;
+		RETURN NEW; END $$;
+		CREATE TRIGGER %[1]s BEFORE UPDATE ON iam_v2.entitlements FOR EACH ROW EXECUTE FUNCTION public.%[1]s();`,
+		trig, broken)); err != nil {
+		t.Fatalf("test trigger: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = p.Exec(context.Background(), fmt.Sprintf(`DROP TRIGGER IF EXISTS %[1]s ON iam_v2.entitlements;
+			DROP FUNCTION IF EXISTS public.%[1]s();`, trig))
+	})
+
+	e := New(p)
+	for sweep := 1; sweep <= StuckExpiryThreshold; sweep++ {
+		due, err := e.EnforceExpiries(ctx, f.tenant, f.site)
+		if err != nil {
+			t.Fatalf("sweep %d failed as a whole: %v", sweep, err)
+		}
+		for _, x := range due {
+			if x.EntitlementID == broken {
+				t.Fatalf("sweep %d reported the failing entitlement as ended", sweep)
+			}
+		}
+		if sweep == 1 && (len(due) != 1 || due[0].EntitlementID != healthy) {
+			t.Fatalf("due = %+v, want only the healthy entitlement ended", due)
+		}
+		if got, want := e.StuckExpiries() > 0, sweep >= StuckExpiryThreshold; got != want {
+			t.Fatalf("after sweep %d StuckExpiries reported %v, want %v", sweep, got, want)
+		}
+	}
+	var hs, bs string
+	_ = p.QueryRow(ctx, `SELECT status FROM iam_v2.entitlements WHERE id=$1`, healthy).Scan(&hs)
+	_ = p.QueryRow(ctx, `SELECT status FROM iam_v2.entitlements WHERE id=$1`, broken).Scan(&bs)
+	if hs != "TERMINATED" || bs == "TERMINATED" {
+		t.Fatalf("healthy=%s broken=%s, want TERMINATED and still live", hs, bs)
 	}
 }
 

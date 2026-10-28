@@ -22,6 +22,7 @@ const (
 	reasonSourceIncoherent   = "a live session's counter source is incoherent"
 	reasonObservationRefused = "an observation was refused by the accounting boundary"
 	reasonNoRecentPass       = "no accounting pass has completed within the freshness window"
+	reasonExpiryStuck        = "an entitlement's expiry has failed in several consecutive sweeps"
 )
 
 type phase3Session struct {
