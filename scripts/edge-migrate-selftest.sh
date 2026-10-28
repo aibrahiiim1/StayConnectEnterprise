@@ -24,7 +24,7 @@ RUNNER="$ROOT/scripts/edge-migrate.sh"
 # skip exactly the assertions that matter. The database lives inside a container this script creates with a
 # unique name, on its own port, and destroys in its EXIT trap; EDGE_PSQL names that container explicitly, so
 # nothing here can reach an appliance.
-C="edge-migrate-selftest-$$"; DB="stayconnect_site"; PORT="${EDGE_SELFTEST_PORT:-55461}"
+C="${EDGE_SELFTEST_CONTAINER:-edge-migrate-selftest-$$}"; DB="stayconnect_site"; PORT="${EDGE_SELFTEST_PORT:-55461}"
 WORK="$(mktemp -d)"
 pass=0; fail=0
 ok(){ echo "  ok: $1"; pass=$((pass+1)); }
@@ -37,10 +37,15 @@ trap cleanup EXIT
 # ---------------------------------------------------------------------------------------------------------
 docker rm -f "$C" >/dev/null 2>&1 || true
 docker run -d --name "$C" -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB="$DB" \
-  -p 127.0.0.1:$PORT:5432 postgres:16-alpine >/dev/null 2>&1 || { echo "INFRA: container"; exit 2; }
+  -p 127.0.0.1:$PORT:5432 "${EDGE_SELFTEST_IMAGE:-postgres:16-alpine}" >/dev/null 2>&1 || { echo "INFRA: container"; exit 2; }
 ready=0
-for _ in $(seq 1 60); do docker exec "$C" psql -U postgres -d "$DB" -tAqc 'select 1' >/dev/null 2>&1 && { ready=1; break; }; sleep 1; done
-[ "$ready" = 1 ] || { echo "INFRA: postgres never became ready"; exit 2; }
+# Three clean queries in a row: an image that restarts after initdb (TimescaleDB) answers once, then shuts down.
+for _ in $(seq 1 90); do
+  if docker exec "$C" psql -U postgres -d "$DB" -tAqc 'select 1' >/dev/null 2>&1; then ready=$((ready+1)); [ "$ready" -ge 3 ] && break
+  else ready=0; fi
+  sleep 1
+done
+[ "$ready" -ge 3 ] || { echo "INFRA: postgres never became ready"; exit 2; }
 
 PSQL="docker exec -i $C psql -U postgres -d $DB"
 Q(){ docker exec "$C" psql -U postgres -d "$DB" -tAqc "$1" 2>&1; }
@@ -678,6 +683,62 @@ if grep -qiE 'skip-?(prechange|backup)|--no-backup' "$RUNNER"; then no "the runn
 else ok "no option exists to skip the pre-change backup"; fi
 if grep -q 'live-site" \] || return 0' "$RUNNER"; then ok "only a live site takes the backup; a disposable test database does not"
 else no "the pre-change backup is not limited to live sites" ""; fi
+
+echo "== 10. never below what the database already has (audit P3 M2) =="
+undo; ledger_reset; mk_commerce
+ledger_add 0100_selftest_later
+out="$(run_apply)"
+if ! applied && echo "$out" | grep -q "below the newest applied migration 0100_selftest_later"; then
+  ok "a version below the ledger head is REFUSED (a baseline-covered or out-of-order apply)"
+else no "a version below the ledger head was applied, or refused for another reason" "$out"; fi
+out="$(run_apply --allow-out-of-order)"
+if applied; then ok "--allow-out-of-order fills a deliberate hole"
+else no "--allow-out-of-order did not apply" "$out"; fi
+undo; ledger_reset
+echo 0099 > "$WORK/schema-baseline"
+out="$(EDGE_SCHEMA_BASELINE_FILE="$WORK/schema-baseline" run_apply)"
+if ! applied && echo "$out" | grep -q "contained in the factory-clean baseline 0099"; then
+  ok "on an empty ledger, a version the recorded baseline contains is REFUSED"
+else no "a baseline-covered version was applied on an empty ledger" "$out"; fi
+echo 0098 > "$WORK/schema-baseline"
+out="$(EDGE_SCHEMA_BASELINE_FILE="$WORK/schema-baseline" run_apply)"
+if applied; then ok "the first version above the recorded baseline still applies"
+else no "the next migration after the baseline was refused" "$out"; fi
+undo; ledger_reset; rm -f "$WORK/schema-baseline"
+
+echo "== 11. the ledger row commits WITH the migration (audit P3 M3) =="
+# A lost ledger write (what a crash or a dropped session between the two used to cause) must take the
+# migration's objects with it.
+Q "CREATE FUNCTION public.selftest_refuse_ledger() RETURNS trigger LANGUAGE plpgsql AS \$f\$ BEGIN
+     IF NEW.version = '0099_selftest_noop' THEN RAISE EXCEPTION 'ledger write lost'; END IF; RETURN NEW; END \$f\$;
+   CREATE TRIGGER selftest_refuse_ledger BEFORE INSERT ON public.schema_migrations
+     FOR EACH ROW EXECUTE FUNCTION public.selftest_refuse_ledger();" >/dev/null
+out="$(run_apply)"; rc=$?
+if [ "$rc" != 0 ] && ! applied && [ "$(marker)" = "0" ]; then
+  ok "own-transaction migration: a lost ledger write rolls the migration back"
+else no "the migration's objects survived a lost ledger write (rc=$rc marker=$(marker))" "$out"; fi
+cp "$MIGDIR/0099_selftest_noop.up.sql" "$WORK/0099.keep"
+printf 'CREATE TABLE IF NOT EXISTS iam_v2.edge_selftest_marker(id int PRIMARY KEY);\n' > "$MIGDIR/0099_selftest_noop.up.sql"
+PSHA="$(sha256sum "$MIGDIR/0099_selftest_noop.up.sql" | awk '{print $1}')"
+out="$(EDGE_PSQL="$PSQL" bash "$RUN" --apply-role edge_apply --only 0099_selftest_noop --expect-db "$DB" --target-kind live-site \
+        --ack-target I_UNDERSTAND_LIVE_DARK_SITE_MIGRATION --expect-sha256 "$PSHA" 2>&1)"; rc=$?
+if [ "$rc" != 0 ] && ! applied && [ "$(marker)" = "0" ]; then
+  ok "migration without transaction control: wrapped, so a lost ledger write rolls it back"
+else no "a plain migration's objects survived a lost ledger write (rc=$rc marker=$(marker))" "$out"; fi
+Q "DROP TRIGGER selftest_refuse_ledger ON public.schema_migrations; DROP FUNCTION public.selftest_refuse_ledger();" >/dev/null
+out="$(EDGE_PSQL="$PSQL" bash "$RUN" --apply-role edge_apply --only 0099_selftest_noop --expect-db "$DB" --target-kind live-site \
+        --ack-target I_UNDERSTAND_LIVE_DARK_SITE_MIGRATION --expect-sha256 "$PSHA" 2>&1)"
+if applied && [ "$(marker)" = "1" ]; then ok "...and the same plain migration applies with its row once the ledger accepts it"
+else no "a plain migration did not apply" "$out"; fi
+undo
+printf 'BEGIN;\nCREATE TABLE IF NOT EXISTS iam_v2.edge_selftest_marker(id int PRIMARY KEY);\nCOMMIT;\nSELECT 1;\n' > "$MIGDIR/0099_selftest_noop.up.sql"
+PSHA="$(sha256sum "$MIGDIR/0099_selftest_noop.up.sql" | awk '{print $1}')"
+out="$(EDGE_PSQL="$PSQL" bash "$RUN" --apply-role edge_apply --only 0099_selftest_noop --expect-db "$DB" --target-kind live-site \
+        --ack-target I_UNDERSTAND_LIVE_DARK_SITE_MIGRATION --expect-sha256 "$PSHA" 2>&1)"
+if ! applied && [ "$(marker)" = "0" ] && echo "$out" | grep -q "statements after its COMMIT"; then
+  ok "statements after COMMIT are REFUSED before anything runs"
+else no "a migration with statements after its COMMIT was run" "$out"; fi
+cp "$WORK/0099.keep" "$MIGDIR/0099_selftest_noop.up.sql"; undo
 
 echo "============================================================"
 if [ "$fail" = "0" ]; then echo "EDGE_MIGRATE_SELFTEST = PASS ($pass cases)"; exit 0; fi
