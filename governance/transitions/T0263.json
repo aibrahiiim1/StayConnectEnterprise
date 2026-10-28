@@ -1,0 +1,34 @@
+{
+  "transition_id": "T0263",
+  "seq": 263,
+  "timestamp": "2026-10-28T00:39:10Z",
+  "timestamp_derivation": "Computed from the workstation clock after the cleanup was committed and validated, and before the commit that introduces this receipt.",
+  "record_type": "REPOSITORY_CLEANUP",
+  "authorisation": "The Product Owner's request of 2026-10-28: remove unwanted and unneeded documents (plans already done, old documents), update any document that does not reflect the current state, and remove every merged branch.",
+  "context": "Six deliveries (#256-#261) merged on 2026-10-27/28 left 128 merged branches on GitHub and locally, a hundred stale local PR refs, and finished per-delivery documents.",
+  "changes": "Branches: every merged branch deleted on GitHub (28) and locally (217), plus 100 stale local refs/remotes/pr/* (old PR heads, never on GitHub); only master remains. Nothing unmerged was lost: the one local branch with unique commits (fix/guest-network-untagged-parent, the bridge-RUNNING wait) is in master as waitBridgesRunning, and the redaction backup branch was the Product Owner's to drop. Documents: 40 per-delivery change manifests no tool or record reads, and six superseded status documents (PHASE19_ASSESSMENT, PHASE19_FINAL_REPORT, CURRENT_STATE_ASSESSMENT, COMMERCIAL_ONBOARDING_EXECUTION_STATUS, CONTROL_PLANE_MIGRATION, SYNC_PROTOCOL), all in git history; live links to them rewritten, historical records that mention them untouched. README.md, docs/README.md and CONTINUATION.md rewritten to the current state.",
+  "kept_on_purpose": "Every document a validator, the pack builder or a governance record reads (records must not be falsified, CLAUDE.md 0D), the Phase*-change-manifest files tools/project-state.py globs, and the backend and performance audits, which are open backlogs.",
+  "verification": "Reference map over every tracked document (tooling, CI, governance, other documents) before deleting; no broken relative link in the entry documents; validate-standing-records, project-state validate and check-generated pass; build-packs passes; transition-time, state-parity, delivery-protocol and migration-location validators pass. GitHub: only refs/heads/master; no open pull request.",
+  "follow_up": "Many reference documents (user guides, the operations manual, SYSTEM_OVERVIEW as a marked historical snapshot) were not rewritten line by line; the system handbook and the installation manual are the current references.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0262."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "base": "d6647840580c363eeadc508a4a099bf3d8fe9769",
+  "base_note": "Master after the merge of PR #261.",
+  "head": "f7a12168",
+  "head_note": "The cleanup commit of branch docs/cleanup. Governance commits follow it.",
+  "previous_delivery": "T0262",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}
