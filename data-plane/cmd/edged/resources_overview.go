@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -451,11 +452,11 @@ func (s *server) reportsOverview(w http.ResponseWriter, r *http.Request) {
 		}()
 	}
 
-	cands, candErr := s.overviewCandidates(ctx, win)
-	out.Guests = s.overviewGuests(ctx, win, cands, candErr)
-	out.Traffic = s.overviewTraffic(ctx, win, cands, candErr)
-	out.SignIn = s.overviewSignIn(ctx, win)
-	out.Packages = s.overviewPackages(ctx, win)
+	b := s.overviewSessionBlocks(ctx, win)
+	out.Guests = b.guests
+	out.Traffic = s.overviewTraffic(ctx, win, b.cands, b.candErr)
+	out.SignIn = b.signIn
+	out.Packages = b.packages
 	out.PMS = s.overviewPMS(ctx)
 	nets, pools := s.overviewNetworkRows(ctx)
 	if canDiag {
@@ -502,6 +503,41 @@ func (s *server) reportsOverview(w http.ResponseWriter, r *http.Request) {
 	}
 	out.Attention = deriveAttention(attIn)
 	writeJSON(w, http.StatusOK, out)
+}
+
+// overviewBlocks are the Overview's whole-table reads over sessions and sign-ins. They show the same figures to
+// every role that may read the Overview (no per-role filtering happens inside them), so one answer per site, range
+// and window serves every open tab for overviewBlocksTTL, as the traffic block already does (performance audit
+// D7-M3: four scans of sessions on every 30 s poll of every tab).
+type overviewBlocks struct {
+	cands    []overviewCandidate
+	candErr  error
+	guests   ovGuests
+	signIn   ovSignIn
+	packages ovPackages
+}
+
+const overviewBlocksTTL = 30 * time.Second
+
+// overviewBlockReads counts computations; tests read it.
+var overviewBlockReads atomic.Int64
+
+func (s *server) overviewSessionBlocks(ctx context.Context, win overviewWindow) overviewBlocks {
+	key := s.tenantID + "|" + s.siteID + "|blocks|" + win.Range + "|" + win.End.UTC().Format(time.RFC3339)
+	if v, ok := overviewCache.get(key, overviewBlocksTTL); ok {
+		return v.(overviewBlocks)
+	}
+	overviewBlockReads.Add(1)
+	var b overviewBlocks
+	b.cands, b.candErr = s.overviewCandidates(ctx, win)
+	b.guests = s.overviewGuests(ctx, win, b.cands, b.candErr)
+	b.signIn = s.overviewSignIn(ctx, win)
+	b.packages = s.overviewPackages(ctx, win)
+	// A block that could not be read is not cached: the next poll tries again.
+	if b.candErr == nil && b.guests.Available {
+		overviewCache.put(key, b)
+	}
+	return b
 }
 
 // Removes attention items for modules this site lacks. PMS messages or room charges awaiting a decision are
