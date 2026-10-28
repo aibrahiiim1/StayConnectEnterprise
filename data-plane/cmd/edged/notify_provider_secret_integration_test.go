@@ -25,7 +25,9 @@ func TestIntegration_NotifyProviderSecretRefusalChangesNothingAndIsAudited(t *te
 	     VALUES ($1, 'sms', 'stub', false, 'Before') RETURNING id::text`, f.tenant).Scan(&id); err != nil {
 		t.Fatalf("seed provider: %v", err)
 	}
-	t.Cleanup(func() { _, _ = f.pool.Exec(context.Background(), `DELETE FROM notification_providers WHERE id=$1::uuid`, id) })
+	t.Cleanup(func() {
+		_, _ = f.pool.Exec(context.Background(), `DELETE FROM notification_providers WHERE id=$1::uuid`, id)
+	})
 
 	req := httptest.NewRequest(http.MethodPatch, "/"+id, strings.NewReader(`{"display_name":"After","api_key":"new-secret"}`))
 	rctx := chi.NewRouteContext()
