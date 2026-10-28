@@ -1,0 +1,4 @@
+commit 875ca812341885f5238f0eb96f85ed5d0ca6c391
+Date:   Wed Oct 28 09:24:16 2026 +0300
+
+    Governance: T0263 corrected before merge (45 historical documents restored, exact counts) and its manifest

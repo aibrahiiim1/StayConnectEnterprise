@@ -123,7 +123,7 @@ Key invariants:
   fetch, hello, assignment acknowledgement and offline-package reconciliation
   (CLAUDE.md §0E). The telemetry subsystem was removed from the appliance on
   2026-09-27 (appliance migration 0093); its historical design is in
-  `SYNC_PROTOCOL.md` (removed 2026-10-28; in git history).
+  SYNC_PROTOCOL.md.
 - **Moves stay within the customer.** A new customer means retire →
   factory-clean install → registration → activation; an appliance Central
   deletes after it held a customer never re-registers

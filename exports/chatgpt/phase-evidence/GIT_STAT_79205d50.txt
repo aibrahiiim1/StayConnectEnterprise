@@ -1,4 +1,0 @@
-commit 79205d5045921dea9ab816ecbf7281ee3dcb3773
-Date:   Wed Oct 28 03:39:27 2026 +0300
-
-    Governance: T0263 records the repository cleanup and its change manifest

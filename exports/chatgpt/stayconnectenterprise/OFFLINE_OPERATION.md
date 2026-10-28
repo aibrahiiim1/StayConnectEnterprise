@@ -90,7 +90,7 @@ Run on a non-production appliance. Expected total time ≈ 20 minutes.
 
 Failure of step 3 or 4 is a release blocker: it means a client-path component
 still has a hidden cloud dependency (compare
-`CURRENT_STATE_ASSESSMENT.md` (removed 2026-10-28; in git history) §3 — the exact
+CURRENT_STATE_ASSESSMENT.md §3 — the exact
 defect this refactor removes).
 
 ## 5. Reboot-while-offline
