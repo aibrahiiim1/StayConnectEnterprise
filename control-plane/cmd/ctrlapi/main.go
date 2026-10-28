@@ -2,9 +2,11 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/pem"
 	"errors"
 	"flag"
 	"fmt"
@@ -12,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -63,11 +66,13 @@ func main() {
 			err = runUnlockSignin(os.Args[2:])
 		case "check-mfa-key":
 			err = runCheckMFAKey(os.Args[2:])
+		case "init-ca":
+			err = runInitCA(os.Args[2:])
 		case "serve", "":
 			goto serve
 		default:
 			fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n", os.Args[1])
-			fmt.Fprintf(os.Stderr, "usage: ctrlapi [serve | seed-admin | gen-vendor-key | gen-assignment-key | gen-registry-key | assignment-key verify-only|revoke | gen-mfa-key | check-mfa-key | reset-mfa | unlock-signin]\n")
+			fmt.Fprintf(os.Stderr, "usage: ctrlapi [serve | init-ca | seed-admin | gen-vendor-key | gen-assignment-key | gen-registry-key | assignment-key verify-only|revoke | gen-mfa-key | check-mfa-key | reset-mfa | unlock-signin]\n")
 			os.Exit(2)
 		}
 		if err != nil {
@@ -233,23 +238,13 @@ func serve() {
 	}
 
 	// Appliance certificate authority. Two-tier: an offline Root signs an online Intermediate; runtime
-	// issuance uses ONLY the intermediate key. Absent key → PKI routes and the mTLS listener stay disabled.
+	// issuance uses ONLY the intermediate. serve never creates CA material (`ctrlapi init-ca` does, once): a
+	// missing or inconsistent CA file, or a CA that differs from the one the database records, leaves the
+	// PKI routes and the mTLS listener off (audit Phase 1 H1).
 	var appCA *pki.CA
-	rootKeyPath := envOrDefault("CTRLAPI_ROOT_CA_KEY", "/etc/stayconnect/pki/root-ca.key")
-	intKeyPath := envOrDefault("CTRLAPI_INTERMEDIATE_CA_KEY", "/etc/stayconnect/pki/intermediate-ca.key")
 	sharedReplay := applianceauth.NewReplayCache(2*time.Minute, 8192)
-	if ca, err := pki.LoadCAChain(rootKeyPath, intKeyPath, 1); err == nil {
+	if ca, err := startPKI(rootCtx, pool, caPathsFromEnv()); err == nil {
 		appCA = ca
-		relocateRootOffline(rootKeyPath)
-		_, _ = pool.Exec(rootCtx, `
-            INSERT INTO appliance_ca_versions (version, cert_pem, subject, key_fingerprint, active)
-            VALUES (0, $1, 'StayConnect Root CA', 'offline', true)
-            ON CONFLICT (version) DO UPDATE SET cert_pem=EXCLUDED.cert_pem`, string(ca.RootPEM()))
-		_, _ = pool.Exec(rootCtx, `
-            INSERT INTO appliance_ca_versions (version, cert_pem, subject, key_fingerprint, active)
-            VALUES ($1,$2,$3,$4,true)
-            ON CONFLICT (version) DO UPDATE SET cert_pem=EXCLUDED.cert_pem, subject=EXCLUDED.subject, key_fingerprint=EXCLUDED.key_fingerprint`,
-			ca.Version, string(ca.IntermediatePEM()), ca.Subject(), ca.KeyFingerprint())
 		slog.Info("appliance CA chain loaded (root offline → online intermediate)", "intermediate_version", ca.Version, "subject", ca.Subject())
 		mtlsAddr := envOrDefault("CTRLAPI_MTLS_ADDR", ":9443")
 		applianceMTLSAPI := api.ApplianceMTLSRouter(pool, rdb, sharedReplay, licSvc, ca, assignKey, regRoot, ptls)
@@ -259,7 +254,7 @@ func serve() {
 			}
 		}()
 	} else {
-		slog.Warn("appliance CA unavailable — PKI/mTLS disabled", "path", intKeyPath, "err", err)
+		slog.Error("appliance CA unavailable — PKI/mTLS disabled; restore the CA files (never re-create them on a Central that has appliances)", "err", err)
 	}
 
 	// Console two-step sign-in. Without the key no operator can sign in: the console refuses rather than accept a password alone.
@@ -341,23 +336,117 @@ func envOrDefault(k, d string) string {
 	return d
 }
 
-// relocateRootOffline moves the root CA key out of the runtime PKI directory once the intermediate is signed.
-func relocateRootOffline(rootKeyPath string) {
+// caPaths are the appliance CA files. The root key is only written by init-ca, straight to the offline directory.
+type caPaths struct {
+	rootCert, intCert, intKey, rootKeyOffline string
+}
+
+func caPathsFromEnv() caPaths {
+	rootKeyPath := envOrDefault("CTRLAPI_ROOT_CA_KEY", "/etc/stayconnect/pki/root-ca.key")
+	intKeyPath := envOrDefault("CTRLAPI_INTERMEDIATE_CA_KEY", "/etc/stayconnect/pki/intermediate-ca.key")
 	offlineDir := envOrDefault("CTRLAPI_ROOT_CA_OFFLINE_DIR", "/etc/stayconnect/pki-offline")
-	if _, err := os.Stat(rootKeyPath); err != nil {
-		return // already moved / absent
+	return caPaths{
+		rootCert:       pki.CertSibling(rootKeyPath),
+		intCert:        pki.CertSibling(intKeyPath),
+		intKey:         intKeyPath,
+		rootKeyOffline: filepath.Join(offlineDir, "root-ca.key"),
 	}
-	if err := os.MkdirAll(offlineDir, 0o700); err != nil {
-		slog.Warn("root CA offline relocate: mkdir failed", "err", err)
-		return
+}
+
+// startPKI loads the CA (never creating it) and records it in appliance_ca_versions without overwriting: a
+// stored row that differs from the loaded certificate means the files belong to another Central, and the PKI
+// stays off with the row untouched.
+func startPKI(ctx context.Context, pool *pgxpool.Pool, p caPaths) (*pki.CA, error) {
+	ca, err := pki.LoadCA(p.rootCert, p.intCert, p.intKey, 1)
+	if err != nil {
+		return nil, err
 	}
-	dst := offlineDir + "/root-ca.key"
-	if err := os.Rename(rootKeyPath, dst); err != nil {
-		slog.Warn("root CA offline relocate failed — move it offline manually", "from", rootKeyPath, "err", err)
-		return
+	if err := recordCA(ctx, pool, ca); err != nil {
+		return nil, err
 	}
-	_ = os.Chmod(dst, 0o600)
-	slog.Warn("root CA private key relocated offline; move to cold storage", "offline_path", dst)
+	return ca, nil
+}
+
+func recordCA(ctx context.Context, pool *pgxpool.Pool, ca *pki.CA) error {
+	rows := []struct {
+		version              int
+		pem, subject, keyFpr string
+	}{
+		{0, string(ca.RootPEM()), "StayConnect Root CA", "offline"},
+		{ca.Version, string(ca.IntermediatePEM()), ca.Subject(), ca.KeyFingerprint()},
+	}
+	for _, r := range rows {
+		if _, err := pool.Exec(ctx, `
+            INSERT INTO appliance_ca_versions (version, cert_pem, subject, key_fingerprint, active)
+            VALUES ($1,$2,$3,$4,true) ON CONFLICT (version) DO NOTHING`, r.version, r.pem, r.subject, r.keyFpr); err != nil {
+			return fmt.Errorf("record appliance CA version %d: %w", r.version, err)
+		}
+		var stored string
+		if err := pool.QueryRow(ctx, `SELECT cert_pem FROM appliance_ca_versions WHERE version=$1`, r.version).Scan(&stored); err != nil {
+			return fmt.Errorf("read appliance CA version %d: %w", r.version, err)
+		}
+		if !samePEMCert(stored, r.pem) {
+			return fmt.Errorf("the database records a different appliance CA (version %d) than the loaded files; refusing to start the PKI", r.version)
+		}
+	}
+	return nil
+}
+
+// samePEMCert compares the first certificate of two PEM texts by DER, ignoring whitespace and line breaks.
+func samePEMCert(a, b string) bool {
+	ba, _ := pem.Decode([]byte(a))
+	bb, _ := pem.Decode([]byte(b))
+	return ba != nil && bb != nil && bytes.Equal(ba.Bytes, bb.Bytes)
+}
+
+// runInitCA creates the appliance CA of a brand-new Central. It refuses when any CA file exists or the
+// database already records a CA: a restored or moved Central carries its CA, it never gets a new one.
+func runInitCA(args []string) error {
+	fs := flag.NewFlagSet("init-ca", flag.ExitOnError)
+	noDB := fs.Bool("no-db", false, "do not check or record appliance_ca_versions (the first serve records it)")
+	_ = fs.Parse(args)
+	p := caPathsFromEnv()
+	var pool *pgxpool.Pool
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if !*noDB {
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+		if pool, err = db.Open(ctx, cfg.DBURL); err != nil {
+			return err
+		}
+		defer pool.Close()
+	}
+	if _, err := initCA(ctx, pool, p); err != nil {
+		return err
+	}
+	fmt.Printf("appliance CA created: %s, %s, %s; the root key is %s — move it to cold storage and delete it here\n",
+		p.rootCert, p.intCert, p.intKey, p.rootKeyOffline)
+	return nil
+}
+
+func initCA(ctx context.Context, pool *pgxpool.Pool, p caPaths) (*pki.CA, error) {
+	if pool != nil {
+		var n int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM appliance_ca_versions`).Scan(&n); err != nil {
+			return nil, err
+		}
+		if n > 0 {
+			return nil, errors.New("the database already records an appliance CA; restore its files instead of creating a new CA")
+		}
+	}
+	ca, err := pki.InitCA(p.rootKeyOffline, p.rootCert, p.intCert, p.intKey, 1)
+	if err != nil {
+		return nil, err
+	}
+	if pool != nil {
+		if err := recordCA(ctx, pool, ca); err != nil {
+			return nil, err
+		}
+	}
+	return ca, nil
 }
 
 // runAssignmentKey changes the state of an assignment-signing key and re-signs the trust registry:

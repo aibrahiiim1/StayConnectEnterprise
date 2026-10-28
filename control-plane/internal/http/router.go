@@ -188,7 +188,16 @@ func readyz(d Deps) http.HandlerFunc {
 		if d.MFA == nil {
 			signin = "unavailable"
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"status": "ready", "version": d.Version, "signin": signin})
+		body := map[string]any{"status": "ready", "signin": signin}
+		// The version and the appliance CA state only to this host (the deploy smoke test); never through Caddy (audit Phase 1 L15, H1).
+		if clientip.IsLoopback(clientip.Peer(r)) && !clientip.Proxied(r) {
+			body["version"] = d.Version
+			body["pki"] = "available"
+			if d.CA == nil {
+				body["pki"] = "unavailable"
+			}
+		}
+		writeJSON(w, http.StatusOK, body)
 	}
 }
 
