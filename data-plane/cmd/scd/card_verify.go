@@ -32,7 +32,6 @@ type cardVerifier struct {
 	mu     sync.Mutex
 	checks map[string]*cardCheck
 	now    func() time.Time
-	run    func(ctx context.Context) error
 }
 
 func newCardVerifier() *cardVerifier {

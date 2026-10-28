@@ -339,12 +339,6 @@ type authorizeReq struct {
 	MAC     string `json:"mac"`
 	Voucher string `json:"voucher"`
 }
-type authorizeResp struct {
-	SessionID       string `json:"session_id"`
-	GuestID         string `json:"guest_id"`
-	DurationSeconds int    `json:"duration_seconds"`
-	ExpiresAt       string `json:"expires_at,omitempty"`
-}
 
 func (s *server) authorize(w http.ResponseWriter, r *http.Request) {
 	var req authorizeReq
@@ -980,7 +974,7 @@ func main() {
 		slog.Warn("scd socket: no socket group resolves; the socket is root-only", "err", err)
 	}
 
-	// ConnContext reads peer credentials once at accept time so code-recovery routes can refuse a non-edged caller. portald shares edged's uid, so this stops a mistake, not a compromise (peer_identity_linux.go).
+	// ConnContext reads peer credentials once at accept time; admin routes require edged's uid and exact binary, and portald has its own account (admin_surface.go, peer_identity_linux.go).
 	srv := &http.Server{Handler: r, ReadHeaderTimeout: 5 * time.Second, ConnContext: withPeerCred}
 	go func() {
 		slog.Info("scd listening", "socket", c.SocketPath)

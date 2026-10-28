@@ -6,7 +6,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net"
@@ -171,8 +170,5 @@ func (s *server) authorizeViaIAMv2(w http.ResponseWriter, r *http.Request,
 	}
 }
 
-func decodeGuestAuthBody(r *http.Request, dst any) error {
-	return json.NewDecoder(r.Body).Decode(dst)
-}
 
 var _ = context.Background // keep context imported for future use by callers

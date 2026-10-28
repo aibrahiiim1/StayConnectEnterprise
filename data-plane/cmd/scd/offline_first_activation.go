@@ -247,7 +247,9 @@ func (s *server) applyActivationPackage(r *http.Request, pkg *activation.Package
 			return errPackageConsumed
 		}
 	}
-	// 2. Signed assignment: Adopt verifies its own signature and version; the envelope only carried it, so a package cannot smuggle in an unsigned tenant/site.
+	// 2. Signed assignment: Adopt itself verifies nothing. The assignment bytes are covered by the package's vendor signature
+	// (activation.AcceptForFirstActivation above), and every boot re-verifies the stored document against the trust registry
+	// (assignment.Resolve), so a package cannot smuggle in an unsigned tenant/site.
 	var doc assignment.Document
 	if err := json.Unmarshal(pkg.Assignment, &doc); err != nil {
 		return errors.New("the signed assignment inside the package is unreadable")
