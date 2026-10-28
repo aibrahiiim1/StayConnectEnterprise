@@ -36,7 +36,9 @@ func (s *server) paymentProvidersRoutes() http.Handler {
 	return r
 }
 
-func (s *server) paymentStepUp(w http.ResponseWriter, r *http.Request, password string) (string, bool) {
+// stepUp is the password step-up shared by every protected change: the operator's password again, and an actor
+// the change can be attributed to (audit P9 CC2: payment and portal changes each had an identical copy).
+func (s *server) stepUp(w http.ResponseWriter, r *http.Request, password string) (string, bool) {
 	if !s.reauth(r, password) {
 		s.reauthRefused(w, r, "password confirmation required")
 		return "", false
@@ -71,7 +73,7 @@ func (s *server) savePaymentAccount(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "too many credential fields or reason too long")
 		return
 	}
-	actor, ok := s.paymentStepUp(w, r, in.Password)
+	actor, ok := s.stepUp(w, r, in.Password)
 	if !ok {
 		return
 	}
@@ -126,7 +128,7 @@ func (s *server) savePaymentDomains(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
 		return
 	}
-	actor, ok := s.paymentStepUp(w, r, in.Password)
+	actor, ok := s.stepUp(w, r, in.Password)
 	if !ok {
 		return
 	}
@@ -197,7 +199,7 @@ func (s *server) putCardSettings(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "out_of_range", "Reconciliation grace must be between 15 and 1440 minutes.")
 		return
 	}
-	actor, ok := s.paymentStepUp(w, r, in.Password)
+	actor, ok := s.stepUp(w, r, in.Password)
 	if !ok {
 		return
 	}
@@ -588,7 +590,7 @@ func (s *server) setPaymentAccountConversion(w http.ResponseWriter, r *http.Requ
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
 		return
 	}
-	actor, ok := s.paymentStepUp(w, r, in.Password)
+	actor, ok := s.stepUp(w, r, in.Password)
 	if !ok {
 		return
 	}

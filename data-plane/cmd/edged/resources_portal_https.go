@@ -321,19 +321,6 @@ func (s *server) portalHTTPSGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, doc)
 }
 
-func (s *server) portalStepUp(w http.ResponseWriter, r *http.Request, password string) (string, bool) {
-	if !s.reauth(r, password) {
-		s.reauthRefused(w, r, "password confirmation required")
-		return "", false
-	}
-	actor := protectionActor(sessFrom(r.Context()))
-	if actor == "" {
-		jsonErr(w, http.StatusForbidden, "forbidden", "the change could not be attributed to an operator")
-		return "", false
-	}
-	return actor, true
-}
-
 func sourceIPOrNil(r *http.Request) any {
 	if ip := net.ParseIP(clientIP(r)); ip != nil {
 		return ip.String()
@@ -383,7 +370,7 @@ func (s *server) portalHTTPSPutAddress(w http.ResponseWriter, r *http.Request) {
 			"issues": []portalIPIssue{{Code: "invalid_address", Message: msg}}})
 		return
 	}
-	actor, ok := s.portalStepUp(w, r, in.Password)
+	actor, ok := s.stepUp(w, r, in.Password)
 	if !ok {
 		return
 	}
@@ -433,7 +420,7 @@ func (s *server) portalHTTPSPutDomain(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusUnprocessableEntity, "validation", msg)
 		return
 	}
-	actor, ok := s.portalStepUp(w, r, in.Password)
+	actor, ok := s.stepUp(w, r, in.Password)
 	if !ok {
 		return
 	}
@@ -449,7 +436,7 @@ func (s *server) portalHTTPSDeleteDomain(w http.ResponseWriter, r *http.Request)
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
 		return
 	}
-	actor, ok := s.portalStepUp(w, r, in.Password)
+	actor, ok := s.stepUp(w, r, in.Password)
 	if !ok {
 		return
 	}
@@ -605,7 +592,7 @@ func (s *server) portalHTTPSRenew(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
 		return
 	}
-	if _, ok := s.portalStepUp(w, r, in.Password); !ok {
+	if _, ok := s.stepUp(w, r, in.Password); !ok {
 		return
 	}
 	if s.scd == nil {

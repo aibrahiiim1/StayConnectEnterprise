@@ -266,7 +266,7 @@ func (s *server) assistedAction(w http.ResponseWriter, r *http.Request) (id stri
 		}
 	}
 	selected, _ = json.Marshal(in.Selected)
-	actor, ok = s.portalStepUp(w, r, in.Password)
+	actor, ok = s.stepUp(w, r, in.Password)
 	return
 }
 

@@ -126,7 +126,7 @@ func (s *server) setAccountingRetention(w http.ResponseWriter, r *http.Request) 
 		jsonErr(w, http.StatusConflict, "awaiting_assignment", "this appliance has no site yet, so nothing can be saved")
 		return
 	}
-	actor, ok := s.portalStepUp(w, r, in.Password)
+	actor, ok := s.stepUp(w, r, in.Password)
 	if !ok {
 		return
 	}

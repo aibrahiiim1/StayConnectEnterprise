@@ -103,7 +103,7 @@ func (s *server) resolveCardCase(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad id")
 		return
 	}
-	actor, ok := s.paymentStepUp(w, r, in.Password)
+	actor, ok := s.stepUp(w, r, in.Password)
 	if !ok {
 		return
 	}

@@ -163,7 +163,7 @@ func (s *server) guestDataAction(w http.ResponseWriter, r *http.Request) (guestD
 		jsonErr(w, http.StatusConflict, "awaiting_assignment", "this appliance has no site yet")
 		return in, "", false
 	}
-	actor, ok := s.portalStepUp(w, r, in.Password)
+	actor, ok := s.stepUp(w, r, in.Password)
 	return in, actor, ok
 }
 
