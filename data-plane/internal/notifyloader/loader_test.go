@@ -19,7 +19,7 @@ func fallbacks() (mail.Mailer, sms.Sender, whatsapp.Sender) {
 
 func TestNoWhatsAppRowKeepsTheStub(t *testing.T) {
 	m, s, w := fallbacks()
-	r := resolve([]providerRow{{channel: "sms", kind: "stub"}}, m, s, w)
+	r := resolve([]ProviderRow{{Channel: "sms", Kind: "stub"}}, m, s, w)
 	if r.WhatsAppKind != "stub" || r.WhatsApp != w {
 		t.Fatalf("whatsapp %v %T", r.WhatsAppKind, r.WhatsApp)
 	}
@@ -27,9 +27,9 @@ func TestNoWhatsAppRowKeepsTheStub(t *testing.T) {
 
 func TestMetaWhatsAppRowBuildsTheMetaAdapter(t *testing.T) {
 	m, s, w := fallbacks()
-	r := resolve([]providerRow{{
-		channel: "whatsapp", kind: KindMetaWhatsApp, apiKey: "tok", apiUser: "12345",
-		extra: map[string]string{"template_name": "onegate_code", "language": "ar"},
+	r := resolve([]ProviderRow{{
+		Channel: "whatsapp", Kind: KindMetaWhatsApp, Secret: "tok", APIUser: "12345",
+		Extra: map[string]string{"template_name": "onegate_code", "language": "ar"},
 	}}, m, s, w)
 	meta, ok := r.WhatsApp.(*whatsapp.Meta)
 	if !ok || r.WhatsAppKind != KindMetaWhatsApp {
@@ -46,9 +46,9 @@ func TestMetaWhatsAppRowBuildsTheMetaAdapter(t *testing.T) {
 
 func TestTwilioWhatsAppRowBuildsTheTwilioAdapter(t *testing.T) {
 	m, s, w := fallbacks()
-	r := resolve([]providerRow{{
-		channel: "whatsapp", kind: KindTwilioWhatsApp, apiKey: "auth", apiUser: "AC1", fromAddr: "+14155238886",
-		extra: map[string]string{"content_sid": "HX1"},
+	r := resolve([]ProviderRow{{
+		Channel: "whatsapp", Kind: KindTwilioWhatsApp, Secret: "auth", APIUser: "AC1", FromAddress: "+14155238886",
+		Extra: map[string]string{"content_sid": "HX1"},
 	}}, m, s, w)
 	tw, ok := r.WhatsApp.(*whatsapp.Twilio)
 	if !ok || r.WhatsAppKind != KindTwilioWhatsApp {
@@ -61,12 +61,12 @@ func TestTwilioWhatsAppRowBuildsTheTwilioAdapter(t *testing.T) {
 
 func TestIncompleteOrUnknownWhatsAppRowFallsBackToStub(t *testing.T) {
 	m, s, w := fallbacks()
-	for _, row := range []providerRow{
-		{channel: "whatsapp", kind: KindMetaWhatsApp, apiKey: "tok", apiUser: "1"},                      // no template
-		{channel: "whatsapp", kind: KindTwilioWhatsApp, apiKey: "a", apiUser: "AC1", fromAddr: "+1415"}, // no content sid
-		{channel: "whatsapp", kind: "twilio"},                                                           // an SMS kind
+	for _, row := range []ProviderRow{
+		{Channel: "whatsapp", Kind: KindMetaWhatsApp, Secret: "tok", APIUser: "1"},                         // no template
+		{Channel: "whatsapp", Kind: KindTwilioWhatsApp, Secret: "a", APIUser: "AC1", FromAddress: "+1415"}, // no content sid
+		{Channel: "whatsapp", Kind: "twilio"},                                                              // an SMS kind
 	} {
-		r := resolve([]providerRow{row}, m, s, w)
+		r := resolve([]ProviderRow{row}, m, s, w)
 		if r.WhatsAppKind != "stub" || r.WhatsApp != w {
 			t.Fatalf("row %+v resolved to %s", row, r.WhatsAppKind)
 		}

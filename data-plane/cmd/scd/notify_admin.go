@@ -76,7 +76,9 @@ func (s *server) openNotifySecret(ctx context.Context, providerID string) (strin
 	plain, err := s.notifyKey.Open(sealbox.Sealed{Ciphertext: ct, Nonce: nonce, KeyID: keyID, CipherVersion: ver},
 		s.tenID, providerID, fmt.Sprint(gen))
 	if err != nil {
+		// Logged and recorded on the provider (never the secret), so a stale plaintext fallback is visible on the provider screen.
 		slog.Warn("notification secrets: cannot open sealed secret", "provider", providerID)
+		s.recordNotifyOutcome(ctx, providerID, errors.New("the stored secret could not be unsealed; save the secret again"))
 		return "", false
 	}
 	return string(plain), true
@@ -277,9 +279,6 @@ func (s *server) recordNotifyOutcome(ctx context.Context, id string, serr error)
 		return
 	}
 	// The stored text is shown to every role that reads the provider screen, so it holds no recipient; the test's own answer keeps the provider's words for the administrator who typed the address.
-	msg := notifyloader.ScrubContacts(serr.Error())
-	if len(msg) > 500 {
-		msg = msg[:500]
-	}
+	msg := notifyloader.Truncate(notifyloader.ScrubContacts(serr.Error()), 500)
 	_, _ = s.db.Exec(ctx, `UPDATE notification_providers SET last_error = $3, last_error_at = now() WHERE id=$1::uuid AND tenant_id=$2`, id, s.tenID, msg)
 }
