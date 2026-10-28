@@ -23,9 +23,8 @@ type apaleoClient struct {
 	clientID     string
 	clientSecret string
 
-	token     string
-	tokenExp  time.Time
-	unitNames []string
+	token    string
+	tokenExp time.Time
 }
 
 func (c *apaleoClient) authenticate(ctx context.Context) error {

@@ -513,9 +513,6 @@ func (s *workerSink) markGapResync(reason Code) error {
 	return s.w.repo.MarkGapAndRequireResync(s.ctx, GapResyncRequest{axisBase: s.ax(), Reason: reason})
 }
 
-// queue is for integration tests only.
-func (s *workerSink) queue() *BoundedQueue { return s.q }
-
 func clip(s string, n int) string {
 	if len(s) > n {
 		return s[:n]
