@@ -1166,7 +1166,8 @@
         "status": "RETIRED",
         "retired_by": "Product-Owner record, 2026-10-28 (T0264): permanently retired; it does not exist as an active environment and may not be contacted",
         "rule": "Not an operational target. Do not contact it, deploy to it, diagnose against it or restore from it. Never replace it blindly with the current production Central: name the environment under test explicitly.",
-        "historical_evidence": "PRESERVED UNCHANGED. Every record of what this host served, deployed and proved stands as written in governance/, the delivery manifests and the accepted evidence: a record of what was true then is not a claim about what is true now."
+        "historical_evidence": "PRESERVED UNCHANGED. Every record of what this host served, deployed and proved stands as written in governance/, the delivery manifests and the accepted evidence: a record of what was true then is not a claim about what is true now.",
+        "host_removed": "PERMANENTLY REMOVED (Product-Owner confirmation, 2026-10-28, T0266)."
       },
       "pre-live-appliance-retired-2026-10-28": {
         "address_octets": [
@@ -1179,7 +1180,8 @@
         "status": "RETIRED",
         "retired_by": "Product-Owner record, 2026-10-28 (T0264): permanently retired; it does not exist as an active environment and may not be contacted",
         "rule": "Not an operational target. Do not contact it, deploy to it or test against it. The standing PRE-LIVE deployment authorisation (D42, 2026-09-24) named this host and has no target now.",
-        "historical_evidence": "PRESERVED UNCHANGED. Every record of what this host served, deployed and proved stands as written in governance/, the delivery manifests and the accepted evidence: a record of what was true then is not a claim about what is true now."
+        "historical_evidence": "PRESERVED UNCHANGED. Every record of what this host served, deployed and proved stands as written in governance/, the delivery manifests and the accepted evidence: a record of what was true then is not a claim about what is true now.",
+        "host_removed": "PERMANENTLY REMOVED (Product-Owner confirmation, 2026-10-28, T0266)."
       },
       "central-stopped-2026-09-27": {
         "address_octets": [
@@ -1191,8 +1193,9 @@
         "role_when_active": "Central until 2026-09-27; it still holds the encrypted Root CA key backup (docs/CA_CEREMONY_RUNBOOK.md)",
         "status": "STOPPED; RETIRED AS A TARGET",
         "retired_by": "Stopped and disabled when Central moved on 2026-09-27; recorded as retired by the Product-Owner record of 2026-10-28 (T0264)",
-        "rule": "Not an operational target: never re-enable it (it would issue licence versions no current Central knows). The legacy Root CA backup it still holds is not disposed (current_state_facts.legacy_pki_custody); disposal is a console shred and VM decommission, out of band.",
-        "historical_evidence": "PRESERVED UNCHANGED. Every record of what this host served, deployed and proved stands as written in governance/, the delivery manifests and the accepted evidence: a record of what was true then is not a claim about what is true now."
+        "rule": "Permanently removed (Product-Owner confirmation, 2026-10-28): never re-create or re-enable it. The legacy Root CA backup it held went with the host (current_state_facts.legacy_pki_custody).",
+        "historical_evidence": "PRESERVED UNCHANGED. Every record of what this host served, deployed and proved stands as written in governance/, the delivery manifests and the accepted evidence: a record of what was true then is not a claim about what is true now.",
+        "host_removed": "PERMANENTLY REMOVED (Product-Owner confirmation, 2026-10-28, T0266)."
       }
     },
     "central_scope": "LICENSING_ONLY",
@@ -1344,10 +1347,11 @@
       "_note": "Reconciliation of the legacy (pre-2026-10-28) trust universe, D79/T0265. Truthful status only; nothing here claims a destruction that was not observed.",
       "current_trust_dependency": "NONE. The production Central and the test appliance are a fresh trust universe (installation manual F, Appendix 3). The repository holds no private key material and no compiled-in trust anchor; every anchor is read at run time from per-installation files under /etc/stayconnect (checked 2026-10-28).",
       "workstation_custody_copy": "NO LONGER HELD (Product-Owner confirmation, 2026-10-28). No destruction record exists and none is written.",
-      "host_backup_150_0_0_252": "NOT DISPOSED. root-ca.key.enc, its .sha256 and CEREMONY_PASSPHRASE.txt under /opt/stayconnect/ca-ceremony-backup/ on the stopped first Central, last verified present 2026-09-27. The delivery environment holds no credentials for the host and its egress proxy refuses the project's hosts. Disposal: shred -u on the console, then decommission the VM and disks, out of band.",
-      "runtime_keys_on_retired_central": "NOT DISPOSED. Legacy Intermediate CA, vendor licence, assignment, registry-root and internal TLS CA private keys under /etc/stayconnect on the retired Central 172.21.96.196 (carried over by the 2026-09-27 restore) and on 150.0.0.252. 172.21.96.196 may not be contacted (D78); disposal is a VM wipe or decommission by its infrastructure owner, out of band.",
+      "host_backup_150_0_0_252": "HOST PERMANENTLY REMOVED (Product-Owner confirmation, 2026-10-28, T0266). The backup (root-ca.key.enc, .sha256, CEREMONY_PASSPHRASE.txt) was last verified present 2026-09-27; its erasure was not observed or verified by any delivery session and none is claimed.",
+      "runtime_keys_on_retired_central": "HOSTS PERMANENTLY REMOVED (same confirmation). The legacy Intermediate CA, vendor licence, assignment, registry-root and internal TLS CA private keys lived under /etc/stayconnect on 172.21.96.196 and 150.0.0.252; erasure not observed or verified, none claimed.",
       "production_root_key_cold_storage": "NOT RECORDED: whether installation manual F step 2 (moving the production Central's Root key offline) has been done could not be checked from the repository.",
-      "record": "docs/CA_CEREMONY_RUNBOOK.md"
+      "record": "docs/CA_CEREMONY_RUNBOOK.md",
+      "summary": "No legacy key copy is known to remain in the Product Owner's possession or on any host the project operates. This rests on the Product Owner's confirmation, not on a verified destruction; any surviving image or snapshot of the removed servers would still contain the keys. No current system trusts them."
     }
   },
   "latest_transition_id": "T0265",

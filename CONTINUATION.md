@@ -33,8 +33,8 @@ proxy refuses them), so deployments run from the workstation.
 ## Open, and known
 
 * **Legacy Root CA custody** ([CA_CEREMONY_RUNBOOK.md](docs/CA_CEREMONY_RUNBOOK.md)): the workstation copy is no longer
-  held (PO, 2026-10-28). The host backup on the stopped first Central and the legacy runtime keys on the retired
-  Central are **not disposed**: wipe or decommission those VMs out of band. No current system trusts those keys.
+  held and the former servers have been permanently removed (PO confirmations, 2026-10-28). Key erasure was never
+  observed or verified, and none is claimed. No current system trusts those keys.
 * Whether the production Central's own Root key was moved to cold storage (manual F, step 2) is not recorded.
 * Card payment and room charge execute only with their execution switches, each a separate PO authorisation (manual C.12).
 * A blank-VM install of the current release was not repeated after #256; rebuild with the same identity (manual E.4

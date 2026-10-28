@@ -1148,8 +1148,8 @@ flowchart TD
 | Email-OTP sign-in | **Removed** (replaced by email accounts; `CHANNEL_REMOVED`) |
 | Legacy in-process PMS providers (`internal/pms`, `pmsloader`) | **Retired but still loaded at scd boot** |
 | `internal/pmsguard` | **Dead code** |
-| Former Central `150.0.0.252` | **Stopped; retired as a target** (holds the former trust universe's encrypted Root CA key backup pending shredding after offline-media confirmation) |
-| Former Central `172.21.96.196`, former PRE-LIVE appliance `172.21.60.25` | **Permanently retired** (Product-Owner record, 2026-10-28; `current_state_facts.retired_hosts`) |
+| Former Central `150.0.0.252` | **Permanently removed** (Product-Owner confirmation, 2026-10-28); it held the former trust universe's Root CA backup, whose erasure was not verified ([CA_CEREMONY_RUNBOOK.md](../CA_CEREMONY_RUNBOOK.md)) |
+| Former Central `172.21.96.196`, former PRE-LIVE appliance `172.21.60.25` | **Permanently retired and removed** (Product-Owner records, 2026-10-28; `current_state_facts.retired_hosts`) |
 | Retired development reference appliance | **Retired; never contacted** |
 
 ---
@@ -1247,7 +1247,7 @@ the operator's), **G15** (no observability stack, no HA).
 
 ### 24.2 Decisions that need a separate operational decision (Product Owner)
 
-1. **Off-host copy destination** for Central dumps and export bundles; shredding the former trust universe's Root-CA backup (on the stopped first Central, retired as a target) after offline-media confirmation.
+1. **Off-host copy destination** for Central dumps and export bundles. (The former trust universe's Root-CA backup went with the permanently removed first Central, PO confirmation 2026-10-28; erasure not verified.)
 2. **Supported OS** — whether Ubuntu 24.04 is a supported target.
 3. **Go-Live**, LIVE-mode card payments, further real PMS postings — remain unauthorised.
 4. **Doc retirement** of the remaining obsolete documents in section 23. Decided in part on 2026-10-28 (D78/T0264): current-state references to retired hosts were corrected and an unexecuted preparation runbook for the retired appliance was removed; records (decisions, delivery manifests, reports, evidence) stay. The rows still open are corrections to make in place, not deletions.
