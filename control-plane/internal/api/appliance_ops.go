@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -109,13 +111,19 @@ func (b *Base) activate(w http.ResponseWriter, r *http.Request) {
 
 	// Lock and re-check the state: two concurrent activations yield one 409, never two assignments.
 	var lifecycle, held string
-	if err := tx.QueryRow(ctx, `SELECT lifecycle_state, COALESCE(held_customer_id::text,'') FROM appliances WHERE id=$1 FOR UPDATE`, id).
-		Scan(&lifecycle, &held); err != nil {
+	var deleting bool
+	if err := tx.QueryRow(ctx, `SELECT lifecycle_state, COALESCE(held_customer_id::text,''), deletion_started_at IS NOT NULL
+          FROM appliances WHERE id=$1 FOR UPDATE`, id).
+		Scan(&lifecycle, &held, &deleting); err != nil {
 		Fail(w, r, http.StatusNotFound, CodeNotFound, "appliance not found")
 		return
 	}
 	if lifecycle != "pending_approval" {
 		Fail(w, r, http.StatusConflict, "invalid_state", "the appliance is no longer waiting for activation")
+		return
+	}
+	if deleting { // audit Phase 1 M8
+		Fail(w, r, http.StatusConflict, "invalid_state", "the appliance is being deleted; it cannot be activated")
 		return
 	}
 	// An appliance still holding a customer's data activates only for that customer (held_customer.go); checked before anything is created.
@@ -511,9 +519,37 @@ func (b *Base) replace(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := DBCtx(r)
 	defer cancel()
-	if _, err := b.DB.Exec(ctx, `UPDATE appliances SET replacement_pending=true,
+	// Lock the row and re-check under the lock, as move does: a retirement or another replace in between wins
+	// (audit Phase 1 L9).
+	tx, err := b.DB.Begin(ctx)
+	if err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "begin failed")
+		return
+	}
+	defer tx.Rollback(ctx)
+	var lifecycle string
+	var pending, retiring bool
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(a.lifecycle_state,''), a.replacement_pending,
+            EXISTS (SELECT 1 FROM appliance_terminal_delivery t WHERE t.appliance_id=a.id)
+          FROM appliances a WHERE a.id=$1 FOR UPDATE`, id).Scan(&lifecycle, &pending, &retiring); err != nil {
+		failInternal(w, r, "Central could not read the appliance, so nothing changed.", err)
+		return
+	}
+	if lifecycle != "assigned" || retiring {
+		invalidState(w, r, "only an activated appliance can be replaced", row)
+		return
+	}
+	if pending {
+		Fail(w, r, http.StatusConflict, CodeConflict, "the appliance is already marked for replacement")
+		return
+	}
+	if _, err := tx.Exec(ctx, `UPDATE appliances SET replacement_pending=true,
         replacement_deadline = now() + make_interval(hours => $2), updated_at=now() WHERE id=$1`,
 		id, int(replacementWindow.Hours())); err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "update failed")
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "update failed")
 		return
 	}
@@ -554,13 +590,38 @@ func (b *Base) rebindWANMAC(w http.ResponseWriter, r *http.Request) {
 		invalidState(w, r, "only an activated appliance can be rebound", row)
 		return
 	}
+	newMAC := ""
+	if strings.TrimSpace(in.NewMAC) != "" {
+		var ok bool
+		if newMAC, ok = canonicalMAC(in.NewMAC); !ok {
+			Fail(w, r, http.StatusBadRequest, CodeBadRequest, "new_mac is not a MAC address (for example 00:11:22:33:44:55)")
+			return
+		}
+	}
 	ctx, cancel := DBCtx(r)
 	defer cancel()
-	var curMAC string
-	_ = b.DB.QueryRow(ctx, `SELECT COALESCE(wan_mac,'') FROM appliances WHERE id=$1`, id).Scan(&curMAC)
-	newMAC := normalizeMAC(in.NewMAC)
+	// The MAC change and the licence re-issue commit together, under the appliance row lock, with the state
+	// re-checked under it (audit Phase 1 M7).
+	tx, err := b.DB.Begin(ctx)
+	if err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "begin failed")
+		return
+	}
+	defer tx.Rollback(ctx)
+	var curMAC, lifecycle string
+	var retiring bool
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(a.wan_mac,''), COALESCE(a.lifecycle_state,''),
+            EXISTS (SELECT 1 FROM appliance_terminal_delivery t WHERE t.appliance_id=a.id)
+          FROM appliances a WHERE a.id=$1 FOR UPDATE`, id).Scan(&curMAC, &lifecycle, &retiring); err != nil {
+		failInternal(w, r, "Central could not read the appliance, so nothing changed.", err)
+		return
+	}
+	if lifecycle != "assigned" || retiring {
+		invalidState(w, r, "only an activated appliance can be rebound", row)
+		return
+	}
 	if newMAC == "" {
-		newMAC = normalizeMAC(curMAC)
+		newMAC, _ = canonicalMAC(curMAC)
 	}
 	if newMAC == "" {
 		Fail(w, r, http.StatusConflict, CodeConflict, "Central has no WAN MAC for this appliance; pass new_mac")
@@ -576,14 +637,17 @@ func (b *Base) rebindWANMAC(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusServiceUnavailable, "licensing_unavailable", "Central could not read the appliance's licence, so nothing changed. Try again later.")
 		return
 	}
-	if _, err := b.DB.Exec(ctx, `UPDATE appliances SET wan_mac=$2, updated_at=now() WHERE id=$1`, id, newMAC); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE appliances SET wan_mac=$2, updated_at=now() WHERE id=$1`, id, newMAC); err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "update failed")
 		return
 	}
-	doc, err := b.Lic.Reissue(ctx, lid, operatorID)
+	doc, err := b.Lic.ReissueTx(ctx, tx, lid, operatorID)
 	if err != nil {
-		_, _ = b.DB.Exec(ctx, `UPDATE appliances SET wan_mac=NULLIF($2,''), updated_at=now() WHERE id=$1`, id, curMAC)
 		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "the licence could not be re-issued, so nothing changed: "+publicError(r, err))
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		failInternal(w, r, "the rebind could not be saved, so nothing changed", err)
 		return
 	}
 	_, _ = b.DB.Exec(ctx, `UPDATE appliance_security_alerts SET status='resolved', resolved=true,
@@ -597,6 +661,16 @@ func (b *Base) rebindWANMAC(w http.ResponseWriter, r *http.Request) {
 
 func normalizeMAC(s string) string {
 	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(s)), "-", ":")
+}
+
+// canonicalMAC accepts a 48-bit MAC in any form net.ParseMAC knows and returns it as aa:bb:cc:dd:ee:ff,
+// the form signed into the licence (audit Phase 1 M7).
+func canonicalMAC(s string) (string, bool) {
+	hw, err := net.ParseMAC(strings.TrimSpace(s))
+	if err != nil || len(hw) != 6 {
+		return "", false
+	}
+	return hw.String(), true
 }
 
 // reissueCertificate: POST /cloud/v1/appliances/{id}/reissue-certificate {reason}
@@ -699,14 +773,36 @@ func (b *Base) deleteAppliance(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "type the exact serial to confirm", map[string]any{"expected": row.Serial})
 		return
 	}
-	ctx, cancel := DBCtx(r)
+	// The release talks to DNS and ACME, so it gets its own, longer deadline than the 15 s request timeout, and
+	// a dropped client does not stop it half-way (audit Phase 1 M8).
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), deleteApplianceTimeout)
 	defer cancel()
 	operatorID, _ := actorOf(r)
+	// Mark the appliance as being deleted, under its row lock and with its state re-checked there, so an
+	// activation cannot land between the checks and the final delete (audit Phase 1 M8).
+	if ok, err := b.startApplianceDeletion(ctx, id); err != nil {
+		failInternal(w, r, "Central could not start the delete, so nothing changed.", err)
+		return
+	} else if !ok {
+		Fail(w, r, http.StatusConflict, "invalid_state", "The appliance changed state; reload and try again.")
+		return
+	}
+	deleted := false
+	defer func() {
+		if !deleted { // a failed step leaves the appliance as it was, not flagged
+			cctx, ccancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer ccancel()
+			if _, err := b.DB.Exec(cctx, `UPDATE appliances SET deletion_started_at=NULL WHERE id=$1`, id); err != nil {
+				slog.Warn("could not clear the deletion marker", "appliance_id", id, "err", err)
+			}
+		}
+	}()
 	// Refused before anything is revoked if the portal hostname and certificates could not be released afterwards,
-	// which would leave a half-retired appliance.
+	// which would leave a half-retired appliance. Provider errors are logged, never shown (audit Phase 1 M8).
 	if err := b.PortalTLS.CanRelease(ctx, id); err != nil {
+		slog.Warn("appliance delete: portal release not possible", "appliance_id", id, "err", err)
 		Fail(w, r, http.StatusConflict, "portal_tls_release_pending",
-			"The appliance's portal hostname or certificate cannot be released yet ("+err.Error()+"), so it was not deleted.")
+			"The appliance's portal hostname or certificate cannot be released yet (see Central's log), so it was not deleted.")
 		return
 	}
 	// Fail closed: a record whose certificate or licence could not be revoked is not deleted.
@@ -722,8 +818,9 @@ func (b *Base) deleteAppliance(w http.ResponseWriter, r *http.Request) {
 	// Deleting the record cascades away the portal rows the worker needs to delete the A record and revoke
 	// certificates, so that work happens first.
 	if err := b.PortalTLS.FinalizeRelease(ctx, id); err != nil {
+		slog.Warn("appliance delete: portal release failed", "appliance_id", id, "err", err)
 		Fail(w, r, http.StatusBadGateway, "portal_tls_release_failed",
-			"The appliance's portal hostname or certificate could not be released ("+err.Error()+"), so it was not deleted. Try again.")
+			"The appliance's portal hostname or certificate could not be released (see Central's log), so it was not deleted. Try again.")
 		return
 	}
 	tx, err := b.DB.Begin(ctx)
@@ -749,7 +846,8 @@ func (b *Base) deleteAppliance(w http.ResponseWriter, r *http.Request) {
 		failInternal(w, r, "delete failed", err)
 		return
 	}
-	tag, err := tx.Exec(ctx, `DELETE FROM appliances WHERE id=$1 AND lifecycle_state IN ('pending_approval','revoked','decommissioned')`, id)
+	tag, err := tx.Exec(ctx, `DELETE FROM appliances WHERE id=$1 AND lifecycle_state IN ('pending_approval','revoked','decommissioned')
+          AND deletion_started_at IS NOT NULL`, id)
 	if err != nil {
 		failInternal(w, r, "delete failed", err)
 		return
@@ -762,10 +860,26 @@ func (b *Base) deleteAppliance(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "commit failed")
 		return
 	}
+	deleted = true
 	audit.Op(ctx, b.DB, r, "appliance.deleted", "appliance", id, map[string]any{
 		"_tenant_id": deref(row.CustomerID), "serial": row.Serial, "activation": row.Activation,
 		"reason": in.Reason, "licenses_revoked": len(revoked)})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// deleteApplianceTimeout bounds a delete, including its DNS and ACME release.
+const deleteApplianceTimeout = 45 * time.Second // under the server WriteTimeout (60 s)
+
+// startApplianceDeletion marks a waiting or retired appliance as being deleted, under its row lock. false: the
+// appliance is no longer in a deletable state.
+func (b *Base) startApplianceDeletion(ctx context.Context, id string) (bool, error) {
+	tag, err := b.DB.Exec(ctx, `
+        UPDATE appliances SET deletion_started_at=now()
+         WHERE id=$1 AND lifecycle_state IN ('pending_approval','revoked','decommissioned')`, id)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
 }
 
 // FetchLogRetention is how long assignment-fetch log rows (one per 30-second poll) are kept.

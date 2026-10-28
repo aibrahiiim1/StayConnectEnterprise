@@ -209,6 +209,9 @@ func (b *Base) licenseAction(action string) http.HandlerFunc {
 		case errors.Is(err, licensing.ErrNoLicense):
 			Fail(w, r, http.StatusNotFound, CodeNotFound, "no current licence with that id")
 			return
+		case errors.Is(err, licensing.ErrSameStatus):
+			Fail(w, r, http.StatusConflict, "invalid_state", "the licence is already "+map[string]string{"suspend": "suspended", "resume": "active"}[action])
+			return
 		case err != nil:
 			Fail(w, r, http.StatusBadRequest, CodeBadRequest, publicError(r, err))
 			return
