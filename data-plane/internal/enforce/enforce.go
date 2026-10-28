@@ -8,6 +8,8 @@ package enforce
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -367,42 +369,33 @@ func (e *Enforcer) EnforceExpiries(ctx context.Context, tenant, site string) ([]
 		}
 	}
 
+	// Each entitlement ends under its own savepoint: one that fails every time (a bad row, a constraint) is
+	// logged and skipped, and never rolls back or blocks the expiry of every other entitlement on the site.
+	ended := due[:0:0]
 	for i := range due {
-		x := &due[i]
-
-		// The writer takes only the entitlement id and re-derives the condition, reason and instant from
-		// authoritative state, so a sweep cannot end a healthy entitlement or misdate an ending. The database's
-		// answer wins over the sweep's proposal.
-		//
-		// Without the writer (older or rolled-back schema) fall back to the controlled boundary termination:
-		// less evidence, but access must still end without depending on a migration.
-		if !e.phase6Writers {
-			if _, err := tx.Exec(ctx, `SELECT iam_v2.terminate_entitlement_at_boundary($1,$2,$3)`,
-				x.EntitlementID, x.At, x.Reason); err != nil {
-				return nil, err
-			}
-			d, sN, err := revoke(ctx, tx, x.EntitlementID, x.At)
-			if err != nil {
-				return nil, err
-			}
-			x.Devices, x.Sessions = d, sN
-			continue
-		}
-		var gotReason string
-		var gotAt time.Time
-		err := tx.QueryRow(ctx,
-			`SELECT reason, at, devices, sessions FROM iam_v2.p6_expire_entitlement($1)`,
-			x.EntitlementID).Scan(&gotReason, &gotAt, &x.Devices, &x.Sessions)
-		if errors.Is(err, pgx.ErrNoRows) {
-			// Already terminated elsewhere; claim nothing.
-			x.Devices, x.Sessions = 0, 0
-			continue
-		}
+		x := due[i]
+		sp, err := tx.Begin(ctx)
 		if err != nil {
 			return nil, err
 		}
-		x.Reason, x.At = gotReason, gotAt
+		claimed, err := e.expireOne(ctx, sp, &x)
+		if err != nil {
+			_ = sp.Rollback(ctx)
+			n := noteExpiryFailure(x.EntitlementID)
+			slog.Error("enforce: entitlement expiry failed; skipped, the rest of the sweep continues",
+				"entitlement_id", x.EntitlementID, "reason", x.Reason, "consecutive_failures", n, "err", err)
+			continue
+		}
+		if err := sp.Commit(ctx); err != nil {
+			return nil, err
+		}
+		clearExpiryFailure(x.EntitlementID)
+		if !claimed {
+			x.Devices, x.Sessions = 0, 0 // already terminated elsewhere; claim nothing
+		}
+		ended = append(ended, x)
 	}
+	due = ended
 	// Fail closed on what cannot be dated: an aggregate entitlement at its budget whose crossing instant is
 	// unprovable is suspended, not terminated, so access stops without claiming an end time. It stays a
 	// candidate and converges at the true instant if evidence appears.
@@ -433,6 +426,65 @@ func (e *Enforcer) EnforceExpiries(ctx context.Context, tenant, site string) ([]
 		return nil, err
 	}
 	return due, nil
+}
+
+// expireOne ends one entitlement. The writer takes only the entitlement id and re-derives the condition, reason
+// and instant from authoritative state, so a sweep cannot end a healthy entitlement or misdate an ending. The
+// database's answer wins over the sweep's proposal. Without the writer (older or rolled-back schema) it falls back
+// to the controlled boundary termination: less evidence, but access must still end without depending on a
+// migration. claimed is false when the entitlement was already terminated elsewhere.
+func (e *Enforcer) expireOne(ctx context.Context, tx pgx.Tx, x *Expiry) (claimed bool, err error) {
+	if !e.phase6Writers {
+		if _, err := tx.Exec(ctx, `SELECT iam_v2.terminate_entitlement_at_boundary($1,$2,$3)`,
+			x.EntitlementID, x.At, x.Reason); err != nil {
+			return false, err
+		}
+		d, sN, err := revoke(ctx, tx, x.EntitlementID, x.At)
+		if err != nil {
+			return false, err
+		}
+		x.Devices, x.Sessions = d, sN
+		return true, nil
+	}
+	var gotReason string
+	var gotAt time.Time
+	err = tx.QueryRow(ctx,
+		`SELECT reason, at, devices, sessions FROM iam_v2.p6_expire_entitlement($1)`,
+		x.EntitlementID).Scan(&gotReason, &gotAt, &x.Devices, &x.Sessions)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	x.Reason, x.At = gotReason, gotAt
+	return true, nil
+}
+
+// expiryFailures counts consecutive failed sweeps per entitlement, so the log says when one keeps failing.
+var (
+	expiryFailuresMu sync.Mutex
+	expiryFailures   = map[string]int{}
+)
+
+func noteExpiryFailure(id string) int {
+	expiryFailuresMu.Lock()
+	defer expiryFailuresMu.Unlock()
+	expiryFailures[id]++
+	return expiryFailures[id]
+}
+
+func clearExpiryFailure(id string) {
+	expiryFailuresMu.Lock()
+	defer expiryFailuresMu.Unlock()
+	delete(expiryFailures, id)
+}
+
+// ExpiryFailures reports how many consecutive sweeps have failed to end id (0 when the last attempt succeeded).
+func ExpiryFailures(id string) int {
+	expiryFailuresMu.Lock()
+	defer expiryFailuresMu.Unlock()
+	return expiryFailures[id]
 }
 
 // revoke closes open authorization intervals and ends live sessions at the same instant.
