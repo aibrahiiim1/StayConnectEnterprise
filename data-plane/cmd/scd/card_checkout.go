@@ -280,9 +280,15 @@ func (s *server) statusAllowed(txn string) bool {
 	if t, ok := s.card.lastStatus[txn]; ok && time.Since(t) < 4*time.Second {
 		return false
 	}
-	s.card.lastStatus[txn] = time.Now()
+	now := time.Now()
+	s.card.lastStatus[txn] = now
 	if len(s.card.lastStatus) > 5000 {
-		s.card.lastStatus = map[string]time.Time{}
+		// Drop only entries past the window: resetting the map would let every status page reach the provider at once.
+		for k, at := range s.card.lastStatus {
+			if now.Sub(at) >= 4*time.Second {
+				delete(s.card.lastStatus, k)
+			}
+		}
 	}
 	return true
 }
