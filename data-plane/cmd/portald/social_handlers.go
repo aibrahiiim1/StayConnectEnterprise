@@ -147,7 +147,7 @@ func (h *handler) socialCallback(w http.ResponseWriter, r *http.Request) {
 	h.renderGuestError(w, r, http.StatusBadGateway, "err.service")
 }
 
-// forwardedHTTPS: Caddy terminates TLS and forwards over loopback; the header is trusted only from a loopback peer.
+// forwardedHTTPS: portald serves guest HTTPS itself; only a loopback peer (Caddy's loopback-only portal vhost) may claim the scheme by header.
 func forwardedHTTPS(r *http.Request) bool {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {

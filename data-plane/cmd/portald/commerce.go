@@ -48,10 +48,21 @@ func newCommerceSessionStore() *commerceSessionStore {
 	return &commerceSessionStore{now: time.Now, m: map[string]commerceSession{}}
 }
 
+// commerceSessionPruneAt bounds the store: past it, put drops expired sessions (audit P5 L3), as pendingOTPStore does.
+const commerceSessionPruneAt = 20000
+
 func (s *commerceSessionStore) put(token string, sess commerceSession) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.m[token] = sess
+	if len(s.m) > commerceSessionPruneAt {
+		now := s.now()
+		for k, v := range s.m {
+			if !v.expiry.After(now) {
+				delete(s.m, k)
+			}
+		}
+	}
 }
 
 func (s *commerceSessionStore) delete(token string) {
@@ -65,6 +76,7 @@ func (s *commerceSessionStore) get(token string) (commerceSession, bool) {
 	defer s.mu.Unlock()
 	sess, ok := s.m[token]
 	if !ok || !sess.expiry.After(s.now()) {
+		delete(s.m, token)
 		return commerceSession{}, false
 	}
 	return sess, true

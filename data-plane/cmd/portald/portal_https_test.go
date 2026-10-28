@@ -335,6 +335,8 @@ func TestCertificatesAreServedBySNIAndReloadedWhenReplaced(t *testing.T) {
 	st := activeState
 	st.CertDir = dir
 	cs := newPortalCertServer(func() portalTLSState { return st })
+	clock := now
+	cs.now = func() time.Time { return clock }
 	for sni, want := range map[string]string{
 		tOG: ogSerial, strings.ToUpper(tCustom): cuSerial, tOG + ".": ogSerial,
 		"": cuSerial, "unknown.example.com": cuSerial, "../../etc/passwd": cuSerial,
@@ -347,7 +349,13 @@ func TestCertificatesAreServedBySNIAndReloadedWhenReplaced(t *testing.T) {
 
 	time.Sleep(20 * time.Millisecond) // a distinct modification time on coarse filesystems
 	newSerial := installFor(t, store, ca, tOG, now)
+	// Within the recheck interval a handshake does not look at the files (perf D3-L3).
 	c, err := cs.GetCertificate(&tls.ClientHelloInfo{ServerName: tOG})
+	if err != nil || leafSerial(c) != ogSerial {
+		t.Fatalf("within the recheck interval the loaded pair must be served without a file check: %v", err)
+	}
+	clock = clock.Add(portalCertRecheck)
+	c, err = cs.GetCertificate(&tls.ClientHelloInfo{ServerName: tOG})
 	if err != nil || leafSerial(c) != newSerial || newSerial == ogSerial {
 		t.Fatalf("after renewal: %v serial %s, want %s", err, leafSerial(c), newSerial)
 	}
@@ -360,6 +368,7 @@ func TestCertificatesAreServedBySNIAndReloadedWhenReplaced(t *testing.T) {
 	if err := os.WriteFile(store.KeyPath(tOG), b, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	clock = clock.Add(portalCertRecheck)
 	c, err = cs.GetCertificate(&tls.ClientHelloInfo{ServerName: tOG})
 	if err != nil || leafSerial(c) != newSerial {
 		t.Fatalf("mid-renewal the previous pair must be served: %v", err)

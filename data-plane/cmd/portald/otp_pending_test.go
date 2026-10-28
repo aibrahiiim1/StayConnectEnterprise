@@ -56,8 +56,9 @@ func TestThePendingCodeIsHeldForTheDeviceAndReopensTheCodeBox(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("request: %d %s", rec.Code, rec.Body.String())
 	}
-	if (*issued)[0]["portal_base"] != "http://example.com" {
-		t.Fatalf("the issue call must carry the origin the device reached the portal by, got %q", (*issued)[0]["portal_base"])
+	// scd builds the link from the appliance's own origin; a guest-supplied Host is never sent (audit P5 CC1).
+	if _, sent := (*issued)[0]["portal_base"]; sent {
+		t.Fatalf("the issue call must not carry the guest's Host header, got %q", (*issued)[0]["portal_base"])
 	}
 	rec = httptest.NewRecorder()
 	h.authMethods(rec, devReq(http.MethodGet, "/api/auth-methods", ""))
@@ -154,15 +155,5 @@ func TestTheMessageLinkOpensAPageAndOnlyTheButtonVerifies(t *testing.T) {
 	h.authOTPLink(rec, req)
 	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), `href="/"`) {
 		t.Fatalf("wrong code: %d", rec.Code)
-	}
-}
-
-func TestPortalLinkBaseIsAPlainOriginOrNothing(t *testing.T) {
-	for host, want := range map[string]string{"192.168.77.1:8380": "http://192.168.77.1:8380", "portal.example": "http://portal.example", "": "", "bad host": "", "a/b": ""} {
-		r := httptest.NewRequest(http.MethodPost, "/auth/otp/request", nil)
-		r.Host = host
-		if got := portalLinkBase(r); got != want {
-			t.Errorf("host %q: got %q want %q", host, got, want)
-		}
 	}
 }
