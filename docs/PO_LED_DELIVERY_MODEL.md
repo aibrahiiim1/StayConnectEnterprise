@@ -11,7 +11,7 @@ Every normal feature, UI change, bug fix, refactor or code change follows:
 
 ```
 REQUEST → SCOPE → IMPLEMENT → FOCUSED SELF-REVIEW → TARGETED TESTS → FIX RELATED ISSUES
-→ BUILD IF NEEDED → DEPLOY TO PRE-LIVE WHEN AUTHORIZED → SMOKE / HEALTH CHECK
+→ BUILD IF NEEDED → DEPLOY TO THE TEST APPLIANCE WHEN AUTHORIZED → SMOKE / HEALTH CHECK
 → PRODUCT OWNER TESTING → PRODUCT OWNER ACCEPTANCE → PROTECTED MERGE TO MASTER → DONE
 ```
 
@@ -149,6 +149,11 @@ does not authorize Go-Live. New product, architecture or security decisions stil
 **Scope.** D67 applies to PRE-LIVE missions the Product Owner requests. A routine FAST change deploys only to an
 appliance a standing authorization names, and Central is not part of that per-change deployment.
 
-**Standing deployment target, 2026-10-28.** The standing per-change PRE-LIVE deployment decision (2026-09-24,
-kept by D42) named the PRE-LIVE appliance, which is now retired, so it has no target. It does not pass to the
-test appliance `172.21.96.97` by inference; that needs the Product Owner's authorization.
+**Standing deployment authorization, 2026-10-28 (D79).** The Product Owner granted standing authorization for
+routine software deployments to the test appliance `172.21.96.97` within approved work, without separate deployment
+approval each time. It covers build and package, install, service restart, deployment verification, retry and
+rollback, and recording the exact deployed commit read back from the installed artifact. It does not cover the
+production Central, migrations or schema decisions, destructive or historical data changes, networking or topology,
+PMS configuration, posting or traffic, financial or payment-provider activity, Guest activation, Root-CA or trust
+changes, or Go-Live. It supersedes the standing per-change PRE-LIVE decision of 2026-09-24, whose appliance is
+retired. In §1 and §9, "PRE-LIVE" now means the test environment the Product Owner names.

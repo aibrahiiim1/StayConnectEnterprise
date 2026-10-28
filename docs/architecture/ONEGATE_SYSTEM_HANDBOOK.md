@@ -647,7 +647,7 @@ Sets [LIVE]: `sc_render_fp` (render fingerprint marker), `auth_ipv4` (legacy, dr
 
 ### 10.6 Where the factory network comes from
 
-A fresh appliance offers a **prepared, not-active** Access network "Client Wi-Fi" (`netcfg/factory.go`: untagged, `10.20.0.0/20`, gateway `10.20.0.1`, pool `10.20.0.10`–`10.20.15.254`, domain `guest.local`, captive portal / NAT / internet / isolation on). It is a *definition*, not a database row; the operator activates it (staged ENABLE) or creates their own. `docs/EDGE_NETWORKING.md` still says the legacy `br-lan` is "imported as the first client network" — that contradicts `CLIENT_NETWORKING.md` and the code. [CODE][DOC]
+A fresh appliance offers a **prepared, not-active** Access network "Client Wi-Fi" (`netcfg/factory.go`: untagged, `10.20.0.0/20`, gateway `10.20.0.1`, pool `10.20.0.10`–`10.20.15.254`, domain `guest.local`, captive portal / NAT / internet / isolation on). It is a *definition*, not a database row; the operator activates it (staged ENABLE) or creates their own. `docs/networking/EDGE_NETWORKING.md` still says the legacy `br-lan` is "imported as the first client network" — that contradicts `CLIENT_NETWORKING.md` and the code. [CODE][DOC]
 
 ---
 
@@ -810,7 +810,7 @@ After a published resync pmsd records coverage and runs `iam_v2.pms_roster_recon
 * **Checkout while down** — closed by roster reconciliation after the next complete generation; until then a departed guest can still match the stale mirror.
 * **Room charge** — fails closed (offers withheld; queued charges abort or stay queued).
 * **DB down** — pmsd retries; scd resolve returns a uniform technical failure.
-* A standing exception is on record: one open `GO_UNKNOWN_STAY` case on PRE-LIVE that must not be fabricated or suppressed (`docs/operations/STANDING_PMS_EXCEPTION_GO_UNKNOWN_STAY.md`).
+* An unplaceable departure (`GO_UNKNOWN_STAY`) stays open and is never fabricated or suppressed; the one recorded case was on the PRE-LIVE appliance, retired 2026-10-28 (its record: `docs/ARCHIVE.md`).
 
 ### 12.8 Room-charge (posting) pipeline — Protel FIAS **[CODE]**
 
@@ -1141,7 +1141,7 @@ flowchart TD
 | High availability (`deploy/ha`, `ha_sync` role, `ha` module) | **Not implemented / historical** |
 | NATS, telemetry outbox, command channel, update agent, cloud-mode settings | **Removed** (2026-09-27; Central migration 0045; appliance migration 0093) |
 | `deploy/observability` (Prometheus/Alertmanager/Grafana) | **Optional, not installed**, dev-era |
-| `phase1-bootstrap.sh`, `phase3-bootstrap.sh` | **Historical — never run on a real appliance** |
+| `phase1-bootstrap.sh`, `phase3-bootstrap.sh` | **Removed** 2026-10-28 (dev-only; [ARCHIVE.md](../ARCHIVE.md)) |
 | `sitemigrate`, `phase3-foundation`, `scd-enroll-test`, `install-pmsd-dark.sh` | **Historical / test tools** |
 | `stayconnect-site-backup.sh` | **Retired** (exits 2) |
 | `stayconnect-tc-setup.service` | **Retired** — present but disabled on PRE-LIVE [LIVE]; the repository ships no unit file and `install-service-units.sh` documents it as a retired unit that must not be re-armed |
@@ -1186,14 +1186,14 @@ Everything below was compared with the code at `7e4686ae`. **The code wins.** Th
 | `docs/DEPLOYMENT_APPLIANCE.md` *(banner added: install with the manual)* | A `postgresql` unit runs PG 16; portald runs as `stayconnect`; bring-up applies `0001_edge_init`; hand-install netplan/nftables/Kea/Unbound skeletons; one Caddy vhost serving a static bundle | Postgres is a container; portald has its own user; fresh installs use the **baseline**; netd renders network config; the Admin Console is a Next server on :3100 behind Caddy |
 | `docs/DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md` *(corrected in this PR)* | "four runtime roles"; record every step in `schema_migrations`; reconcile with `gatep-reconcile.sh`; apply netplan/nftables/Kea skeletons; never tells you to apply migrations after the baseline | **eight** `svc_*` roles; the baseline records no ledger rows; the provisioner uses direct `psql -f`; skeletons are not applied; migrations 0150–0158 are required |
 | `docs/APPLIANCE_ONBOARDING_MANUAL.md` *(corrected in this PR)*, `STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md` | "No CLI / nothing typed on the appliance" | True only *after* installation; the install itself is one root command (`appliance-install.sh`) |
-| `docs/EDGE_NETWORKING.md` | `br-lan` imported as the first client network; `netplan apply`; Kea `config-test` gate; Unbound reload; route list; relay "minimal" | Prepared inactive 10.20.0.0/20 network; `ip` surgery + `netplan generate`; no config-test; Unbound **restart**; routes differ; relay has no data path |
-| `docs/NETWORK_APPLY_AND_ROLLBACK.md` | Rollback re-applies `previous_seq` "at any time"; `dns` health check; `snapshot/health/commit` event phases | Manual rollback only for `applying`/`pending_confirmation`; there is no `dns` check; those phases are not written |
-| `docs/DHCP_MANAGEMENT.md`, `NETWORK_TROUBLESHOOTING.md`, `deploy/kea/kea-dhcp4.conf` | Option 114 by name `v4-captive-portal`; must be plain HTTP | Kea 2.0 maps that name to code 160; emitted **by code 114**; HTTPS form is used when portal HTTPS is active |
-| `docs/NETWORK_TROUBLESHOOTING.md` *(corrected in this PR)* | "Last resort: re-apply the bootstrap skeletons" and force a netd rollback | Skeletons are legacy `ens160`/`flush ruleset`/10.10.0.0/24 — applying them **erases the rendered ruleset and every client network**; rollback of an active revision is refused. Use `netd recover reassert-confirmed` |
-| `docs/HOTEL_ADMIN_IP_ALIAS.md` | Contains the placeholder phrase "the retired development reference appliance" in an example | Redaction artefact |
+| `docs/networking/EDGE_NETWORKING.md` | `br-lan` imported as the first client network; `netplan apply`; Kea `config-test` gate; Unbound reload; route list; relay "minimal" | Prepared inactive 10.20.0.0/20 network; `ip` surgery + `netplan generate`; no config-test; Unbound **restart**; routes differ; relay has no data path |
+| `docs/networking/NETWORK_APPLY_AND_ROLLBACK.md` | Rollback re-applies `previous_seq` "at any time"; `dns` health check; `snapshot/health/commit` event phases | Manual rollback only for `applying`/`pending_confirmation`; there is no `dns` check; those phases are not written |
+| `docs/networking/DHCP.md`, `NETWORK_TROUBLESHOOTING.md`, `deploy/kea/kea-dhcp4.conf` | Option 114 by name `v4-captive-portal`; must be plain HTTP | Kea 2.0 maps that name to code 160; emitted **by code 114**; HTTPS form is used when portal HTTPS is active |
+| `docs/networking/NETWORK_TROUBLESHOOTING.md` *(corrected in this PR)* | "Last resort: re-apply the bootstrap skeletons" and force a netd rollback | Skeletons are legacy `ens160`/`flush ruleset`/10.10.0.0/24 — applying them **erases the rendered ruleset and every client network**; rollback of an active revision is refused. Use `netd recover reassert-confirmed` |
+| `docs/networking/ADMIN_CONSOLE_IP_ALIAS.md` | Contains the placeholder phrase "the retired development reference appliance" in an example | Redaction artefact |
 | `docs/OFFLINE_OPERATION.md` | Email OTP and Mews/Apaleo "upstream_fail" rows; in-memory PMS cache; `nft add rule inet filter output …`; "HA boot-reconcile path" | Email OTP removed; PMS offline basis is the DB mirror; table is `inet stayconnect` with **no output chain**; there is no HA |
-| `docs/SECURITY_HARDENING.md` | Items 1–5 OPEN (plaintext Gmail password, WAN-open 8080/3000, dev DB credentials, IPv6 bypass, cookies off) | Largely closed: password read from a file; no 8080/3000 exposure; IPv6 dropped; cookies Secure by default; DB passwords generated |
-| `docs/CONTROL_PLANE_MIGRATION.md` | Central on `150.0.0.252` with NATS 4222 and telemetry | Entirely superseded — **do not use** |
+| `docs/SECURITY_HARDENING.md` | Items 1–5 OPEN | **Removed 2026-10-28**; its items, with current status, are in [AUDIT_BACKLOG.md](../AUDIT_BACKLOG.md) (SH-1…SH-8) |
+| `docs/CONTROL_PLANE_MIGRATION.md` | Central on `150.0.0.252` with NATS 4222 and telemetry (historical) | **Removed 2026-10-28** ([ARCHIVE.md](../ARCHIVE.md)) |
 | `docs/DEPLOYMENT_CLOUD.md` | Central Redis has AOF | Persistence is disabled (`--appendonly no --save ""`) |
 | `docs/CLOUD_ARCHITECTURE.md` | Licence "schema_version 3"; ctrlapi has 5 sub-commands | Version 4; 10 sub-commands |
 | `docs/LICENSING_AND_ENTITLEMENTS.md` | Module list omits `whatsapp_otp` | Ten modules in code |
@@ -1204,11 +1204,11 @@ Everything below was compared with the code at `7e4686ae`. **The code wins.** Th
 | `docs/architecture/ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md` | EMAIL factor verified by an emailed code; remember cookie `og_client` only | Email OTP removed; three cookies exist; an account's email can pin a client group (doc/code tension recorded) |
 | `docs/ROLE_AND_SCOPE_MATRIX.md` | Missing rows for newer resources | See section 17.2 |
 | `docs/ROLLBACK_POLICY.md` | Presented as the policy for both hosts | Central-only |
-| `docs/DEPLOYED_STATE.md` | Deployment record | Historical (2026-08) and cites the stopped Central |
+| `docs/DEPLOYED_STATE.md` | Deployment record | **Removed 2026-10-28** ([ARCHIVE.md](../ARCHIVE.md)) |
 | `README.md` | Daemon `policyd`; "Phase 0 quickstart" `make infra-up/migrate` | No `policyd`; quickstart is development-only |
 | `.github/workflows/*` header comments | "06:00 Cairo nightly sentinel" | Removed by D42 |
 | `deploy/ha/*`, `deploy/nftables/stayconnect.nft`, `deploy/netplan/02-lan-bridge.yaml`, `deploy/unbound/unbound-stayconnect.conf` | Appear to be deployable configuration | Legacy skeletons; not applied |
-| `scripts/phase1-bootstrap.sh`, `phase3-bootstrap.sh` | Look like installers | Dev-only; seed a dev tenant/admin with default passwords — **never run** |
+| `scripts/phase1-bootstrap.sh`, `phase3-bootstrap.sh` | Looked like installers | **Removed 2026-10-28** |
 | `deploy/gatep/gatep-grants.sql` header | Cites `gatep-roles.sql.tmpl` and "zero iam_v2 privileges" | File does not exist; later per-service includes grant `iam_v2` access |
 
 ---

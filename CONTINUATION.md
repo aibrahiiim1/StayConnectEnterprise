@@ -13,38 +13,39 @@
 
 ## Where the work is (2026-10-28)
 
-Latest merged deliveries: #256–#261 (fresh-VM installer, enrollment F1, installer acceptance, Central `:9443`
-verified from outside, modules follow the licence, card payment and room charge configurable but never executable;
-records T0259–T0262) and #262 (repository cleanup, T0263). This branch (`claude/vigilant-keller-sag14r`, T0264, D78)
-records the Product Owner's environment record, removes retired-server dependencies from configuration, scripts and
-tests, adds the single retired-target safeguard, and removes superseded documents.
+Latest merged deliveries: #256–#261 (installer, enrollment F1, installer acceptance, Central `:9443` from outside,
+modules follow the licence, financial modules configurable but never executable; T0259–T0262), #262 (repository
+cleanup, T0263) and #263 (retired targets removed with one safeguard, D78/T0264, and the integrated cleanup, D79/T0265:
+documents consolidated, audits turned into [`docs/AUDIT_BACKLOG.md`](docs/AUDIT_BACKLOG.md), removed files indexed in
+[`docs/ARCHIVE.md`](docs/ARCHIVE.md), `CLAUDE.md` compacted, legacy Root CA custody reconciled).
 
-## Environments (Product-Owner record, 2026-10-28, D78)
+## Environments (Product-Owner record, 2026-10-28)
 
 | Role | Host | State |
 |---|---|---|
-| **Production Central** | `central.onegate.getsemantics.com`, public `41.128.240.133`, private `172.21.96.96` | release `onegate-central-05481cb57334`; its own trust universe. Production: never a default for tests or drills |
-| **Test appliance** | `172.21.96.97` | release `onegate-appliance-d25999781b1a` (master code of #261), activated on the production Central; Go-Live not authorised |
+| **Production Central** | `central.onegate.getsemantics.com`, public `41.128.240.133`, private `172.21.96.96` | release `onegate-central-05481cb57334`; its own trust universe. Never a default for tests or drills |
+| **Test appliance** | `172.21.96.97` | release `onegate-appliance-d25999781b1a` (master code of #261); activated on the production Central; standing deployment authorization for routine software (D79); Go-Live not authorised |
 
-Every other host is retired and is never contacted: see `current_state_facts.retired_hosts`, enforced by
-`tools/validate-standing-records.py`.
+Every other host is retired and never contacted (`current_state_facts.retired_hosts`, enforced by
+`tools/validate-standing-records.py`). The cloud delivery environment cannot reach either current host (its egress
+proxy refuses them), so deployments run from the workstation.
 
 ## Open, and known
 
-* **Deployment target.** The standing per-change PRE-LIVE deployment decision named the retired appliance, so it has
-  no target. Deploying to the test appliance needs a mission that names it, or a new standing decision.
-* Card payment and room charge execute only with their execution switches (provider calls, LIVE, PMS transmit),
-  each a separate Product-Owner authorisation (manual C.12).
-* A blank-VM install of the current release was not repeated after #256 (it needs the test VM reset).
-* Rebuilding an appliance with the same identity (manual E.4 Case 2) is self-tested but not run on a VM.
-* The backend audit (`docs/audit/`) and the performance audit (`docs/performance-audit/`) are open backlogs of findings.
+* **Legacy Root CA custody** ([CA_CEREMONY_RUNBOOK.md](docs/CA_CEREMONY_RUNBOOK.md)): the workstation copy is no longer
+  held (PO, 2026-10-28). The host backup on the stopped first Central and the legacy runtime keys on the retired
+  Central are **not disposed**: wipe or decommission those VMs out of band. No current system trusts those keys.
+* Whether the production Central's own Root key was moved to cold storage (manual F, step 2) is not recorded.
+* Card payment and room charge execute only with their execution switches, each a separate PO authorisation (manual C.12).
+* A blank-VM install of the current release was not repeated after #256; rebuild with the same identity (manual E.4
+  Case 2) is self-tested but not run on a VM.
+* 251 backend and 82 performance audit findings are open ([AUDIT_BACKLOG.md](docs/AUDIT_BACKLOG.md)), including four of
+  the five backend High findings.
 * High availability and white label are licence keys with no implementation.
-* Product-Owner decisions still open (system handbook §24.2): the off-host copy destination for Central dumps; custody
-  and shredding of the former trust universe's Root-CA backup (on the stopped first Central); whether Ubuntu 24.04 is
-  supported; Go-Live, LIVE card payments and further PMS postings. High availability is a product decision (§16.5).
-* A local backup ref `refs/original/refs/heads/feat/operator-journeys-consolidation` (tip `c6905b3f`) holds the
-  pre-redaction form of the T0164 commits, whose redacted form is on master. It was never on GitHub and was left in
-  place; dropping it is the Product Owner's call.
+* PO decisions still open (handbook §24.2): the off-host copy destination for Central dumps; whether Ubuntu 24.04 is
+  supported; Go-Live, LIVE card payments and further PMS postings; high availability (§16.5).
+* A local backup ref `refs/original/refs/heads/feat/operator-journeys-consolidation` (tip `c6905b3f`) on the
+  workstation holds the pre-redaction form of the T0164 commits; never on GitHub; dropping it is the PO's call.
 
 ## Build environment
 

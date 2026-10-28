@@ -181,14 +181,14 @@ say "infra containers"
 # every appliance. A fresh install generates one here, keeps it 0600 in the secrets directory, and hands it to
 # compose (POSTGRES_PASSWORD only takes effect when the cluster is first initialised). An existing database
 # volume is left exactly as it is: its password was fixed at its initdb, and changing it is an operation of its
-# own (docs/SECURITY_HARDENING.md, "Database superuser password").
+# own (docs/DEPLOYMENT_APPLIANCE.md, "Database superuser password").
 PG_SECRET="$ETC/secrets/pg-superuser.env"
 if [ ! -s "$PG_SECRET" ] && ! docker volume inspect stayconnect-infra_pgdata >/dev/null 2>&1; then
   ( umask 077; printf 'STAYCONNECT_PG_PASSWORD=%s\n' "$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')" > "$PG_SECRET" )
   say "generated a random database superuser password ($PG_SECRET)"
 fi
 if [ -s "$PG_SECRET" ]; then set -a; . "$PG_SECRET"; set +a; fi
-[ -n "${STAYCONNECT_PG_PASSWORD:-}" ] || say "NOTE: this appliance's database predates the generated superuser password; see docs/SECURITY_HARDENING.md"
+[ -n "${STAYCONNECT_PG_PASSWORD:-}" ] || say "NOTE: this appliance's database predates the generated superuser password; see docs/DEPLOYMENT_APPLIANCE.md"
 ( cd "$DEPLOY/compose" && docker compose -f infra.yml up -d )
 for _ in $(seq 1 60); do
   docker exec stayconnect-pg pg_isready -U stayconnect >/dev/null 2>&1 && break
@@ -411,7 +411,7 @@ NETD_MGMT_IFACE=${WAN_IFACE}
 NETD_MGMT_ADDR=auto
 NETD_LAN_PHYS=${LAN_IFACE}
 EOF
-# THE ADMIN CONSOLE'S PORT 443 IS PINNED TO THE WAN ADDRESS (docs/HOTEL_ADMIN_IP_ALIAS.md). The WAN is also the
+# THE ADMIN CONSOLE'S PORT 443 IS PINNED TO THE WAN ADDRESS (docs/networking/ADMIN_CONSOLE_IP_ALIAS.md). The WAN is also the
 # management interface (two-NIC topology, docs/DEPLOYMENT_APPLIANCE.md), so without a pin 443 was accepted on
 # EVERY address the WAN NIC carries. "auto" pins it to the WAN's current primary IPv4 and follows a change made
 # through System network (cmd/netd/nft_watch.go); a literal address would lock the console out at the first WAN

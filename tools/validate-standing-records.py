@@ -122,13 +122,12 @@ OPERATIONAL_EXT = {
 IMMUTABLE_TREES = ("data-plane/migrations/", "control-plane/migrations/")
 
 # Delivery manifests are generated records of a past delivery, and exports/ holds generated copies of
-# documents judged at their source: neither is re-judged by the retired-host rule. The four documents after
-# them are records kept byte for byte (each says so in a historical/superseded banner or scope note; T0263, T0264):
-# they describe the retired hosts as they were, which is what they are evidence of.
+# documents judged at their source: neither is re-judged by the retired-host rule. The superseded nightly model is
+# a record kept byte for byte (its banner says so) and describes the retired PRE-LIVE appliance as it was. The
+# archive index names retired hosts only inside the paths of removed records.
 RETIRED_HOST_RECORD_TREES = (
     "docs/manifests/", "exports/",
-    "docs/DEPLOYED_STATE.md", "docs/CONTROL_PLANE_MIGRATION.md",
-    "docs/COMMERCIAL_ONBOARDING_EXECUTION_STATUS.md", "docs/NIGHTLY_AUTHORITATIVE_DELIVERY.md",
+    "docs/NIGHTLY_AUTHORITATIVE_DELIVERY.md", "docs/ARCHIVE.md",
 )
 
 # A paragraph carrying one of these is talking about the past on purpose.

@@ -266,7 +266,7 @@ constraint when the compatibility window closes
 
 ## 6. Phase 19 — Networking permissions
 
-Client-network management ([EDGE_NETWORKING.md](EDGE_NETWORKING.md)) adds a
+Client-network management ([EDGE_NETWORKING.md](networking/EDGE_NETWORKING.md)) adds a
 `network.*` permission family, gated by edged on the `/edge/v1/network/*`,
 `/edge/v1/guest-networks/*` and `/edge/v1/dhcp/*` routes (all writes proxy to
 `netd`). Because a bad apply can affect connectivity, only the two technical

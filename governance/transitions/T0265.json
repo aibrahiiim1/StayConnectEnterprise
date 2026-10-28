@@ -1,0 +1,35 @@
+{
+  "transition_id": "T0265",
+  "seq": 265,
+  "timestamp": "2026-10-28T13:17:24Z",
+  "timestamp_derivation": "Computed from the session clock after the changes were made, and before the commit that introduces this receipt.",
+  "record_type": "INTEGRATED_CLEANUP",
+  "authorisation": "The Product Owner's 'FINAL INTEGRATED CLEANUP MISSION' of 2026-10-28 (D79), continuing PR #263, with explicit authorization to complete and protected-merge it.",
+  "standing_authorization": "Routine software deployments to the test appliance 172.21.96.97 within approved work, without separate approval each time (D79); recorded in CLAUDE.md 0F, docs/PO_LED_DELIVERY_MODEL.md and current_state_facts.standing_test_appliance_deployment_authorization. It supersedes the 2026-09-24 standing PRE-LIVE decision.",
+  "repository": "Tracked files 3154 -> 3050; Markdown files 277 -> 184 (7.07 MB -> 5.13 MB); docs/ 222 -> 137 files (base 3679e674, master after PR #262). 113 files removed, each listed with the commit to restore it from in docs/ARCHIVE.md: 43 historical delivery manifests (reproducible from Git), the backend audit (13) and performance audit (14) folders and SECURITY_HARDENING.md (consolidated into docs/AUDIT_BACKLOG.md), superseded working documents and unexecuted plans (11), merged documents (9), the Phase-1B Planning Pack (12 files including its zip), 10 obsolete pre-split test scripts. Consolidated: docs/networking/ (DHCP.md from three documents, CLIENT_VLANS_AND_SSIDS.md from two, four moved), docs/user-guide/central-roles.md from four role guides; operational content of SECURITY_HARDENING.md moved verbatim into DEPLOYMENT_APPLIANCE.md. docs/README.md rewritten as one index. CLAUDE.md compacted 34.9 KB -> 21.5 KB with every rule kept.",
+  "audit_backlog": "docs/AUDIT_BACKLOG.md: every finding of both audits, sources at commit 1d69508a. Backend 258 rows: OPEN 229, OPEN-DECISION 22, PARTIAL 4, FIXED 3 (P8 H1, M6, M10 by 60e15df7 and 490321c1, PR #242). Performance 82 rows: OPEN 71, OPEN-DECISION 11. PR #217 (D52-D63) predates both audits and closes none of them. Plus the eight folded-in security-hardening items SH-1..SH-8 with handbook-based status.",
+  "packs": "The ChatGPT Project Pack and the Phase Evidence Pack are kept and rebuilt. The Phase-1B Planning Pack (HISTORICAL, a subset of the Project Pack) is retired with its builder; tools/project-state.py now refuses its return, and mutation M42 proves it.",
+  "legacy_pki": "Current production trust has no dependency on the legacy universe (repository check: no private key material, no compiled-in anchor; anchors are per-installation files). Workstation custody copy: no longer held (PO confirmation). Host backup on 150.0.0.252 and legacy runtime keys on the retired 172.21.96.196: NOT disposed, no authorized access from the delivery environment (no credentials; the egress proxy refuses the project's hosts, verified against the production Central). No destruction is claimed. Recorded in docs/CA_CEREMONY_RUNBOOK.md and current_state_facts.legacy_pki_custody.",
+  "evidence_preserved": "Every transition-cited evidence file, every document cited by a decision or by project-state.json, the reports, acceptance records and evidence trees, and the governance records are kept. Where a kept evidence document linked to a moved file, only the link target changed.",
+  "no_live_contact": "Nothing was deployed and no host was contacted; neither current host is reachable from the delivery environment.",
+  "verification": "As recorded in PR #263.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0264."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "3679e67455c5cc1adff57ed65a20873c4b66bfff",
+  "previous_delivery": "T0264",
+  "decision": "D79",
+  "go_live": "NOT authorised."
+}

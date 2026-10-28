@@ -110,7 +110,7 @@ OneGate's design rule is **two NICs and no more**. The installer counts physical
    * **Access / untagged:** portgroup VLAN ID = the Client VLAN (or 0 for an untagged LAN). On the appliance the *prepared* untagged Client network (`10.20.0.0/20`) uses this. One Client network per NIC.
    * **Trunk:** portgroup VLAN ID **4095** (all VLANs) so the VM sees tagged frames; netd then creates `ens192.<vid>` sub-interfaces and a bridge per VLAN. Use this for several Client VLANs. *PRE-LIVE runs VLAN 90 this way (`ens192.90` → `br-g90-a811`).* Tagged-VLAN delivery on the switch/ESXi side is **recorded as unverified** by the project itself.
    * Both can coexist: an untagged network enslaves the parent NIC to its bridge while tagged VLANs ride sub-interfaces of the same parent.
-4. Wi-Fi access points / switches: map each SSID to its VLAN, and **turn on AP/switch client isolation** — Clients on the same bridge exchange frames at layer 2 without passing through the appliance's firewall, so isolation *between two Clients on one segment* is the access layer's job (Handbook §10.4; `docs/ARUBA_SSID_VLAN_MAPPING.md`).
+4. Wi-Fi access points / switches: map each SSID to its VLAN, and **turn on AP/switch client isolation** — Clients on the same bridge exchange frames at layer 2 without passing through the appliance's firewall, so isolation *between two Clients on one segment* is the access layer's job (Handbook §10.4; `docs/networking/CLIENT_VLANS_AND_SSIDS.md`).
 5. Do **not** run another DHCP server on a Client VLAN that OneGate serves with Kea (unless you configure the network as *external DHCP*).
 
 ### A.4 Addressing, DNS, NTP, firewall
@@ -138,7 +138,7 @@ OneGate's design rule is **two NICs and no more**. The installer counts physical
 
 ### A.6 Things you must **not** do
 
-* Do not run `scripts/phase1-bootstrap.sh` or `scripts/phase3-bootstrap.sh` (dev-only; seed a dev tenant and default-password admin).
+* The dev-only bootstrap scripts (`scripts/phase1-bootstrap.sh`, `scripts/phase3-bootstrap.sh`, which seeded a dev tenant and a default-password admin) were removed on 2026-10-28; never recreate them on a real appliance.
 * Do not apply `deploy/nftables/stayconnect.nft`, `deploy/netplan/02-lan-bridge.yaml`, `deploy/kea/kea-dhcp4.conf` or `deploy/unbound/unbound-stayconnect.conf` — they are legacy skeletons that would overwrite what `netd` renders and wipe every Client network.
 * Do not copy any file from, or point the new appliance at, the retired development reference appliance or the former Central `150.0.0.252`.
 * Do not use PRE-LIVE `172.21.60.25` as a donor of identity, keys, database or configuration.
@@ -370,7 +370,7 @@ Open *Network → Client networks* (`/network`). A fresh appliance offers one **
 
 What the apply does (so you know what to verify): creates the bridge (and VLAN sub-interface), assigns the gateway address, converges the nftables table, pushes the Kea config (and **starts Kea for the first time**, writing `/etc/kea/kea-dhcp4.conf`), writes Unbound fragments (and restarts it), creates `ogportal0` with the portal address, and runs health checks (`mgmt_reachable`, `gateway_up`, `kea_running`, `portal_listen`, `portal_address`). **Any failing check rolls the whole change back** and the revision is marked `rolled_back` with the reason — read *Config history* (`/network/revisions`).
 
-Choices per network (see `docs/CLIENT_NETWORKING.md`, `EXTERNAL_DHCP_MODE.md`): **DHCP mode** `local` (Kea) / `external` (the hotel's server — then *you* must hand out option 114 and the gateway) / `relay` (**no data path implemented**) / `disabled`; **DNS mode** appliance or custom; **NAT**; **client isolation**; **captive portal**; internet on/off; lease timers; reservations; per-network portal profile and sign-in methods.
+Choices per network (see `docs/CLIENT_NETWORKING.md`, `docs/networking/DHCP.md` Part C): **DHCP mode** `local` (Kea) / `external` (the hotel's server — then *you* must hand out option 114 and the gateway) / `relay` (**no data path implemented**) / `disabled`; **DNS mode** appliance or custom; **NAT**; **client isolation**; **captive portal**; internet on/off; lease timers; reservations; per-network portal profile and sign-in methods.
 
 ### C.7 Gateway, DHCP, DNS, NAT and captive-portal expectations
 

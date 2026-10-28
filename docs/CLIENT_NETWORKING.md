@@ -3,9 +3,9 @@
 How a client network is prepared, switched on, changed, recovered and given its own portal and sign-in. It describes what is implemented
 and tested; **PRE-LIVE acceptance on real Kea and a real switch has not been performed** (see §12).
 
-Related: [NETWORK_APPLY_AND_ROLLBACK.md](NETWORK_APPLY_AND_ROLLBACK.md) (the apply/confirm/rollback engine),
-[DHCP_MANAGEMENT.md](DHCP_MANAGEMENT.md), [EDGE_NETWORKING.md](EDGE_NETWORKING.md) (the original model),
-[NETWORK_TROUBLESHOOTING.md](NETWORK_TROUBLESHOOTING.md).
+Related: [NETWORK_APPLY_AND_ROLLBACK.md](networking/NETWORK_APPLY_AND_ROLLBACK.md) (the apply/confirm/rollback engine),
+[DHCP.md, Part A](networking/DHCP.md), [EDGE_NETWORKING.md](networking/EDGE_NETWORKING.md) (the original model),
+[NETWORK_TROUBLESHOOTING.md](networking/NETWORK_TROUBLESHOOTING.md).
 
 ## 1. The prepared Access network
 

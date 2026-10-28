@@ -44,8 +44,8 @@ table is empty — `tenants=0 sites=0 appliances=0 operators=0 guest_accounts=0 
 *awaiting-assignment* mode. `EDGED_TENANT_ID` / `EDGED_SITE_ID` exist only as a documented migration-only
 fallback and **must not be set on a production appliance**.
 
-`scripts/phase1-bootstrap.sh` creates a dev tenant, site, appliance and a test voucher. **It must never be
-run on a production appliance.**
+The dev-only `scripts/phase1-bootstrap.sh` (it created a dev tenant, site, appliance and a test voucher) was removed on
+2026-10-28; nothing equivalent may be run on a production appliance.
 
 ---
 

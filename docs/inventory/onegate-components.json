@@ -957,14 +957,14 @@
       "kind": "tool",
       "host": "appliance",
       "technology": "bash",
-      "status": "historical",
+      "status": "removed",
       "source": [
         "scripts/"
       ],
       "verification": [
         "CODE"
       ],
-      "notes": "Dev-only; never run on a real appliance"
+      "notes": "Removed 2026-10-28 (T0265); dev-only, seeded default passwords. See docs/ARCHIVE.md."
     },
     {
       "id": "tool.site-backup",
