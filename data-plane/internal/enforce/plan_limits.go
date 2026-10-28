@@ -28,10 +28,8 @@ const (
 //
 // On a schema without the operation this is a no-op, not an error.
 func (e *Enforcer) EnforceSessionLimits(ctx context.Context, tenant, site string, now time.Time, judgeIdle bool) ([]SessionEnd, error) {
-	var present bool
-	if err := e.pool.QueryRow(ctx,
-		`SELECT to_regprocedure('iam_v2.p6_end_sessions_over_plan_limits(uuid,uuid,timestamptz,boolean)') IS NOT NULL`).
-		Scan(&present); err != nil {
+	present, err := e.procPresent(ctx, "iam_v2.p6_end_sessions_over_plan_limits(uuid,uuid,timestamptz,boolean)")
+	if err != nil {
 		return nil, err
 	}
 	if !present {
@@ -59,15 +57,27 @@ func (e *Enforcer) EnforceSessionLimits(ctx context.Context, tenant, site string
 // no-op while retention is unlimited, and removes only old records of ended sessions whose entitlements have all
 // terminated.
 func (e *Enforcer) PurgeAccountingDetail(ctx context.Context, tenant, site string, batch int) (int, error) {
-	var present bool
-	if err := e.pool.QueryRow(ctx,
-		`SELECT to_regprocedure('iam_v2.purge_accounting_detail(uuid,uuid,integer)') IS NOT NULL`).Scan(&present); err != nil {
+	present, err := e.procPresent(ctx, "iam_v2.purge_accounting_detail(uuid,uuid,integer)")
+	if err != nil {
 		return 0, err
 	}
 	if !present {
 		return 0, nil
 	}
 	var n int
-	err := e.pool.QueryRow(ctx, `SELECT iam_v2.purge_accounting_detail($1,$2,$3)`, tenant, site, batch).Scan(&n)
+	err = e.pool.QueryRow(ctx, `SELECT iam_v2.purge_accounting_detail($1,$2,$3)`, tenant, site, batch).Scan(&n)
 	return n, err
+}
+
+// procPresent reports whether a database function exists, re-probing the catalog at most once a minute.
+func (e *Enforcer) procPresent(ctx context.Context, signature string) (bool, error) {
+	v, err := e.probes.get(signature, func() ([]bool, error) {
+		var present bool
+		err := e.pool.QueryRow(ctx, `SELECT to_regprocedure($1) IS NOT NULL`, signature).Scan(&present)
+		return []bool{present}, err
+	})
+	if err != nil {
+		return false, err
+	}
+	return v[0], nil
 }

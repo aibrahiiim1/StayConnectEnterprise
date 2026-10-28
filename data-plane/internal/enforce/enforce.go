@@ -61,6 +61,8 @@ type Enforcer struct {
 	mu sync.Mutex
 	// expiryFailures counts consecutive sweeps in which an entitlement could not be expired.
 	expiryFailures map[string]int
+	// probes caches catalog probes for catalogProbeTTL.
+	probes probeCache
 }
 
 // Both forms must agree on when a guest ran out of data; the first is the implementation the expiry writer calls.
@@ -83,16 +85,21 @@ const dataCrossingLegacy = `LEFT JOIN LATERAL (
 				WHERE COALESCE(e.data_quota_bytes, spr.data_quota_bytes) IS NOT NULL
 				  AND x.running >= COALESCE(e.data_quota_bytes, spr.data_quota_bytes)) dat ON true`
 
-// resolveDataCrossing probes the catalog every sweep, not once at startup: a migration applied or rolled back
-// under a running process would otherwise leave a stale flag that stops every expiry.
+// resolveDataCrossing probes the catalog at most once a minute, not once at startup: a migration applied or
+// rolled back under a running process would otherwise leave a stale flag that stops every expiry.
 func (e *Enforcer) resolveDataCrossing(ctx context.Context, tx pgx.Tx) error {
-	var present, incremental bool
-	if err := tx.QueryRow(ctx,
-		`SELECT to_regprocedure('iam_v2.p6_data_crossing(uuid)') IS NOT NULL
-		    AND to_regprocedure('iam_v2.p6_expire_entitlement(uuid)') IS NOT NULL,
-		        to_regprocedure('iam_v2.p6_advance_data_crossing(uuid,uuid)') IS NOT NULL`).Scan(&present, &incremental); err != nil {
+	v, err := e.probes.get("data_crossing", func() ([]bool, error) {
+		var present, incremental bool
+		err := tx.QueryRow(ctx,
+			`SELECT to_regprocedure('iam_v2.p6_data_crossing(uuid)') IS NOT NULL
+			    AND to_regprocedure('iam_v2.p6_expire_entitlement(uuid)') IS NOT NULL,
+			        to_regprocedure('iam_v2.p6_advance_data_crossing(uuid,uuid)') IS NOT NULL`).Scan(&present, &incremental)
+		return []bool{present, incremental}, err
+	})
+	if err != nil {
 		return err
 	}
+	present, incremental := v[0], v[1]
 	e.phase6Writers = present
 	e.incrementalCrossing = present && incremental
 	if present {
