@@ -84,6 +84,44 @@ func TestFrames_MalformedControlTerminates(t *testing.T) {
 	}
 }
 
+// Audit P7 M1: STX followed by megabytes with no ETX ends the cycle as PROTOCOL_FRAMING_ERROR once the frame cap is
+// passed, long before the heartbeat timeout.
+func TestFrames_UnterminatedFrameTerminatesAsFraming(t *testing.T) {
+	adapter, server := newAdapterOverPipe(t)
+	adapter.rev.HeartbeatInterval = time.Hour
+	adapter.rev.HeartbeatTimeout = time.Minute
+	peer := newPipePeer(server)
+	sink := &recordingSink{q: NewBoundedQueue(16, time.Second)}
+	done := make(chan error, 1)
+	go func() { done <- adapter.Serve(context.Background(), sink) }()
+	for i := 0; i < 5; i++ {
+		<-peer.recv // startup
+	}
+	go func() {
+		chunk := make([]byte, 64<<10)
+		for i := range chunk {
+			chunk[i] = 'A'
+		}
+		if _, err := server.Write([]byte{pms.STX}); err != nil {
+			return
+		}
+		for i := 0; i < 160; i++ { // 10 MB
+			if _, err := server.Write(chunk); err != nil {
+				return
+			}
+		}
+	}()
+	select {
+	case err := <-done:
+		if Classify(err) != CodeProtocolFraming {
+			t.Fatalf("terminate code = %q, want PROTOCOL_FRAMING_ERROR", Classify(err))
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Serve did not terminate on an unterminated frame")
+	}
+	_ = server.Close()
+}
+
 // A malformed domain record drives a gap/resync, admits zero events and keeps the link up.
 func TestFrames_MalformedDomainGapAndZeroAdmission(t *testing.T) {
 	adapter, server := newAdapterOverPipe(t)

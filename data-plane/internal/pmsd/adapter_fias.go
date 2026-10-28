@@ -205,6 +205,10 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
+			if errors.Is(err, pms.ErrFrameTooLong) {
+				// An unterminated or oversized frame: the stream is no longer framed. No payload is logged.
+				return failedAt(stepRead, coded(CodeProtocolFraming, err))
+			}
 			// a writer failure closes the transport to unblock this read; surface the writer's cause if any
 			select {
 			case <-w.done:
