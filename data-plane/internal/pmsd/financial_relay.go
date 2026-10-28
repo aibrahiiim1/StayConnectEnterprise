@@ -338,7 +338,8 @@ func boundedRelayCode(c string) string {
 	return c
 }
 
-// ServeSocket serves a root-only unix socket, one request and answer per connection. A command body (room,
+// ServeSocket serves a unix socket owned by pmsd's own user, mode 0600 (scd reaches it as root), one request and
+// answer per connection. A command body (room,
 // reservation) is never logged.
 func (r *FinancialRelay) ServeSocket(ctx context.Context, path string) error {
 	if path == "" {

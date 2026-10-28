@@ -247,7 +247,8 @@ type Repo interface {
 	// AdmitLiveEvent proves ownership and inserts in one transaction; a stale owner inserts nothing. An exact
 	// repeat of an admitted LIVE record inserts nothing and returns the existing id with *DuplicateLiveEventError.
 	AdmitLiveEvent(ctx context.Context, row InboxRow) (string, error)
-	// StageResyncEvent appends an immutable STAGED row, invisible to the Stay engine until publication.
+	// StageResyncEvent appends an immutable STAGED row, invisible to the Stay engine until publication. An exact
+	// repeat inside the same generation inserts nothing and returns ErrDuplicateResyncEvent.
 	StageResyncEvent(ctx context.Context, row InboxRow) (string, error)
 	// LoadConnectionSettings is read-only for the connector (a daemon that could widen its own backoff
 	// makes the configuration meaningless), keyed per interface so a flaky link doesn't slow a healthy one.
@@ -364,6 +365,10 @@ type DuplicateLiveEventError struct {
 }
 
 func (e *DuplicateLiveEventError) Error() string { return "pmsd: live record already admitted" }
+
+// ErrDuplicateResyncEvent reports that the same record was already staged in this resync generation; nothing was
+// inserted and the window continues (audit P7 M2).
+var ErrDuplicateResyncEvent = errors.New("pmsd: record already staged in this resync generation")
 
 func (d *Deps) now() time.Time {
 	if d.Now != nil {

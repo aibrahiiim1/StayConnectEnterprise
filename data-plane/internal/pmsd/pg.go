@@ -282,11 +282,17 @@ func (r *pgRepo) insertInboxRow(ctx context.Context, row InboxRow) (string, erro
 	}
 	// A LIVE row that repeats an admitted one byte for byte is the PMS retransmitting it: nothing is inserted
 	// and the existing row is reported. The conflict target repeats the partial index predicate so Postgres
-	// infers se_live_identity; RESYNC rows keep failing on se_resync_identity as before.
+	// infers se_live_identity. A RESYNC row repeated inside one generation (se_resync_identity) is likewise
+	// inserted once and reported as a typed duplicate, so one repeated record cannot fail every resync
+	// (audit P7 M2); the roster reads reservations DISTINCT, so the repeat carries nothing new.
 	onConflict := ""
-	if row.AdmissionKind == "LIVE" {
+	switch row.AdmissionKind {
+	case "LIVE":
 		onConflict = `
 		ON CONFLICT (tenant_id, site_id, pms_interface_id, external_event_identity) WHERE admission_kind = 'LIVE' DO NOTHING`
+	case "RESYNC":
+		onConflict = `
+		ON CONFLICT (tenant_id, site_id, pms_interface_id, resync_generation, external_event_identity) WHERE admission_kind = 'RESYNC' DO NOTHING`
 	}
 	var id string
 	err = tx.QueryRow(ctx, `INSERT INTO iam_v2.stay_events
@@ -300,6 +306,9 @@ func (r *pgRepo) insertInboxRow(ctx context.Context, row InboxRow) (string, erro
 		row.PMSTimestampRaw, row.PMSTimestampUTC, row.SourceTimezone, row.ReceivedAt,
 		row.SequenceVersion, row.NormalizationVersion, row.ClockSuspect, string(payload),
 		row.AdmissionKind, row.ExpectedGeneration, row.ResyncGeneration, row.FingerprintKeyVersion).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) && row.AdmissionKind == "RESYNC" {
+		return "", ErrDuplicateResyncEvent
+	}
 	if errors.Is(err, pgx.ErrNoRows) && onConflict != "" {
 		var status string
 		if err := tx.QueryRow(ctx, `SELECT id::text, processing_status FROM iam_v2.stay_events

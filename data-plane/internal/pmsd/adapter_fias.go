@@ -139,8 +139,17 @@ func (a *fiasAdapter) Close() error {
 }
 
 // Serve runs the verified read-only protocol (LS/LD/LR handshake, read loop, DS..DE resync) and sends LE on cancel. It
-// never emits PS/PA (guarded at writeFrame).
+// never emits PS/PA (guarded at writeFrame). A cycle that ends on a link fault is reported to the sink, as the REST
+// adapter does, so a roster cut off mid-window reads INTERRUPTED rather than RECEIVING (audit P7 L9).
 func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
+	err := a.serve(ctx, sink)
+	if err != nil && ctx.Err() == nil && !errors.Is(err, context.Canceled) {
+		_ = sink.OnDisconnected(a.now(), Classify(err))
+	}
+	return err
+}
+
+func (a *fiasAdapter) serve(ctx context.Context, sink AxisSink) error {
 	// A single serialized writer owns every outbound frame; the read loop only submits requests. wctx cancellation
 	// emits a controlled LE and stops; the deferred drain prevents goroutine leaks.
 	wctx, wcancel := context.WithCancel(ctx)
@@ -237,7 +246,7 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 		if perr != nil {
 			if intendedDomain(body) {
 				// Malformed domain record, a recoverable feed fault: atomic gap/resync, zero admission, DR while owned,
-				// barrier stays active; no idle reset, heartbeat or ack.
+				// and the sink raises the LIVE barrier until the resync publishes; no idle reset, heartbeat or ack.
 				if a.log != nil {
 					a.log.Error("pmsd: unparseable domain record — continuity fault",
 						"interface", a.iface.ID, "reason", "strict_parse")

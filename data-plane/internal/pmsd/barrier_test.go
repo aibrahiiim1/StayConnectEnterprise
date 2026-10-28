@@ -104,6 +104,108 @@ func TestBarrier_NoPublishWithoutDE(t *testing.T) {
 	}
 }
 
+// Audit P7 L1: after a continuity fault on a synced link, nothing is admitted LIVE and continuity is not set back to
+// CONTINUOUS until the requested resync publishes.
+func TestBarrier_GapClosesLiveAdmissionUntilResyncPublishes(t *testing.T) {
+	s, repo, id := newBarrierSink(t)
+	ctx := context.Background()
+	if err := s.RequireInitialResync(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.OnResyncStart(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.OnResyncComplete(time.Now(), ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.OnDomainEvent(ctx, ev("L1")); err != nil {
+		t.Fatal(err)
+	}
+	if live, _ := counts(repo); live != 1 {
+		t.Fatalf("synced link: live=%d, want 1", live)
+	}
+	if err := s.OnContinuityFault(ctx, CodeEventInvalid); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.OnDomainEvent(ctx, ev("L2")); err != nil {
+		t.Fatal(err)
+	}
+	if live, _ := counts(repo); live != 1 {
+		t.Fatalf("after a gap, before DS: live=%d, want 1 (nothing new admitted)", live)
+	}
+	repo.mu.Lock()
+	cont := repo.continuity[id]
+	repo.mu.Unlock()
+	if cont != ContinuityGapDetected {
+		t.Fatalf("continuity after a gap and a later record = %q, want GAP_DETECTED", cont)
+	}
+	// The resync re-establishes the roster and lowers the barrier.
+	if err := s.OnResyncStart(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.OnResyncComplete(time.Now(), ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.OnDomainEvent(ctx, ev("L3")); err != nil {
+		t.Fatal(err)
+	}
+	if live, _ := counts(repo); live != 2 {
+		t.Fatalf("after the resync publishes: live=%d, want 2", live)
+	}
+}
+
+// Audit P7 M2: the same record twice inside one window is staged once, counted as skipped, and the generation still
+// publishes.
+func TestBarrier_RepeatedRecordInsideResyncIsSkipped(t *testing.T) {
+	s, repo, id := newBarrierSink(t)
+	ctx := context.Background()
+	if err := s.RequireInitialResync(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.OnResyncStart(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range []Event{ev("G1"), ev("G1"), ev("G2")} {
+		if err := s.OnDomainEvent(ctx, e); err != nil {
+			t.Fatalf("a repeated record must not end the window: %v", err)
+		}
+	}
+	s.RecordSkipped(2) // the adapter's own skips add to the repeats
+	if err := s.OnResyncComplete(time.Now(), ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, staged := counts(repo); staged != 2 {
+		t.Fatalf("staged = %d, want 2", staged)
+	}
+	if repo.publishedGen[id] == 0 {
+		t.Fatal("the generation must publish")
+	}
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	if repo.lastSkipped != 3 || repo.lastReceived != 2 {
+		t.Fatalf("skipped=%d received=%d, want 3 and 2", repo.lastSkipped, repo.lastReceived)
+	}
+}
+
+// Audit P7 L9: a disconnect inside a DS..DE window records the INTERRUPTED stage.
+func TestBarrier_DisconnectMidWindowIsInterrupted(t *testing.T) {
+	s, repo, _ := newBarrierSink(t)
+	if err := s.RequireInitialResync(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.OnResyncStart(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.OnDisconnected(time.Now(), CodeDialFailed); err != nil {
+		t.Fatal(err)
+	}
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	if n := len(repo.stages); n == 0 || repo.stages[n-1] != string(StageInterrupted) {
+		t.Fatalf("stages = %v, want last %s", repo.stages, StageInterrupted)
+	}
+}
+
 func TestBarrier_DEWithoutDSPublishesNothing(t *testing.T) {
 	s, repo, id := newBarrierSink(t)
 	if err := s.RequireInitialResync(time.Now()); err != nil {

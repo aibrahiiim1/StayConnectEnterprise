@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"runtime"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -79,6 +80,7 @@ type fakeRepo struct {
 	publishedGen map[string]int64
 	liveRows     []string
 	stagedRows   []string
+	stagedKeys   map[string]bool
 	// Operator command channel + durable progress, faked at the repo boundary.
 	cmdQueue       []ResyncCommand
 	cmdGen         int64
@@ -211,6 +213,15 @@ func (r *fakeRepo) StageResyncEvent(ctx context.Context, row InboxRow) (string, 
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	// se_resync_identity: one row per identity per generation.
+	key := strconv.FormatInt(row.ResyncGeneration, 10) + "/" + row.ExternalEventIdentity
+	if r.stagedKeys == nil {
+		r.stagedKeys = map[string]bool{}
+	}
+	if r.stagedKeys[key] {
+		return "", ErrDuplicateResyncEvent
+	}
+	r.stagedKeys[key] = true
 	r.stagedRows = append(r.stagedRows, row.ExternalEventIdentity)
 	return "resync-" + row.ExternalEventIdentity, nil
 }
