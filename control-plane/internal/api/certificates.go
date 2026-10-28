@@ -52,11 +52,19 @@ func (b *CertBase) SubmitCSR(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := DBCtx(r)
 	defer cancel()
+	// One pending request per appliance: a new one closes the older ones (only the newest is ever signed), so
+	// repeated submissions cannot pile up rows (audit Phase 1 L8).
 	var reqID string
-	err := b.DB.QueryRow(ctx, `
-        INSERT INTO appliance_certificate_requests (appliance_id, csr_pem, status, source_ip)
-        VALUES ($1,$2,'pending',$3) RETURNING id`,
-		ident.ApplianceID, in.CSRPem, clientIP(r)).Scan(&reqID)
+	err := pgx.BeginFunc(ctx, b.DB, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `UPDATE appliance_certificate_requests SET status='rejected', decided_at=now()
+            WHERE appliance_id=$1 AND status='pending'`, ident.ApplianceID); err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, `
+            INSERT INTO appliance_certificate_requests (appliance_id, csr_pem, status, source_ip)
+            VALUES ($1,$2,'pending',$3) RETURNING id`,
+			ident.ApplianceID, in.CSRPem, clientIP(r)).Scan(&reqID)
+	})
 	if err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "csr store failed")
 		return
@@ -66,18 +74,22 @@ func (b *CertBase) SubmitCSR(w http.ResponseWriter, r *http.Request) {
 	// Rotation needs no human: the existing valid certificate is the trust proof.
 	var activeCount int
 	var lifecycle string
+	var retiring bool
 	b.DB.QueryRow(ctx, `SELECT count(*) FROM appliance_certificates WHERE appliance_id=$1 AND status='active'`, ident.ApplianceID).Scan(&activeCount)
-	b.DB.QueryRow(ctx, `SELECT COALESCE(lifecycle_state,'') FROM appliances WHERE id=$1`, ident.ApplianceID).Scan(&lifecycle)
-	rotatable := activeCount > 0 && lifecycle == "assigned"
+	b.DB.QueryRow(ctx, `SELECT COALESCE(lifecycle_state,''),
+            EXISTS (SELECT 1 FROM appliance_terminal_delivery t WHERE t.appliance_id=a.id)
+          FROM appliances a WHERE a.id=$1`, ident.ApplianceID).Scan(&lifecycle, &retiring)
+	// A retiring appliance gets no new certificate on its own (audit Phase 1 L8).
+	rotatable := activeCount > 0 && lifecycle == "assigned" && !retiring
 	// Activation already authorized the first certificate, so it is issued on arrival; a waiting appliance's CSR
 	// is queued and signed by the activation itself.
 	firstAfterActivate := activeCount == 0 && lifecycle == "assigned"
-	if rotatable || firstAfterActivate {
+	if rotatable || (firstAfterActivate && !retiring) {
 		actor := "appliance-rotation"
 		if firstAfterActivate {
 			actor = "auto-activate"
 		}
-		res, err := b.issueCertForAppliance(ctx, r, ident.ApplianceID, actor)
+		res, err := b.issueCertForAppliance(ctx, r, ident.ApplianceID, actor, false)
 		if err == nil {
 			WriteJSON(w, http.StatusCreated, map[string]any{
 				"status": "rotated", "fingerprint_sha256": res.FingerprintHex,
@@ -125,9 +137,25 @@ func (b *CertBase) FetchCertificate(w http.ResponseWriter, r *http.Request) {
 
 // issueCertForAppliance signs the latest pending CSR of the current identity, supersedes any prior active cert, and records
 // the issuance. Every other pending request is closed as rejected: none of them may be signed later.
-func (b *CertBase) issueCertForAppliance(ctx context.Context, r *http.Request, appID, actor string) (*pki.SignedClient, error) {
+//
+// The appliance row is locked for the whole issuance, so two concurrent issuances cannot both leave an active
+// certificate (audit Phase 1 L8). revokeOthers (an operator's reissue) revokes every earlier certificate at once
+// instead of superseding it with the 24 h overlap that automatic rotation keeps (audit Phase 1 M2).
+func (b *CertBase) issueCertForAppliance(ctx context.Context, r *http.Request, appID, actor string, revokeOthers bool) (*pki.SignedClient, error) {
+	operatorID := ""
+	if s := auth.FromContext(r.Context()); s != nil {
+		operatorID = s.OperatorID
+	}
+	tx, err := b.DB.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM appliances WHERE id=$1 FOR UPDATE`, appID); err != nil {
+		return nil, err
+	}
 	var reqID, csrPEM, tenantID, siteID, serial string
-	if err := b.DB.QueryRow(ctx, `
+	if err := tx.QueryRow(ctx, `
         SELECT rq.id::text, rq.csr_pem, COALESCE(a.tenant_id::text,''), COALESCE(a.site_id::text,''), a.serial
           FROM appliance_certificate_requests rq JOIN appliances a ON a.id=rq.appliance_id
          WHERE rq.appliance_id=$1 AND `+currentPendingCSR+`
@@ -138,16 +166,20 @@ func (b *CertBase) issueCertForAppliance(ctx context.Context, r *http.Request, a
 	if err != nil {
 		return nil, err
 	}
-	operatorID := ""
-	if s := auth.FromContext(r.Context()); s != nil {
-		operatorID = s.OperatorID
-	}
-	tx, err := b.DB.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `UPDATE appliance_certificates SET status='superseded', superseded_at=now()
+	if revokeOthers {
+		reason := "operator reissue"
+		if _, err := tx.Exec(ctx, `
+            INSERT INTO appliance_certificate_revocations (certificate_id, appliance_id, fingerprint_sha256, reason, revoked_by)
+            SELECT c.id, c.appliance_id, c.fingerprint_sha256, $2, NULLIF($3,'')::uuid
+              FROM appliance_certificates c WHERE c.appliance_id=$1 AND c.status IN ('active','superseded')
+            ON CONFLICT DO NOTHING`, appID, reason, operatorID); err != nil {
+			return nil, err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE appliance_certificates SET status='revoked', revoked_at=now(), revocation_reason=$2
+            WHERE appliance_id=$1 AND status IN ('active','superseded')`, appID, reason); err != nil {
+			return nil, err
+		}
+	} else if _, err := tx.Exec(ctx, `UPDATE appliance_certificates SET status='superseded', superseded_at=now()
         WHERE appliance_id=$1 AND status='active'`, appID); err != nil {
 		return nil, err
 	}

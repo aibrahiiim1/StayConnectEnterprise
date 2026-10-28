@@ -205,7 +205,7 @@ func (b *Base) activate(w http.ResponseWriter, r *http.Request) {
 	if b.CA != nil {
 		if b.countCurrentPendingCSRs(ctx, id) > 0 {
 			cb := &CertBase{Base: b, CA: b.CA, ClientValid: b.ClientValid}
-			_, cerr := cb.issueCertForAppliance(ctx, r, id, email)
+			_, cerr := cb.issueCertForAppliance(ctx, r, id, email, false)
 			certIssued = cerr == nil
 		}
 	}
@@ -633,7 +633,7 @@ func (b *Base) reissueCertificate(w http.ResponseWriter, r *http.Request) {
 	outcome := "signed_pending_csr"
 	if b.countCurrentPendingCSRs(ctx, id) > 0 {
 		cb := &CertBase{Base: b, CA: b.CA, ClientValid: b.ClientValid}
-		if _, err := cb.issueCertForAppliance(ctx, r, id, email); err != nil {
+		if _, err := cb.issueCertForAppliance(ctx, r, id, email, true); err != nil {
 			Fail(w, r, http.StatusBadRequest, CodeBadRequest, "the waiting CSR could not be signed: "+publicError(r, err))
 			return
 		}
