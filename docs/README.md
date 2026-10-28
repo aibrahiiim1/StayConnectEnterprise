@@ -1,8 +1,15 @@
 # OneGate — Documentation Index
 
 Start here. This index is organized by what you're trying to do. If you're new to
-OneGate, read the **Complete Operations Manual** first — it takes a site from
-an unpacked appliance to live, licensed client Wi-Fi and covers day-2 operations.
+OneGate, start with the two current references:
+
+- the [system handbook](architecture/ONEGATE_SYSTEM_HANDBOOK.md) — the system as built, compared with the code (where a
+  document and the code disagree, the code wins);
+- the [Fresh VM Installation Manual](runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md) — building, installing and
+  verifying an appliance and a Central; its Appendix 3 records what was validated on the test pair.
+
+Where another document here disagrees with those two, they win. The other manuals and guides were written for earlier
+states and have not been re-verified against the current release.
 The product words used throughout (Client, Admin Console, Client Portal, Site) are defined in
 [PRODUCT_TERMINOLOGY.md](PRODUCT_TERMINOLOGY.md).
 
@@ -27,10 +34,11 @@ The product words used throughout (Client, Admin Console, Client Portal, Site) a
 - [APPLIANCE_ONBOARDING_MANUAL.md](APPLIANCE_ONBOARDING_MANUAL.md) — the shortest
   UI-only path to bring one site online (zero-touch, two consoles).
 
-## 2. Complete Operations Manual — **recommended starting point**
+## 2. Complete Operations Manual — **not re-verified against the current release**
 
 - [STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md](STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md)
-  — end-to-end: architecture, install, WAN/LAN, registration, activation,
+  — background reading only; for installation and current behaviour use the system handbook and the installation manual
+  above. It covers, end to end: architecture, install, WAN/LAN, registration, activation,
   convergence, the license model & states, concurrent capacity, client networks / VLANs (with
   worked VLAN 100 / VLAN 200 examples), DHCP/DNS/NAT/portal, auth methods, access
   plans & vouchers, integrations, renewal & anti-replay, recovery, Central-outage

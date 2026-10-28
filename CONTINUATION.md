@@ -24,7 +24,9 @@ The latest deliveries, all merged to master under the Product Owner's approval:
 | #260 | modules follow the licence: the Hotel module installed; room sign-in only where it is in use | D76 / T0261 |
 | #261 | card payment and room charge configurable, never executable; high availability and white label never shown available | D77 / T0262 |
 
-On 2026-10-28 every merged branch was deleted, on GitHub and locally; only `master` remains (T0263). The 45 historical
+On 2026-10-28 every merged branch was deleted, on GitHub (28) and locally (217), with 100 stale local copies of old
+pull-request heads (T0263). Besides `master`, the one branch left is `docs/cleanup`, the branch of the still-open
+PR #262 that records this cleanup; it is deleted when that PR is merged. The 45 historical
 documents a first pass deleted (39 change manifests, six superseded reports) were restored in the same PR: each is
 a delivery record or is cited by a record, so they stay, marked historical where they were already marked.
 
