@@ -98,7 +98,15 @@ func TestExistingDevicesGrandfatheredAboveLimit(t *testing.T) {
 
 func TestGraceDeterministic(t *testing.T) {
 	r := ConversionRequest{HasActiveEntitlementAtCheckout: true, Configured: adminPolicy(), ConfiguredValid: true}
-	if DecideConversion(r) != DecideConversion(r) {
+	want := Conversion{Create: true, Trigger: TriggerCheckoutGrace, Policy: adminPolicy(), Reason: "ELIGIBLE"}
+	for i := 0; i < 3; i++ {
+		// A freshly built, equal request each time: the decision depends on the request alone.
+		again := ConversionRequest{HasActiveEntitlementAtCheckout: true, Configured: adminPolicy(), ConfiguredValid: true}
+		if got := DecideConversion(again); got != want {
+			t.Fatalf("DecideConversion = %+v, want %+v", got, want)
+		}
+	}
+	if DecideConversion(r) != want {
 		t.Fatal("DecideConversion must be deterministic")
 	}
 }
