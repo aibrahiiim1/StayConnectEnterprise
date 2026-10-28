@@ -126,6 +126,12 @@ func perr(kind ErrKind, op string, status int, cause error) *Error {
 	return &Error{Kind: kind, Op: op, Status: status, cause: cause}
 }
 
+// errPagingStuck: paging that stops advancing, or reaches its page cap, is an invalid response, never a silently
+// partial list (audit P7 L5).
+func errPagingStuck(op string) error {
+	return perr(KindInvalidResponse, op, 0, errors.New("paging did not advance or reached its cap"))
+}
+
 type Options struct {
 	HTTP     *http.Client
 	Now      func() time.Time
@@ -142,6 +148,13 @@ type Options struct {
 func (o *Options) defaults() {
 	if o.HTTP == nil {
 		o.HTTP = &http.Client{Timeout: 30 * time.Second}
+	}
+	// Provider APIs do not redirect, and a 307/308 would replay a body carrying credentials (Mews tokens) to another
+	// host: a redirect is answered, never followed (audit P7 L4). The caller's client is copied, not mutated.
+	if o.HTTP.CheckRedirect == nil {
+		hc := *o.HTTP
+		hc.CheckRedirect = noRedirect
+		o.HTTP = &hc
 	}
 	if o.Now == nil {
 		o.Now = time.Now
@@ -171,6 +184,8 @@ func (o *Options) defaults() {
 		o.UserAgent = "StayConnect-Enterprise-PMS-Connector/1.0"
 	}
 }
+
+func noRedirect(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 
 const maxBody = 32 << 20
 

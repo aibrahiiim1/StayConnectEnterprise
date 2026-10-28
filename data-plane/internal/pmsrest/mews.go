@@ -120,19 +120,25 @@ func (c *mewsClient) reservations(ctx context.Context, filters map[string]any, m
 		if resp.Reservations == nil {
 			return nil, perr(KindInvalidResponse, "reservations/getAll", 200, nil)
 		}
+		added := 0
 		for _, r := range resp.Reservations {
 			if r.ID == "" || seen[r.ID] {
 				continue // a cursor page that repeats an item is not a second reservation
 			}
 			seen[r.ID] = true
 			out = append(out, r)
+			added++
 		}
 		if max > 0 || resp.Cursor == nil || *resp.Cursor == "" || len(resp.Reservations) < count {
 			return out, nil
 		}
+		// A full page that adds nothing, or a cursor that does not move, would page to the cap (audit P7 L5).
+		if added == 0 || (cursor != nil && *cursor == *resp.Cursor) {
+			return nil, errPagingStuck("reservations/getAll")
+		}
 		cursor = resp.Cursor
 	}
-	return out, nil
+	return nil, errPagingStuck("reservations/getAll")
 }
 
 func (c *mewsClient) loadResources(ctx context.Context) error {
@@ -174,9 +180,12 @@ func (c *mewsClient) loadResources(ctx context.Context) error {
 		if resp.Cursor == nil || *resp.Cursor == "" || len(resp.Resources) < mewsPage {
 			return nil
 		}
+		if cursor != nil && *cursor == *resp.Cursor {
+			return errPagingStuck("resources/getAll")
+		}
 		cursor = resp.Cursor
 	}
-	return nil
+	return errPagingStuck("resources/getAll")
 }
 
 type mewsName struct{ First, Last string }
@@ -214,6 +223,9 @@ func (c *mewsClient) customers(ctx context.Context, ids []string) (map[string]me
 			}
 			if resp.Cursor == nil || *resp.Cursor == "" || len(resp.Customers) < mewsPage {
 				break
+			}
+			if page == 999 || (cursor != nil && *cursor == *resp.Cursor) {
+				return nil, errPagingStuck("customers/getAll")
 			}
 			cursor = resp.Cursor
 		}
@@ -255,6 +267,9 @@ func (c *mewsClient) companions(ctx context.Context, resIDs []string) (map[strin
 			}
 			if resp.Cursor == nil || *resp.Cursor == "" || len(resp.Companionships) < mewsPage {
 				break
+			}
+			if page == 999 || (cursor != nil && *cursor == *resp.Cursor) {
+				return nil, errPagingStuck("companionships/getAll")
 			}
 			cursor = resp.Cursor
 		}

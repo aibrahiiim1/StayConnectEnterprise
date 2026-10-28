@@ -136,17 +136,22 @@ func (c *apaleoClient) reservations(ctx context.Context, q url.Values, max int) 
 		if resp.Reservations == nil || resp.Count == nil {
 			return nil, perr(KindInvalidResponse, "booking/reservations", status, nil)
 		}
+		added := 0
 		for _, r := range resp.Reservations {
 			if r.ID != "" && !seen[r.ID] {
 				seen[r.ID] = true
 				out = append(out, r)
+				added++
 			}
 		}
 		if max > 0 || len(resp.Reservations) < size || int64(page*size) >= *resp.Count {
 			return out, nil
 		}
+		if added == 0 {
+			return nil, errPagingStuck("booking/reservations")
+		}
 	}
-	return out, nil
+	return nil, errPagingStuck("booking/reservations")
 }
 
 func (c *apaleoClient) units(ctx context.Context) ([]string, error) {
@@ -178,7 +183,7 @@ func (c *apaleoClient) units(ctx context.Context) ([]string, error) {
 			return names, nil
 		}
 	}
-	return names, nil
+	return nil, errPagingStuck("inventory/units")
 }
 
 func (c *apaleoClient) normalise(raw []apaleoReservation) []Reservation {
