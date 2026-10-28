@@ -1,0 +1,1 @@
+-- 0160 — ROSTER READS USE THE RESYNC INDEX (performance audit D6-M1).

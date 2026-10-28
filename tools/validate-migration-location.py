@@ -69,6 +69,8 @@ NOT_MIGRATIONS = {
     ".git",
     "node_modules",
     ".cleanroom",
+    # Agent worktrees (git worktrees of this repository created by delivery tooling) are copies, not content.
+    ".claude/worktrees",
 }
 
 NUMBERED = re.compile(r"^(\d{4})_(.+)\.(up|down)\.sql$")
