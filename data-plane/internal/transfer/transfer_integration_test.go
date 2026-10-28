@@ -156,6 +156,38 @@ func req(f fx, from, to string) Request {
 		Operator: operator, Reason: "guest moved to the other property", GraceValidFor: 2 * time.Hour}
 }
 
+// Audit P6 L11: among equally ranked landing packages the choice is deterministic (package code, then id).
+func TestIntegration_F9_LandingPackageChoiceIsDeterministic(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	f := seed(t, p)
+	ctx := context.Background()
+	var other string
+	if err := p.QueryRow(ctx, `WITH
+	  ip AS (INSERT INTO iam_v2.internet_packages(id,tenant_id,site_id,code,is_system,active)
+	         VALUES (gen_random_uuid(), $1, $2, 'AAA-GRACE', true, true) RETURNING id),
+	  ipr AS (INSERT INTO iam_v2.internet_package_revisions(id,tenant_id,site_id,package_id,revision_no,
+	            service_plan_revision_id,package_type,price_minor,settlement_methods)
+	          SELECT gen_random_uuid(), $1, $2, ip.id, 1, r.service_plan_revision_id, 'CHECKOUT_GRACE', 0,
+	                 ARRAY['NOT_REQUIRED']::text[]
+	            FROM ip, iam_v2.internet_package_revisions r WHERE r.id = $3 RETURNING id)
+	  SELECT id::text FROM ipr`, f.tenant, f.site, f.pkg).Scan(&other); err != nil {
+		t.Fatalf("second landing package: %v", err)
+	}
+	if _, err := p.Exec(ctx, `UPDATE iam_v2.internet_packages SET current_revision_id=$1
+		WHERE id=(SELECT package_id FROM iam_v2.internet_package_revisions WHERE id=$1)`, other); err != nil {
+		t.Fatalf("current revision: %v", err)
+	}
+	grant(t, p, f, f.stayA)
+	out, err := New(p).Execute(ctx, req(f, f.stayA, f.stayB))
+	if err != nil {
+		t.Fatalf("transfer: %v", err)
+	}
+	if out.ToPackage != other {
+		t.Fatalf("landed on %s, want the package ordered first by code (%s)", out.ToPackage, other)
+	}
+}
+
 func TestIntegration_F9_TransferMovesAccessSeamlessly(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
