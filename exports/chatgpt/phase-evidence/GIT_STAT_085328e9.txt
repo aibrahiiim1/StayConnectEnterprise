@@ -1,4 +1,0 @@
-commit 085328e97a66cca9050d450a7c238f13fa3cd5a7
-Date:   Wed Oct 28 10:16:10 2026 +0300
-
-    Governance: T0263 head at the final documentation commit, and its manifest
