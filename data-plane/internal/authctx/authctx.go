@@ -59,6 +59,8 @@ func (p Presenter) valid() bool {
 		validPinUUID(strings.TrimSpace(p.Device)) && validPinUUID(strings.TrimSpace(p.GuestNetwork))
 }
 
+func trim(s string) string { return strings.TrimSpace(s) }
+
 type Store struct{ pool *pgxpool.Pool }
 
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
@@ -119,6 +121,10 @@ func (s *Store) IssuePMS(ctx context.Context, g PMSGrant) (string, error) {
 // Revision, and reads the AUTHORITATIVE lifecycle_version and occupancy_evidence_version from that row, never from the caller. Fails closed
 // (ErrGrantIncomplete) on any missing or invalid pin, without inserting.
 func (s *Store) IssuePMSTx(ctx context.Context, tx pgx.Tx, g PMSGrant) (string, error) {
+	// The ids are trimmed once and the trimmed values are both validated and bound, so a padded id gets the uniform
+	// refusal path, never a raw database cast error.
+	g.Tenant, g.Site, g.Interface, g.Revision = trim(g.Tenant), trim(g.Site), trim(g.Interface), trim(g.Revision)
+	g.Stay, g.Device, g.GuestNetwork = trim(g.Stay), trim(g.Device), trim(g.GuestNetwork)
 	if !g.valid() {
 		return "", ErrGrantIncomplete
 	}
@@ -195,6 +201,7 @@ var ErrPostStayNotAuthenticable = errors.New("authctx: post-stay profile is not 
 // It binds the context to the profile's CURRENT episode so a reinstatement between issue and consume invalidates it, locking the origin Stay (L1 first)
 // and reading the episode AUTHORITATIVELY from it. A profile not authenticable now yields ErrPostStayNotAuthenticable and NO row.
 func (s *Store) IssuePostStayTx(ctx context.Context, tx pgx.Tx, g PostStayGrant) (string, error) {
+	g.Tenant, g.Site, g.Profile, g.Device, g.GuestNetwork = trim(g.Tenant), trim(g.Site), trim(g.Profile), trim(g.Device), trim(g.GuestNetwork)
 	if !g.valid() {
 		return "", ErrGrantIncomplete
 	}
@@ -265,7 +272,9 @@ func (s *Store) Consume(ctx context.Context, id string, p Presenter) (Consumed, 
 // unconsumed to consumed, guarded by consumed_at IS NULL AND expires_at > now(): exactly one winner. The caller continues in the SAME transaction
 // holding the Stay lock. Every failure is the uniform ErrContextInvalid.
 func (s *Store) ConsumeTx(ctx context.Context, tx pgx.Tx, id string, p Presenter) (Consumed, error) {
-	if !validPinUUID(strings.TrimSpace(id)) || !p.valid() {
+	id = trim(id)
+	p.Tenant, p.Site, p.Device, p.GuestNetwork = trim(p.Tenant), trim(p.Site), trim(p.Device), trim(p.GuestNetwork)
+	if !validPinUUID(id) || !p.valid() {
 		return Consumed{}, ErrContextInvalid // typed/sanitized BEFORE any SQL — never a raw cast error
 	}
 	// The Auth Context family is capability-scoped: declare the operation first, or writes to auth_contexts are refused.
@@ -321,11 +330,11 @@ func (s *Store) ConsumeTx(ctx context.Context, tx pgx.Tx, id string, p Presenter
 			  -- specific to CONSUMING a context, so it stays here.
 			  st.lifecycle_version IS NOT DISTINCT FROM ac.pinned_lifecycle_version
 			  AND st.occupancy_evidence_version IS NOT DISTINCT FROM ac.pinned_occupancy_evidence_version
-			  -- Conditions on the Stay row stay INLINE, never inside a function. This query holds
-			  -- FOR UPDATE OF st, and when a concurrent Checkout commits while we wait on that lock,
-			  -- PostgreSQL re-evaluates these against the UPDATED tuple and correctly refuses the consume.
-			  -- A STABLE function reading iam_v2.stays internally would answer from the pre-Checkout
-			  -- statement snapshot and let a departed guest through.
+			  -- Conditions on the Stay row stay INLINE, never inside a function. The Stay lock is taken
+			  -- by lock_stay above, before this statement; under READ COMMITTED this statement's snapshot
+			  -- is taken after that lock, so a Checkout that committed while we waited is what it reads,
+			  -- and the consume is refused. A STABLE function reading iam_v2.stays could answer from an
+			  -- older snapshot and let a departed guest through.
 			  AND st.status='IN_HOUSE'
 			  AND st.occupancy_revision_id = ac.authentication_interface_revision_id
 			  AND st.occupancy_evidence_at IS NOT NULL
