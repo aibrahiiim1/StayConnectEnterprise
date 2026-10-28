@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -40,6 +41,41 @@ type pendingChange struct {
 	ActorID    string `json:"actor_id"`
 	SourceIP   string `json:"source_ip"`
 	Target     string `json:"target"`
+	// RollbackAttempts counts reverts that did not complete; while it is non-zero the marker is kept so the watchdog
+	// retries (audit Phase 8 M7) and no new change may replace it. RetryAt spaces those retries.
+	RollbackAttempts int   `json:"rollback_attempts,omitempty"`
+	RetryAt          int64 `json:"retry_at,omitempty"`
+}
+
+// Retries of a failed revert back off from sysnetRetryBase to sysnetRetryMax: the revert is the safety net for a change
+// that cut the appliance off, so it is never abandoned, only spaced out.
+const (
+	sysnetRetryBase = 5 * time.Second
+	sysnetRetryMax  = 5 * time.Minute
+)
+
+// endRevert settles the pending marker after a revert: a complete revert clears it; an incomplete one keeps it, due
+// now, so the watchdog (and the next boot) tries again instead of leaving a half-restored network nobody retries.
+func (m *sysNetMgr) endRevert(pc pendingChange, rerr error) {
+	if rerr == nil {
+		m.clearPendingFiles()
+		return
+	}
+	now := time.Now()
+	pc.RollbackAttempts++
+	delay := sysnetRetryBase
+	for i := 1; i < pc.RollbackAttempts && delay < sysnetRetryMax; i++ {
+		delay *= 2
+	}
+	if delay > sysnetRetryMax {
+		delay = sysnetRetryMax
+	}
+	if pc.Deadline > now.Unix() {
+		pc.Deadline = now.Unix()
+	}
+	pc.RetryAt = now.Add(delay).Unix()
+	_ = os.Remove(m.paths().commit)
+	m.writePending(pc)
 }
 
 type sysNetMgr struct {
@@ -249,6 +285,10 @@ func (m *sysNetMgr) apply(ctx context.Context, p sysnet.Proposal, actor, actorID
 	}
 	defer m.mu.Unlock()
 	ps := m.paths()
+	if prev, ok := m.readPending(); ok && prev.RollbackAttempts > 0 {
+		return &applySysResult{OK: false, State: "failed", Message: "the previous WAN / LAN change could not be rolled back and is being retried; " +
+			"no new change is accepted until that rollback completes"}, nil
+	}
 
 	res, w, l := m.validate(ctx, p)
 	out := &applySysResult{Validation: res, ManagementURL: sysnet.ManagementURL(w)}
@@ -282,13 +322,13 @@ func (m *sysNetMgr) apply(ctx context.Context, p sysnet.Proposal, actor, actorID
 	pc.Backup = bk
 
 	if p.WAN != nil {
-		if err := os.WriteFile(ps.wan, []byte(sysnet.RenderWANNetplan(w)), 0o600); err != nil {
+		if err := writeFileAtomic(ps.wan, []byte(sysnet.RenderWANNetplan(w)), 0o600); err != nil {
 			_ = m.restoreFiles(bk) // nothing was applied yet; the live files are put back as they were
 			return nil, err
 		}
 	}
 	if p.LAN != nil {
-		if err := os.WriteFile(ps.lan, []byte(sysnet.RenderLANNetplan(l)), 0o600); err != nil {
+		if err := writeFileAtomic(ps.lan, []byte(sysnet.RenderLANNetplan(l)), 0o600); err != nil {
 			_ = m.restoreFiles(bk) // nothing was applied yet; the live files are put back as they were
 			return nil, err
 		}
@@ -311,7 +351,7 @@ func (m *sysNetMgr) apply(ctx context.Context, p sysnet.Proposal, actor, actorID
 
 	if err := m.netplan("apply"); err != nil {
 		rerr := m.restore(ctx, bk)
-		m.clearPendingFiles()
+		m.endRevert(pc, rerr)
 		out.State = "failed"
 		out.Message = "netplan apply failed: " + err.Error() + restoreSuffix(rerr)
 		m.auditEvent(ctx, revID, "network.apply.failed", pc, "netplan_apply: "+err.Error()+restoreSuffix(rerr), bk)
@@ -332,7 +372,7 @@ func (m *sysNetMgr) apply(ctx context.Context, p sysnet.Proposal, actor, actorID
 		m.auditEvent(ctx, revID, "network.apply.verify_failed", pc, fmt.Sprintf("%v", v), bk)
 		m.auditEvent(ctx, revID, "network.rollback.automatic.started", pc, "verify_failed", bk)
 		rerr := m.restore(ctx, bk)
-		m.clearPendingFiles()
+		m.endRevert(pc, rerr)
 		out.State = "rolled_back"
 		out.Message = "post-apply verification failed; restored last-known-good"
 		if rerr != nil {
@@ -356,12 +396,17 @@ func (m *sysNetMgr) apply(ctx context.Context, p sysnet.Proposal, actor, actorID
 	return out, nil
 }
 
-func (m *sysNetMgr) writePendingLocked(pc pendingChange) { m.writePending(pc) }
-
+// confirm takes the change lock, so it cannot interleave with an apply still verifying or a rollback in progress (audit
+// Phase 8 L14): once it holds the lock, the marker it reads is the settled state.
 func (m *sysNetMgr) confirm(ctx context.Context, actor, actorID, srcIP string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	pc, ok := m.readPending()
 	if !ok {
 		return fmt.Errorf("no pending network change to confirm")
+	}
+	if pc.RollbackAttempts > 0 {
+		return fmt.Errorf("the change was already timed out and its rollback is being retried; there is nothing to confirm")
 	}
 	_ = os.WriteFile(m.paths().commit, []byte(time.Now().String()), 0o644)
 	pc.Actor, pc.ActorID, pc.SourceIP = actor, actorID, srcIP
@@ -387,7 +432,7 @@ func (m *sysNetMgr) rollback(ctx context.Context, actor, actorID, srcIP string) 
 	pc.Actor, pc.ActorID, pc.SourceIP = actor, actorID, srcIP
 	m.auditEvent(ctx, pc.RevisionID, "network.rollback.manual.started", pc, "operator requested", bk)
 	rerr := m.restore(ctx, bk)
-	m.clearPendingFiles()
+	m.endRevert(pc, rerr)
 	if rerr != nil {
 		m.auditEvent(ctx, pc.RevisionID, "network.rollback.manual.failed", pc, "operator requested"+restoreSuffix(rerr), bk)
 		return fmt.Errorf("the rollback ran but did not fully restore the previous network configuration: %w", rerr)
@@ -417,7 +462,7 @@ func (m *sysNetMgr) maybeAutoRollback(ctx context.Context) {
 	if _, err := os.Stat(m.paths().commit); err == nil {
 		return
 	}
-	if time.Now().Unix() < pc.Deadline {
+	if time.Now().Unix() < pc.Deadline || time.Now().Unix() < pc.RetryAt {
 		return
 	}
 	if m.dryRun || !m.mu.TryLock() {
@@ -427,20 +472,25 @@ func (m *sysNetMgr) maybeAutoRollback(ctx context.Context) {
 	if pc2, ok := m.readPending(); !ok || pc2.RevisionID != pc.RevisionID {
 		return
 	}
-	m.auditEvent(ctx, pc.RevisionID, "network.apply.confirmation_timeout", pc, fmt.Sprintf("no confirmation within %s", m.confirmWindow), pc.Backup)
-	m.auditEvent(ctx, pc.RevisionID, "network.rollback.automatic.started", pc, "confirmation_timeout", pc.Backup)
+	reason := "confirmation_timeout"
+	if pc.RollbackAttempts > 0 {
+		reason = fmt.Sprintf("retry_after_failed_rollback (attempt %d)", pc.RollbackAttempts+1)
+	} else {
+		m.auditEvent(ctx, pc.RevisionID, "network.apply.confirmation_timeout", pc, fmt.Sprintf("no confirmation within %s", m.confirmWindow), pc.Backup)
+	}
+	m.auditEvent(ctx, pc.RevisionID, "network.rollback.automatic.started", pc, reason, pc.Backup)
 	if pc.Backup == "" {
 		m.clearPendingFiles()
 		m.auditEvent(ctx, pc.RevisionID, "network.rollback.automatic.failed", pc, "no backup recorded", "")
 		return
 	}
 	rerr := m.restore(ctx, pc.Backup)
-	m.clearPendingFiles()
+	m.endRevert(pc, rerr)
 	if rerr != nil {
-		m.auditEvent(ctx, pc.RevisionID, "network.rollback.automatic.failed", pc, "confirmation_timeout"+restoreSuffix(rerr), pc.Backup)
+		m.auditEvent(ctx, pc.RevisionID, "network.rollback.automatic.failed", pc, reason+restoreSuffix(rerr)+" (will retry)", pc.Backup)
 		return
 	}
-	m.auditEvent(ctx, pc.RevisionID, "network.rollback.automatic.succeeded", pc, "confirmation_timeout", pc.Backup)
+	m.auditEvent(ctx, pc.RevisionID, "network.rollback.automatic.succeeded", pc, reason, pc.Backup)
 }
 
 // ReconcileStalePendingOnBoot rolls back a change that was applied but never confirmed (netd crashed or the box rebooted mid-window); a marker still within its window is left for the watchdog.
@@ -468,9 +518,9 @@ func (m *sysNetMgr) ReconcileStalePendingOnBoot(ctx context.Context) {
 	if !m.dryRun {
 		rerr = m.restore(ctx, pc.Backup)
 	}
-	m.clearPendingFiles()
+	m.endRevert(pc, rerr)
 	if rerr != nil {
-		m.auditEvent(ctx, pc.RevisionID, "network.rollback.automatic.failed", pc, "boot_reconcile"+restoreSuffix(rerr), pc.Backup)
+		m.auditEvent(ctx, pc.RevisionID, "network.rollback.automatic.failed", pc, "boot_reconcile"+restoreSuffix(rerr)+" (will retry)", pc.Backup)
 		return
 	}
 	m.auditEvent(ctx, pc.RevisionID, "network.rollback.automatic.succeeded", pc, "boot_reconcile", pc.Backup)
@@ -479,7 +529,7 @@ func (m *sysNetMgr) ReconcileStalePendingOnBoot(ctx context.Context) {
 // backupFile records a missing source as absent so a restore removes the file the apply created.
 func backupFile(src, dst string) {
 	if err := copyFile(src, dst); err != nil && os.IsNotExist(err) {
-		_ = os.WriteFile(dst+absentSuffix, []byte("did not exist before this change\n"), 0o600)
+		_ = writeFileAtomic(dst+absentSuffix, []byte("did not exist before this change\n"), 0o600)
 	}
 }
 
@@ -541,7 +591,8 @@ func (m *sysNetMgr) verifyNow(w sysnet.WANConfig, l sysnet.LANConfig) map[string
 
 func (m *sysNetMgr) verify(w sysnet.WANConfig, l sysnet.LANConfig) map[string]bool {
 	v := map[string]bool{}
-	v["wan_ip"] = w.IP == "" || ifaceHasIP(w.Interface, w.IP)
+	// In DHCP mode the address is the server's choice: checking the old static one would roll back a working change (audit Phase 8 L14).
+	v["wan_ip"] = w.Mode == "dhcp" || w.IP == "" || ifaceHasIP(w.Interface, w.IP)
 	v["gateway"] = w.Gateway == "" || ping(w.Gateway)
 	v["internet"] = ping("8.8.8.8")
 	v["dns"] = resolves("github.com")
@@ -549,7 +600,7 @@ func (m *sysNetMgr) verify(w sysnet.WANConfig, l sysnet.LANConfig) map[string]bo
 	v["lan_member"] = ifaceMaster(l.PhysicalInterface) == l.Bridge
 	// The console must answer at the new WAN address on 443, which is what the operator's browser reaches; a loopback probe is up whatever the network looks like.
 	addr := w.IP
-	if addr == "" {
+	if addr == "" || w.Mode == "dhcp" {
 		addr, _ = primaryV4(w.Interface)
 	}
 	v["management_reachable"] = addr != "" && tcpProbe(addr+":443")
@@ -716,7 +767,7 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(dst, b, 0o600)
+	return writeFileAtomic(dst, b, 0o600) // restores write live netplan files: never leave one truncated (audit Phase 8 L12)
 }
 
 type ipAddrJSON struct {
@@ -880,9 +931,8 @@ func (m *sysNetMgr) writePending(pc pendingChange) {
 	path := m.paths().pending
 	_ = os.MkdirAll(filepath.Dir(path), 0o700)
 	b, _ := json.Marshal(pc)
-	tmp := path + ".tmp"
-	if os.WriteFile(tmp, b, 0o600) == nil {
-		_ = os.Rename(tmp, path)
+	if err := writeFileAtomic(path, b, 0o600); err != nil {
+		slog.Error("sysnet: pending marker not saved", "err", err)
 	}
 }
 

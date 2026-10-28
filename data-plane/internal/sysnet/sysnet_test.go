@@ -1,6 +1,9 @@
 package sysnet
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func goodWAN() WANConfig {
 	return WANConfig{Interface: "ens160", Mode: "static", IP: "192.0.2.23", PrefixLen: 24, Gateway: "192.0.2.1", DNS: []string{"1.1.1.1", "8.8.8.8"}}
@@ -134,7 +137,7 @@ func TestRenderWANNetplanHasNoLegacyAddr(t *testing.T) {
 func TestRenderLANNetplanIPOnBridge(t *testing.T) {
 	out := RenderLANNetplan(goodLAN())
 	// the address must appear under the bridge stanza, member enslaved
-	if !containsAll(out, "br-lan:", "interfaces: [ens192]", "10.10.0.1/24") {
+	if !containsAll(out, `"br-lan":`, `interfaces: ["ens192"]`, "10.10.0.1/24") {
 		t.Fatalf("LAN netplan wrong:\n%s", out)
 	}
 }
@@ -153,4 +156,78 @@ func containsAll(s string, subs ...string) bool {
 		}
 	}
 	return true
+}
+
+// Request-supplied interface names are refused unless they are plain Linux interface names, and the renderer writes
+// them as quoted scalars, so a newline cannot add netplan keys (audit Phase 8 M9).
+func TestHostileInterfaceNamesAreRefused(t *testing.T) {
+	hostile := []string{"ens160\n      addresses: [203.0.113.9/24]", "ens\"160", "-ens160", "ens160:", "a234567890123456", "ens 160", "ens160#x"}
+	for _, name := range hostile {
+		w := goodWAN()
+		w.Interface = name
+		if r := ValidateFull(w, goodLAN()); r.OK || !hasCode(r, "invalid_interface_name") {
+			t.Errorf("WAN interface %q accepted: %+v", name, r.Issues)
+		}
+		l := goodLAN()
+		l.PhysicalInterface = name
+		if r := ValidateFull(goodWAN(), l); r.OK || !hasCode(r, "invalid_interface_name") {
+			t.Errorf("LAN interface %q accepted: %+v", name, r.Issues)
+		}
+		l = goodLAN()
+		l.Bridge = name
+		if r := ValidateFull(goodWAN(), l); r.OK || !hasCode(r, "invalid_interface_name") {
+			t.Errorf("LAN bridge %q accepted: %+v", name, r.Issues)
+		}
+	}
+	for _, name := range []string{"ens160", "eth0.100", "br-lan", "enp3s0f1", "wan_1"} {
+		w := goodWAN()
+		w.Interface = name
+		if r := ValidateFull(w, goodLAN()); hasCode(r, "invalid_interface_name") {
+			t.Errorf("plain interface name %q refused: %+v", name, r.Issues)
+		}
+	}
+}
+
+// Audit Phase 8 L14: an unknown mode is not silently treated as static, and addresses that can never be an interface
+// address or a gateway are refused.
+func TestModeAndAddressClassesAreValidated(t *testing.T) {
+	for _, mode := range []string{"", "Static", "pppoe"} {
+		w := goodWAN()
+		w.Mode = mode
+		if r := ValidateFull(w, goodLAN()); r.OK || !hasCode(r, "invalid_mode") {
+			t.Errorf("mode %q accepted: %+v", mode, r.Issues)
+		}
+	}
+	w := goodWAN()
+	w.Mode = "dhcp"
+	if r := ValidateFull(w, goodLAN()); !r.OK {
+		t.Errorf("dhcp refused: %+v", r.Issues)
+	}
+	for _, ip := range []string{"127.0.0.5", "224.0.0.9", "169.254.10.10", "0.0.0.0"} {
+		w := goodWAN()
+		w.IP, w.Gateway, w.PrefixLen = ip, ip, 8
+		if r := ValidateFull(w, goodLAN()); r.OK || !hasCode(r, "unusable_address") {
+			t.Errorf("WAN address %s accepted: %+v", ip, r.Issues)
+		}
+		l := goodLAN()
+		l.IP, l.DHCPEnabled = ip, false
+		if r := ValidateFull(goodWAN(), l); r.OK || !hasCode(r, "unusable_address") {
+			t.Errorf("LAN address %s accepted: %+v", ip, r.Issues)
+		}
+	}
+}
+
+func TestRenderedInterfaceNamesStayOneScalar(t *testing.T) {
+	w := goodWAN()
+	w.Interface = "ens160:\n      addresses: [203.0.113.9/24]"
+	out := RenderWANNetplan(w)
+	if strings.Count(out, "\n") != strings.Count(RenderWANNetplan(goodWAN()), "\n") {
+		t.Fatalf("an interface name added YAML keys:\n%s", out)
+	}
+	l := goodLAN()
+	l.Bridge = "br-lan\"\n    x:"
+	out = RenderLANNetplan(l)
+	if strings.Count(out, "\n") != strings.Count(RenderLANNetplan(goodLAN()), "\n") {
+		t.Fatalf("a bridge name added YAML keys:\n%s", out)
+	}
 }
