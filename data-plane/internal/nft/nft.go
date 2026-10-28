@@ -70,8 +70,6 @@ func (c *Client) execOrReal(ctx context.Context, name string, args ...string) ([
 	return realExec(ctx, name, args...)
 }
 
-func (c *Client) probeConcat(ctx context.Context) bool { return c.probeConcatIn(ctx, AuthV4) }
-
 func containsConcatType(s string) bool {
 	return indexOf(s, "ifname . ipv4_addr") >= 0 || indexOf(s, "ipv4_addr . ifname") >= 0
 }

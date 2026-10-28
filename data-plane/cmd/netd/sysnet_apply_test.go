@@ -245,3 +245,136 @@ func TestSysnetAutomaticRollbackThatFailsIsAuditedAsFailed(t *testing.T) {
 		t.Fatalf("the operator is told the rollback finished: %q", res.Message)
 	}
 }
+
+// A revert that fails keeps its marker, so the watchdog retries it until it completes; while it waits no new change
+// and no confirm may replace it (audit Phase 8 M7, fix step 2).
+func TestSysnetFailedRevertKeepsTheMarkerAndTheWatchdogRetries(t *testing.T) {
+	m, ps, _ := testSysnet(t)
+	_ = os.WriteFile(ps.wan, []byte("previous"), 0o600)
+	var audit []string
+	m.auditFn = func(action, reason string) { audit = append(audit, action+": "+reason) }
+	if res, err := m.apply(context.Background(), wanTo("192.0.2.20"), "op", "", ""); err != nil || !res.OK {
+		t.Fatalf("apply: %+v %v", res, err)
+	}
+	applyFails := true
+	m.runFn = func(name string, args ...string) error {
+		if len(args) > 0 && args[0] == "apply" && applyFails {
+			return errors.New("netplan: cannot bring up ens160")
+		}
+		return nil
+	}
+	// The confirm window runs out; the revert's netplan apply fails.
+	pc, _ := m.readPending()
+	pc.Deadline = time.Now().Add(-time.Second).Unix()
+	m.writePending(pc)
+	m.maybeAutoRollback(context.Background())
+
+	pc, ok := m.readPending()
+	if !ok {
+		t.Fatal("a failed revert cleared its pending marker: nothing would retry it")
+	}
+	if pc.RollbackAttempts != 1 || pc.RetryAt <= time.Now().Unix() {
+		t.Fatalf("marker after a failed revert: %+v", pc)
+	}
+	if res, _ := m.apply(context.Background(), wanTo("192.0.2.30"), "op", "", ""); res == nil || res.OK {
+		t.Fatalf("a new change replaced a revert that is still being retried: %+v", res)
+	}
+	if err := m.confirm(context.Background(), "op", "", ""); err == nil {
+		t.Fatal("a change whose revert is being retried was confirmed")
+	}
+	// Before RetryAt the watchdog waits.
+	audit = nil
+	m.maybeAutoRollback(context.Background())
+	if len(audit) != 0 {
+		t.Fatalf("the watchdog retried before its back-off: %v", audit)
+	}
+	// The retry is due and now succeeds.
+	applyFails = false
+	pc.RetryAt = time.Now().Add(-time.Second).Unix()
+	m.writePending(pc)
+	m.maybeAutoRollback(context.Background())
+	if _, ok := m.readPending(); ok {
+		t.Fatal("the marker survived a revert that completed")
+	}
+	joined := strings.Join(audit, " | ")
+	if !strings.Contains(joined, "rollback.automatic.succeeded") || !strings.Contains(joined, "retry_after_failed_rollback") {
+		t.Fatalf("the retry is not audited: %s", joined)
+	}
+	if b, _ := os.ReadFile(ps.wan); string(b) != "previous" {
+		t.Fatalf("the retry did not restore the previous file: %q", b)
+	}
+}
+
+// The WAN netplan file is replaced, not truncated and rewritten (audit Phase 8 L12): the old inode is left intact.
+func TestSysnetNetplanFileIsReplacedAtomically(t *testing.T) {
+	m, ps, _ := testSysnet(t)
+	_ = os.WriteFile(ps.wan, []byte("previous"), 0o600)
+	held, err := os.Open(ps.wan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+	if res, err := m.apply(context.Background(), wanTo("192.0.2.20"), "op", "", ""); err != nil || !res.OK {
+		t.Fatalf("apply: %+v %v", res, err)
+	}
+	buf := make([]byte, 64)
+	n, _ := held.ReadAt(buf, 0)
+	if string(buf[:n]) != "previous" {
+		t.Fatalf("the live file was rewritten in place: the old inode now reads %q", buf[:n])
+	}
+	if b, _ := os.ReadFile(ps.wan); !strings.Contains(string(b), "192.0.2.20/24") {
+		t.Fatalf("new file: %q", b)
+	}
+}
+
+// Audit Phase 8 L11: the interface queries are bounded; a hung `ip` answers "unknown" instead of holding the caller.
+func TestInterfaceQueriesAreBounded(t *testing.T) {
+	hung := filepath.Join(t.TempDir(), "ip")
+	if err := os.WriteFile(hung, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oldBin, oldTimeout := ifaceQueryBin, ifaceQueryTimeout
+	ifaceQueryBin, ifaceQueryTimeout = hung, 200*time.Millisecond
+	defer func() { ifaceQueryBin, ifaceQueryTimeout = oldBin, oldTimeout }()
+	start := time.Now()
+	if ifaceHasIP("br-g20", "10.20.0.1") || ifaceHasAnyIP("br-g20") || len(ifaceAddrs("br-g20")) != 0 {
+		t.Fatal("a hung query reported an address")
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Fatalf("three hung queries took %v: they are not bounded", d)
+	}
+}
+
+// The same on the apply path (verification failed, revert failed) and at boot.
+func TestSysnetFailedRevertOnApplyAndBootIsRetried(t *testing.T) {
+	m, ps, _ := testSysnet(t)
+	_ = os.WriteFile(ps.wan, []byte("previous"), 0o600)
+	m.verifyFn = func(sysnet.WANConfig, sysnet.LANConfig) map[string]bool {
+		return map[string]bool{"wan_ip": true, "gateway": true, "management_reachable": false}
+	}
+	n := 0
+	m.runFn = func(name string, args ...string) error {
+		if len(args) > 0 && args[0] == "apply" {
+			n++
+			if n >= 2 { // the change applies; every revert fails
+				return errors.New("netplan: busy")
+			}
+		}
+		return nil
+	}
+	if res, err := m.apply(context.Background(), wanTo("192.0.2.20"), "op", "", ""); err != nil || res.State != "rolled_back" {
+		t.Fatalf("%+v %v", res, err)
+	}
+	pc, ok := m.readPending()
+	if !ok || pc.RollbackAttempts != 1 {
+		t.Fatalf("a failed revert after failed verification left no retry marker: %+v ok=%v", pc, ok)
+	}
+	m.ReconcileStalePendingOnBoot(context.Background())
+	pc, ok = m.readPending()
+	if !ok || pc.RollbackAttempts != 2 {
+		t.Fatalf("a failed boot revert left no retry marker: %+v ok=%v", pc, ok)
+	}
+	if pc.RetryAt-time.Now().Unix() < int64(sysnetRetryBase.Seconds()) {
+		t.Fatalf("the retry does not back off: %+v", pc)
+	}
+}

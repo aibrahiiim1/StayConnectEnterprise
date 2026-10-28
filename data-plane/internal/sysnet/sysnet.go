@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net"
 	"strings"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
 )
 
 // WANConfig is the appliance uplink + management interface.
@@ -92,6 +94,22 @@ func Merge(cur WANConfig, curLAN LANConfig, p Proposal) (WANConfig, LANConfig) {
 func ValidateFull(wan WANConfig, lan LANConfig) ValidationResult {
 	res := ValidationResult{OK: true}
 
+	// Interface names come from the request and are written into netplan YAML as keys: a closed character set keeps a
+	// newline or quote from adding keys (addresses, routes) to the file (audit Phase 8 M9).
+	for _, f := range []struct{ field, name string }{
+		{"wan.interface", wan.Interface}, {"lan.physical_interface", lan.PhysicalInterface}, {"lan.bridge", lan.Bridge},
+	} {
+		if f.name == "" {
+			continue // a missing name is reported by the rules below, or means "unchanged"
+		}
+		if msg := netcfg.CheckIfaceName(f.name); msg != "" {
+			res.add(f.field, "invalid_interface_name", msg)
+		}
+	}
+
+	if wan.Mode != "static" && wan.Mode != "dhcp" {
+		res.add("wan.mode", "invalid_mode", `WAN mode must be "static" or "dhcp"`)
+	}
 	static := wan.Mode != "dhcp"
 	var wanNet *net.IPNet
 	if static {
@@ -101,6 +119,8 @@ func ValidateFull(wan WANConfig, lan LANConfig) ValidationResult {
 		wip := net.ParseIP(wan.IP)
 		if wip == nil || wip.To4() == nil {
 			res.add("wan.ip", "invalid_ip", "WAN IP is not a valid IPv4 address")
+		} else if why := unusableHost(wip); why != "" {
+			res.add("wan.ip", "unusable_address", "WAN IP is "+why)
 		} else if wan.PrefixLen >= 1 && wan.PrefixLen <= 32 {
 			_, wanNet, _ = net.ParseCIDR(fmt.Sprintf("%s/%d", wan.IP, wan.PrefixLen))
 			if wanNet != nil {
@@ -121,6 +141,8 @@ func ValidateFull(wan WANConfig, lan LANConfig) ValidationResult {
 			gw := net.ParseIP(wan.Gateway)
 			if gw == nil || gw.To4() == nil {
 				res.add("wan.gateway", "invalid_gateway", "WAN gateway is not a valid IPv4 address")
+			} else if why := unusableHost(gw); why != "" {
+				res.add("wan.gateway", "unusable_address", "WAN gateway is "+why)
 			} else if wanNet != nil && !wanNet.Contains(gw) {
 				res.add("wan.gateway", "gateway_off_subnet", "WAN gateway is not in the WAN subnet (on-link route required)")
 			}
@@ -139,6 +161,8 @@ func ValidateFull(wan WANConfig, lan LANConfig) ValidationResult {
 	var lanNet *net.IPNet
 	if lip == nil || lip.To4() == nil {
 		res.add("lan.ip", "invalid_ip", "LAN gateway IP is not a valid IPv4 address")
+	} else if why := unusableHost(lip); why != "" {
+		res.add("lan.ip", "unusable_address", "LAN gateway IP is "+why)
 	} else if lan.PrefixLen >= 1 && lan.PrefixLen <= 30 {
 		_, lanNet, _ = net.ParseCIDR(fmt.Sprintf("%s/%d", lan.IP, lan.PrefixLen))
 		if lanNet != nil {
@@ -245,6 +269,23 @@ func ManagementURL(wan WANConfig) string {
 	return ""
 }
 
+// unusableHost says why an address cannot be an interface address or a gateway (audit Phase 8 L14), or "".
+func unusableHost(ip net.IP) string {
+	switch {
+	case ip.IsUnspecified():
+		return "the unspecified address"
+	case ip.IsLoopback():
+		return "a loopback address"
+	case ip.IsMulticast():
+		return "a multicast address"
+	case ip.IsLinkLocalUnicast():
+		return "a link-local address"
+	case ip.Equal(net.IPv4bcast):
+		return "the broadcast address"
+	}
+	return ""
+}
+
 func isNetworkAddr(ip net.IP, n *net.IPNet) bool {
 	return ip.Mask(n.Mask).Equal(ip.To4()) && ip.To4().Equal(n.IP.To4())
 }
@@ -292,7 +333,7 @@ func RenderWANNetplan(w WANConfig) string {
 	b.WriteString("# StayConnect Hotel Appliance — WAN + Management (managed by the\n")
 	b.WriteString("# Hotel Admin network service). Hand edits are overwritten on apply.\n")
 	b.WriteString("network:\n  version: 2\n  ethernets:\n")
-	fmt.Fprintf(&b, "    %s:\n", w.Interface)
+	fmt.Fprintf(&b, "    %s:\n", yamlName(w.Interface))
 	if w.Mode == "dhcp" {
 		b.WriteString("      dhcp4: yes\n      dhcp6: no\n")
 		return b.String()
@@ -318,12 +359,18 @@ func RenderLANNetplan(l LANConfig) string {
 	b.WriteString("# StayConnect Hotel Appliance — LAN bridge (managed by the Hotel Admin\n")
 	b.WriteString("# network service). The IP lives on the bridge, never the member NIC.\n")
 	b.WriteString("network:\n  version: 2\n  ethernets:\n")
-	fmt.Fprintf(&b, "    %s:\n      dhcp4: no\n      dhcp6: no\n", l.PhysicalInterface)
+	fmt.Fprintf(&b, "    %s:\n      dhcp4: no\n      dhcp6: no\n", yamlName(l.PhysicalInterface))
 	b.WriteString("  bridges:\n")
-	fmt.Fprintf(&b, "    %s:\n", l.Bridge)
-	fmt.Fprintf(&b, "      interfaces: [%s]\n", l.PhysicalInterface)
+	fmt.Fprintf(&b, "    %s:\n", yamlName(l.Bridge))
+	fmt.Fprintf(&b, "      interfaces: [%s]\n", yamlName(l.PhysicalInterface))
 	fmt.Fprintf(&b, "      addresses:\n        - %s/%d\n", l.IP, l.PrefixLen)
 	b.WriteString("      dhcp4: no\n      dhcp6: no\n")
 	b.WriteString("      parameters:\n        stp: false\n        forward-delay: 0\n")
 	return b.String()
+}
+
+// yamlName writes an interface name as a double-quoted YAML scalar. Validation already restricts the name to
+// letters, digits, '.', '_' and '-'; the reduction and the quotes make a value that bypassed it still one scalar.
+func yamlName(s string) string {
+	return `"` + netcfg.SafeIface(s) + `"`
 }

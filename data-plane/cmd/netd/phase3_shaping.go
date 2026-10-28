@@ -42,7 +42,8 @@ type shaper interface {
 	AbortSession(ctx context.Context, bridge string, ip net.IP) error
 	// RemoveClassification strips tc classification only; it does not deny access.
 	RemoveClassification(ctx context.Context, bridge string, ip net.IP) error
-	ReRateSession(ctx context.Context, bridge string, ip net.IP, downKbps, upKbps int) error
+	// ReRateSessionIn re-rates with the shape the session was prepared with: empty groupCid is PER_DEVICE.
+	ReRateSessionIn(ctx context.Context, bridge string, ip net.IP, downKbps, upKbps int, groupCid string) error
 	SessionForwarding(ctx context.Context, bridge string, ip net.IP) (bool, error)
 	DeleteSession(ctx context.Context, bridge string, ip net.IP) error
 	// ReadClasses reads what is actually installed; netd's memory misses exactly the dangerous leftovers.
@@ -95,6 +96,10 @@ type phase3Shaping struct {
 	secClock securityClock
 	// unprovenUnknown: the activation journal was unreadable at startup, so an unproven activation is treated as having spent its grace.
 	unprovenUnknown bool
+	// journalUnreadable and classSaveFailed are the two reasons for unprovenUnknown: the first lasts until restart,
+	// the second only until the next successful class-state save (audit Phase 8 L3).
+	journalUnreadable bool
+	classSaveFailed   bool
 	// classes/epochCeiling/bootID are the durable half; without them a restart or reboot re-issues epoch 1 and accounting stalls or misattributes.
 	classes     map[string]managedClass
 	bootID      string
@@ -104,6 +109,8 @@ type phase3Shaping struct {
 	// endedTorn remembers torn-down sessions the plan still lists so their teardown is not repeated each pass.
 	endedTorn   map[string]bool
 	passClasses map[string]map[int]shape.ClassBytes
+	// passGroups records the SHARED group classes already re-rated in this pass, so a group is re-rated once per pass, not once per device.
+	passGroups map[string]bool
 }
 
 type passLeases struct {
@@ -166,6 +173,9 @@ func (p *phase3Shaping) Epochs() map[string]int64 {
 	return out
 }
 
+// phase3PassTimeout bounds one plan pass, which runs detached from the submitting request.
+const phase3PassTimeout = 2 * time.Minute
+
 type errPlanRefused struct{ reason string }
 
 func (e errPlanRefused) Error() string { return "plan refused: " + e.reason }
@@ -180,10 +190,20 @@ func (p *phase3Shaping) submit(ctx context.Context, env shapeplan.Envelope, now 
 		p.noteRejection("phase3_dark")
 		return shapingPlanResponse{Accepted: false, Reason: "phase3_dark"}, errPlanRefused{"phase3_dark"}
 	}
+	if env.ExpiresAt.After(now.Add(maxPlanValidity)) {
+		p.noteRejection("plan_validity_too_long")
+		return shapingPlanResponse{Accepted: false, Reason: "plan_validity_too_long"}, errPlanRefused{"plan_validity_too_long"}
+	}
 	last, hasLast := p.lastAccepted, p.hasAccepted
+	var storeProblem string
 	if !hasLast && p.store != nil {
 		// After a restart the in-memory history is empty but the durable one is not.
-		last, hasLast = p.store.load()
+		var lerr error
+		last, hasLast, lerr = p.store.load()
+		if lerr != nil {
+			// The replay guard is unknown; acceptance is still bounded by maxPlanValidity, and the pass is reported degraded.
+			storeProblem = "the stored plan generation could not be read (" + lerr.Error() + "); replay protection rests on the plan validity cap until a new record is saved"
+		}
 	}
 	scope := shapeplan.Scope{TenantID: p.mode.TenantID, SiteID: p.mode.SiteID,
 		ApplianceID: p.mode.ApplianceID, AssignGen: p.mode.AssignGen}
@@ -204,8 +224,16 @@ func (p *phase3Shaping) submit(ctx context.Context, env shapeplan.Envelope, now 
 	// Admission advances even on partial application so a replay of an older generation cannot reinstate revoked access.
 	// Resubmitting the same generation and hash is allowed so the producer can retry until the kernel converges.
 	p.lastAccepted, p.hasAccepted = accepted, true
+	if storeProblem != "" {
+		res.Degraded = true
+		res.Problems = append(res.Problems, storeProblem)
+	}
 	if p.store != nil {
-		p.store.save(accepted)
+		if err := p.store.save(accepted); err != nil {
+			res.Degraded = true
+			res.Problems = append(res.Problems, "the accepted plan generation was not saved durably: "+err.Error()+
+				"; the plan is applied but not reported converged")
+		}
 	}
 	// Convergence is recorded only when nothing failed.
 	if !res.Degraded {
@@ -233,8 +261,8 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 		p.owner.src = &passLeases{src: saved.src}
 		defer func() { p.owner = saved }()
 	}
-	p.passClasses = nil
-	defer func() { p.passClasses = nil }()
+	p.passClasses, p.passGroups = nil, nil
+	defer func() { p.passClasses, p.passGroups = nil, nil }()
 	p.pruneLeaseMemory(now)
 
 	desired := map[string]map[int]shapeplan.Session{}
@@ -245,7 +273,24 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 			bridges[b] = true
 		}
 	}
+	// Two bridges whose upload devices share one IFB name (it is truncated to 15 characters) would meter and shape
+	// each other's guests; neither is shaped, so both fail closed (audit Phase 6 L12).
+	ifbOwner := map[string]string{}
+	ifbShared := map[string]bool{}
+	for _, b := range sortedKeys(bridges) {
+		ifb := shape.IFBName(b)
+		if other, taken := ifbOwner[ifb]; taken {
+			ifbShared[b], ifbShared[other] = true, true
+			res.Failed++
+			res.Problems = append(res.Problems, "bridges "+other+" and "+b+" share the upload device name "+ifb+"; neither is shaped")
+			continue
+		}
+		ifbOwner[ifb] = b
+	}
 	var tear []shapeplan.Session
+	// clashed remembers a class two sessions claimed: removing the first claimant from desired is not enough, or a
+	// third session with the same class would find no clash and be installed (audit Phase 8 L6).
+	clashed := map[string]bool{}
 
 	for _, s := range env.Sessions {
 		if s.Bridge == "" {
@@ -261,6 +306,11 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 		}
 		if !s.Entitled {
 			tear = append(tear, s)
+			continue
+		}
+		if ifbShared[s.Bridge] {
+			res.Failed++
+			res.Problems = append(res.Problems, "session "+s.SessionID+": bridge "+s.Bridge+" shares its upload device; not shaped")
 			continue
 		}
 		ip := net.ParseIP(s.IP)
@@ -279,7 +329,14 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 		if desired[s.Bridge] == nil {
 			desired[s.Bridge] = map[int]shapeplan.Session{}
 		}
+		if clashed[minorKey(s.Bridge, minor)] {
+			res.Failed++
+			res.Problems = append(res.Problems,
+				fmt.Sprintf("class conflict on %s: session %s also maps to contested minor %d", s.Bridge, s.SessionID, minor))
+			continue
+		}
 		if other, clash := desired[s.Bridge][minor]; clash && other.SessionID != s.SessionID {
+			clashed[minorKey(s.Bridge, minor)] = true
 			// Two live sessions claiming one class is a producer defect; installing either would misattribute traffic, so neither is installed.
 			res.Failed++
 			res.Problems = append(res.Problems,
@@ -362,7 +419,9 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 				if !ok {
 					continue
 				}
-				if _, want := desired[el.Bridge][minor]; want {
+				// Match the address, not only its class number: a stale element for another address with the same
+				// low 12 bits is not wanted (audit Phase 8 L7).
+				if want, ok := desired[el.Bridge][minor]; ok && net.ParseIP(want.IP).Equal(el.IP) {
 					continue
 				}
 				if err := p.denyAccess(ctx, el.Bridge, el.IP); err != nil {
@@ -378,6 +437,9 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 	}
 
 	// 2b. REMOVE STRAY CLASSES — everything installed on a managed bridge that the plan does not claim.
+	// The bridge read is reused by step 3's per-pass cache (perf audit D4-L1): the sweep deletes only minors the plan
+	// does not want, and step 3 asks only about minors it does want, so the read stays exact for every question asked.
+	strayReads := map[string]map[int]shape.ClassBytes{}
 	for _, bridge := range sortedKeys(bridges) {
 		installed, err := p.shp.ReadClasses(ctx, bridge)
 		if err != nil {
@@ -386,6 +448,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 			res.Problems = append(res.Problems, "stray scan failed on "+bridge+": "+err.Error())
 			continue
 		}
+		strayReads[bridge] = installed
 		for _, minor := range sortedInts(installed) {
 			if minor < shape.GuestMinorBase || minor > shape.GuestMinorMax {
 				continue
@@ -421,7 +484,8 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 	}
 
 	// 3. Shape what must be forwarded, staged and fail-closed (see provisionSession); tc class inventories are read once per device per pass.
-	p.passClasses = map[string]map[int]shape.ClassBytes{}
+	p.passClasses = strayReads
+	p.passGroups = map[string]bool{}
 	for _, bridge := range sortedKeys(bridges) {
 		byMinor := desired[bridge]
 		if len(byMinor) == 0 {
@@ -443,7 +507,11 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 			res.Failed++
 			res.Problems = append(res.Problems, "durable class state not written: "+err.Error())
 			// The activation clock is in that file; if it cannot be written, an unprovable activation gets no fresh grace after restart.
-			p.unprovenUnknown = true
+			p.unprovenUnknown, p.classSaveFailed = true, true
+		} else if p.classSaveFailed {
+			// The clock is durable again; one failed save must not deny every new guest until a restart.
+			p.classSaveFailed = false
+			p.unprovenUnknown = p.journalUnreadable
 		}
 	}
 
@@ -507,7 +575,11 @@ func (s *server) phase3ShapingHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := s.phase3.submit(r.Context(), env, time.Now())
+	// The pass outlives the request (audit Phase 8 L9): acctd's client gives up after 10 s, and a cancelled context
+	// would stop a revocation half way, including the deny calls that fail closed. Its own deadline bounds it instead.
+	passCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), phase3PassTimeout)
+	defer cancel()
+	res, err := s.phase3.submit(passCtx, env, time.Now())
 	if err != nil {
 		var refused errPlanRefused
 		code := http.StatusConflict
@@ -534,17 +606,6 @@ const (
 )
 
 // ACTIVE_FRESH_CONVERGED requires both halves verified; a session metered but not authorized (or vice versa) leaves res.Failed non-zero.
-
-// enforcementStage is per-session progress, so an operator can tell which half has not converged.
-const (
-	stageRequested    = "REQUESTED"
-	stageTCPrepared   = "TC_PREPARED"
-	stageOriginPinned = "ORIGIN_PINNED"
-	stageTCActive     = "TC_ACTIVE"
-	stageAuthorized   = "NFT_AUTHORIZED"
-	stageEnforced     = "ENFORCED"
-	stageDeniedFailed = "DENIED_FAILED"
-)
 
 func (p *phase3Shaping) shapingState(now time.Time) (string, bool) {
 	if !p.mode.Active {
@@ -642,7 +703,11 @@ func (s *server) phase3EpochsHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]any{"error": "forbidden"})
 		return
 	}
-	if !s.phase3.mode.Active {
+	// The scope watcher replaces mode under the lock, so it is read under the lock (audit Phase 8 L8).
+	s.phase3.mu.Lock()
+	active := s.phase3.mode.Active
+	s.phase3.mu.Unlock()
+	if !active {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "phase3_dark"})
 		return
 	}

@@ -83,7 +83,7 @@ func (a *applier) bootstrapKeaIfStopped(ctx context.Context, revID string, dhcp4
 	if err := os.MkdirAll(filepath.Dir(a.keaConfPath()), 0o755); err != nil {
 		return fmt.Errorf("kea bootstrap: %w", err)
 	}
-	if err := os.WriteFile(a.keaConfPath(), dhcp4Full, 0o644); err != nil {
+	if err := writeFileAtomic(a.keaConfPath(), dhcp4Full, 0o644); err != nil {
 		return fmt.Errorf("kea bootstrap: write config: %w", err)
 	}
 	if err := a.run(ctx, "systemctl", "enable", "kea-dhcp4-server"); err != nil {
@@ -143,7 +143,7 @@ func (a *applier) restoreKeaBootstrap(ctx context.Context) error {
 	}
 
 	if snap.HadConfig {
-		step("restore previous config", os.WriteFile(a.keaConfPath(), snap.PrevConfig, 0o644))
+		step("restore previous config", writeFileAtomic(a.keaConfPath(), snap.PrevConfig, 0o644))
 	} else if err := os.Remove(a.keaConfPath()); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		step("remove bootstrap config", err)
 	}
@@ -170,7 +170,7 @@ func (a *applier) writeKeaSnapshot(s keaBootstrapState) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(a.keaSnapshotPath(), raw, 0o600)
+	return writeFileAtomic(a.keaSnapshotPath(), raw, 0o600)
 }
 
 func (a *applier) readKeaSnapshot() (keaBootstrapState, bool) {
@@ -210,7 +210,7 @@ func (a *applier) unitIsActive(ctx context.Context, unit string) bool {
 
 // waitBridgesRunning waits, bounded, for each bridge to be IFF_RUNNING. Timeout is non-fatal on purpose: a
 // bridge with an unplugged NIC never comes up, and the network may be configured before the cable is in;
-// keaListeningFor catches a silently unbound bridge.
+// gatewaysNotListening catches a silently unbound bridge.
 func (a *applier) waitBridgesRunning(ctx context.Context, bridges []string) {
 	if a.dryRun || len(bridges) == 0 {
 		return
@@ -268,12 +268,6 @@ func (a *applier) gatewaysNotListening(managed []netcfg.GuestNetwork) []string {
 	return missing
 }
 
-// keaListeningFor reports whether something holds udp/67 on the gateway (or wildcard). It reads /proc/net/udp
-// because Kea's own status cannot tell the difference.
-func keaListeningFor(gatewayIP string) bool {
-	return keaListeningIn(readProcNetUDP(), gatewayIP)
-}
-
 func readProcNetUDP() string {
 	raw, err := os.ReadFile("/proc/net/udp")
 	if err != nil {
@@ -282,6 +276,8 @@ func readProcNetUDP() string {
 	return string(raw)
 }
 
+// keaListeningIn reports whether something holds udp/67 on the gateway (or wildcard) in a /proc/net/udp read,
+// because Kea's own status cannot tell the difference.
 func keaListeningIn(procNetUDP, gatewayIP string) bool {
 	want := hexLE(gatewayIP)
 	if want == "" {

@@ -25,9 +25,6 @@ const (
 
 	// phase3ActivationGrace bounds how long a provisional lease is re-issued; past it the session fails closed.
 	phase3ActivationGrace = 30 * time.Second
-
-	// unprovenRecordHorizon is far longer than the largest backoff, so a record is never pruned mid-countdown.
-	unprovenRecordHorizon = 24 * time.Hour
 )
 
 // leaseFor returns the lease clamped by the hard access boundary; false means no lease may be issued, and

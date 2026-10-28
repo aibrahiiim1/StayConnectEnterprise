@@ -20,6 +20,8 @@ import (
 // never touching management/WAN/legacy interfaces), netplan written only for reboot persistence, nftables + Kea + Unbound rendered
 // from the DB and swapped atomically; a watchdog rolls back if not confirmed within confirmWindow.
 type applier struct {
+	// nftWatch records consecutive failures of the periodic firewall re-assertion (audit Phase 8 L13).
+	nftWatch      nftWatchState
 	st            revisionStore
 	kea           *keaClient
 	topo          netcfg.Topology
@@ -204,11 +206,11 @@ func (a *applier) Validate(ctx context.Context, summary, actor string) (*applyRe
 	if err != nil {
 		return nil, err
 	}
-	_ = a.st.SetRevisionValidation(ctx, id, res)
+	logStoreErr("SetRevisionValidation", id, a.st.SetRevisionValidation(ctx, id, res))
 	a.st.Event(ctx, id, "validate", res.OK, map[string]any{"issues": len(res.Issues)})
 	out := &applyResult{RevisionID: id, Seq: seq, State: "validated", Validation: res}
 	if !res.OK {
-		_ = a.st.SetRevisionState(ctx, id, "failed")
+		logStoreErr("SetRevisionState", id, a.st.SetRevisionState(ctx, id, "failed"))
 		out.State = "failed"
 	}
 	return out, nil
@@ -256,10 +258,10 @@ func (a *applier) Apply(ctx context.Context, summary, actor string) (*applyResul
 	if err != nil {
 		return nil, err
 	}
-	_ = a.st.SetRevisionValidation(ctx, id, res)
+	logStoreErr("SetRevisionValidation", id, a.st.SetRevisionValidation(ctx, id, res))
 	out := &applyResult{RevisionID: id, Seq: seq, Validation: res}
 	if !res.OK {
-		_ = a.st.SetRevisionState(ctx, id, "failed")
+		logStoreErr("SetRevisionState", id, a.st.SetRevisionState(ctx, id, "failed"))
 		out.State = "failed"
 		out.Message = "validation failed"
 		a.st.Event(ctx, id, "validate", false, map[string]any{"issues": len(res.Issues)})
@@ -300,7 +302,7 @@ func (a *applier) Apply(ctx context.Context, summary, actor string) (*applyResul
 		// returning; otherwise the next firewall tick would install a configuration the database refused to record.
 		a.restoreInForce(before)
 		a.clearApplyInflight()
-		_ = a.st.MarkFailed(ctx, id, "could not take the in-flight slot: "+err.Error())
+		logStoreErr("MarkFailed", id, a.st.MarkFailed(ctx, id, "could not take the in-flight slot: "+err.Error()))
 		return nil, err
 	}
 	a.st.Event(ctx, id, "apply", true, map[string]any{"started": true})
@@ -445,7 +447,7 @@ func (a *applier) validateWithPortal(ctx context.Context, intent []netcfg.GuestN
 }
 
 func (a *applier) fail(ctx context.Context, id string, out *applyResult, reason string) {
-	_ = a.st.MarkFailed(ctx, id, reason)
+	logStoreErr("MarkFailed", id, a.st.MarkFailed(ctx, id, reason))
 	a.st.Event(ctx, id, "generate", false, map[string]any{"error": reason})
 	out.State = "failed"
 	out.Message = reason
@@ -590,4 +592,12 @@ func rollbackSuffix(incomplete []string) string {
 		return ""
 	}
 	return " -- ROLLBACK INCOMPLETE, the appliance may not be on its confirmed configuration: " + strings.Join(incomplete, "; ")
+}
+
+// logStoreErr reports a revision-record write that failed: the revision row then disagrees with what netd did, which
+// an operator must be able to see (audit Phase 8 CC3).
+func logStoreErr(op, revID string, err error) {
+	if err != nil {
+		slog.Error("netd: revision record not updated", "op", op, "revision", revID, "err", err)
+	}
 }

@@ -58,23 +58,26 @@ func (s *server) endFlows(ctx context.Context, ip net.IP, bridge string, flows c
 	out := flowsEndResp{IP: ip.String()}
 	var problems []error
 	if p := s.phase3; p != nil && p.gate != nil {
-		p.mu.Lock()
-		els, err := p.gate.List(ctx)
-		if err != nil {
-			problems = append(problems, fmt.Errorf("phase-3 authorization set unreadable: %w", err))
-		}
-		for _, el := range els {
-			if el.IP == nil || !el.IP.Equal(ip) || (bridge != "" && el.Bridge != bridge) {
-				continue
+		// A closure so the lock is released by defer: a panic in a gate call must not leave enforcement locked (audit Phase 8 L8).
+		func() {
+			p.mu.Lock()
+			defer p.mu.Unlock()
+			els, err := p.gate.List(ctx)
+			if err != nil {
+				problems = append(problems, fmt.Errorf("phase-3 authorization set unreadable: %w", err))
 			}
-			out.Phase3Managed = true
-			if derr := p.denyAccess(ctx, el.Bridge, el.IP); derr != nil {
-				problems = append(problems, fmt.Errorf("phase-3 authorization on %s not proven removed: %w", el.Bridge, derr))
-				continue
+			for _, el := range els {
+				if el.IP == nil || !el.IP.Equal(ip) || (bridge != "" && el.Bridge != bridge) {
+					continue
+				}
+				out.Phase3Managed = true
+				if derr := p.denyAccess(ctx, el.Bridge, el.IP); derr != nil {
+					problems = append(problems, fmt.Errorf("phase-3 authorization on %s not proven removed: %w", el.Bridge, derr))
+					continue
+				}
+				out.Phase3Revoked++
 			}
-			out.Phase3Revoked++
-		}
-		p.mu.Unlock()
+		}()
 	}
 	// Flows end whatever the sets said; the legacy set is the caller's to revoke.
 	n, err := flows.FlushAddrs(ctx, []net.IP{ip})

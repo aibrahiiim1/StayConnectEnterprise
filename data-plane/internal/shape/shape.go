@@ -271,8 +271,8 @@ func (c *Client) AbortSession(ctx context.Context, bridge string, ip net.IP) err
 	// Filters first, so forwarding stops even if a class delete later fails.
 	_ = c.removeFilter(ctx, bridge, ip)
 	_ = c.removeFilter(ctx, IFBName(bridge), ip)
-	_ = c.removeClassAndFilter(ctx, bridge, cidClass(ip), ip)
-	_ = c.removeClassAndFilter(ctx, IFBName(bridge), cidClass(ip), ip)
+	_ = c.removeClassAndFilter(ctx, bridge, ClassidForIP(ip), ip)
+	_ = c.removeClassAndFilter(ctx, IFBName(bridge), ClassidForIP(ip), ip)
 	minor, ok := MinorForIP(ip)
 	if !ok {
 		return nil
@@ -302,8 +302,18 @@ func (c *Client) RemoveClassification(ctx context.Context, bridge string, ip net
 }
 
 // ReRateSession uses `tc class change`, never delete+add, so byte counters are preserved and a re-rate does
-// not look like a counter reset. It fails if the class is absent.
+// not look like a counter reset. It fails if the class is absent. It is the PER_DEVICE re-rate; a SHARED session
+// is re-rated with ReRateSessionIn.
 func (c *Client) ReRateSession(ctx context.Context, bridge string, ip net.IP, downKbps, upKbps int) error {
+	return c.ReRateSessionIn(ctx, bridge, ip, downKbps, upKbps, "")
+}
+
+// ReRateSessionIn re-rates a session with the same shape PrepareSessionIn gave it: empty groupCid is PER_DEVICE
+// (rate == ceil == the plan's rate, off the root); a SHARED session keeps its group parent, its small floor as rate
+// and the group's rate as ceiling. Re-rating a SHARED session to rate == ceil == the whole allowance would guarantee
+// every device the full allowance, since an HTB class within its own rate never borrows from its parent
+// (audit Phase 8 M4 / Phase 6 M4).
+func (c *Client) ReRateSessionIn(ctx context.Context, bridge string, ip net.IP, downKbps, upKbps int, groupCid string) error {
 	cid := ClassidForIP(ip)
 	if cid == "" {
 		return fmt.Errorf("ipv4 required, got %s", ip)
@@ -316,16 +326,19 @@ func (c *Client) ReRateSession(ctx context.Context, bridge string, ip net.IP, do
 	if upRate <= 0 {
 		upRate = unlimitedKbps
 	}
-	if err := c.changeClass(ctx, bridge, cid, downRate); err != nil {
+	parent, downFloor, upFloor := RootParent, downRate, upRate
+	if groupCid != "" {
+		parent = groupCid
+		downFloor, upFloor = sharedFloorKbps(downRate), sharedFloorKbps(upRate)
+	}
+	if err := c.changeClassUnder(ctx, bridge, parent, cid, downFloor, downRate); err != nil {
 		return fmt.Errorf("re-rate download on %s: %w", bridge, err)
 	}
-	if err := c.changeClass(ctx, IFBName(bridge), cid, upRate); err != nil {
+	if err := c.changeClassUnder(ctx, IFBName(bridge), parent, cid, upFloor, upRate); err != nil {
 		return fmt.Errorf("re-rate upload on %s: %w", IFBName(bridge), err)
 	}
 	return nil
 }
-
-func cidClass(ip net.IP) string { return ClassidForIP(ip) }
 
 // SessionForwarding reports whether the forwarding filter is installed in both directions (post-activation check).
 func (c *Client) SessionForwarding(ctx context.Context, bridge string, ip net.IP) (bool, error) {
@@ -447,11 +460,10 @@ func sharedFloorKbps(groupKbps int) int {
 	return floor
 }
 
-// changeClass re-rates in place; `class change` preserves byte counters, delete+add would reset them.
-func (c *Client) changeClass(ctx context.Context, ifc, cid string, kbps int) error {
-	rate := fmt.Sprintf("%dkbit", kbps)
-	return c.run(ctx, "class", "change", "dev", ifc, "parent", RootParent,
-		"classid", cid, "htb", "rate", rate, "ceil", rate, "burst", "32k")
+// changeClassUnder re-rates in place; `class change` preserves byte counters, delete+add would reset them.
+func (c *Client) changeClassUnder(ctx context.Context, ifc, parent, cid string, rateKbps, ceilKbps int) error {
+	return c.run(ctx, "class", "change", "dev", ifc, "parent", parent,
+		"classid", cid, "htb", "rate", fmt.Sprintf("%dkbit", rateKbps), "ceil", fmt.Sprintf("%dkbit", ceilKbps), "burst", "32k")
 }
 
 // addFilter installs the filter that makes a prepared class start carrying the guest's packets.

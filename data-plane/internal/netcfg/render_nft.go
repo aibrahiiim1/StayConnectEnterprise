@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net"
+	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -98,6 +100,11 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 	// exempt; the counters make it observable.
 	b.WriteString("\tset dns_preauth_rl {\n\t\ttype ipv4_addr\n\t\tsize 65535\n\t\tflags dynamic,timeout\n\t\ttimeout 1m\n\t}\n\n")
 	b.WriteString("\tcounter dns_preauth_limited {\n\t\tcomment \"pre-auth DNS packets refused by the per-device rate limit\"\n\t}\n\n")
+	// Per-source cap on open connections to the portal listeners (audit Phase 5 M1 step 3, Phase 8 M1): one device
+	// cannot exhaust portald's connections. Generous on purpose (PortalConnLimitPerSource), so no real device or
+	// captive-check burst meets it; only new connections are counted against it, and refusals are counted.
+	b.WriteString("\tset portal_conn_per_src {\n\t\ttype ipv4_addr\n\t\tsize 65535\n\t\tflags dynamic\n\t}\n\n")
+	b.WriteString("\tcounter portal_conn_limited {\n\t\tcomment \"new portal connections refused by the per-device connection cap\"\n\t}\n\n")
 	b.WriteString("\tcounter guest_ipv6_dropped {\n\t\tcomment \"IPv6 to or from a client network, refused\"\n\t}\n\n")
 	b.WriteString("\tset guest_interfaces {\n\t\ttype ifname\n")
 	if len(enabled) > 0 {
@@ -122,6 +129,10 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 	// loopback was accepted above.
 	if vip := renderPortalVIP(topo); vip != "" {
 		fmt.Fprintf(&b, "\t\tiifname != @guest_interfaces ip daddr %s drop comment \"portal address: guest networks only\"\n", vip)
+	}
+	if ports := portalPorts(topo); ports != "" {
+		fmt.Fprintf(&b, "\t\tiifname @guest_interfaces tcp dport { %s } ct state new add @portal_conn_per_src { ip saddr ct count over %d } counter name \"portal_conn_limited\" drop comment \"portal: per-device connection cap\"\n",
+			ports, PortalConnLimitPerSource)
 	}
 	fmt.Fprintf(&b, "\t\tiifname \"%s\" tcp dport 22 accept\n", topo.MgmtInterface)
 	// Admin UI (Caddy TLS). When MgmtAddr is set the accept is pinned to it, so the admin UI is refused on the WAN IP
@@ -336,4 +347,33 @@ func baselinePairs() string {
 		parts = append(parts, fmt.Sprintf("%s . %d", ip, BaselineResolverPort))
 	}
 	return strings.Join(parts, ", ")
+}
+
+// PortalConnLimitPerSource is the most connections one guest address may hold open to the portal listeners at once.
+// A browser opens about six per host and an OS captive check a handful, so 256 is far above any real device; it
+// exists to stop one client exhausting portald (audit Phase 5 M1 step 3). A protection constant, not a hotel setting.
+const PortalConnLimitPerSource = 256
+
+// portalPorts lists every port the portal listens on as guests see it at the input hook (per-network gateway ports and
+// the portal address ports), sorted and de-duplicated, or "" when there is none.
+func portalPorts(topo Topology) string {
+	seen := map[int]bool{}
+	var ports []int
+	add := func(p int) {
+		if p > 0 && !seen[p] {
+			seen[p] = true
+			ports = append(ports, p)
+		}
+	}
+	add(portalHTTPPort(topo))
+	add(topo.PortalTLSPort)
+	if renderPortalVIP(topo) != "" {
+		add(PortalAddressTLSPort)
+	}
+	sort.Ints(ports)
+	out := make([]string, len(ports))
+	for i, p := range ports {
+		out[i] = strconv.Itoa(p)
+	}
+	return strings.Join(out, ", ")
 }

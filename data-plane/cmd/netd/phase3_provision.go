@@ -132,7 +132,7 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 			}
 		}
 	}
-	if q := p.quarantined[key]; q != nil && q.BackoffUntilBootMs != 0 {
+	if q := p.quarantined[key]; q != nil && q.BackoffUntilBootMs != 0 && !q.freshAttempt {
 		hold := nowBoot < q.BackoffUntilBootMs
 		if !hold && p.enforcement != nil {
 			if _, err := p.enforcement.Confirm(ctx, s.SessionID); err != nil {
@@ -156,7 +156,7 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 				itoa(int((q.BackoffUntilBootMs-nowBoot)/1000))+"s")
 			return
 		}
-		q.BackoffUntilBootMs = 0 // the backoff has elapsed and durable state is readable: one fresh attempt
+		q.freshAttempt = true // the backoff has elapsed and durable state is readable: one fresh attempt
 	}
 
 	// Re-rate of an already-active class: a `tc class change` in place (no new generation, no new origin,
@@ -165,7 +165,14 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 		if _, held := p.classes[key]; held {
 			present, err := p.classPresentCached(ctx, bridge, minor)
 			if err == nil && present {
-				if rerr := p.shp.ReRateSession(ctx, bridge, ip, s.DownKbps, s.UpKbps); rerr != nil {
+				groupCid, gproblem := p.reRateGroup(ctx, bridge, s)
+				if gproblem != "" {
+					// A failed group re-rate leaves the last authorised rates in force.
+					res.Failed++
+					res.Problems = append(res.Problems, "re-rate "+s.SessionID+": "+gproblem)
+					return
+				}
+				if rerr := p.shp.ReRateSessionIn(ctx, bridge, ip, s.DownKbps, s.UpKbps, groupCid); rerr != nil {
 					// A failed re-rate leaves the last authorised rate in force.
 					res.Failed++
 					res.Problems = append(res.Problems, "re-rate "+s.SessionID+": "+rerr.Error())
@@ -314,6 +321,33 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 		p.failClosed(ctx, bridge, ip, res, "session "+s.SessionID+": activation never proven")
 		p.endSeries(bridge, s.SessionID)
 	}
+}
+
+// reRateGroup re-rates a SHARED session's group class to the plan's allowance, once per pass, and returns the group the
+// session is re-rated under ("" for PER_DEVICE). A SHARED session keeps its floor under the group; the group alone
+// carries the allowance (audit Phase 8 M4 / Phase 6 M4).
+func (p *phase3Shaping) reRateGroup(ctx context.Context, bridge string, s shapeplan.Session) (string, string) {
+	if s.SpeedAllocation != speedAllocationShared {
+		return "", ""
+	}
+	groupCid := shape.GroupClassid(s.EntitlementID)
+	if groupCid == "" {
+		return "", "SHARED allocation with no entitlement to group by"
+	}
+	k := bridge + "|" + groupCid
+	if p.passGroups != nil && p.passGroups[k] {
+		return groupCid, ""
+	}
+	if err := p.shp.EnsureGroupClass(ctx, bridge, groupCid, s.DownKbps); err != nil {
+		return "", "shared group (download): " + err.Error()
+	}
+	if err := p.shp.EnsureGroupClass(ctx, shape.IFBName(bridge), groupCid, s.UpKbps); err != nil {
+		return "", "shared group (upload): " + err.Error()
+	}
+	if p.passGroups != nil {
+		p.passGroups[k] = true
+	}
+	return groupCid, ""
 }
 
 // provisionalOrLess caps the lease at the provisional one without overshooting the hard boundary.

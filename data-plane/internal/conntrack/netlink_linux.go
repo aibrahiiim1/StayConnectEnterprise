@@ -35,35 +35,60 @@ func netlinkFlush(ctx context.Context, ips []net.IP) (int, error) {
 
 	kernel := &syscall.SockaddrNetlink{Family: syscall.AF_NETLINK}
 	seq := uint32(time.Now().UnixNano())
-	if err := syscall.Sendto(fd, buildDumpRequest(seq), 0, kernel); err != nil {
-		return 0, fmt.Errorf("conntrack dump request: %w", err)
-	}
 	buf := make([]byte, 1<<16)
-	var all []entry
-	for {
-		if ctx.Err() != nil {
-			return 0, ctx.Err()
+	// Only the entries naming one of ips are kept while reading, not the whole table (audit Phase 8 L10). A dump the
+	// kernel marks interrupted (NLM_F_DUMP_INTR) may have missed entries, so it is repeated, keeping what each pass
+	// found, up to dumpAttempts; a dump still interrupted after that is reported, after deleting what was found.
+	const dumpAttempts = 3
+	var matched []entry
+	seen := map[string]bool{}
+	interrupted := true
+	for attempt := 0; attempt < dumpAttempts && interrupted; attempt++ {
+		interrupted = false
+		seq++
+		if err := syscall.Sendto(fd, buildDumpRequest(seq), 0, kernel); err != nil {
+			return 0, fmt.Errorf("conntrack dump request: %w", err)
 		}
-		n, _, err := syscall.Recvfrom(fd, buf, 0)
-		if err != nil {
-			if errors.Is(err, syscall.EINTR) {
-				continue
+		for {
+			if ctx.Err() != nil {
+				return 0, ctx.Err()
 			}
-			return 0, fmt.Errorf("conntrack dump: %w", err)
-		}
-		r := parseMessages(buf[:n])
-		if r.err != nil {
-			return 0, fmt.Errorf("conntrack dump: %w", r.err)
-		}
-		all = append(all, r.entries...)
-		if r.done {
-			break
+			n, _, err := syscall.Recvfrom(fd, buf, 0)
+			if err != nil {
+				if errors.Is(err, syscall.EINTR) {
+					continue
+				}
+				return 0, fmt.Errorf("conntrack dump: %w", err)
+			}
+			r := parseMessages(buf[:n])
+			if r.err != nil {
+				return 0, fmt.Errorf("conntrack dump: %w", r.err)
+			}
+			interrupted = interrupted || r.interrupted
+			for _, e := range selectEntries(r.entries, ips) {
+				if k := string(e.rawOrig) + "|" + string(e.rawZone); !seen[k] {
+					seen[k] = true
+					matched = append(matched, e)
+				}
+			}
+			if r.done {
+				break
+			}
 		}
 	}
 
 	deleted := 0
 	var firstErr error
-	for _, e := range selectEntries(all, ips) {
+	if interrupted {
+		firstErr = fmt.Errorf("conntrack dump: still interrupted by concurrent changes after %d attempts; some flows may remain", dumpAttempts)
+	}
+	for _, e := range matched {
+		if err := ctx.Err(); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			break
+		}
 		seq++
 		if err := syscall.Sendto(fd, buildDeleteRequest(e, seq), 0, kernel); err != nil {
 			if firstErr == nil {
