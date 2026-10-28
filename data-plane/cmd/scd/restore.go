@@ -151,7 +151,7 @@ func maintenanceOn(reason, backup string) error {
 		return err
 	}
 	b, _ := json.Marshal(maintenanceState{Active: true, Reason: reason, Since: time.Now().UTC(), Backup: backup})
-	return os.WriteFile(maintenanceFile, b, 0o644)
+	return writeFileSync(maintenanceFile, b, 0o644)
 }
 
 func maintenanceOff() {

@@ -272,7 +272,8 @@ func (s *server) applyActivationPackage(r *http.Request, pkg *activation.Package
 			undoAssignment()
 			return err
 		}
-		if err := os.WriteFile(p, []byte(pkg.CABundlePEM), 0o644); err != nil {
+		// Atomic and synced: a truncated bundle would break mutual TLS to Central.
+		if err := writeFileSync(p, []byte(pkg.CABundlePEM), 0o644); err != nil {
 			undoAssignment()
 			return errors.New("could not install the trust bundle")
 		}
