@@ -31,7 +31,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 OUT="${1:-$ROOT/dist/central}"
-GO_IMAGE="${GO_IMAGE:-golang:1.25.12}"
+GO_IMAGE="${GO_IMAGE:-golang:1.25.12@sha256:dbeddb5e728ea4b5ba7920574413e311025ffa42d196793857e4d160e8dfe60d}"  # tag and digest (audit P0-3)
 NODE_IMAGE="${NODE_IMAGE:-node:20.18.0-bookworm-slim}"
 GOARCH_TARGET="${GOARCH_TARGET:-amd64}"
 

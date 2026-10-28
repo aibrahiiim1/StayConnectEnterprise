@@ -43,12 +43,22 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="${1:-$ROOT/../sc-appliance-build}"
-GO_IMAGE="${GO_IMAGE:-golang:1.25.12}"
+# Pinned by digest as well as tag (audit P0-3 / X1): a re-pushed tag cannot change the compiler silently. The digest
+# is the multi-arch index Docker Hub lists for golang:1.25.12; change both together.
+GO_IMAGE="${GO_IMAGE:-golang:1.25.12@sha256:dbeddb5e728ea4b5ba7920574413e311025ffa42d196793857e4d160e8dfe60d}"
 # keybootstrap and svc-run are part of every release: the provisioner runs keybootstrap before scd may start, and
 # the Caddy, Admin Console, Kea and Unbound units run svc-run as their ExecStartPre. They were missing from this
 # default, so a release built with it could not be provisioned.
 SERVICES="${SERVICES:-scd edged pmsd portald netd acctd keybootstrap svc-run}"
 BUILD_TAGS="${BUILD_TAGS:-stayconnect_production}"
+# A shipped binary is never a development build (audit P3 L12): devlicense compiles in permissive unlicensed mode.
+case ",${BUILD_TAGS// /,}," in
+  *,devlicense,*) echo "REFUSED: BUILD_TAGS contains devlicense; an appliance release is never a development build" >&2; exit 2 ;;
+esac
+case ",${BUILD_TAGS// /,}," in
+  *,stayconnect_production,*) ;;
+  *) echo "REFUSED: BUILD_TAGS must include stayconnect_production" >&2; exit 2 ;;
+esac
 
 cd "$ROOT"
 
