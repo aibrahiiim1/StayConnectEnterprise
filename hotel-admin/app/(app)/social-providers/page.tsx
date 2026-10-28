@@ -5,7 +5,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { api, ListResp, Whoami, SocialOAuthProvider } from "@/lib/api";
+import { api, ListResp, SocialOAuthProvider } from "@/lib/api";
 import { PROVIDER_CONSOLE_HELP, PROVIDER_LABELS, PortalCallbackURL, keepAvailable, offeredWords } from "@/lib/portal-https";
 import { DEFAULT_SCOPES, extraScopes } from "@/lib/social-scopes";
 import { PageShell, PageHeader } from "@/components/ui/page";
@@ -25,6 +25,7 @@ import { Plus, KeyRound } from "lucide-react";
 import { canWrite } from "@/lib/roles";
 import { useToast } from "@/components/ui/toast";
 import { formatRelative } from "@/lib/utils";
+import { useOperatorRoles } from "@/lib/whoami-context";
 
 const PROVIDERS = ["google", "apple", "facebook", "microsoft"] as const;
 
@@ -70,7 +71,7 @@ export default function SocialProvidersPage() {
   const [rows, setRows] = useState<SocialOAuthProvider[] | null>(null);
   const [callbacks, setCallbacks] = useState<PortalCallbackURL[]>([]);
   const [httpsActive, setHttpsActive] = useState<boolean | null>(null);
-  const [roles, setRoles] = useState<string[] | null>(null);
+  const roles = useOperatorRoles();
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [formErr, setFormErr] = useState<unknown>(null);
@@ -93,7 +94,6 @@ export default function SocialProvidersPage() {
   }
   useEffect(() => {
     load();
-    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
   }, []);
 
   function openNew() {

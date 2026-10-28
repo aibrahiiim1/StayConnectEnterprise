@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { api, ListResp, Whoami } from "@/lib/api";
+import { api, ListResp } from "@/lib/api";
 import type { PortalHTTPSDoc } from "@/lib/portal-https";
 import { typedSignInOn } from "@/lib/sign-in-methods";
 import { canRead, canWrite } from "@/lib/roles";
@@ -30,6 +30,7 @@ import { NetworkSignInOverview } from "@/components/network/effective-signin";
 import type { SiteFacts } from "@/lib/sign-in-effective";
 import { senderReady, type NotifyProvider } from "@/lib/sign-in-readiness";
 import { Ticket, Hotel, KeyRound, Mail, MessageSquare, Users, ArrowUpRight, PackageOpen, Smartphone } from "lucide-react";
+import { useOperatorRoles } from "@/lib/whoami-context";
 
 // Only the keys this screen owns are typed; the server's per-key merge preserves the rest.
 type Method = { enabled?: boolean };
@@ -66,10 +67,7 @@ const SOCIAL_LABELS: Record<string, string> = { google: "Google", apple: "Apple"
 export default function SignInMethodsPage() {
   const toast = useToast();
   // Read-only until the role loads; edged enforces the real gate.
-  const [roles, setRoles] = useState<string[] | null>(null);
-  useEffect(() => {
-    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
-  }, []);
+  const roles = useOperatorRoles();
   const writable = roles === null ? false : canWrite("auth-methods", roles);
   const mayChangeProtection = roles === null ? false : canWrite("guest-signin-protection", roles);
 

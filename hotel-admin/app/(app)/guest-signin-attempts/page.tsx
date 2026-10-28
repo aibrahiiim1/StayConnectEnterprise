@@ -7,8 +7,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { KeyRound, ShieldAlert } from "lucide-react";
 import {
-  api, SignInAttempt, SignInAttemptDetail, SignInAttemptCredentials, Whoami,
-} from "@/lib/api";
+  api, SignInAttempt, SignInAttemptDetail, SignInAttemptCredentials } from "@/lib/api";
 import { canRead, canWrite } from "@/lib/roles";
 import { ActiveRestrictions } from "@/components/guest-signin-restrictions";
 import { NetworkPausesNotice } from "@/components/guest-signin-network-pause";
@@ -30,6 +29,7 @@ import { RowActions } from "@/components/ui/row-actions";
 import { useServerPage, type PagedFields } from "@/lib/use-server-page";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LiveStatus, NotAvailable, refreshingClass } from "@/components/ui/patterns";
+import { useOperatorRoles } from "@/lib/whoami-context";
 
 // The label comes from the server's Go map so a new result code never shows as a raw enum.
 const RESULT_WORDS: Record<string, { tone: "ok" | "warn" | "err" | "info" | "neutral"; meaning: string }> = {
@@ -160,10 +160,7 @@ export default function GuestSignInAttemptsPage() {
   const [revealing, setRevealing] = useState(false);
 
   // The credential permission fails closed while it loads; edged is the real boundary.
-  const [roles, setRoles] = useState<string[] | null>(null);
-  useEffect(() => {
-    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
-  }, []);
+  const roles = useOperatorRoles();
   const maySeeCredentials = roles === null ? false : canRead("guest-signin-credentials", roles);
   // Three separate permissions, none implying another; edged enforces all of them.
   const maySeeRestrictions = roles === null ? false : canRead("guest-signin-restrictions", roles);

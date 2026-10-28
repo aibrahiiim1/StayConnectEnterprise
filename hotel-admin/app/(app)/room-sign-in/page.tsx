@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowUpRight } from "lucide-react";
-import { api, Whoami } from "@/lib/api";
+import { api } from "@/lib/api";
 import { canWrite } from "@/lib/roles";
 import { RoomSignInReadinessCallout, useRoomSignInReadiness } from "@/components/room-sign-in-readiness";
 import { Card, CardBody, SectionCard } from "@/components/ui/card";
@@ -18,6 +18,7 @@ import { OptionCard } from "@/components/ui/data";
 import { Skeleton } from "@/components/ui/misc";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
+import { useOperatorRoles } from "@/lib/whoami-context";
 
 type PMSMethod = { enabled?: boolean; mode?: string; provider?: string; template_id?: string };
 type AuthMethods = { pms?: PMSMethod; [key: string]: unknown };
@@ -55,10 +56,7 @@ const DEFAULT_MODE = "room_lastname";
 export default function RoomSignInPage() {
   const toast = useToast();
   // Read-only until the role loads; edged enforces the real gate.
-  const [roles, setRoles] = useState<string[] | null>(null);
-  useEffect(() => {
-    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
-  }, []);
+  const roles = useOperatorRoles();
   const writable = roles === null ? false : canWrite("auth-methods", roles);
 
   const [cfg, setCfg] = useState<AuthMethods | null>(null);

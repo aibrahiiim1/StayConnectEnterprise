@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, ListResp, Whoami, WalledGardenRule, WalledGardenPolicy } from "@/lib/api";
+import { api, ListResp, WalledGardenRule, WalledGardenPolicy } from "@/lib/api";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { Card } from "@/components/ui/card";
@@ -20,6 +20,7 @@ import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { formatRelative } from "@/lib/utils";
 import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
+import { useOperatorRoles } from "@/lib/whoami-context";
 
 function kindTone(kind: string): "info" | "default" | "warn" {
   switch (kind) {
@@ -52,7 +53,7 @@ export default function WalledGardenPage() {
   const [policyErr, setPolicyErr] = useState<unknown>(null);
   // null = adding a new rule
   const [editing, setEditing] = useState<WalledGardenRule | null>(null);
-  const [roles, setRoles] = useState<string[] | null>(null);
+  const roles = useOperatorRoles();
   const [err, setErr] = useState<unknown>(null);
   const [showNew, setShowNew] = useState(false);
   const [deleting, setDeleting] = useState<WalledGardenRule | null>(null);
@@ -75,7 +76,6 @@ export default function WalledGardenPage() {
   }
   useEffect(() => {
     load();
-    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
   }, []);
 
   function openNew() {
