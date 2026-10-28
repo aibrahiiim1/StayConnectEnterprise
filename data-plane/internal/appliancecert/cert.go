@@ -30,8 +30,8 @@ import (
 
 type Manager struct {
 	dir         string // cert directory, e.g. /etc/stayconnect/certs
-	ctrlBase    string // https ingress for signed-auth CSR submit/fetch (e.g. https://sc-central.echofusion.com)
-	mtlsBase    string // mTLS listener (e.g. https://sc-central.echofusion.com:9443)
+	ctrlBase    string // https ingress for signed-auth CSR submit/fetch (e.g. https://central.example.com)
+	mtlsBase    string // mTLS listener (e.g. https://central.example.com:9443)
 	applianceID string
 	priv        ed25519.PrivateKey
 

@@ -19,7 +19,7 @@ UUIDs. Both consoles refresh themselves.
 
 | Console | URL | Login |
 |---------|-----|-------|
-| **OneGate Central** (Control Panel) | `https://sc-central.echofusion.com` | your Central operator account |
+| **OneGate Central** (Control Panel) | `https://central.onegate.getsemantics.com` | your Central operator account |
 | **Appliance Admin Console** (formerly Hotel Admin) | `https://hotel.stayconnect.local` or the appliance's management IP | your Site IT manager account |
 
 The Admin Console is reachable on the **management network only** (clients are firewalled

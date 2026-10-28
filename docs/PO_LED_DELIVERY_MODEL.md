@@ -24,8 +24,8 @@ REQUEST → SCOPE → IMPLEMENT → FOCUSED SELF-REVIEW → TARGETED TESTS → F
 * **Testing.** Targeted tests for the changed components and the build of anything being deployed. Not the
   whole test matrix, not every browser suite, not the governance suites, not preflight stages 1/9, not the
   four comprehensive gates.
-* **PRE-LIVE.** When the mission or the standing PRE-LIVE authorization covers it: deploy the exact tested
-  commit to PRE-LIVE `172.21.60.25`, keep rollback, run a practical smoke/health check, confirm the change is
+* **PRE-LIVE.** When the mission or a standing deployment authorization covers it: deploy the exact tested
+  commit to the named test appliance, keep rollback, run a practical smoke/health check, confirm the change is
   there to test, and report the exact deployed source. **Deploying before the merge is intended.** No Central,
   Production or other environment unless that target is explicitly authorized; a PRE-LIVE mission the Product
   Owner requests authorizes Central as part of PRE-LIVE (§9, D67).
@@ -120,8 +120,9 @@ Blocker:                 - NONE / exact blocker
 **Permanent Product-Owner decision D67, 2026-10-24, recorded by T0243.**
 
 When the Product Owner requests a PRE-LIVE mission, that request is the full authorization for executing it
-end to end across the PRE-LIVE appliance (`172.21.60.25`) and Central (`172.21.96.196`; retired 2026-10-28 — the
-decision text is kept as recorded, and which Central a PRE-LIVE mission covers now is the Product Owner's to state):
+end to end across the PRE-LIVE appliance (`172.21.60.25`) and Central (`172.21.96.196`) — both permanently retired
+on 2026-10-28 (Product-Owner record, T0264); the decision text is kept as recorded, and a mission now covers the
+environment the Product Owner names in it, never the production Central by default:
 
 * deployments to either host, including Central releases built from master or from the mission's branch;
 * database migrations on either host;
@@ -145,5 +146,9 @@ security and validation stay as they are. A PRE-LIVE mission must not affect rea
 financial systems, live PMS posting, Root CA or trust roots, or networking/topology outside PRE-LIVE, and it
 does not authorize Go-Live. New product, architecture or security decisions still return to the Product Owner.
 
-**Scope.** D67 applies to PRE-LIVE missions the Product Owner requests. A routine FAST change still deploys
-only to the appliance under the standing authorization, and Central is not part of that per-change deployment.
+**Scope.** D67 applies to PRE-LIVE missions the Product Owner requests. A routine FAST change deploys only to an
+appliance a standing authorization names, and Central is not part of that per-change deployment.
+
+**Standing deployment target, 2026-10-28.** The standing per-change PRE-LIVE deployment decision (2026-09-24,
+kept by D42) named the PRE-LIVE appliance, which is now retired, so it has no target. It does not pass to the
+test appliance `172.21.96.97` by inference; that needs the Product Owner's authorization.

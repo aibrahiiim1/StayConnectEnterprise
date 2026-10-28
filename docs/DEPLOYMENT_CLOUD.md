@@ -2,8 +2,8 @@
 
 > The runbook for OneGate Central, the vendor half: licensing, activation and fleet status
 > ([CENTRAL_CONTROL_PLANE.md](CENTRAL_CONTROL_PLANE.md)). Central runs on its own host; appliances reach it
-> by name (`sc-central.echofusion.com`, CLAUDE.md §0D) and only ever for licensing (CLAUDE.md §0E). Staff use the
-> console at `central.onegate.getsemantics.com` (§3).
+> by name (`central.onegate.getsemantics.com`, the production Central since 2026-10-28, CLAUDE.md §0D) and only ever
+> for licensing (CLAUDE.md §0E). Staff use the console at the same name (§3).
 > Appliance counterpart: [DEPLOYMENT_APPLIANCE.md](DEPLOYMENT_APPLIANCE.md).
 >
 > **Everything here is a script in `deploy/scripts/`.** A Central host is built from a release and nothing
@@ -67,17 +67,16 @@ it cannot drift from what appliances are told to dial. Central initiates **no** 
 
 ## 3. Names, TLS and the host layout
 
-- **`sc-central.echofusion.com`** is the only Central address an appliance ever learns. It is defined once, in
+- **`central.onegate.getsemantics.com`** is the only Central address an appliance ever learns. It is defined once, in
   [`deploy/config/central-endpoint.env`](../deploy/config/central-endpoint.env) (`CENTRAL_BASE`,
   `CENTRAL_MTLS_BASE`, `CTRLAPI_APPLIANCE_BASE`); the installer, ctrlapi and appliance provisioning all read it.
   **Moving Central is a DNS change** — no appliance knows an IP.
 - The console may have its own name(s) (`--admin-name`), so it can later sit behind MFA/VPN without that
   becoming a dependency of a site's connectivity. Those names become `CTRLAPI_ALLOW_ORIGINS`.
-- **`central.onegate.getsemantics.com`** is the staff address of the console (Product Owner, 2026-10-19). It is
-  given as `--admin-name central.onegate.getsemantics.com`, so it joins the Caddy site addresses, the certificate
-  names and `CTRLAPI_ALLOW_ORIGINS`; appliances keep `sc-central.echofusion.com`. **Not configured yet:** it needs
-  a DNS record pointing at the Central host, a certificate that covers it (`internal` adds it to the SANs; `acme`
-  needs the name publicly reachable), and a Central redeploy, each with the Product Owner's go-ahead.
+- **`central.onegate.getsemantics.com`** is also the staff address of the console (Product Owner, 2026-10-19). On
+  the production Central the appliance name and the console name are the same: public DNS `A 41.128.240.133`
+  (installation manual A3.8). A Central installed under another name passes the console name with
+  `--admin-name`, so it joins the Caddy site addresses, the certificate names and `CTRLAPI_ALLOW_ORIGINS`.
 - **:443 certificate**, two modes (`--tls`):
   - `internal` (default, what the first Central uses): Central's own TLS CA in `/opt/stayconnect/central/tls`
     issues the certificate (`central-mint-tls.sh`); appliances trust that CA (`install-central-trust.sh`).
@@ -216,7 +215,7 @@ Root CA is a Product-Owner decision, not a deployment step.
    database — no admin is seeded.
 5. **Compare identities**: `FINGERPRINTS.txt` on the new host must equal the old host's (vendor, assignment,
    registry key ids; Root CA and TLS CA fingerprints). Sign in with an existing operator account.
-6. **Switch DNS** for `sc-central.echofusion.com` to the new host. No appliance changes. Watch *Overview* for
+6. **Switch DNS** for the appliance-facing name (`CENTRAL_BASE`) to the new host. No appliance changes. Watch *Overview* for
    appliances turning `connected`.
 7. **Retire the old host**: leave it stopped (it is disabled already). Once the new host has issued anything,
    the old one must never run again: two Centrals with one identity produce licence versions that appliances
@@ -268,31 +267,15 @@ bash /opt/stayconnect/central/tooling/deploy/scripts/central-deploy.sh rollback 
 
 Never `pg_restore --clean` a TimescaleDB database: it drops the extension and every hypertable with it.
 
-## 8. The move from the first Central host (150.0.0.252) — done 2026-09-27
+## 8. Earlier Central hosts (historical)
 
-The first Central predated this tooling. It was moved, as in §6, onto `172.21.96.196`, which the installer built:
-
-1. `central-cleanup-obsolete.sh --apply --remove-legacy-bundle` on the old host (NATS state, command/update keys,
-   the legacy trust file; `pki/ca-bundle.crt` in place of `nats-ca-bundle.crt`).
-2. `central-export.sh --dry-run` refused the first time: `assignment-signing.pub` was the public half of the key
-   revoked on 2026-07-12, left behind by that rotation. It was replaced by the active key's public half (the stale
-   file is kept as `assignment-signing.pub.revoked-c63f848bf5ded3f6`) and the export then passed every
-   consistency check.
-3. `central-export.sh --final`, then `central-install.sh --mode restore --bundle … --extra-names 172.21.96.196
-   --install-prereqs`: smoke PASS, preflight READY, vendor key `2fbdfcbde209ebb5`, assignment key
-   `027a2c97f6c8fcdb`, registry root `84655767f9834fa2` unchanged.
-4. The old host's Caddy was stopped and disabled as well (`--final` now does this itself): while it answered 502,
-   PRE-LIVE kept using its keep-alive connection to it.
-5. PRE-LIVE resolves `sc-central.echofusion.com` through the gateway DNS (FortiGate `172.21.60.1`). An interim
-   `/etc/hosts` line pointed the name at the new host until the record was changed to `172.21.96.196`; it was then
-   removed, and a restarted scd reconnected over DNS alone (mTLS, assignment, licence).
-
-**Still to do outside this repository:** the encrypted Root CA backup
-(`/opt/stayconnect/ca-ceremony-backup/root-ca.key.enc`) was copied off the old host and checksum-verified on
-2026-09-27; once it is on offline media ([CA_CEREMONY_RUNBOOK.md](CA_CEREMONY_RUNBOOK.md)), shred the old host's
-copy, and only then decommission `150.0.0.252`.
-Rolling back to the old host is possible only until the new one has issued anything (it had issued licence
-version 3 at verification time) — after that, move again with §6 instead.
+Central has run on three hosts. The first (`150.0.0.252`, stopped and retired as a target since 2026-09-27) was
+moved with §6 that day onto `172.21.96.196`, which the Product Owner permanently retired on
+2026-10-28, when the production Central became the fresh installation at `41.128.240.133`, which has **its own
+trust universe** (installation manual F, Appendix 3); appliances provisioned against a retired Central are
+re-provisioned, not repointed. Both moves are recorded in `governance/` (transitions of 2026-09-27 and T0264). The
+one open item from the first move is the custody of the former trust universe's encrypted Root CA backup on the
+retired first host ([CA_CEREMONY_RUNBOOK.md](CA_CEREMONY_RUNBOOK.md)), a Product-Owner decision.
 
 ## 9. Backups and key custody
 

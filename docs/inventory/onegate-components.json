@@ -8,13 +8,28 @@
       "name": "PRE-LIVE appliance",
       "address": "172.21.60.25",
       "os": "Ubuntu 22.04.5 LTS",
-      "date": "2026-10-26"
+      "date": "2026-10-26",
+      "status": "RETIRED 2026-10-28 (Product-Owner record, D78); inspected as recorded, never contacted again"
     },
     {
       "name": "OneGate Central",
       "address": "172.21.96.196",
       "os": "Ubuntu 22.04.5 LTS",
-      "date": "2026-10-26"
+      "date": "2026-10-26",
+      "status": "RETIRED 2026-10-28 (Product-Owner record, D78); inspected as recorded, never contacted again"
+    }
+  ],
+  "current_environments": [
+    {
+      "name": "Production Central",
+      "address": "41.128.240.133",
+      "dns": "central.onegate.getsemantics.com",
+      "since": "2026-10-28"
+    },
+    {
+      "name": "Test appliance",
+      "address": "172.21.96.97",
+      "since": "2026-10-28"
     }
   ],
   "verification_labels": {

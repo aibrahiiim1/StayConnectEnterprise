@@ -166,36 +166,31 @@ operational number, that number ships as a setting.
 
 ## 0D. CURRENT ENVIRONMENT, AND WHAT IS NO LONGER A TARGET
 
-**Standing record, 2026-09-12; Central corrected by the Product Owner on 2026-10-28.** Supersedes every earlier address
-list in this file.
+**Product-Owner record, 2026-10-28 (T0264).** Supersedes every earlier address list in this file.
 
 | Role | Host | Notes |
 |---|---|---|
-| **Central** | `41.128.240.133` (`central.onegate.getsemantics.com`) | Production Central since 2026-10-28 (Product-Owner record). Installed fresh by `central-install.sh`, so it has **its own trust universe**: appliances provisioned against the former Central do not trust it ([installation manual](docs/runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md) F, Appendix 3). Identity, activation and licensing ([`docs/CENTRAL_CONTROL_PLANE.md`](docs/CENTRAL_CONTROL_PLANE.md)): `ctrlapi` (behind Caddy on `443`; appliance mutual-TLS listener on `9443`), `cloud-admin`, Caddy, Postgres/TimescaleDB and Redis (`deploy/compose/central-infra.yml`). Installed and upgraded by `deploy/scripts/central-install.sh` ([`docs/DEPLOYMENT_CLOUD.md`](docs/DEPLOYMENT_CLOUD.md)). Central runs no message bus (§0E). Verify the actual endpoints and TLS identity before connecting; do not assume them from this table. |
-| Former Central | `172.21.96.196` (`sc-central.echofusion.com`) | **RETIRED 2026-10-28 (Product-Owner record). Not an operational target: do not contact it.** It was Central from 2026-09-27 (moved from `150.0.0.252` with every key, certificate and the licence database) and its trust universe is the one PRE-LIVE was provisioned in. What it served and proved stays as recorded. |
-| Former Central | `150.0.0.252` | **STOPPED, not an operational target.** `ctrlapi`, the console and Caddy are stopped and disabled since the move; re-enabling it would issue licence versions the new Central does not know. It still holds the encrypted Root CA key backup (`/opt/stayconnect/ca-ceremony-backup/`, [`docs/CA_CEREMONY_RUNBOOK.md`](docs/CA_CEREMONY_RUNBOOK.md)); a verified copy was taken off the host on 2026-09-27, and the host copy is shredded only after the backup is confirmed on offline media. |
-| **PRE-LIVE appliance** | `172.21.60.25` | The only appliance. **PRE-LIVE remains PRE-LIVE. Go-Live is not authorised.** It was provisioned against the former Central `172.21.96.196` (by the name `sc-central.echofusion.com` on the gateway DNS), which is now retired; serving it from the current Central would need it re-provisioned in that trust universe, a Product-Owner decision. |
-| ~~Development reference appliance~~ | *(address removed from the current tree — T0194)* | **RETIRED.** Not an operational target. Do not contact it, do not diagnose against it, do not treat it as a source of anything. |
+| **Production Central** | `41.128.240.133` (`central.onegate.getsemantics.com`; private `172.21.96.96`, the same host) | Identity, activation and licensing only ([`docs/CENTRAL_CONTROL_PLANE.md`](docs/CENTRAL_CONTROL_PLANE.md), §0E): `ctrlapi` behind Caddy on `443`, appliance mutual TLS on `9443`, `cloud-admin`, Postgres/TimescaleDB, Redis. Installed and upgraded by `deploy/scripts/central-install.sh` / `central-deploy.sh` ([`docs/DEPLOYMENT_CLOUD.md`](docs/DEPLOYMENT_CLOUD.md)). Appliances dial the name in `deploy/config/central-endpoint.env`. **It is production: tests and drills never default to it.** |
+| **Test appliance** | `172.21.96.97` | Activated on the production Central. Release and validation record: [installation manual](docs/runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md) Appendix 3. **Go-Live is not authorised.** |
 
-**Retiring a target does not falsify its records.** What the retired development reference appliance proved keeps
-its meaning and its outcome, in `governance/` and in the accepted documents that cite it: a record of what was true
-then is not a claim about what is true now, and no historical fact or result may be changed.
+**Retired targets.** The one authoritative register is `governance/project-state.json` →
+`current_state_facts.retired_hosts`, enforced by `tools/validate-standing-records.py` (no retired address or name
+in code, scripts, configuration or tests; none in a current-state document unless the line says it is retired).
+Today it holds the former Central `172.21.96.196` (`sc-central.echofusion.com`), permanently retired 2026-10-28;
+the former PRE-LIVE appliance `172.21.60.25`, permanently retired 2026-10-28; the first Central `150.0.0.252`,
+stopped since 2026-09-27 and retired as a target, holding only the former trust universe's encrypted Root CA backup ([`docs/CA_CEREMONY_RUNBOOK.md`](docs/CA_CEREMONY_RUNBOOK.md));
+and the retired development reference appliance (address recorded as octets only, T0194). **None of them exists
+as an active environment: never contact, deploy to, test against or restore from them.** Never replace a retired
+address with the production Central's: name the environment under test explicitly.
 
-**Its literal address is no longer written anywhere in the current tree** (Product-Owner direction, T0194). Records
-name it as *the retired development reference appliance*; the original wording remains in Git history, which is
-never rewritten. Do not reintroduce the literal. Guards that must still refuse it assemble the address from its
-octets (`current_state_facts.retired_hosts.*.address_octets`).
+**Retiring a target does not falsify its records.** What a retired host served and proved stays as recorded in
+`governance/`, the delivery manifests and the accepted evidence: a record of what was true then is not a claim
+about what is true now, and no historical fact or result may be changed. Git history is never rewritten.
 
-**PMS.** Protel FIAS is connected. Keep the configured connection operational, and preserve local-first
-behaviour for future intentional disconnections: the appliance authorises guests from its last-good mirrored
-roster and must go on doing so when the feed drops.
-
-**A correction of record, because the wrong version was stated and acted on.** *An intentionally disconnected
-PMS does not by itself prevent guest authentication.* The appliance authorises from the mirror; a
-`DISCONNECTED` transport is a feed-health fact, not a guest-authentication outage, and both successful
-sign-ins and credential-failure counting have been observed live while the feed was down. What must **not** be
-inferred from that is the opposite error: eligibility is still decided per stay by the mirror-trust and
-freshness rules, not every mirrored stay is eligible, and not all offline conditions have been tested.
+**PMS.** Preserve local-first behaviour: an appliance authorises guests from its last-good mirrored roster and
+must go on doing so when the feed drops. A `DISCONNECTED` transport is a feed-health fact, not a
+guest-authentication outage; eligibility is still decided per stay by the mirror-trust and freshness rules, and
+not all offline conditions have been tested.
 
 ---
 
@@ -267,15 +262,18 @@ unnamed environment.
 **Nothing runs unattended.** There is no schedule and no workflow merges. The nightly orchestrator and
 `tools/nightly-status.py` were removed by T0196; there is no session-start nightly check any more.
 
-### The standing PRE-LIVE deployment authorization
+### The standing PRE-LIVE deployment authorization — no target since 2026-10-28
 
-> **Until explicitly revoked or changed by the Product Owner, every completed application/code change may be
-> deployed promptly to the PRE-LIVE appliance at `172.21.60.25` for Product Owner testing, before it is
-> merged.**
+The Product Owner's standing decision of 2026-09-24 (kept by D42) let every completed application/code change be
+deployed promptly, before merge, to the PRE-LIVE appliance for Product Owner testing. That appliance is
+**permanently retired** (§0D), so the standing authorization currently has **no target**. It does **not** pass to
+the test appliance `172.21.96.97` by inference: deploying there needs the Product Owner's authorization, either a
+mission that names it or a new standing decision recorded here. The decision text itself is preserved in
+[`docs/PO_LED_DELIVERY_MODEL.md`](docs/PO_LED_DELIVERY_MODEL.md) and the decision register.
 
-**This is continuing. Do not ask for it again.** Asking again is a defect in reading this section. It covers the
-directly required parts of deploying: build and package, install, service restart, deployment verification,
-retry and rollback, and recording exact deployed-source provenance.
+When a standing decision names a target, it covers the directly required parts of deploying: build and package,
+install, service restart, deployment verification, retry and rollback, and recording exact deployed-source
+provenance.
 
 It authorizes **none** of the following, which remain separate Product-Owner decisions: a new
 product/architecture/security decision · destructive or historical data mutation · a new database
@@ -297,13 +295,12 @@ wider: see §0G (D67).
 **Permanent Product-Owner decision D67, 2026-10-24 (T0243). The full form is
 [`docs/PO_LED_DELIVERY_MODEL.md`](docs/PO_LED_DELIVERY_MODEL.md) §9; where the two differ, that file wins.**
 
-> When the Product Owner requests a PRE-LIVE mission, that request is the full end-to-end authorization for it,
-> across the PRE-LIVE appliance (`172.21.60.25`) and Central (`172.21.96.196`): deployments, database
-> migrations, test-database reset or reconstruction, test-account resets, test-licence reissuance, directly
-> related repairs, verification, documentation, and Git delivery including push, PR and the protected merge.
-
-*Note, 2026-10-28:* the Central named in the decision, `172.21.96.196`, is retired (§0D). The decision text is kept as
-recorded; which Central a PRE-LIVE mission covers now is the Product Owner's to state.
+D67 made a Product-Owner-requested PRE-LIVE mission the full end-to-end authorization for it across the PRE-LIVE
+appliance and Central of the time: deployments, database migrations, test-database reset or reconstruction,
+test-account resets, test-licence reissuance, directly related repairs, verification, documentation, and Git
+delivery including push, PR and the protected merge. Both hosts it named are retired (§0D); the decision text is
+preserved in the full form. **A mission now covers the environment the Product Owner names in it**, and never the
+production Central by default.
 
 * **PRE-LIVE data is disposable.** Preserving test accounts, historical test records or test licences is never a
   reason to stop. Recreate what the mission needs. Do not touch a real person's account to do it: use or create

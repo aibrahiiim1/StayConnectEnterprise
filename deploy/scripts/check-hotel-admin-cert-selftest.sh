@@ -46,7 +46,7 @@ mkcert() { # mkcert <name> <days> <issuer-name|self> [CA:TRUE]
   openssl ecparam -name prime256v1 -genkey -noout -out "$CA/$n.key" 2>/dev/null
   local ext="$WORK/$n.ext"
   if [ -n "$ca" ]; then printf 'basicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign\n' > "$ext"
-  else printf 'basicConstraints=critical,CA:FALSE\nsubjectAltName=DNS:hotel.stayconnect.local,IP:172.21.60.25\nextendedKeyUsage=serverAuth\n' > "$ext"; fi
+  else printf 'basicConstraints=critical,CA:FALSE\nsubjectAltName=DNS:hotel.stayconnect.local,IP:192.168.60.25\nextendedKeyUsage=serverAuth\n' > "$ext"; fi
   if [ "$iss" = "self" ]; then
     # `openssl req` takes -addext, never -extfile. Passing the latter produced no certificate at all and the
     # cases below then failed for want of a fixture rather than for anything they were asserting.
@@ -192,7 +192,7 @@ keyUsage=critical,keyCertSign
   openssl ecparam -name prime256v1 -genkey -noout -out "$WORK/served.key" 2>/dev/null
   openssl req -new -key "$WORK/served.key" -out "$WORK/served.csr" -subj "/CN=hotel.stayconnect.local" 2>/dev/null
   printf 'basicConstraints=critical,CA:FALSE
-subjectAltName=DNS:hotel.stayconnect.local,IP:172.21.60.25
+subjectAltName=DNS:hotel.stayconnect.local,IP:192.168.60.25
 extendedKeyUsage=serverAuth
 ' > "$WORK/served.ext"
   openssl x509 -req -in "$WORK/served.csr" -CA "$CA/old-caddy-int.crt" -CAkey "$CA/old-caddy-int.key" -CAcreateserial     -out "$WORK/served.crt" -days 730 -extfile "$WORK/served.ext" 2>/dev/null
@@ -201,12 +201,12 @@ extendedKeyUsage=serverAuth
   DNS_SAN="hotel.stayconnect.local"; MIN_FRESH_DAYS=180
   cert_sans(){ openssl x509 -in "$1" -noout -ext subjectAltName 2>/dev/null | tr ',' '\n' | sed -n 's/.*\(DNS:[^ ]*\|IP Address:[0-9.]*\).*/\1/p' | sed 's/IP Address:/IP:/' | tr -d ' ' | sort; }
   want_sans(){ printf 'DNS:%s\nIP:%s\n' "$DNS_SAN" "$1" | sort; }
-  if vr="$(validate_candidate "$WORK/served.key" "$WORK/served.crt" "$WORK/served.fullchain" 172.21.60.25 served)" && [ -z "$vr" ]; then
+  if vr="$(validate_candidate "$WORK/served.key" "$WORK/served.crt" "$WORK/served.fullchain" 192.168.60.25 served)" && [ -z "$vr" ]; then
     ok "a healthy leaf served with the previous intermediate passes the served-chain check after Caddy rotates"
   else
     no "a healthy served certificate was reported invalid after an intermediate rotation" "$vr"
   fi
-  if vr="$(validate_candidate "$WORK/served.key" "$WORK/served.crt" "$WORK/served.fullchain" 172.21.60.25)"; [ -n "$vr" ]; then
+  if vr="$(validate_candidate "$WORK/served.key" "$WORK/served.crt" "$WORK/served.fullchain" 192.168.60.25)"; [ -n "$vr" ]; then
     ok "a freshly minted CANDIDATE must still chain through the CURRENT intermediate (${vr})"
   else
     no "candidate validation no longer insists on the current intermediate"

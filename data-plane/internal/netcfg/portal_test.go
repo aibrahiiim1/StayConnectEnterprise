@@ -22,10 +22,10 @@ func hasPortalCode(issues []Issue, code string) bool {
 	return false
 }
 
-// The appliance as PRE-LIVE looks: WAN/management on 172.21.60.0/24, Docker's default bridge, two guest bridges.
+// A typical appliance: WAN/management on 192.168.60.0/24, Docker's default bridge, two guest bridges.
 func liveHost() []HostAddr {
 	return []HostAddr{
-		{Iface: "ens160", CIDR: "172.21.60.25/24"},
+		{Iface: "ens160", CIDR: "192.168.60.25/24"},
 		{Iface: "docker0", CIDR: "172.17.0.1/16"},
 		{Iface: "br-3f2a9c1d7e44", CIDR: "172.18.0.1/16"},
 		{Iface: "br-g221", CIDR: "10.221.0.1/22"},
@@ -51,7 +51,7 @@ func TestValidatePortalIP(t *testing.T) {
 		{"inside a guest subnet", "10.221.1.7", nets, liveHost(), "portal_ip_overlap"},
 		{"equal to a guest gateway", "10.222.0.1", nets, liveHost(), "portal_ip_overlap"},
 		{"inside a DISABLED guest subnet", "10.255.255.1", append(append([]GuestNetwork{}, nets...), disabled), liveHost(), "portal_ip_overlap"},
-		{"inside the WAN/management subnet", "172.21.60.200", nets, liveHost(), "portal_ip_overlap"},
+		{"inside the WAN/management subnet", "192.168.60.200", nets, liveHost(), "portal_ip_overlap"},
 		{"inside the Docker default bridge 172.17.0.1/16", "172.17.5.5", nets, liveHost(), "portal_ip_overlap"},
 		{"inside a compose bridge", "172.18.200.1", nets, liveHost(), "portal_ip_overlap"},
 		{"a public address", "8.8.8.8", nets, liveHost(), "portal_ip_not_private"},

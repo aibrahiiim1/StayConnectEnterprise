@@ -232,7 +232,7 @@ func TestIntegration_Reset_NeverForcesAGenuineConflictOrTheManagementPort(t *tes
 	if st, b := f.do(t, "POST", "/network/recovery/stage", map[string]any{"op": "full_reset", "confirm_site_name": h.siteName}); st != 409 || !strings.Contains(b["message"].(string), "never forced") {
 		t.Fatalf("a WAN overlap = %d %v", st, b)
 	}
-	fn.wanIP, fn.wanBits = "172.21.60.25", 24
+	fn.wanIP, fn.wanBits = "192.168.60.25", 24
 	fn.lan = "ens160"
 	if st, b := f.do(t, "POST", "/network/recovery/stage", map[string]any{"op": "full_reset", "confirm_site_name": h.siteName}); st != 409 || !strings.Contains(b["message"].(string), "WAN/management port") {
 		t.Fatalf("the management port as the client port = %d %v", st, b)

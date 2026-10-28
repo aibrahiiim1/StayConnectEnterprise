@@ -13,49 +13,35 @@
 
 ## Where the work is (2026-10-28)
 
-The latest deliveries, all merged to master under the Product Owner's approval:
+Latest merged deliveries: #256–#261 (fresh-VM installer, enrollment F1, installer acceptance, Central `:9443`
+verified from outside, modules follow the licence, card payment and room charge configurable but never executable;
+records T0259–T0262) and #262 (repository cleanup, T0263). This branch (`claude/vigilant-keller-sag14r`, T0264, D78)
+records the Product Owner's environment record, removes retired-server dependencies from configuration, scripts and
+tests, adds the single retired-target safeguard, and removes superseded documents.
 
-| PR | What | Record |
-|---|---|---|
-| #256 | the fresh-VM installer: one release, one command (install, re-run, resume, `--upgrade`) | manual Appendix 3 |
-| #257 | enrollment F1: a reinstall before activation can no longer bind an obsolete certificate | D75 / T0259 |
-| #258 | installer acceptance: Central survives a reboot (Redis auth file out of `/tmp`), a refused first administrator stops the install, the manual executed end to end | T0260 |
-| #259 | Central's `:9443` verified from outside as the mutual-TLS listener | manual A3.8 |
-| #260 | modules follow the licence: the Hotel module installed; room sign-in only where it is in use | D76 / T0261 |
-| #261 | card payment and room charge configurable, never executable; high availability and white label never shown available | D77 / T0262 |
-
-On 2026-10-28 every merged branch was deleted, on GitHub (28) and locally (217), with 100 stale local copies of old
-pull-request heads (T0263). Besides `master`, the one branch left is `docs/cleanup`, the branch of the still-open
-PR #262 that records this cleanup; it is deleted when that PR is merged. The 45 historical
-documents a first pass deleted (39 change manifests, six superseded reports) were restored in the same PR: each is
-a delivery record or is cited by a record, so they stay, marked historical where they were already marked.
-
-## Environments
+## Environments (Product-Owner record, 2026-10-28, D78)
 
 | Role | Host | State |
 |---|---|---|
-| PRE-LIVE appliance | `172.21.60.25` | #256–#261 were **not deployed** to it; Go-Live not authorised |
-| **Production Central** (Product-Owner record, 2026-10-28) | `central.onegate.getsemantics.com` — public `41.128.240.133`, private `172.21.96.96` | release `onegate-central-05481cb57334`; its own trust universe |
-| Former Central | `172.21.96.196` (`sc-central.echofusion.com`) | **retired 2026-10-28**; not an operational target |
-| Test appliance | `172.21.96.97` | release `onegate-appliance-d25999781b1a` (master code of #261), activated on the current Central |
+| **Production Central** | `central.onegate.getsemantics.com`, public `41.128.240.133`, private `172.21.96.96` | release `onegate-central-05481cb57334`; its own trust universe. Production: never a default for tests or drills |
+| **Test appliance** | `172.21.96.97` | release `onegate-appliance-d25999781b1a` (master code of #261), activated on the production Central; Go-Live not authorised |
 
-The current Central and the test appliance share one trust universe; PRE-LIVE belongs to the former Central's.
+Every other host is retired and is never contacted: see `current_state_facts.retired_hosts`, enforced by
+`tools/validate-standing-records.py`.
 
 ## Open, and known
 
-* The current Central carries the R1 fix (Redis auth file out of `/tmp`; installation manual A3.7).
-* PRE-LIVE was provisioned against the retired Central and does not run F1, the installer fixes or the module changes.
-  Serving it from the current Central needs it re-provisioned in that trust universe: a Product-Owner decision.
+* **Deployment target.** The standing per-change PRE-LIVE deployment decision named the retired appliance, so it has
+  no target. Deploying to the test appliance needs a mission that names it, or a new standing decision.
 * Card payment and room charge execute only with their execution switches (provider calls, LIVE, PMS transmit),
   each a separate Product-Owner authorisation (manual C.12).
 * A blank-VM install of the current release was not repeated after #256 (it needs the test VM reset).
 * Rebuilding an appliance with the same identity (manual E.4 Case 2) is self-tested but not run on a VM.
 * The backend audit (`docs/audit/`) and the performance audit (`docs/performance-audit/`) are open backlogs of findings.
 * High availability and white label are licence keys with no implementation.
-* Product-Owner decisions still open (system handbook §24.2): the off-host copy destination for Central dumps, and
-  shredding the Root-CA backup once it is confirmed on offline media; whether Ubuntu 24.04 is supported; Go-Live, LIVE
-  card payments and further PMS postings; retiring the obsolete documents listed in handbook §23. High availability is
-  also a product decision (§16.5).
+* Product-Owner decisions still open (system handbook §24.2): the off-host copy destination for Central dumps; custody
+  and shredding of the former trust universe's Root-CA backup (on the stopped first Central); whether Ubuntu 24.04 is
+  supported; Go-Live, LIVE card payments and further PMS postings. High availability is a product decision (§16.5).
 * A local backup ref `refs/original/refs/heads/feat/operator-journeys-consolidation` (tip `c6905b3f`) holds the
   pre-redaction form of the T0164 commits, whose redacted form is on master. It was never on GitHub and was left in
   place; dropping it is the Product Owner's call.

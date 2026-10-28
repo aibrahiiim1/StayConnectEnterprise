@@ -1,14 +1,18 @@
 # StayConnect Root CA — Offline Export & Ceremony Runbook
 
 ## Current status (honest)
-- **Central moved on 2026-09-27** to `172.21.96.196`. The encrypted Root CA backup below was deliberately NOT
-  carried to the new host (the Root key does not belong on a running Central). It is still on the stopped former
-  Central `150.0.0.252`; the commands below still name that host, and it must not be wiped until the export is done.
+- **Two trust universes.** The production Central (`41.128.240.133`, since 2026-10-28) was installed fresh and has
+  its own Root CA; moving its Root key to cold storage is installation manual F (step 2) and follows the
+  procedure below. Everything else in this section concerns the **former** trust universe, the one the retired
+  Centrals and the retired PRE-LIVE appliance used.
+- **Former trust universe.** When Central moved on 2026-09-27 the encrypted Root CA backup was deliberately NOT
+  carried to the new host (the Root key does not belong on a running Central). It stayed on the stopped first
+  Central (`150.0.0.252`, retired as a target), and must not be wiped until the export is done.
 - **2026-09-27:** a copy of `root-ca.key.enc`, its sha256 (`a5aa1944…504c`, verified), `root-ca.crt` (fingerprint
   `D2:60:C6:EE:…:A7:00`, the fleet's Root CA) and the ceremony runbook was taken off the host into the Product
   Owner's workstation custody folder, access-restricted, to be moved onto two offline media. Shred the host copy
   (step 5 below) only after both media are verified.
-- **Runtime-isolated NOW:** the Root CA **private** key exists on `150.0.0.252` only as an
+- **Runtime-isolated:** the former Root CA **private** key exists on that retired host only as an
   AES-256-CBC / PBKDF2 (300k iter) encrypted blob at
   `/opt/stayconnect/ca-ceremony-backup/root-ca.key.enc`. No plaintext Root private key exists
   anywhere on the Central host, Docker volumes, `/tmp`, backups, shell history, logs, or the repo
@@ -31,10 +35,13 @@
 | `CEREMONY_PASSPHRASE.txt` | 0400 | **One-time** passphrase for operator pickup |
 
 ## One-time operator export procedure
+`HOST` is the Central host that holds the backup, named explicitly for the ceremony; there is no default.
+
 1. **Copy** to offline encrypted media / HSM / vault (do this from a trusted admin workstation):
    ```
-   scp root@150.0.0.252:/opt/stayconnect/ca-ceremony-backup/root-ca.key.enc      ./
-   scp root@150.0.0.252:/opt/stayconnect/ca-ceremony-backup/root-ca.key.enc.sha256 ./
+   HOST=root@<central-host-holding-the-backup>
+   scp "$HOST":/opt/stayconnect/ca-ceremony-backup/root-ca.key.enc      ./
+   scp "$HOST":/opt/stayconnect/ca-ceremony-backup/root-ca.key.enc.sha256 ./
    ```
 2. **Validate checksum** on the offline media:
    ```
@@ -43,12 +50,12 @@
 3. **Retrieve the passphrase separately** (different channel from the blob), then **destroy the
    Central copy** of the passphrase file:
    ```
-   scp root@150.0.0.252:/opt/stayconnect/ca-ceremony-backup/CEREMONY_PASSPHRASE.txt ./   # store in a password manager / vault, NOT next to the blob
-   ssh root@150.0.0.252 'shred -u /opt/stayconnect/ca-ceremony-backup/CEREMONY_PASSPHRASE.txt'
+   scp "$HOST":/opt/stayconnect/ca-ceremony-backup/CEREMONY_PASSPHRASE.txt ./   # store in a password manager / vault, NOT next to the blob
+   ssh "$HOST" 'shred -u /opt/stayconnect/ca-ceremony-backup/CEREMONY_PASSPHRASE.txt'
    ```
 4. **After the offline copy is verified**, remove the remaining Central copy of the encrypted key:
    ```
-   ssh root@150.0.0.252 'shred -u /opt/stayconnect/ca-ceremony-backup/root-ca.key.enc'
+   ssh "$HOST" 'shred -u /opt/stayconnect/ca-ceremony-backup/root-ca.key.enc'
    ```
    At this point the Root private key exists ONLY on offline media → physically offline achieved.
 5. **Store passphrase separately** from the encrypted blob (different vault / different custodian).

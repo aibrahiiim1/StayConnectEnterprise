@@ -90,7 +90,7 @@ func portalApplier(t *testing.T, k *fakeKernel, pn *fakePortalNet) *applier {
 		return nil
 	}
 	a.hostAddrsFn = func(context.Context) ([]netcfg.HostAddr, error) {
-		return []netcfg.HostAddr{{Iface: "ens160", CIDR: "172.21.60.25/24"}, {Iface: "docker0", CIDR: "172.17.0.1/16"}}, nil
+		return []netcfg.HostAddr{{Iface: "ens160", CIDR: "192.168.60.25/24"}, {Iface: "docker0", CIDR: "172.17.0.1/16"}}, nil
 	}
 	return a
 }
@@ -183,7 +183,7 @@ func TestPortalIface_DryRunTouchesNothingAndFailuresAreReported(t *testing.T) {
 
 func TestParseHostAddrs(t *testing.T) {
 	raw := `[{"ifindex":1,"ifname":"lo","addr_info":[{"family":"inet","local":"127.0.0.1","prefixlen":8}]},
-	{"ifindex":2,"ifname":"ens160","addr_info":[{"family":"inet","local":"172.21.60.25","prefixlen":24}]},
+	{"ifindex":2,"ifname":"ens160","addr_info":[{"family":"inet","local":"192.168.60.25","prefixlen":24}]},
 	{"ifindex":3,"ifname":"docker0","addr_info":[{"family":"inet","local":"172.17.0.1","prefixlen":16}]},
 	{"ifindex":4,"ifname":"ens192","addr_info":[]},
 	{"ifindex":5,"ifname":"ogportal0","addr_info":[{"family":"inet","local":"10.255.255.1","prefixlen":32}]}]`
@@ -195,7 +195,7 @@ func TestParseHostAddrs(t *testing.T) {
 	for _, h := range got {
 		s = append(s, h.Iface+"="+h.CIDR)
 	}
-	want := "lo=127.0.0.1/8 ens160=172.21.60.25/24 docker0=172.17.0.1/16 ogportal0=10.255.255.1/32"
+	want := "lo=127.0.0.1/8 ens160=192.168.60.25/24 docker0=172.17.0.1/16 ogportal0=10.255.255.1/32"
 	if strings.Join(s, " ") != want {
 		t.Fatalf("got %v", s)
 	}
@@ -226,7 +226,7 @@ func TestPortalIPValidateEndpoint(t *testing.T) {
 		{`{"portal_ip":"10.255.255.1"}`, true, ""},
 		{`{"portal_ip":"10.20.1.1"}`, false, "portal_ip_overlap"},
 		{`{"portal_ip":"172.17.9.9"}`, false, "portal_ip_overlap"},
-		{`{"portal_ip":"172.21.60.77"}`, false, "portal_ip_overlap"},
+		{`{"portal_ip":"192.168.60.77"}`, false, "portal_ip_overlap"},
 		{`{"portal_ip":"203.0.113.5"}`, false, "portal_ip_not_private"},
 		{`{"portal_ip":""}`, false, "required"},
 	}

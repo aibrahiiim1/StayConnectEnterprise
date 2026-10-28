@@ -1,0 +1,7 @@
+# Keep generated copies and dated records out of DEFAULT searches (ripgrep, and editor/agent search built on it).
+# They stay in the repository and remain searchable by naming the path explicitly, or with git grep.
+# Why: a plain search for a file or symbol otherwise returns every delivery manifest and pack copy that lists it,
+# which costs time and AI context without adding information.
+exports/
+docs/manifests/
+governance/transitions/

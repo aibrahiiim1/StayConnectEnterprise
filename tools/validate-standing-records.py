@@ -21,10 +21,17 @@ not exist, the delivery that added this validator added the fact.
 THE FOUR RULES
 
   1. RETIRED HOSTS may not appear as an operational default or target. Keyed to
-     current_state_facts.retired_hosts. Scans executable and config surfaces for a retired address used as a
-     DEFAULT (`${VAR:-<addr>}`), which is the form that sends an unsuspecting run at the forbidden machine.
-     Prose mentions are NOT flagged: historical evidence must be preserved, and the standing record says so
-     explicitly.
+     current_state_facts.retired_hosts, THE ONE AUTHORITATIVE REGISTER of retired machines (each entry: its
+     address as octets and, where it had one, its DNS name as labels). Three checks:
+       a. a retired address used as a DEFAULT (`${VAR:-<addr>}`) anywhere, which is the form that sends an
+          unsuspecting run at the forbidden machine;
+       b. a retired address or name ANYWHERE in code, scripts, configuration or tests (Product-Owner
+          direction, 2026-10-28: retired-server dependencies are removed from active configuration, scripts
+          and tests). Applied migrations are immutable and exempt;
+       c. a retired address or name in a current-state DOCUMENT on a line that does not say it is retired or
+          historical, which is how a reader comes to believe the machine is still a target.
+     Historical trees (records, evidence, delivery manifests) are NOT judged: historical evidence must be
+     preserved, and the standing record says so explicitly.
 
   2. ONBOARDING MILESTONES that are recorded as done may not be described as awaited. Keyed to the
      appliance_* booleans, which were all recorded true while three fields in the SAME FILE said the
@@ -96,9 +103,33 @@ SELF = (
 )
 
 TEXT_EXT = {
-    ".md", ".json", ".sh", ".py", ".go", ".ts", ".tsx", ".js", ".yml", ".yaml",
-    ".sql", ".conf", ".env", ".txt", ".service", ".timer",
+    ".md", ".json", ".sh", ".py", ".go", ".ts", ".tsx", ".js", ".mjs", ".yml", ".yaml",
+    ".sql", ".conf", ".env", ".txt", ".service", ".timer", ".example",
 }
+# Operational files without a telling extension: Caddyfile.central, Makefile, Dockerfile.*.
+TEXT_BASENAME_PREFIXES = ("Caddyfile", "Makefile", "Dockerfile")
+
+# OPERATIONAL SURFACES: what runs, configures or tests the product. A retired host has no business here at
+# all, not even as an example: a test fixture is copied into the next script, and a comment's address is the
+# one somebody pastes.
+OPERATIONAL_EXT = {
+    ".sh", ".py", ".go", ".ts", ".tsx", ".js", ".mjs", ".yml", ".yaml", ".sql", ".conf", ".env",
+    ".service", ".timer", ".example",
+}
+
+# APPLIED MIGRATIONS ARE IMMUTABLE. Their comments may name the machine a grant was verified on; editing a
+# migration that has run anywhere is never the fix.
+IMMUTABLE_TREES = ("data-plane/migrations/", "control-plane/migrations/")
+
+# Delivery manifests are generated records of a past delivery, and exports/ holds generated copies of
+# documents judged at their source: neither is re-judged by the retired-host rule. The four documents after
+# them are records kept byte for byte (each says so in a historical/superseded banner or scope note; T0263, T0264):
+# they describe the retired hosts as they were, which is what they are evidence of.
+RETIRED_HOST_RECORD_TREES = (
+    "docs/manifests/", "exports/",
+    "docs/DEPLOYED_STATE.md", "docs/CONTROL_PLANE_MIGRATION.md",
+    "docs/COMMERCIAL_ONBOARDING_EXECUTION_STATUS.md", "docs/NIGHTLY_AUTHORITATIVE_DELIVERY.md",
+)
 
 # A paragraph carrying one of these is talking about the past on purpose.
 HISTORY_MARKERS = (
@@ -114,7 +145,7 @@ HISTORY_MARKERS = (
 # `slog.Warn("awaiting assignment: edged running without a tenant/site (generic appliance)")` and a
 # control-plane comment reading "Everything AWAITING ASSIGNMENT, not merely awaiting claim". Both are
 # CORRECT: they are product code handling an appliance that genuinely has no assignment yet, and the
-# vocabulary is the product's, not a claim about 172.21.60.25. A rule that cannot tell a description of this
+# vocabulary is the product's, not a claim about one appliance. A rule that cannot tell a description of this
 # appliance from a code path for any appliance would have to be silenced to be usable, and a silenced rule
 # is worse than none.
 #
@@ -158,7 +189,8 @@ def text_files():
             dirnames[:] = []
             continue
         for fn in filenames:
-            if os.path.splitext(fn)[1].lower() not in TEXT_EXT:
+            if (os.path.splitext(fn)[1].lower() not in TEXT_EXT
+                    and not fn.startswith(TEXT_BASENAME_PREFIXES)):
                 continue
             if (d + fn) in SELF:
                 continue
@@ -214,6 +246,31 @@ def quoted_citation(line_text, start):
 
 
 # ---- 1. RETIRED HOSTS -------------------------------------------------------------------------------------
+def is_operational_surface(path):
+    if any(path.startswith(t) for t in HISTORICAL_TREES + IMMUTABLE_TREES):
+        return False
+    base = path.rsplit("/", 1)[-1]
+    return os.path.splitext(base)[1].lower() in OPERATIONAL_EXT or base.startswith(TEXT_BASENAME_PREFIXES)
+
+
+def retired_identifiers(key, entry):
+    """Every spelling of a retired host: its dotted address (from octets) and its DNS name (from labels).
+
+    An entry is keyed by NAME and carries its address as octets, so the literal of a retired host is not
+    written in the register itself (T0194). An entry keyed by the address itself is still accepted."""
+    entry = entry or {}
+    octets = entry.get("address_octets")
+    out = [".".join(str(int(o)) for o in octets) if octets else key]
+    for labels in entry.get("hostname_labels") or []:
+        out.append(".".join(labels))
+    return out
+
+
+def identifier_re(ident):
+    # Whole-token match: a.b.c.25 must not match inside a.b.c.250, nor a name inside a longer name.
+    return re.compile(r"(?<![0-9A-Za-z.-])%s(?![0-9A-Za-z-]|\.[0-9A-Za-z])" % re.escape(ident))
+
+
 def check_retired_hosts(facts, files):
     retired = facts.get("retired_hosts") or {}
     if not retired:
@@ -222,20 +279,18 @@ def check_retired_hosts(facts, files):
             "against anything. Record it there.")
         return
     hits = 0
-    # An entry is keyed by NAME and carries its address as octets, so the literal address of a retired host is
-    # not written in the tree (T0194). An entry keyed by the address itself is still accepted.
-    def address_of(key, entry):
-        octets = (entry or {}).get("address_octets")
-        return ".".join(str(int(o)) for o in octets) if octets else key
     for key in retired:
-        addr = address_of(key, retired[key])
-        # The form that actually causes harm: a retired address as a DEFAULT, so a run with no environment
+        status = (retired[key] or {}).get("status", "RETIRED")
+        idents = retired_identifiers(key, retired[key])
+        addr = idents[0]
+        # a. The form that actually causes harm: a retired address as a DEFAULT, so a run with no environment
         # variable goes there. Matches ${VAR:-addr}, ${VAR:=addr} and a bare `VAR=addr` assignment.
         default_form = re.compile(
             r"(\$\{[A-Za-z_][A-Za-z0-9_]*:[-=]\s*%s\s*\})|(^\s*[A-Za-z_][A-Za-z0-9_]*=\"?%s\"?\s*$)"
             % (re.escape(addr), re.escape(addr)), re.M)
+        patterns = [(i, identifier_re(i)) for i in idents]
         for path, body in files:
-            if addr not in body:
+            if not any(i in body for i in idents):
                 continue
             for m in default_form.finditer(body):
                 line_no = body.count("\n", 0, m.start()) + 1
@@ -245,10 +300,34 @@ def check_retired_hosts(facts, files):
                 hits += 1
                 bad("retired-host-default",
                     "%s is RETIRED (%s) and is used here as a DEFAULT target, so a run that does not set "
-                    "the variable contacts it" % (key, retired[key].get("status", "RETIRED")),
+                    "the variable contacts it" % (key, status),
                     "%s:%d  %s" % (path, line_no, line.strip()))
+            operational = is_operational_surface(path)
+            document = (not operational and path.endswith(".md") and is_current_state_surface(path)
+                        and not any(path.startswith(t) for t in RETIRED_HOST_RECORD_TREES))
+            if not operational and not document:
+                continue
+            for i, line in enumerate(body.splitlines(), 1):
+                for ident, pat in patterns:
+                    if ident not in line or not pat.search(line):
+                        continue
+                    if operational:
+                        if default_form.search(line):
+                            continue  # already reported as a default
+                        hits += 1
+                        bad("retired-host-operational",
+                            "%s is RETIRED (%s); code, scripts, configuration and tests may not name it, "
+                            "not even as an example" % (key, status),
+                            "%s:%d  %s" % (path, i, line.strip()[:160]))
+                    elif not historical(path, line):
+                        hits += 1
+                        bad("retired-host-current-state",
+                            "%s is RETIRED (%s); a current-state document names it on a line that does not "
+                            "say so, so it reads as a live target" % (key, status),
+                            "%s:%d  %s" % (path, i, line.strip()[:160]))
     if not hits:
-        ok("no retired host is used as a default target (%s)" % ", ".join(sorted(retired)))
+        ok("no retired host is a default, an operational dependency or a current-state target (%s)"
+           % ", ".join(sorted(retired)))
 
 
 # ---- 2. ONBOARDING MILESTONES -----------------------------------------------------------------------------

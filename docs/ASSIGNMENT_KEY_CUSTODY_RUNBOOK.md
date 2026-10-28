@@ -29,7 +29,7 @@ assignment, unless `--emergency` (confirmed compromise).
 
 ## Retirement of `c63f848bf5ded3f6` — 2026-07-12
 
-Performed on Central (`150.0.0.252`, host trust domain `sc-central-*`).
+Performed on the Central of the time (`150.0.0.252`, retired as a target since 2026-09-27; host trust domain `sc-central-*`).
 
 > **Follow-up found 2026-09-27, during the move to `172.21.96.196`:** the rotation had left `/etc/stayconnect/assignment-signing.pub` holding the public half of this revoked key. Nothing verified against that file, but `central-export.sh` refused to move an inconsistent key pair. It was replaced by the active key's public half (`027a2c97f6c8fcdb`); the stale file is kept as `assignment-signing.pub.revoked-c63f848bf5ded3f6`.
 

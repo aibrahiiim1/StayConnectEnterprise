@@ -18,15 +18,15 @@ func TestSameOriginGuardRefusesAnotherSite(t *testing.T) {
 		name, method, origin, referer, fwdHost string
 		want                                   int
 	}{
-		{"cross-site POST", "POST", "https://evil.example", "", "172.21.60.25", 403},
-		{"cross-site DELETE by referer", "DELETE", "", "https://evil.example/page", "172.21.60.25", 403},
-		{"opaque origin", "POST", "null", "", "172.21.60.25", 403},
-		{"a sibling host", "PUT", "https://other.172.21.60.25.nip.io", "", "172.21.60.25", 403},
-		{"same origin through the console proxy", "POST", "https://172.21.60.25", "", "172.21.60.25", 204},
-		{"same origin with the default port spelled out", "POST", "https://172.21.60.25:443", "", "172.21.60.25", 204},
+		{"cross-site POST", "POST", "https://evil.example", "", "192.168.60.25", 403},
+		{"cross-site DELETE by referer", "DELETE", "", "https://evil.example/page", "192.168.60.25", 403},
+		{"opaque origin", "POST", "null", "", "192.168.60.25", 403},
+		{"a sibling host", "PUT", "https://other.192.168.60.25.nip.io", "", "192.168.60.25", 403},
+		{"same origin through the console proxy", "POST", "https://192.168.60.25", "", "192.168.60.25", 204},
+		{"same origin with the default port spelled out", "POST", "https://192.168.60.25:443", "", "192.168.60.25", 204},
 		{"same origin by referer", "PATCH", "", "https://hotel.stayconnect.local/operators", "hotel.stayconnect.local", 204},
 		{"no browser headers at all (curl, scripts)", "POST", "", "", "", 204},
-		{"a GET is never refused", "GET", "https://evil.example", "", "172.21.60.25", 204},
+		{"a GET is never refused", "GET", "https://evil.example", "", "192.168.60.25", 204},
 	} {
 		reached = 0
 		r := httptest.NewRequest(tc.method, "http://127.0.0.1:8090/edge/v1/operators", nil)

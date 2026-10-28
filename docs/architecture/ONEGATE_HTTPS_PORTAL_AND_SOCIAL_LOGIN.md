@@ -259,7 +259,7 @@ they carry hostnames, the portal address, CSRs and certificate status — no gue
 
 ## 12. Verified on Central and PRE-LIVE (2026-10-13), with a temporary test CA
 
-The full chain ran on the real Central (`172.21.96.196`) and the PRE-LIVE appliance (`172.21.60.25`) against a
+The full chain ran on the real Central (`172.21.96.196`) and the PRE-LIVE appliance (`172.21.60.25`), both retired since 2026-10-28, against a
 temporary Pebble ACME CA (15-minute certificates) and a challenge-test DNS server standing in for Let's Encrypt
 and Cloudflare, then both were removed and the configuration reset (the appliance is back on `NOT_CONFIGURED`).
 Phones do not trust that CA, so this proves the machinery, not public trust.

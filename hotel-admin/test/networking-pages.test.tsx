@@ -305,10 +305,10 @@ describe("Config history", () => {
 describe("WAN / LAN settings", () => {
   const STATE = {
     wan: {
-      interface: "ens160", mac: "00:11", link_up: true, mode: "static", ip: "172.21.60.25", prefix_len: 24,
-      netmask: "255.255.255.0", gateway: "172.21.60.1", dns: ["1.1.1.1"], management_url: "https://172.21.60.25",
+      interface: "ens160", mac: "00:11", link_up: true, mode: "static", ip: "192.168.60.25", prefix_len: 24,
+      netmask: "255.255.255.0", gateway: "192.168.60.1", dns: ["1.1.1.1"], management_url: "https://192.168.60.25",
       outbound_interface: "ens160", connectivity: { gateway_reachable: true, internet_ok: true, dns_ok: true },
-      persistent_ip: "172.21.60.25", drift: false,
+      persistent_ip: "192.168.60.25", drift: false,
     },
     lan: {
       physical_interface: "ens192", bridge: "br-lan", mac: "00:22", link_up: true, ip: "10.10.0.1", prefix_len: 24,
@@ -320,14 +320,14 @@ describe("WAN / LAN settings", () => {
   it("previews, warns that the admin address changes, and applies only with the password", async () => {
     route({ "/auth/whoami": IT, "/network/system": STATE, "/network/system/history": { history: [] } });
     post.mockImplementation((path: string) => {
-      if (path === "/network/system/validate") return Promise.resolve({ validation: { ok: true }, management_url: "https://172.21.60.30", effective: {} });
-      if (path === "/network/system/apply") return Promise.resolve({ ok: true, state: "pending_confirmation", validation: { ok: true }, management_url: "https://172.21.60.30", deadline_unix: Math.floor(Date.now() / 1000) + 120 });
+      if (path === "/network/system/validate") return Promise.resolve({ validation: { ok: true }, management_url: "https://192.168.60.30", effective: {} });
+      if (path === "/network/system/apply") return Promise.resolve({ ok: true, state: "pending_confirmation", validation: { ok: true }, management_url: "https://192.168.60.30", deadline_unix: Math.floor(Date.now() / 1000) + 120 });
       return Promise.resolve({});
     });
     render(<WanLanPage />);
     expect(await screen.findByRole("heading", { name: "WAN / LAN settings" })).toBeTruthy();
 
-    fireEvent.change(screen.getByLabelText("IP address"), { target: { value: "172.21.60.30" } });
+    fireEvent.change(screen.getByLabelText("IP address"), { target: { value: "192.168.60.30" } });
     expect(screen.getByText("Changing the WAN IP changes the admin address")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Validate & preview/ }));
     fireEvent.click(await screen.findByRole("button", { name: /Apply change/ }));
@@ -339,7 +339,7 @@ describe("WAN / LAN settings", () => {
     fireEvent.click(submit);
     await waitFor(() => expect(post).toHaveBeenCalledWith("/network/system/apply", expect.objectContaining({ password: "s3cret" })));
     const body = post.mock.calls.find((c) => c[0] === "/network/system/apply")![1];
-    expect(body.proposal.wan.ip).toBe("172.21.60.30");
+    expect(body.proposal.wan.ip).toBe("192.168.60.30");
     expect(await screen.findByText("Change applied — confirmation required")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Keep this configuration" })).toBeTruthy();
   });

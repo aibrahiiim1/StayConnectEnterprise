@@ -5,7 +5,7 @@
 | **Status** | Authoritative current-state reference (not a historical snapshot) |
 | **Reviewed against** | `master` at `7e4686ae56a229ef05460e02675d1d17924f8c9c` (2026-10-26); install path (sections 7.5, 16, 22–24) updated by the fresh-VM installer mission, 2026-10-27; certificate enrollment (section 9.3, finding F1) corrected 2026-10-27; installer acceptance on the test pair (R1–R3, manual A3.7) 2026-10-27 |
 | **Fresh-VM validation** | A new Central and a new appliance on VMware ESXi / Ubuntu 22.04.5, isolated from PRE-LIVE and the production Central, 2026-10-27 — labelled **[VM]** (installation manual Appendix 3) |
-| **Live environments inspected (read-only)** | PRE-LIVE appliance `172.21.60.25` and OneGate Central `172.21.96.196`, 2026-10-26 |
+| **Live environments inspected (read-only)** | PRE-LIVE appliance `172.21.60.25` and OneGate Central `172.21.96.196`, 2026-10-26 (both permanently retired 2026-10-28; the [LIVE] facts below are as inspected then) |
 | **Companion documents** | [Fresh VM Installation & Configuration Manual](../runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md) · [Machine-readable inventory](../inventory/onegate-components.json) |
 | **Supersedes** | [SYSTEM_OVERVIEW.md](../SYSTEM_OVERVIEW.md) (historical snapshot of 2026-07-10) as the whole-system reference |
 
@@ -230,7 +230,7 @@ The **Client Portal** is not a Next app: it is server-rendered Go `html/template
 | Node.js | 20.20.2 | [LIVE] |
 | time sync | systemd-timesyncd, clock synchronised, zone UTC | [LIVE] |
 
-Central (172.21.96.196) runs the same OS and image pins with the differences: Docker 29.1.3 (Ubuntu package), Compose 2.40.3, `ufw` active (22/443/9443), no Kea/Unbound/nftables rules of its own, and containers `sc-central-pg` / `sc-central-redis`. [LIVE]
+Central (172.21.96.196, retired 2026-10-28; as inspected) ran the same OS and image pins with the differences: Docker 29.1.3 (Ubuntu package), Compose 2.40.3, `ufw` active (22/443/9443), no Kea/Unbound/nftables rules of its own, and containers `sc-central-pg` / `sc-central-redis`. [LIVE]
 
 ---
 
@@ -528,7 +528,7 @@ The cloud owns the licensing relationship; the **site owns its Clients' data**. 
 |---|---|---|---|
 | Admin Console `https://<WAN/management IP>/` and `hotel.stayconnect.local` | Caddy (appliance) | EC P-256 leaf, 730 d, SAN = `hotel.stayconnect.local` + management IP, signed by **Caddy's local CA**; renewed by `stayconnect-hotel-admin-cert-manager` (timer every 6 h; renews at ≤ 45 days, SAN/IP drift or missing; atomic swap with `.prev` rollback, `caddy validate` + reload, health check by name and IP) | Browsers must trust Caddy's local root or accept a warning; distribution of that root to staff PCs is **[UNVERIFIED]**. HSTS 1 y, `nosniff`, `X-Frame-Options: DENY`. |
 | Client Portal `https://<label>.gw.onegate.work` | portald :8343 | Public ACME certificate obtained **through Central** (DNS-01 at Cloudflare, Let's Encrypt); ECDSA P-256 key and CSR generated **on the appliance** | Portal address is a private RFC 1918 /32 on dummy interface `ogportal0`; HSTS is deliberately never set; PRE-LIVE: a `t89b76xm.gw.onegate.work` certificate file is present **[LIVE]** |
-| Central console + API `https://sc-central.echofusion.com` | Caddy (Central) | Issued by Central's own internal TLS CA (`central-mint-tls.sh`, 825 d) by default; ACME only if `--tls acme` | Appliances pin `central-ca.crt` into the OS trust store |
+| Central console + API `https://central.onegate.getsemantics.com` | Caddy (Central) | Issued by Central's own internal TLS CA (`central-mint-tls.sh`, 825 d) by default; ACME only if `--tls acme` | Appliances pin `central-ca.crt` into the OS trust store |
 | Central appliance protocol `:9443` | `ctrlapi` directly (not behind Caddy) | Server certificate issued by the **appliance Intermediate CA**, rotated 30 days before expiry | `RequireAndVerifyClientCert` against the appliance CA |
 | Appliance → Central, first calls | `:443` via Caddy | Signed JWT with the appliance identity key (≤ 60 s lifetime, replay-protected) | Used for register, CSR; mTLS thereafter |
 
@@ -565,7 +565,7 @@ The appliance has **exactly two NICs**: the **WAN/management** NIC (default rout
 
 * The provisioner detects `WAN_IFACE` as the interface of the default route and `LAN_IFACE` as the first other NIC (alphabetical, skipping `lo`, `docker*`, `br-*`, `veth*`) and writes them to `netd.env`. netd's compiled defaults are `ens160`/`ens192`. Nothing blocks a three-NIC machine; "exactly two" is a design rule enforced by convention, not by code. [CODE]
 * Interface roles (`network_interfaces.role`): `management`, `wan` (protected, cannot be reassigned), `guest_access`, `guest_trunk`, `ha_sync` (value exists; no consumer), `unused`. The newer **Access/Trunk port mode** (`POST /ports/{iface}/mode`) stages ENABLE/DISABLE changes and refuses protected ports. [CODE]
-* **Live PRE-LIVE example** [LIVE]: `ens160 172.21.60.25/24` (default via `172.21.60.1`); `ens192` carries no address; `br-g-52fd7a28 10.20.0.1/20` (the prepared untagged Client network, ifb `ifb-g-52fd7a28`); VLAN sub-interface `ens192.90` enslaved to `br-g90-a811 10.90.0.1/24`; portal address `ogportal0 10.255.255.1/32`; Docker bridges for the two containers.
+* **Live PRE-LIVE example** [LIVE, on the since-retired appliance]: `ens160 172.21.60.25/24` (default via `172.21.60.1`); `ens192` carries no address; `br-g-52fd7a28 10.20.0.1/20` (the prepared untagged Client network, ifb `ifb-g-52fd7a28`); VLAN sub-interface `ens192.90` enslaved to `br-g90-a811 10.90.0.1/24`; portal address `ogportal0 10.255.255.1/32`; Docker bridges for the two containers.
 * Sysctl (`deploy/sysctl/99-stayconnect.conf`, installed by the provisioner): `ip_forward=1`, IPv6 forwarding 1, `send_redirects=0`, `nf_conntrack_max=262144`. [CODE][LIVE]
 
 ### 10.2 Who writes what
@@ -879,7 +879,7 @@ sequenceDiagram
   end
 ```
 
-1. **Provision** writes `scd.env` with `SCD_CTRLAPI_BASE`, `SCD_MTLS_BASE`, `SCD_AUTO_REGISTER=true`; **no tenant or site is ever written**. The Central endpoint is a *name* (`sc-central.echofusion.com`, `:9443`) validated as https + FQDN (no IP); provisioning warns on `/etc/hosts` overrides and **hard-stops** if upstream resolvers disagree about the name (needs `dig`, not installed by the provisioner).
+1. **Provision** writes `scd.env` with `SCD_CTRLAPI_BASE`, `SCD_MTLS_BASE`, `SCD_AUTO_REGISTER=true`; **no tenant or site is ever written**. The Central endpoint is a *name* (`CENTRAL_BASE` / `CENTRAL_MTLS_BASE` in `deploy/config/central-endpoint.env`, `:9443`) validated as https + FQDN (no IP); provisioning warns on `/etc/hosts` overrides and **hard-stops** if upstream resolvers disagree about the name (needs `dig`, not installed by the provisioner).
 2. **Registration** (retry 30 s doubling to 5 min, ±20 % jitter; success re-execs scd). Refusals: known identity key from different hardware ⇒ 403 + clone alert; new key on a waiting appliance adopted only if the hardware fingerprint matches; retired identity ⇒ 403; a retired appliance re-registering ⇒ a **new** row.
 3. **Activation** needs `platform_owner/admin` + password. It refuses `409 holds_other_customer_data` if the appliance holds a different customer's data. Tenant/site are never typed on the appliance and have no env fallback in production builds.
 4. **Licence document** (schema 4): binds `appliance_id`, serial, hardware fingerprint, identity-key fingerprint, WAN MAC; monotonic `license_version`; `valid_from/until`; `grace_period_days`; `max_concurrent_online_guests`; `modules` (sole authority). The envelope is `{payload (exact signed bytes), signature, key_id}` — no canonicalisation. Stored in `/etc/stayconnect/license/{current.json,state.json,revoked.json}` with anti-rollback (version/issued-at/revoked ids) and a 48 h clock high-water. Binding re-evaluated every minute: **hardware mismatch = hard reject**; WAN-MAC-only mismatch = soft (operator does "Rebind WAN MAC" in Central). States: Active, GracePeriod, Expired, Suspended, Revoked, Unlicensed (+ CloudStale warning). New sessions are refused unless Active/Grace; existing sessions run to their natural end. Voucher sign-in still works when the licence is Restricted/Suspended.
@@ -1148,7 +1148,8 @@ flowchart TD
 | Email-OTP sign-in | **Removed** (replaced by email accounts; `CHANNEL_REMOVED`) |
 | Legacy in-process PMS providers (`internal/pms`, `pmsloader`) | **Retired but still loaded at scd boot** |
 | `internal/pmsguard` | **Dead code** |
-| Former Central `150.0.0.252` | **Stopped; not a target** (holds an encrypted Root CA key backup pending shredding after offline-media confirmation) |
+| Former Central `150.0.0.252` | **Stopped; retired as a target** (holds the former trust universe's encrypted Root CA key backup pending shredding after offline-media confirmation) |
+| Former Central `172.21.96.196`, former PRE-LIVE appliance `172.21.60.25` | **Permanently retired** (Product-Owner record, 2026-10-28; `current_state_facts.retired_hosts`) |
 | Retired development reference appliance | **Retired; never contacted** |
 
 ---
@@ -1181,7 +1182,7 @@ Everything below was compared with the code at `7e4686ae`. **The code wins.** Th
 
 | Document | Statement | Reality |
 |---|---|---|
-| `docs/SYSTEM_OVERVIEW.md` | Whole-system reference; NATS, `web-admin`, "18 migrations", scd nft writer and 30 s reaper, portald as `stayconnect` with `PORTALD_CERT`, email OTP, plain-HTTP option 114 | Banner marks it a 2026-07-10 snapshot; all of these are superseded |
+| `docs/SYSTEM_OVERVIEW.md` | Whole-system reference (2026-07-10 snapshot) | Superseded by this handbook; kept as a historical snapshot because transitions T0027/T0028 cite it as evidence |
 | `docs/DEPLOYMENT_APPLIANCE.md` *(banner added: install with the manual)* | A `postgresql` unit runs PG 16; portald runs as `stayconnect`; bring-up applies `0001_edge_init`; hand-install netplan/nftables/Kea/Unbound skeletons; one Caddy vhost serving a static bundle | Postgres is a container; portald has its own user; fresh installs use the **baseline**; netd renders network config; the Admin Console is a Next server on :3100 behind Caddy |
 | `docs/DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md` *(corrected in this PR)* | "four runtime roles"; record every step in `schema_migrations`; reconcile with `gatep-reconcile.sh`; apply netplan/nftables/Kea skeletons; never tells you to apply migrations after the baseline | **eight** `svc_*` roles; the baseline records no ledger rows; the provisioner uses direct `psql -f`; skeletons are not applied; migrations 0150–0158 are required |
 | `docs/APPLIANCE_ONBOARDING_MANUAL.md` *(corrected in this PR)*, `STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md` | "No CLI / nothing typed on the appliance" | True only *after* installation; the install itself is one root command (`appliance-install.sh`) |
@@ -1246,10 +1247,10 @@ the operator's), **G15** (no observability stack, no HA).
 
 ### 24.2 Decisions that need a separate operational decision (Product Owner)
 
-1. **Off-host copy destination** for Central dumps and export bundles; Root-CA backup shredding after offline-media confirmation.
+1. **Off-host copy destination** for Central dumps and export bundles; shredding the former trust universe's Root-CA backup (on the stopped first Central, retired as a target) after offline-media confirmation.
 2. **Supported OS** — whether Ubuntu 24.04 is a supported target.
 3. **Go-Live**, LIVE-mode card payments, further real PMS postings — remain unauthorised.
-4. **Doc retirement** of the remaining obsolete documents in section 23 (this PR corrects the install-path ones only).
+4. **Doc retirement** of the remaining obsolete documents in section 23. Decided in part on 2026-10-28 (D78/T0264): current-state references to retired hosts were corrected and an unexecuted preparation runbook for the retired appliance was removed; records (decisions, delivery manifests, reports, evidence) stay. The rows still open are corrections to make in place, not deletions.
 
 ---
 

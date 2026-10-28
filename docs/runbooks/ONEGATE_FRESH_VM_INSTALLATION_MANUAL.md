@@ -118,7 +118,7 @@ OneGate's design rule is **two NICs and no more**. The installer counts physical
 | Need | Detail | Label |
 |---|---|---|
 | WAN IP/prefix/gateway | Static is recommended: the Admin Console certificate, the nft `443` pin and the Central link follow this address. Changing it later is a staged change with a confirm window (Part C.5). | **[CODE]** |
-| DNS on the WAN NIC | Resolvers that **resolve your Central's name** (`sc-central.echofusion.com` for the production Central). The provisioner queries every upstream resolver and **stops if they disagree** about the name (set `ALLOW_SPLIT_DNS=1` only knowingly). | **[CODE][VM]** |
+| DNS on the WAN NIC | Resolvers that **resolve your Central's name** (`central.onegate.getsemantics.com` for the production Central). The provisioner queries every upstream resolver and **stops if they disagree** about the name (set `ALLOW_SPLIT_DNS=1` only knowingly). | **[CODE][VM]** |
 | Central reachability | Outbound **TCP 443** to Central for register/CSR/licence/assignment/hello/portal-TLS, and **TCP 9443** (mutual TLS) once a certificate exists. The name must be a **hostname, not an IP**. Central never connects inbound to the appliance. **If Central sits behind NAT, both 443 and 9443 must be forwarded to the Central host** (the validation found 443 forwarded to the wrong host once — check, do not assume). An appliance outside Central's network needs the name in **public DNS** (an A record to Central's public address); one on Central's own LAN reaches the public address only if the router does hairpin NAT, or by internal DNS. Proven from outside for the test Central (A3.8). | **[CODE][VM]** |
 | Package/image sources | Outbound HTTPS to the Ubuntu mirrors, `download.docker.com`, `dl.cloudsmith.io` (Caddy), `deb.nodesource.com`, and Docker Hub (images `timescale/timescaledb:2.16.1-pg16`, `redis:7-alpine`). **No offline install path exists. [PO] if the site is air-gapped.** | **[CODE][VM]** |
 | NTP | Outbound UDP 123 to the site's/clock source | — |
@@ -733,7 +733,7 @@ unchanged. `apply-pending-migrations.sh --list` prints the pending set without c
 | Item | Requirement | Label |
 |---|---|---|
 | Host | Ubuntu **22.04** (validated on 22.04.5) — the installer also lists 24.04 and Debian 12; one NIC; root access. Validated lab Central: 2 vCPU, 5.9 GiB RAM, 18 GB root LV (39 % used after install). Production Central: 1 vCPU, 7.8 GiB, 18 GB | **[VM][LIVE-REF]**; no official sizing — **[PO]** |
-| Addressing | One static IPv4; DNS **A record** for the Central name (e.g. `sc-central.echofusion.com`) that every appliance's resolvers can resolve. The name is the only thing appliances pin — if the host moves, change the DNS, not the appliances | **[CODE]** |
+| Addressing | One static IPv4; DNS **A record** for the Central name (e.g. `central.onegate.getsemantics.com`) that every appliance's resolvers can resolve. The name is the only thing appliances pin — if the host moves, change the DNS, not the appliances | **[CODE]** |
 | Endpoint config | The Central name is read from the release's `deploy/config/central-endpoint.env` (`CENTRAL_BASE`, `CENTRAL_MTLS_BASE`, `CTRLAPI_APPLIANCE_BASE`); a new environment needs its own value — for a lab, `--endpoint-config <file>` (the validation used one naming the lab Central), and on the appliance side `appliance-install.sh --central-base`. Must be https + FQDN, no IP, no path | **[CODE][VM]** |
 | Console name | e.g. `central.onegate.getsemantics.com` (documented as **not configured yet**; needs DNS + certificate + redeploy) — pass with `--admin-name` | **[DOC]** |
 | TLS for `:443` | `--tls internal` (default; Central's own CA, which appliances install) or `--tls acme` (public certificate; needs public DNS and `:80/:443`) | **[CODE]** |
@@ -786,7 +786,7 @@ Failure modes: wrong `--mode`; a repository checkout instead of a release; check
 7. Portal certificates (optional): *System → Portal certificates* — Cloudflare API token, ACME contact, staging first, then production and CAA. **[PO]** for the token and zone.
 8. Off-host copy of `/opt/stayconnect/backups/db` and the export bundle **[PO]**.
 
-### F.5 Verify Central (software) — **[LIVE-REF] on 172.21.96.196**
+### F.5 Verify Central (software) — **[LIVE-REF] on 172.21.96.196** (the Central of the time, retired 2026-10-28)
 
 | ID | Check | Expected |
 |---|---|---|
@@ -893,7 +893,7 @@ DSNs are `postgres://<svc_role>:<password>@127.0.0.1:5432/stayconnect_site?sslmo
 ## Appendix 3 — Validation performed for this manual
 
 **2026-10-27**, on an **isolated test environment** built for this purpose and never connected to PRE-LIVE `172.21.60.25` or the production
-Central `172.21.96.196`: a **new Central** (`central.onegate.getsemantics.com`, its own trust universe, VMware ESXi, Ubuntu 22.04.5, 2 vCPU /
+Central `172.21.96.196` (both since retired, 2026-10-28): a **new Central** (`central.onegate.getsemantics.com`, its own trust universe, VMware ESXi, Ubuntu 22.04.5, 2 vCPU /
 5.9 GiB / 18 GB) and two **new appliances** in turn (VMware ESXi, Ubuntu 22.04.5, two NICs each): appliance 1 (4 vCPU / 12 GB / 48 GB, behind
 NAT, reaching Central by its public name) and appliance 2 (1 vCPU / 7.8 GiB / 97 GB, on Central's subnet, reaching it through hairpin NAT). Test
 data only (customer "OneGate Test Lab", site "Test Site"); no PMS, no payment provider, no real Client.
