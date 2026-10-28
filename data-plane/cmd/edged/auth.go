@@ -3,60 +3,24 @@ package main
 import (
 	"context"
 	"crypto/rand"
-	"crypto/subtle"
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
-	"golang.org/x/crypto/argon2"
+	"github.com/stayconnect/enterprise/data-plane/internal/passwordhash"
 )
 
-// argon2id parameters match the cloud control plane.
-const (
-	argonMemory  = 64 * 1024
-	argonTime    = 1
-	argonThreads = 4
-	argonSaltLen = 16
-	argonKeyLen  = 32
-)
-
-func hashPassword(pw string) (string, error) {
-	salt := make([]byte, argonSaltLen)
-	if _, err := rand.Read(salt); err != nil {
-		return "", err
-	}
-	key := argon2.IDKey([]byte(pw), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
-	return fmt.Sprintf("$argon2id$v=19$m=%d,t=%d,p=%d$%s$%s",
-		argonMemory, argonTime, argonThreads,
-		base64.RawStdEncoding.EncodeToString(salt),
-		base64.RawStdEncoding.EncodeToString(key)), nil
-}
+// Password hashing is the shared internal/passwordhash implementation (same argon2id format and parameters), so
+// verification bounds the hash's own m, t and p: a hash written outside edged (a restore, direct database
+// access) can no longer make one sign-in allocate unbounded memory (audit P9 L3, perf D2-CC1).
+func hashPassword(pw string) (string, error) { return passwordhash.Hash(pw) }
 
 func verifyPassword(pw, encoded string) bool {
-	parts := strings.Split(encoded, "$")
-	if len(parts) != 6 || parts[1] != "argon2id" {
-		return false
-	}
-	var m uint32
-	var t uint32
-	var p uint8
-	if _, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &m, &t, &p); err != nil {
-		return false
-	}
-	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
-	if err != nil {
-		return false
-	}
-	want, err := base64.RawStdEncoding.DecodeString(parts[5])
-	if err != nil {
-		return false
-	}
-	got := argon2.IDKey([]byte(pw), salt, t, m, p, uint32(len(want)))
-	return subtle.ConstantTimeCompare(got, want) == 1
+	ok, err := passwordhash.Verify(pw, encoded)
+	return err == nil && ok
 }
 
 // Sessions live in edged's memory (one edged per appliance; re-login after a restart is acceptable). The cookie

@@ -172,6 +172,29 @@ func TestDummyHashCostsTheSameAsARealOne(t *testing.T) {
 	}
 }
 
+// P9 L3: a stored hash's own argon2 parameters are bounded before argon2 runs, so a hash written outside edged
+// cannot make one sign-in allocate gigabytes. The old verifier would have run argon2 with m=4 GiB here.
+func TestVerifyPasswordRefusesAHashWithHostileParameters(t *testing.T) {
+	real, err := hashPassword("pw-for-bounds")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := strings.Split(real, "$")
+	for _, params := range []string{"m=4194304,t=1,p=4", "m=65536,t=1000,p=4", "m=65536,t=1,p=255"} {
+		hostile := strings.Join([]string{"", parts[1], parts[2], params, parts[4], parts[5]}, "$")
+		start := time.Now()
+		if verifyPassword("pw-for-bounds", hostile) {
+			t.Errorf("%s: a hash outside the verifier bounds must not verify", params)
+		}
+		if d := time.Since(start); d > 200*time.Millisecond {
+			t.Errorf("%s: refused only after %v; argon2 must not run", params, d)
+		}
+	}
+	if !verifyPassword("pw-for-bounds", real) {
+		t.Fatal("a hash edged wrote must still verify")
+	}
+}
+
 func TestLoginRefusesAnOversizedBodyBeforeTouchingTheDatabase(t *testing.T) {
 	s := &server{sessions: newSessionStore(time.Hour)} // no database: reaching it would panic
 	body := `{"email":"a@b.c","password":"` + strings.Repeat("x", authBodyLimit) + `"}`
