@@ -75,6 +75,8 @@ type Store struct {
 	ExtraRoots []*x509.Certificate
 	// Warn receives operational warnings, never key material.
 	Warn func(msg string, args ...any)
+
+	certWriter func(path string, chainPEM []byte) error // tests only
 }
 
 func (s *Store) now() time.Time {
@@ -144,6 +146,12 @@ func (s *Store) EnsureDir() error {
 	}
 	if err := os.MkdirAll(s.dir(), mode); err != nil {
 		return err
+	}
+	// Temporary files left by a crash mid-write may hold key bytes; nothing else uses them.
+	if stale, err := filepath.Glob(filepath.Join(s.dir(), ".*.tmp-*")); err == nil {
+		for _, f := range stale {
+			_ = os.Remove(f)
+		}
 	}
 	if ok {
 		if err := s.chown(s.dir(), 0, gid); err != nil {
@@ -432,7 +440,9 @@ func describe(host string, leaf *x509.Certificate) *Installed {
 }
 
 // Install verifies the chain against the pending key, then installs the key, the chain, and drops the pending
-// key. portald keeps its current pair if a load fails, so the gap between the renames cannot break a handshake.
+// key. portald keeps its current pair if a load fails, so the gap between the renames cannot break a handshake. If the
+// chain cannot be written after the key was, the previous key is put back so the installed pair still matches; the
+// pending key stays until both are in place.
 func (s *Store) Install(host string, chainPEM []byte) (*Installed, error) {
 	if !ValidHostname(host) {
 		return nil, ErrBadHostname
@@ -452,10 +462,19 @@ func (s *Store) Install(host string, chainPEM []byte) (*Installed, error) {
 	if err != nil {
 		return nil, err
 	}
+	oldKey, oldKeyErr := os.ReadFile(s.KeyPath(host))
 	if err := s.writeKey(s.KeyPath(host), keyPEM); err != nil {
 		return nil, err
 	}
-	if err := s.writeAtomic(s.CertPath(host), chainPEM, 0o644, 0, false); err != nil {
+	if err := s.writeCert(s.CertPath(host), chainPEM); err != nil {
+		switch {
+		case oldKeyErr == nil:
+			if rerr := s.writeKey(s.KeyPath(host), oldKey); rerr != nil {
+				s.warn("portal-tls: chain write failed and the previous key could not be restored", "host", host, "err", rerr)
+			}
+		case errors.Is(oldKeyErr, os.ErrNotExist):
+			_ = os.Remove(s.KeyPath(host))
+		}
 		return nil, err
 	}
 	if err := s.DropPending(host); err != nil {
@@ -464,7 +483,16 @@ func (s *Store) Install(host string, chainPEM []byte) (*Installed, error) {
 	return inst, nil
 }
 
-// Inspect does not check expiry or trust (the agent decides), but refuses a mismatched pair (ErrKeyMismatch).
+// writeCert is the chain write Install uses; tests replace it to simulate a failure.
+func (s *Store) writeCert(path string, chainPEM []byte) error {
+	if s.certWriter != nil {
+		return s.certWriter(path, chainPEM)
+	}
+	return s.writeAtomic(path, chainPEM, 0o644, 0, false)
+}
+
+// Inspect does not check expiry or trust (the agent decides), but refuses a mismatched pair (ErrKeyMismatch) and a
+// certificate that does not name host.
 func (s *Store) Inspect(host string) (*Installed, error) {
 	if !ValidHostname(host) {
 		return nil, ErrBadHostname
@@ -487,6 +515,9 @@ func (s *Store) Inspect(host string) (*Installed, error) {
 	}
 	if !samePublicKey(key.Public(), certs[0].PublicKey) {
 		return nil, ErrKeyMismatch
+	}
+	if err := certs[0].VerifyHostname(host); err != nil {
+		return nil, fmt.Errorf("installed certificate does not name %s", host)
 	}
 	return describe(host, certs[0]), nil
 }
