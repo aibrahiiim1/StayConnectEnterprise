@@ -192,7 +192,7 @@ func (p *phase3) buildEnvelope(plan enforce.Plan, managedBridges []string, fallb
 	}
 	return shapeproducer.BuildEnvelope(plan, shapeproducer.Scope{
 		TenantID: p.tenant, SiteID: p.site, ApplianceID: p.scope.ApplianceID,
-		AssignmentID: p.scope.AssignmentID, AssignmentGen: p.scope.AssignmentGe,
+		AssignmentID: p.scope.AssignmentID, AssignmentGen: p.scope.AssignmentGen,
 	}, gen, runtime, managedBridges, fallbackBridge, now, planValidity), nil
 }
 

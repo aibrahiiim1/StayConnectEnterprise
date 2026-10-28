@@ -13,11 +13,11 @@ import (
 )
 
 type planScope struct {
-	TenantID     string
-	SiteID       string
-	ApplianceID  string
-	AssignmentID string
-	AssignmentGe int64
+	TenantID      string
+	SiteID        string
+	ApplianceID   string
+	AssignmentID  string
+	AssignmentGen int64
 }
 
 type planCounter struct {

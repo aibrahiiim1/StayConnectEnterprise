@@ -1,11 +1,32 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
 	"github.com/stayconnect/enterprise/data-plane/internal/assignment/assignmenttest"
 )
+
+// Audit P6 L13: an assignment that changed after acctd resolved its scope must not become the watcher's
+// baseline, or acctd would never re-execute and would keep billing the previous customer.
+func TestWatchBaselineIsTheResolvedVersion(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "assignment.json"),
+		[]byte(`{"current":{"assignment_id":"a2","version":9},"version":9}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store := &assignment.Store{Dir: dir}
+	if got := watchBaseline(5, store); got != 5 {
+		t.Fatalf("baseline = %d, want the resolved version 5 (the change to 9 must trigger a re-exec)", got)
+	}
+	// With no verified version (development fallback) the stored record is the baseline, so the watcher does
+	// not re-execute forever.
+	if got := watchBaseline(0, store); got != 9 {
+		t.Fatalf("fallback baseline = %d, want 9", got)
+	}
+}
 
 func acctdEnv(f *assignmenttest.Fixture) func(string) string {
 	m := map[string]string{

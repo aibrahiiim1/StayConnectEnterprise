@@ -20,7 +20,7 @@ func testArm(t *testing.T, counterPath string) *phase3 {
 	return &phase3{
 		tenant: "tenant-1", site: "site-1",
 		scope: planScope{TenantID: "tenant-1", SiteID: "site-1", ApplianceID: "appl-1",
-			AssignmentID: "asg-1", AssignmentGe: 7},
+			AssignmentID: "asg-1", AssignmentGen: 7},
 		plans: c,
 	}
 }

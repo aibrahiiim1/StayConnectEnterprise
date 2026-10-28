@@ -136,8 +136,16 @@ func (p *phase3) accountingPass(ctx context.Context, rd counterReader, ep epochS
 			// netd has no class for this session yet, so there is no trustworthy generation.
 			continue
 		}
+		upBytes, upOK := up.classes[minor]
+		downBytes, downOK := down.classes[minor]
+		if !upOK || !downOK {
+			// Audit P6 L13: a class absent from the counter dump is an unread meter, not a reading of 0 bytes.
+			degraded = reasonCountersUnreadable
+			slog.Warn("phase3: session's class is absent from the counters; not accounted", "session", s.ID)
+			continue
+		}
 		class, err := p.ingestAbsolute(ctx, s, bridge, minor, epoch,
-			int64(up.classes[minor].Bytes), int64(down.classes[minor].Bytes), now)
+			int64(upBytes.Bytes), int64(downBytes.Bytes), now)
 		if err != nil {
 			degraded = reasonObservationRefused
 			slog.Warn("phase3: absolute counter observation refused", "session", s.ID, "err", err)

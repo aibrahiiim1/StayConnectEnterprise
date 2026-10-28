@@ -46,12 +46,23 @@ func waitForAssignment(ctx context.Context, assigned func() bool) {
 	}
 }
 
-// watchAssignmentReexec re-execs on an assignment version change so usage is never billed to the previous customer.
-func watchAssignmentReexec(ctx context.Context, store *assignment.Store) {
-	baseline := int64(0)
-	if r, err := store.Load(); err == nil && r != nil {
-		baseline = r.Version
+// watchBaseline is the version the watcher compares against. It is the version acctd resolved its scope from
+// (audit P6 L13): reading the store again after resolving would adopt a change made in between as the
+// baseline, and acctd would keep billing the previous customer. Only with no verified version (a development
+// fallback) is the stored record read.
+func watchBaseline(resolved int64, store *assignment.Store) int64 {
+	if resolved > 0 {
+		return resolved
 	}
+	if r, err := store.Load(); err == nil && r != nil {
+		return r.Version
+	}
+	return 0
+}
+
+// watchAssignmentReexec re-execs on an assignment version change so usage is never billed to the previous customer.
+func watchAssignmentReexec(ctx context.Context, store *assignment.Store, resolvedVersion int64) {
+	baseline := watchBaseline(resolvedVersion, store)
 	t := time.NewTicker(15 * time.Second)
 	defer t.Stop()
 	for {
