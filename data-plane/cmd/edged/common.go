@@ -177,7 +177,7 @@ func (c *scdClient) call(ctx context.Context, method, path string, body any) (in
 func (c *scdClient) proxy(w http.ResponseWriter, r *http.Request, method, path string, body any) {
 	st, raw, err := c.call(r.Context(), method, path, body)
 	if err != nil {
-		jsonErr(w, http.StatusBadGateway, "scd_unreachable", err.Error())
+		internalErr(w, r, http.StatusBadGateway, "scd_unreachable", err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -193,7 +193,7 @@ func (s *server) licenseInstall(w http.ResponseWriter, r *http.Request) {
 	}
 	st, resp, err := s.scd.call(r.Context(), http.MethodPost, "/v1/license/install", json.RawMessage(raw))
 	if err != nil {
-		jsonErr(w, http.StatusBadGateway, "scd_unreachable", err.Error())
+		internalErr(w, r, http.StatusBadGateway, "scd_unreachable", err)
 		return
 	}
 	if st == http.StatusOK {

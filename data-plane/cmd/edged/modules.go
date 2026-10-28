@@ -245,7 +245,7 @@ func (s *server) getModuleChanges(w http.ResponseWriter, r *http.Request) {
 		 WHERE tenant_id = $1::uuid AND site_id = $2::uuid
 		 ORDER BY changed_at DESC LIMIT 100`, s.tenantID, s.siteID)
 	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "changes_unreadable", err.Error())
+		internalErr(w, r, http.StatusInternalServerError, "changes_unreadable", err)
 		return
 	}
 	defer rows.Close()
@@ -261,7 +261,7 @@ func (s *server) getModuleChanges(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var c change
 		if err := rows.Scan(&c.Module, &c.ChangedAt, &c.ChangedBy, &c.Reason, &c.Old, &c.New); err != nil {
-			jsonErr(w, http.StatusInternalServerError, "changes_unreadable", err.Error())
+			internalErr(w, r, http.StatusInternalServerError, "changes_unreadable", err)
 			return
 		}
 		out = append(out, c)
@@ -334,7 +334,7 @@ func (s *server) putModule(w http.ResponseWriter, r *http.Request) {
 	var version int64
 	if err := s.db.QueryRow(ctx, `SELECT iam_v2.site_module_set($1::uuid,$2::uuid,$3,$4,$5,NULLIF($6,''))`,
 		s.tenantID, s.siteID, id, *in.Enabled, actor, strings.TrimSpace(in.Reason)).Scan(&version); err != nil {
-		jsonErr(w, http.StatusInternalServerError, "module_not_saved", err.Error())
+		internalErr(w, r, http.StatusInternalServerError, "module_not_saved", err)
 		return
 	}
 	s.invalidateModules()

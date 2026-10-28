@@ -36,7 +36,7 @@ func (s *server) getGuestDeviceSetting(w http.ResponseWriter, r *http.Request) {
 	svc := deviceselfservice.New(s.db)
 	on, err := svc.EnabledForAppliance(ctx, s.tenantID, s.siteID, s.applianceID())
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		jsonErr(w, http.StatusInternalServerError, "read_failed", err.Error())
+		internalErr(w, r, http.StatusInternalServerError, "read_failed", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, guestDeviceSettingResp{
@@ -89,12 +89,12 @@ func (s *server) setGuestDeviceSetting(w http.ResponseWriter, r *http.Request) {
 	svc := deviceselfservice.New(s.db)
 	before, err := svc.EnabledForAppliance(ctx, s.tenantID, s.siteID, s.applianceID())
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		jsonErr(w, http.StatusInternalServerError, "read_failed", err.Error())
+		internalErr(w, r, http.StatusInternalServerError, "read_failed", err)
 		return
 	}
 	if err := svc.SetForAppliance(ctx, s.tenantID, s.siteID, s.applianceID(), *in.Enabled,
 		sess.OperatorID, label, reason); err != nil {
-		jsonErr(w, http.StatusInternalServerError, "write_failed", err.Error())
+		internalErr(w, r, http.StatusInternalServerError, "write_failed", err)
 		return
 	}
 

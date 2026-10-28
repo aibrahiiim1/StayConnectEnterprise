@@ -360,7 +360,7 @@ func (s *server) disconnectGuestSession(w http.ResponseWriter, r *http.Request) 
 	st, raw, err := s.scd.call(r.Context(), http.MethodPost, "/v1/sessions/revoke",
 		map[string]string{"ip": *ip, "reason": "admin"})
 	if err != nil {
-		jsonErr(w, http.StatusBadGateway, "scd_unreachable", err.Error())
+		internalErr(w, r, http.StatusBadGateway, "scd_unreachable", err)
 		return
 	}
 	if st != http.StatusOK {

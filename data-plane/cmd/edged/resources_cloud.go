@@ -61,7 +61,7 @@ func (s *server) centralRefresh(w http.ResponseWriter, r *http.Request) {
 func (s *server) centralOfflineRequest(w http.ResponseWriter, r *http.Request) {
 	st, raw, err := s.scd.call(r.Context(), http.MethodGet, "/v1/central/offline-request", nil)
 	if err != nil {
-		jsonErr(w, http.StatusBadGateway, "scd_unreachable", err.Error())
+		internalErr(w, r, http.StatusBadGateway, "scd_unreachable", err)
 		return
 	}
 	if st == http.StatusOK {
@@ -82,7 +82,7 @@ func (s *server) centralOfflinePackage(w http.ResponseWriter, r *http.Request) {
 	st, resp, err := s.scd.call(r.Context(), http.MethodPost, "/v1/central/offline-package", json.RawMessage(raw))
 	if err != nil {
 		s.audit(r, "central.offline_package_failed", "appliance", "", map[string]any{"error": err.Error()})
-		jsonErr(w, http.StatusBadGateway, "scd_unreachable", err.Error())
+		internalErr(w, r, http.StatusBadGateway, "scd_unreachable", err)
 		return
 	}
 	if st >= 200 && st < 300 {

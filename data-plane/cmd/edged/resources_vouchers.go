@@ -107,7 +107,7 @@ func (s *server) listVoucherBatches(w http.ResponseWriter, r *http.Request) {
 func (s *server) proxyVoucherRows(w http.ResponseWriter, r *http.Request, path, key string) {
 	st, raw, err := s.scd.call(r.Context(), http.MethodGet, path, nil)
 	if err != nil {
-		jsonErr(w, http.StatusBadGateway, "scd_unreachable", err.Error())
+		internalErr(w, r, http.StatusBadGateway, "scd_unreachable", err)
 		return
 	}
 	if st == http.StatusOK && s.db != nil {
@@ -360,7 +360,7 @@ func (s *server) issueVouchers(w http.ResponseWriter, r *http.Request) {
 	}
 	st, resp, err := s.scd.call(r.Context(), http.MethodPost, "/v1/vouchers/issue", body)
 	if err != nil {
-		jsonErr(w, http.StatusBadGateway, "scd_unreachable", err.Error())
+		internalErr(w, r, http.StatusBadGateway, "scd_unreachable", err)
 		return
 	}
 	if st == http.StatusCreated {
@@ -412,7 +412,7 @@ func (s *server) revokeVoucher(w http.ResponseWriter, r *http.Request) {
 	st, resp, err := s.scd.call(r.Context(), http.MethodPost, "/v1/vouchers/"+id+"/revoke",
 		map[string]any{"operator_id": actor, "operator_label": label, "reason": in.Reason})
 	if err != nil {
-		jsonErr(w, http.StatusBadGateway, "scd_unreachable", err.Error())
+		internalErr(w, r, http.StatusBadGateway, "scd_unreachable", err)
 		return
 	}
 	if st == http.StatusOK {
@@ -479,7 +479,7 @@ func (s *server) revealVoucherCode(w http.ResponseWriter, r *http.Request) {
 	st, resp, err := s.scd.call(r.Context(), http.MethodPost, "/v1/vouchers/"+id+"/reveal",
 		map[string]any{"operator_id": actor, "operator_label": label, "reason": in.Reason})
 	if err != nil {
-		jsonErr(w, http.StatusBadGateway, "scd_unreachable", err.Error())
+		internalErr(w, r, http.StatusBadGateway, "scd_unreachable", err)
 		return
 	}
 	if st == http.StatusOK {
@@ -506,7 +506,7 @@ func (s *server) exportVoucherCodes(w http.ResponseWriter, r *http.Request) {
 		"batch_id": strings.TrimSpace(in.BatchID), "state": in.State,
 	})
 	if err != nil {
-		jsonErr(w, http.StatusBadGateway, "scd_unreachable", err.Error())
+		internalErr(w, r, http.StatusBadGateway, "scd_unreachable", err)
 		return
 	}
 	if st == http.StatusOK {
@@ -642,7 +642,7 @@ func (s *server) rotateVoucherKeyGeneration(w http.ResponseWriter, r *http.Reque
 		"/v1/voucher-key-generations/"+id+"/supersede",
 		map[string]any{"operator_id": actor, "operator_label": label, "reason": in.Reason})
 	if err != nil {
-		jsonErr(w, http.StatusBadGateway, "scd_unreachable", err.Error())
+		internalErr(w, r, http.StatusBadGateway, "scd_unreachable", err)
 		return
 	}
 	if st == http.StatusOK {
@@ -718,7 +718,7 @@ func (s *server) setVoucherCodeSettings(w http.ResponseWriter, r *http.Request) 
 	if err := s.db.QueryRow(ctx,
 		`SELECT iam_v2.voucher_code_settings_set($1::uuid, $2::uuid, $3, $4, $5, $6)`,
 		s.tenantID, s.siteID, in.Mode, in.Length, label, nullIfBlank(in.Reason)).Scan(&version); err != nil {
-		jsonErr(w, http.StatusInternalServerError, "update_failed", err.Error())
+		internalErr(w, r, http.StatusInternalServerError, "update_failed", err)
 		return
 	}
 	s.audit(r, "voucher.code_format_changed", "voucher_code_settings", "", map[string]any{
@@ -808,7 +808,7 @@ func (s *server) revokeVoucherBatch(w http.ResponseWriter, r *http.Request) {
 	st, resp, err := s.scd.call(r.Context(), http.MethodPost, "/v1/voucher-batches/"+id+"/revoke",
 		map[string]any{"operator_id": actor, "operator_label": label, "reason": in.Reason})
 	if err != nil {
-		jsonErr(w, http.StatusBadGateway, "scd_unreachable", err.Error())
+		internalErr(w, r, http.StatusBadGateway, "scd_unreachable", err)
 		return
 	}
 	if st == http.StatusOK {

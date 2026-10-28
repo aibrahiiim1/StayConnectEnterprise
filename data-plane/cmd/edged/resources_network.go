@@ -646,7 +646,7 @@ func (s *server) netApply(w http.ResponseWriter, r *http.Request) {
 			unrevertedStagedChanges(w, everything, rerr, "the appliance's network service could not be reached")
 			return
 		}
-		jsonErr(w, http.StatusBadGateway, "netd_unreachable", err.Error())
+		internalErr(w, r, http.StatusBadGateway, "netd_unreachable", err)
 		return
 	}
 	var res struct {
@@ -722,7 +722,7 @@ func (s *server) dhcpLeases(w http.ResponseWriter, r *http.Request) {
 	}
 	st, raw, err := s.netd.call(r.Context(), http.MethodGet, "/v1/leases", nil)
 	if err != nil {
-		jsonErr(w, http.StatusBadGateway, "netd_unreachable", err.Error())
+		internalErr(w, r, http.StatusBadGateway, "netd_unreachable", err)
 		return
 	}
 	if st != http.StatusOK {
@@ -733,7 +733,7 @@ func (s *server) dhcpLeases(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := pageLeases(raw, search, pg)
 	if err != nil {
-		jsonErr(w, http.StatusBadGateway, "dhcp_leases_unreadable", err.Error())
+		internalErr(w, r, http.StatusBadGateway, "dhcp_leases_unreadable", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -1027,7 +1027,7 @@ func (s *server) confirmRevision(w http.ResponseWriter, r *http.Request) {
 		map[string]string{"revision_id": id, "actor": s.actor(r)})
 	if err != nil {
 		s.audit(r, "network.revision.confirm_failed", "network_revision", id, map[string]any{"error": err.Error()})
-		jsonErr(w, http.StatusBadGateway, "netd_unreachable", err.Error())
+		internalErr(w, r, http.StatusBadGateway, "netd_unreachable", err)
 		return
 	}
 	s.audit(r, "network.revision.confirmed", "network_revision", id, map[string]any{"kept": st < 300, "status": st})
@@ -1067,7 +1067,7 @@ func (s *server) rollbackRevision(w http.ResponseWriter, r *http.Request) {
 		map[string]string{"revision_id": id, "actor": s.actor(r)})
 	if err != nil {
 		s.audit(r, "network.revision.rollback_failed", "network_revision", id, map[string]any{"error": err.Error()})
-		jsonErr(w, http.StatusBadGateway, "netd_unreachable", err.Error())
+		internalErr(w, r, http.StatusBadGateway, "netd_unreachable", err)
 		return
 	}
 	s.audit(r, "network.revision.rolledback", "network_revision", id, map[string]any{"undone": st < 300, "status": st})

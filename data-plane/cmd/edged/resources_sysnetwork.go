@@ -73,7 +73,7 @@ func (s *server) sysNetConfirm(w http.ResponseWriter, r *http.Request) {
 	s.audit(r, "network.system.confirm", "system_network", in.RevisionID, nil)
 	st, raw, err := s.netd.call(r.Context(), http.MethodPost, "/v1/system-network/confirm", body)
 	if err != nil {
-		jsonErr(w, http.StatusBadGateway, "netd_unreachable", err.Error())
+		internalErr(w, r, http.StatusBadGateway, "netd_unreachable", err)
 		return
 	}
 	// A confirmed change may have moved the management IP: renew the Hotel Admin certificate, detached from the
