@@ -198,7 +198,13 @@ func (s *Store) GrantTx(ctx context.Context, tx pgx.Tx, tenant, site string, r R
 	// apply_entitlement_transition is the only writer of its status.
 	endMode, windowSecs := grantShape(duration)
 	var window *time.Time
-	activatedAt := time.Now().UTC().Truncate(time.Microsecond)
+	// The activation instant comes from the database clock, the same clock the eligibility checks in this transaction
+	// use (now()), so the window cannot drift from them if the database ever runs elsewhere.
+	var activatedAt time.Time
+	if err := tx.QueryRow(ctx, `SELECT now()`).Scan(&activatedAt); err != nil {
+		return res, err
+	}
+	activatedAt = activatedAt.UTC().Truncate(time.Microsecond)
 	if windowSecs > 0 {
 		w := activatedAt.Add(time.Duration(windowSecs) * time.Second)
 		window = &w
