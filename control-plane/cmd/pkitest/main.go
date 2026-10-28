@@ -184,16 +184,6 @@ func mtlsClient(certPEM string, priv ed25519.PrivateKey, caPEM string) *http.Cli
 	}}
 }
 
-func rawGet(cl *http.Client, url string) (int, string) {
-	resp, err := cl.Get(url)
-	if err != nil {
-		return 0, err.Error()
-	}
-	defer resp.Body.Close()
-	b, _ := io.ReadAll(resp.Body)
-	return resp.StatusCode, string(b)
-}
-
 func must(cl *http.Client, method, url string, body []byte, want int) string {
 	var rdr io.Reader
 	if body != nil {

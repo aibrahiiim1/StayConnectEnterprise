@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -110,7 +111,7 @@ func (d authDeps) describe(ctx context.Context, s *auth.Session) whoamiResp {
 
 func (d authDeps) login(w http.ResponseWriter, r *http.Request) {
 	var req loginReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil { // audit Phase 1 M9
 		api.Fail(w, r, http.StatusBadRequest, api.CodeBadRequest, "bad body")
 		return
 	}
@@ -174,7 +175,7 @@ func (d authDeps) reauth(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Password == "" {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil || req.Password == "" {
 		api.Fail(w, r, http.StatusBadRequest, api.CodeBadRequest, "password required")
 		return
 	}
@@ -200,8 +201,13 @@ func (d authDeps) reauth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.signinSucceeded(r, s.Email)
+	// The session always comes from the cookie (auth.Middleware), so there is a cookie to mark.
 	if c, err := r.Cookie(auth.SessionCookieName); err == nil {
-		api.MarkReauth(d.Store.R, c.Value)
+		if err := api.MarkReauth(r.Context(), d.Store.R, c.Value); err != nil {
+			slog.Warn("step-up could not be recorded", "err", err)
+			api.Fail(w, r, http.StatusServiceUnavailable, "unavailable", "Central could not record the password confirmation. Try again in a moment.")
+			return
+		}
 	}
 	audit.Op(r.Context(), d.DB, r, "auth.reauth_succeeded", "operator", s.OperatorID, nil)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})

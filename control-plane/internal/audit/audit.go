@@ -43,7 +43,9 @@ func Emit(ctx context.Context, db *pgxpool.Pool, e Entry) {
 		payload = []byte("{}")
 	}
 
-	writeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	// The change being recorded has already committed: a dropped client or the request deadline must not cancel
+	// its audit row (audit Phase 1 M14).
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 
 	_, err := db.Exec(writeCtx, `
@@ -75,10 +77,19 @@ func Op(ctx context.Context, db *pgxpool.Pool, r *http.Request, action, targetTy
 		e.ActorID = s.OperatorID
 		e.TenantID = s.DefaultTenantID
 	}
-	// payload["_tenant_id"] overrides the session's tenant (e.g. a platform admin acting on a specific one).
-	if tid, _ := payload["_tenant_id"].(string); tid != "" {
-		e.TenantID = tid
-		delete(payload, "_tenant_id")
+	// payload["_tenant_id"] overrides the session's tenant (e.g. a platform admin acting on a specific one). The
+	// caller's map is copied, never changed (audit Phase 1 M14).
+	if tid, ok := payload["_tenant_id"]; ok {
+		if s, _ := tid.(string); s != "" {
+			e.TenantID = s
+		}
+		cp := make(map[string]any, len(payload))
+		for k, v := range payload {
+			if k != "_tenant_id" {
+				cp[k] = v
+			}
+		}
+		e.Payload = cp
 	}
 	Emit(ctx, db, e)
 }

@@ -33,7 +33,7 @@ func runGenRegistryKey(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(*out, priv, 0o600); err != nil {
+	if err := writeNewKeyFile(*out, priv, *force); err != nil { // never overwritten in place (audit Phase 1 M17)
 		return err
 	}
 	if *pubOut != "" {
@@ -69,7 +69,7 @@ func runGenAssignmentKey(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(*out, priv, 0o600); err != nil {
+	if err := writeNewKeyFile(*out, priv, *force); err != nil { // never overwritten in place (audit Phase 1 M17)
 		return err
 	}
 	if *pubOut != "" {

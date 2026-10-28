@@ -42,7 +42,7 @@ func (p *PortalTLSBase) Sync(w http.ResponseWriter, r *http.Request) {
 	}
 	var in portaltls.SyncRequest
 	if err := DecodeJSON(r, &in); err != nil {
-		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "bad body")
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, badBody(err))
 		return
 	}
 	out, err := p.Svc.Sync(r.Context(), ident.ApplianceID, in)
@@ -62,7 +62,7 @@ func (p *PortalTLSBase) Order(w http.ResponseWriter, r *http.Request) {
 	}
 	var in portaltls.OrderRequest
 	if err := DecodeJSON(r, &in); err != nil {
-		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "bad body")
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, badBody(err))
 		return
 	}
 	out, err := p.Svc.CreateOrder(r.Context(), ident.ApplianceID, in)
@@ -122,7 +122,7 @@ func (b *Base) portalTLSSettings(w http.ResponseWriter, r *http.Request) {
 func (b *Base) putPortalTLSSettings(w http.ResponseWriter, r *http.Request) {
 	var in portaltls.SettingsUpdate
 	if err := DecodeJSON(r, &in); err != nil {
-		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "bad body")
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, badBody(err))
 		return
 	}
 	_, email := actorOf(r)
@@ -142,7 +142,7 @@ func (b *Base) putPortalTLSToken(w http.ResponseWriter, r *http.Request) {
 		Token string `json:"token"`
 	}
 	if err := DecodeJSON(r, &in); err != nil {
-		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "bad body")
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, badBody(err))
 		return
 	}
 	_, email := actorOf(r)
@@ -212,7 +212,7 @@ func (b *Base) revokePortalTLS(w http.ResponseWriter, r *http.Request) {
 		Hostname string `json:"hostname"`
 	}
 	if err := DecodeJSON(r, &in); err != nil {
-		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "bad body")
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, badBody(err))
 		return
 	}
 	if !requireReason(w, r, in.Reason) {

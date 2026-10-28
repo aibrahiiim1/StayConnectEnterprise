@@ -223,7 +223,7 @@ func (b *Base) AckHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	recordLifecycle(ctx, tx, ident.ApplianceID, prevLifecycle, terminal, "appliance",
-		clientIPFromReq(r), "retirement acknowledged by the appliance")
+		clientIP(r), "retirement acknowledged by the appliance")
 	if err := tx.Commit(ctx); err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "ack failed")
 		return
@@ -246,32 +246,59 @@ func ReconcileTerminalTimeouts(ctx context.Context, b *Base) (int64, error) {
 	var ids []string
 	for rows.Next() {
 		var id string
-		if rows.Scan(&id) == nil {
-			ids = append(ids, id)
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
 		}
+		ids = append(ids, id)
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
 	var n int64
 	for _, id := range ids {
-		if _, err := b.DB.Exec(ctx, `UPDATE appliance_terminal_delivery SET delivery_state='terminal_delivery_failed' WHERE appliance_id=$1`, id); err != nil {
+		// The state change and its alert commit together, so a failed alert never leaves a silent failure
+		// (audit Phase 1 L6). The state is re-checked under the update.
+		raised, err := failTerminalDelivery(ctx, b, id)
+		if err != nil {
 			return n, err
 		}
-		var serial string
-		_ = b.DB.QueryRow(ctx, `SELECT COALESCE(serial,'') FROM appliances WHERE id=$1`, id).Scan(&serial)
-		// detail is jsonb; a bare string is rejected by Postgres.
-		detail, _ := json.Marshal(map[string]string{
-			"reason": "the appliance did not acknowledge its retirement within policy; retirement is UNCONFIRMED and its credentials were NOT revoked. Investigate, or retire it again as an emergency.",
-		})
-		if _, err := b.DB.Exec(ctx, `
-            INSERT INTO appliance_security_alerts (appliance_id, serial, kind, detail, status)
-            VALUES ($1,$2,'terminal_delivery_failed',$3::jsonb,'open')`, id, serial, string(detail)); err != nil {
-			return n, err
+		if !raised {
+			continue
 		}
 		audit.System(ctx, b.DB, "appliance.terminal_delivery_failed", "appliance", id,
 			map[string]any{"note": "no ack within policy; not reported as decommissioned"})
 		n++
 	}
 	return n, nil
+}
+
+func failTerminalDelivery(ctx context.Context, b *Base, id string) (bool, error) {
+	tx, err := b.DB.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(ctx)
+	tag, err := tx.Exec(ctx, `UPDATE appliance_terminal_delivery SET delivery_state='terminal_delivery_failed'
+         WHERE appliance_id=$1 AND delivery_state='terminal_delivery_pending'`, id)
+	if err != nil || tag.RowsAffected() == 0 {
+		return false, err
+	}
+	var serial string
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(serial,'') FROM appliances WHERE id=$1`, id).Scan(&serial); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return false, err
+	}
+	// detail is jsonb; a bare string is rejected by Postgres.
+	detail, _ := json.Marshal(map[string]string{
+		"reason": "the appliance did not acknowledge its retirement within policy; retirement is UNCONFIRMED and its credentials were NOT revoked. Investigate, or retire it again as an emergency.",
+	})
+	if _, err := tx.Exec(ctx, `
+        INSERT INTO appliance_security_alerts (appliance_id, serial, kind, detail, status)
+        VALUES ($1,$2,'terminal_delivery_failed',$3::jsonb,'open')`, id, serial, string(detail)); err != nil {
+		return false, err
+	}
+	return true, tx.Commit(ctx)
 }
 
 // StrictApplianceAssignmentHandler serves GET /v1/appliance/assignment under the full mTLS trust rules; it is the
@@ -324,10 +351,10 @@ func (b *AssignmentBase) StrictApplianceAssignmentHandler(w http.ResponseWriter,
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	idFpr := ""
-	_ = b.DB.QueryRow(ctx, `SELECT COALESCE(public_key,'') FROM appliances WHERE id=$1`, appID).Scan(&idFpr)
+	pubB64 := ""
+	_ = b.DB.QueryRow(ctx, `SELECT COALESCE(public_key,'') FROM appliances WHERE id=$1`, appID).Scan(&pubB64)
 	if doc.ApplianceID != appID ||
-		(doc.IdentityKeyFpr != "" && doc.IdentityKeyFpr != identityFprFromPubB64(idFpr)) {
+		(doc.IdentityKeyFpr != "" && doc.IdentityKeyFpr != identityFprFromPubB64(pubB64)) {
 		logFetch(ctx, b.DB, appID, "", "denied:not-self")
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -364,10 +391,14 @@ func strictMTLSSelf(w http.ResponseWriter, r *http.Request, db *pgxpool.Pool, ap
 	// NOT decimal — match that exact form or the serial check never passes.
 	certSerial := fmt.Sprintf("%x", cert.SerialNumber)
 	var n int
-	_ = db.QueryRow(r.Context(), `
+	// A failed lookup is Central's outage (503), not "certificate not active" (audit Phase 1 L7).
+	if err := db.QueryRow(r.Context(), `
         SELECT count(*) FROM appliance_certificates
          WHERE appliance_id=$1 AND fingerprint_sha256=$2 AND cert_serial=$3 AND status='active'`,
-		applianceID, fpr, certSerial).Scan(&n)
+		applianceID, fpr, certSerial).Scan(&n); err != nil {
+		failDB(w, r, "Central could not check the certificate. Try again later.", err)
+		return false
+	}
 	if n == 0 {
 		Fail(w, r, http.StatusForbidden, CodeForbidden,
 			"certificate fingerprint/serial not an active credential issued to this appliance")

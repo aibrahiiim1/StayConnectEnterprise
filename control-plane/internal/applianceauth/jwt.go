@@ -163,12 +163,30 @@ func b64(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
 
 // ReplayCache holds recently seen jti values in process. That is authoritative only while ctrlapi runs as a
 // single instance; scaling out requires Redis (SETNX with TTL).
+//
+// Entries expire in arrival order from a queue, so expiry is O(1) amortised instead of a scan of the whole map
+// per insert; past a hard ceiling of unexpired entries (replayCeilingFactor × max) Use refuses with
+// ErrReplayCacheFull rather than grow without bound (audit Phase 1 L20). max stays the expected working set.
 type ReplayCache struct {
-	mu   sync.Mutex
-	seen map[string]time.Time
-	ttl  time.Duration
-	max  int
+	mu    sync.Mutex
+	seen  map[string]time.Time
+	order []replayEntry
+	head  int
+	ttl   time.Duration
+	max   int
 }
+
+type replayEntry struct {
+	jti string
+	at  time.Time
+}
+
+// replayCeilingFactor puts the refusal far above the measured fleet load (about 5,200 tokens per 2 minutes at
+// 1,000 appliances against max 8,192).
+const replayCeilingFactor = 16
+
+// ErrReplayCacheFull: too many unexpired tokens are held; the request is refused, not remembered.
+var ErrReplayCacheFull = errors.New("applianceauth: replay cache full")
 
 func NewReplayCache(ttl time.Duration, max int) *ReplayCache {
 	return &ReplayCache{seen: make(map[string]time.Time, max), ttl: ttl, max: max}
@@ -177,19 +195,34 @@ func NewReplayCache(ttl time.Duration, max int) *ReplayCache {
 func (rc *ReplayCache) Use(jti string, now time.Time) error {
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
+	rc.expire(now)
 	if t, ok := rc.seen[jti]; ok && now.Sub(t) < rc.ttl {
 		return ErrReplay
 	}
-	if len(rc.seen) >= rc.max {
-		cutoff := now.Add(-rc.ttl)
-		for k, t := range rc.seen {
-			if t.Before(cutoff) {
-				delete(rc.seen, k)
-			}
-		}
+	if len(rc.seen) >= rc.max*replayCeilingFactor {
+		return ErrReplayCacheFull
 	}
 	rc.seen[jti] = now
+	rc.order = append(rc.order, replayEntry{jti: jti, at: now})
 	return nil
+}
+
+// expire drops entries older than ttl from the front of the queue. A jti re-used after its expiry has a newer
+// queue entry; the older one only deletes the map entry when the times still match.
+func (rc *ReplayCache) expire(now time.Time) {
+	cutoff := now.Add(-rc.ttl)
+	for rc.head < len(rc.order) && !rc.order[rc.head].at.After(cutoff) {
+		e := rc.order[rc.head]
+		if t, ok := rc.seen[e.jti]; ok && t.Equal(e.at) {
+			delete(rc.seen, e.jti)
+		}
+		rc.order[rc.head] = replayEntry{}
+		rc.head++
+	}
+	if rc.head > 0 && rc.head*2 >= len(rc.order) {
+		rc.order = append(rc.order[:0], rc.order[rc.head:]...)
+		rc.head = 0
+	}
 }
 
 func Describe(err error) string {

@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -57,6 +59,13 @@ func RequireAppliance(db *pgxpool.Pool, cache *applianceauth.ReplayCache) func(h
 			if err != nil {
 				applianceAuthFail(r.Context(), db, r, "", "unparseable token")
 				jsonErr(w, http.StatusUnauthorized, "unauthenticated", "bad appliance JWT", r)
+				return
+			}
+			// An issuer that is not a uuid names no appliance: "not enrolled", audited, never a 500 from the
+			// uuid cast (audit Phase 1 L12).
+			if !uuidRe.MatchString(iss) {
+				applianceAuthFail(r.Context(), db, r, "", "not enrolled (issuer is not an appliance id)")
+				jsonErr(w, http.StatusUnauthorized, "unauthenticated", "appliance not enrolled", r)
 				return
 			}
 			var pubB64, tenantID, siteID, serial, lifecycle string
@@ -112,13 +121,20 @@ func RequireAppliance(db *pgxpool.Pool, cache *applianceauth.ReplayCache) func(h
 				return
 			}
 			if err := cache.Use(claims.Jti, now); err != nil {
+				if errors.Is(err, applianceauth.ErrReplayCacheFull) {
+					jsonErr(w, http.StatusServiceUnavailable, "busy", "Central is busy; try again shortly", r)
+					return
+				}
 				applianceAuthFail(r.Context(), db, r, iss, "replay detected")
 				jsonErr(w, http.StatusUnauthorized, "unauthenticated", "replay detected", r)
 				return
 			}
+			// last_seen_at is read to the minute; writing it on every call churned the table (perf audit D9-L3).
 			_, _ = db.Exec(r.Context(),
 				`UPDATE appliances SET last_seen_at = now(),
-				        version = COALESCE(NULLIF($2,''), version) WHERE id = $1`,
+				        version = COALESCE(NULLIF($2,''), version)
+				  WHERE id = $1 AND (last_seen_at IS NULL OR last_seen_at < now() - interval '60 seconds'
+				                     OR version IS DISTINCT FROM COALESCE(NULLIF($2,''), version))`,
 				iss, claims.Ver)
 			ident := &ApplianceIdent{
 				ApplianceID: iss, TenantID: tenantID, SiteID: siteID, Serial: serial, Version: claims.Ver,
@@ -150,27 +166,17 @@ func applianceAuthFail(ctx context.Context, db *pgxpool.Pool, r *http.Request, a
         INSERT INTO audit_log (ts, actor_type, actor_id, action, target_type, target_id, ip, user_agent, payload)
         VALUES (now(), 'appliance', NULLIF($1,''), 'appliance.auth_failed', 'appliance', NULLIF($1,''),
                 CASE WHEN $2 = '' THEN NULL ELSE $2::inet END, NULLIF($3,''), $4::jsonb)`,
-		applianceID, clientip.From(r), r.UserAgent(),
-		`{"reason":`+jsonString(reason)+`,"method":`+jsonString(r.Method)+`,"path":`+jsonString(r.URL.Path)+`}`)
+		applianceID, clientip.From(r), r.UserAgent(), authFailPayload(reason, r.Method, r.URL.Path))
 }
 
-func jsonString(s string) string {
-	var b strings.Builder
-	b.WriteByte('"')
-	for _, c := range s {
-		switch c {
-		case '"', '\\':
-			b.WriteByte('\\')
-			b.WriteRune(c)
-		case '\n':
-			b.WriteString("\\n")
-		default:
-			b.WriteRune(c)
-		}
-	}
-	b.WriteByte('"')
-	return b.String()
+// authFailPayload is built with encoding/json, which escapes every control character; the hand-written escaper
+// it replaces did not, and the row was dropped (audit Phase 1 L12).
+func authFailPayload(reason, method, path string) string {
+	b, _ := json.Marshal(map[string]string{"reason": reason, "method": method, "path": path})
+	return string(b)
 }
+
+var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 func bearerFrom(r *http.Request) string {
 	h := r.Header.Get("Authorization")

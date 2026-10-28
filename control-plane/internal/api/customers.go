@@ -97,8 +97,11 @@ func createCustomer(ctx context.Context, q querier, name, slug string) (string, 
 	}
 	var id string
 	err := q.QueryRow(ctx, `INSERT INTO tenants (slug, name) VALUES ($1, $2) RETURNING id::text`, slug, name).Scan(&id)
-	if err != nil {
+	if isUniqueViolation(err) {
 		return "", "", errors.New("a customer with that slug already exists")
+	}
+	if err != nil {
+		return "", "", err // a database error, never reported as "already exists" (audit Phase 1 L13)
 	}
 	return id, slug, nil
 }
@@ -121,6 +124,9 @@ func createSite(ctx context.Context, q querier, customerID, name, code, timezone
 		return "", errors.New("unknown timezone " + timezone)
 	}
 	code = strings.TrimSpace(strings.ToLower(code))
+	if code != "" && slugify(code) != code {
+		return "", errors.New("site code may contain only lowercase letters, digits and hyphens (at most 48)") // audit Phase 1 L14
+	}
 	if code == "" {
 		var err error
 		code, err = uniqueValue(ctx, slugify(name), func(ctx context.Context, v string) (bool, error) {
@@ -144,8 +150,11 @@ func createSite(ctx context.Context, q querier, customerID, name, code, timezone
         INSERT INTO sites (tenant_id, code, name, timezone, country, site_type)
         VALUES ($1, $2, $3, $4, NULLIF($5,''), $6) RETURNING id::text`,
 		customerID, code, name, timezone, strings.TrimSpace(country), siteType).Scan(&id)
-	if err != nil {
+	if isUniqueViolation(err) {
 		return "", errors.New("a site with that code already exists for this customer")
+	}
+	if err != nil {
+		return "", err
 	}
 	return id, nil
 }
@@ -273,14 +282,18 @@ func (b *Base) postCustomer(w http.ResponseWriter, r *http.Request) {
 		Slug string `json:"slug"`
 	}
 	if err := DecodeJSON(r, &in); err != nil {
-		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "bad body")
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, badBody(err))
 		return
 	}
 	ctx, cancel := DBCtx(r)
 	defer cancel()
 	id, slug, err := createCustomer(ctx, b.DB, in.Name, in.Slug)
+	if isDBError(err) {
+		failInternal(w, r, "Central could not create the customer (database error).", err)
+		return
+	}
 	if err != nil {
-		Fail(w, r, http.StatusConflict, CodeConflict, publicError(r, err))
+		Fail(w, r, http.StatusConflict, CodeConflict, err.Error())
 		return
 	}
 	audit.Op(r.Context(), b.DB, r, "customer.created", "customer", id, map[string]any{
@@ -364,7 +377,9 @@ func blockers(all ...blocker) []blocker {
 func (b *Base) deleteCustomer(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var in deleteConfirm
-	_ = DecodeJSON(r, &in)
+	if limitExceeded(w, r, DecodeJSON(r, &in)) {
+		return
+	}
 	ctx, cancel := DBCtx(r)
 	defer cancel()
 	var name, slug string
@@ -488,12 +503,16 @@ func (b *Base) postSite(w http.ResponseWriter, r *http.Request) {
 		SiteType string `json:"site_type"`
 	}
 	if err := DecodeJSON(r, &in); err != nil {
-		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "bad body")
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, badBody(err))
 		return
 	}
 	ctx, cancel := DBCtx(r)
 	defer cancel()
 	id, err := createSite(ctx, b.DB, customerID, in.Name, in.Code, in.Timezone, in.Country, in.SiteType)
+	if isDBError(err) {
+		failInternal(w, r, "Central could not create the site (database error).", err)
+		return
+	}
 	if err != nil {
 		Fail(w, r, http.StatusBadRequest, CodeBadRequest, err.Error())
 		return
@@ -532,7 +551,7 @@ func (b *Base) patchSite(w http.ResponseWriter, r *http.Request) {
 		SiteType *string `json:"site_type"`
 	}
 	if err := DecodeJSON(r, &in); err != nil {
-		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "bad body")
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, badBody(err))
 		return
 	}
 	if in.Name != nil && strings.TrimSpace(*in.Name) == "" {
@@ -653,6 +672,18 @@ func (b *Base) setSiteStatus(to string) http.HandlerFunc {
 		}
 		ctx, cancel := DBCtx(r)
 		defer cancel()
+		if to == "active" {
+			// A site of an archived customer stays archived until the customer is restored (audit Phase 1 L14).
+			var custStatus string
+			if err := b.DB.QueryRow(ctx, `SELECT status FROM tenants WHERE id=$1`, customerID).Scan(&custStatus); err != nil {
+				failInternal(w, r, "Central could not read the customer.", err)
+				return
+			}
+			if custStatus == "archived" {
+				Fail(w, r, http.StatusConflict, CodeConflict, "the customer is archived; restore the customer first")
+				return
+			}
+		}
 		if _, err := b.DB.Exec(ctx, `UPDATE sites SET status=$2, updated_at=now() WHERE id=$1`, id, to); err != nil {
 			Fail(w, r, http.StatusInternalServerError, CodeInternal, "update failed")
 			return
@@ -674,7 +705,9 @@ func (b *Base) deleteSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in deleteConfirm
-	_ = DecodeJSON(r, &in)
+	if limitExceeded(w, r, DecodeJSON(r, &in)) {
+		return
+	}
 	ctx, cancel := DBCtx(r)
 	defer cancel()
 	var code, name string

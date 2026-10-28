@@ -47,4 +47,24 @@ func TestReadyzReportsWhetherSignInIsAvailable(t *testing.T) {
 	if b := ready(nil); !strings.Contains(b, `"signin":"unavailable"`) {
 		t.Fatalf("without the key: %s", b)
 	}
+	// Audit Phase 1 L15/H1: the version and the CA state only to a direct loopback caller.
+	get := func(remote string, proxied bool) string {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+		req.RemoteAddr = remote
+		if proxied {
+			req.Header.Set("X-Real-IP", "203.0.113.9")
+		}
+		readyz(Deps{DB: pool, Redis: rdb, MFA: mfa, Version: "test-ver"})(rec, req)
+		return rec.Body.String()
+	}
+	if b := get("203.0.113.9:4000", false); strings.Contains(b, "test-ver") || strings.Contains(b, `"pki"`) {
+		t.Fatalf("public readyz leaks the version or CA state: %s", b)
+	}
+	if b := get("127.0.0.1:4000", true); strings.Contains(b, "test-ver") {
+		t.Fatalf("readyz through the proxy leaks the version: %s", b)
+	}
+	if b := get("127.0.0.1:4000", false); !strings.Contains(b, `"version":"test-ver"`) || !strings.Contains(b, `"pki":"unavailable"`) {
+		t.Fatalf("loopback readyz must carry the version and the CA state: %s", b)
+	}
 }

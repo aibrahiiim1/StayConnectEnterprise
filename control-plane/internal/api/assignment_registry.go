@@ -37,8 +37,9 @@ func (b *RegistryBase) Rebuild(ctx context.Context, reason string) (*assignment.
 		var keyID, state string
 		var pub []byte
 		var added time.Time
-		if rows.Scan(&keyID, &pub, &state, &added) != nil {
-			continue
+		// A key that cannot be read is an error, never silently left out of the registry.
+		if err := rows.Scan(&keyID, &pub, &state, &added); err != nil {
+			return nil, err
 		}
 		keys = append(keys, assignment.TrustedKey{
 			KeyID: keyID, PublicKey: base64.StdEncoding.EncodeToString(pub),
@@ -46,8 +47,15 @@ func (b *RegistryBase) Rebuild(ctx context.Context, reason string) (*assignment.
 		})
 	}
 
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+
 	var ver int64
-	_ = b.DB.QueryRow(ctx, `SELECT COALESCE(MAX(registry_version),0)+1 FROM assignment_registry`).Scan(&ver)
+	if err := b.DB.QueryRow(ctx, `SELECT COALESCE(MAX(registry_version),0)+1 FROM assignment_registry`).Scan(&ver); err != nil {
+		return nil, err
+	}
 	now := time.Now().UTC()
 	sr := &assignment.SignedRegistry{
 		RegistryVersion: ver,

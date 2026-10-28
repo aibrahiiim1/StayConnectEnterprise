@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -50,7 +51,7 @@ func dbBackupHealth(now time.Time) DBBackupHealth {
 		var run dbBackupRun
 		if json.Unmarshal(raw, &run) == nil {
 			h.LastAttemptAt, h.LastSuccessAt, h.LastFailureAt = run.LastAttemptAt, run.LastSuccessAt, run.LastFailureAt
-			h.LastError = strPtr(run.LastError)
+			h.LastError = strPtr(shortBackupError(run.LastError))
 		}
 	}
 	type dump struct {
@@ -72,7 +73,8 @@ func dbBackupHealth(now time.Time) DBBackupHealth {
 	sort.Slice(dumps, func(i, j int) bool { return dumps[i].at.After(dumps[j].at) })
 	if len(dumps) > 0 {
 		at := dumps[0].at.UTC()
-		h.NewestFile, h.NewestAt, h.NewestBytes = strPtr(dumps[0].path), &at, dumps[0].size
+		// The file name only: host paths are not for the console (audit Phase 1 L15).
+		h.NewestFile, h.NewestAt, h.NewestBytes = strPtr(filepath.Base(dumps[0].path)), &at, dumps[0].size
 	}
 	problem := ""
 	switch {
@@ -90,6 +92,17 @@ func dbBackupHealth(now time.Time) DBBackupHealth {
 	h.Healthy = problem == ""
 	h.Problem = strPtr(problem)
 	return h
+}
+
+var absPath = regexp.MustCompile(`(?:/[^/\s"':]+)+/([^/\s"':]+)`)
+
+// shortBackupError reduces any absolute path in the backup script's error to its file name and keeps it short.
+func shortBackupError(s string) string {
+	s = absPath.ReplaceAllString(strings.TrimSpace(s), "$1")
+	if r := []rune(s); len(r) > 200 {
+		s = string(r[:200]) + "…"
+	}
+	return s
 }
 
 // BackupHealthHandler exposes the database backup health and the retention status written by

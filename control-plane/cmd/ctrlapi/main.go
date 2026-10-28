@@ -2,9 +2,11 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/pem"
 	"errors"
 	"flag"
 	"fmt"
@@ -12,6 +14,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -63,11 +67,14 @@ func main() {
 			err = runUnlockSignin(os.Args[2:])
 		case "check-mfa-key":
 			err = runCheckMFAKey(os.Args[2:])
+		case "init-ca":
+			err = runInitCA(os.Args[2:])
 		case "serve", "":
-			goto serve
+			serve()
+			return
 		default:
 			fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n", os.Args[1])
-			fmt.Fprintf(os.Stderr, "usage: ctrlapi [serve | seed-admin | gen-vendor-key | gen-assignment-key | gen-registry-key | assignment-key verify-only|revoke | gen-mfa-key | check-mfa-key | reset-mfa | unlock-signin]\n")
+			fmt.Fprintf(os.Stderr, "usage: ctrlapi [serve | init-ca | seed-admin | gen-vendor-key | gen-assignment-key | gen-registry-key | assignment-key verify-only|revoke | gen-mfa-key | check-mfa-key | reset-mfa | unlock-signin]\n")
 			os.Exit(2)
 		}
 		if err != nil {
@@ -76,7 +83,6 @@ func main() {
 		}
 		return
 	}
-serve:
 	serve()
 }
 
@@ -141,32 +147,39 @@ func serve() {
 	// trust registry. Absent: activation, moves and retirement refuse.
 	assignKeyPath := envOrDefault("CTRLAPI_ASSIGN_KEY", "/etc/stayconnect/assignment-signing.key")
 	var assignKey ed25519.PrivateKey
-	if raw, err := os.ReadFile(assignKeyPath); err == nil && len(raw) == ed25519.PrivateKeySize {
-		assignKey = ed25519.PrivateKey(raw)
-		assignPub := assignKey.Public().(ed25519.PublicKey)
-		if vraw, verr := os.ReadFile(vendorKeyPath); verr == nil && len(vraw) == ed25519.PrivateKeySize &&
-			string(vraw) == string(raw) {
-			slog.Error("assignment signing key MUST NOT be the vendor license key — refusing to sign assignments",
-				"path", assignKeyPath)
-			assignKey = nil
-		} else {
-			slog.Info("dedicated assignment signing key loaded",
-				"key_id", assignment.KeyID(assignPub), "path", assignKeyPath)
-			if err := api.RegisterActiveKey(rootCtx, &api.Base{DB: pool}, assignPub, "ctrlapi boot"); err != nil {
-				slog.Warn("assignment signing key registration failed", "err", err)
-			}
-		}
+	if k, err := loadEd25519File(assignKeyPath); err == nil {
+		assignKey = k
 	} else {
 		slog.Warn("dedicated assignment signing key unavailable — activation disabled",
-			"path", assignKeyPath, "hint", "run: ctrlapi gen-assignment-key --out "+assignKeyPath)
+			"path", assignKeyPath, "err", err, "hint", "run: ctrlapi gen-assignment-key --out "+assignKeyPath)
 	}
 
 	// Registry ROOT-OF-TRUST key: signs the versioned trust registry the appliance verifies.
 	regRoot := loadRegistryRoot()
+
+	// No two signing roles may share a key (audit Phase 1 M17): with a shared key the assignment signer and
+	// the registry root are both refused, so nothing is signed under a key that has two meanings.
+	var vendorRaw ed25519.PrivateKey
+	if raw, err := os.ReadFile(vendorKeyPath); err == nil && len(raw) == ed25519.PrivateKeySize {
+		vendorRaw = ed25519.PrivateKey(raw)
+	}
+	if err := distinctKeys(map[string]ed25519.PrivateKey{"vendor licence": vendorRaw, "assignment signing": assignKey,
+		"registry root": regRoot}); err != nil {
+		slog.Error("refusing to sign assignments or the trust registry", "err", err)
+		assignKey, regRoot = nil, nil
+	}
+	if assignKey != nil {
+		assignPub := assignKey.Public().(ed25519.PublicKey)
+		slog.Info("dedicated assignment signing key loaded", "key_id", assignment.KeyID(assignPub), "path", assignKeyPath)
+		if err := api.RegisterActiveKey(rootCtx, &api.Base{DB: pool}, assignPub, "ctrlapi boot"); err != nil {
+			slog.Warn("assignment signing key registration failed", "err", err)
+		}
+	}
 	if regRoot != nil {
 		regBase := &api.RegistryBase{Base: &api.Base{DB: pool}, RootKey: regRoot}
+		// Every start re-signs, so a key-state change whose re-signing failed is published now (audit Phase 1 M3).
 		if sr, err := regBase.Rebuild(rootCtx, "ctrlapi boot"); err != nil {
-			slog.Warn("signed registry rebuild failed", "err", err)
+			slog.Error("signed registry rebuild failed: appliances keep the previous registry", "err", err)
 		} else if sr != nil {
 			slog.Info("signed trust registry published", "registry_version", sr.RegistryVersion, "keys", len(sr.Keys))
 		}
@@ -184,34 +197,7 @@ func serve() {
 			case <-rootCtx.Done():
 				return
 			case <-t.C:
-				if n, err := api.ReconcileTerminalTimeouts(rootCtx, tb); err != nil {
-					slog.Warn("terminal-delivery timeout reconcile failed", "err", err)
-				} else if n > 0 {
-					slog.Warn("retirement unconfirmed (no ack within policy)", "count", n)
-				}
-				if n, err := api.ReconcileReplacements(rootCtx, tb); err != nil {
-					slog.Warn("replacement window reconcile failed", "err", err)
-				} else if n > 0 {
-					slog.Warn("replacement window elapsed (operator decision required)", "count", n)
-				}
-				if time.Since(lastPrune) >= time.Hour {
-					lastPrune = time.Now()
-					if n, err := api.PruneAssignmentFetchLog(rootCtx, tb); err != nil {
-						slog.Warn("assignment fetch log retention failed", "err", err)
-					} else if n > 0 {
-						slog.Info("assignment fetch log retention", "deleted", n)
-					}
-					if n, err := api.RevokeSupersededCertificates(rootCtx, tb); err != nil {
-						slog.Warn("superseded certificate revocation failed", "err", err)
-					} else if n > 0 {
-						slog.Info("superseded appliance certificates revoked", "count", n)
-					}
-					if done, err := api.ApplyRetention(rootCtx, tb); err != nil {
-						slog.Warn("data retention failed", "err", err)
-					} else if len(done) > 0 {
-						slog.Info("data retention applied", "done", done)
-					}
-				}
+				housekeepingPass(rootCtx, tb, &lastPrune)
 			}
 		}
 	}()
@@ -220,7 +206,7 @@ func serve() {
 	// overrides point the chain at Pebble + challtestsrv; every start says when one is on.
 	ptlsOpts, ptlsOverrides := portaltls.OptionsFromEnv()
 	var ptls *portaltls.Service
-	if err := ptlsOpts.Check(); err != nil {
+	if err := ptlsOpts.CheckEnv(cfg.Production()); err != nil {
 		slog.Error("portal TLS disabled: invalid configuration", "err", err)
 	} else {
 		ptls = portaltls.New(pool, ptlsOpts)
@@ -233,33 +219,24 @@ func serve() {
 	}
 
 	// Appliance certificate authority. Two-tier: an offline Root signs an online Intermediate; runtime
-	// issuance uses ONLY the intermediate key. Absent key → PKI routes and the mTLS listener stay disabled.
+	// issuance uses ONLY the intermediate. serve never creates CA material (`ctrlapi init-ca` does, once): a
+	// missing or inconsistent CA file, or a CA that differs from the one the database records, leaves the
+	// PKI routes and the mTLS listener off (audit Phase 1 H1).
 	var appCA *pki.CA
-	rootKeyPath := envOrDefault("CTRLAPI_ROOT_CA_KEY", "/etc/stayconnect/pki/root-ca.key")
-	intKeyPath := envOrDefault("CTRLAPI_INTERMEDIATE_CA_KEY", "/etc/stayconnect/pki/intermediate-ca.key")
 	sharedReplay := applianceauth.NewReplayCache(2*time.Minute, 8192)
-	if ca, err := pki.LoadCAChain(rootKeyPath, intKeyPath, 1); err == nil {
+	if ca, err := startPKI(rootCtx, pool, caPathsFromEnv()); err == nil {
 		appCA = ca
-		relocateRootOffline(rootKeyPath)
-		_, _ = pool.Exec(rootCtx, `
-            INSERT INTO appliance_ca_versions (version, cert_pem, subject, key_fingerprint, active)
-            VALUES (0, $1, 'StayConnect Root CA', 'offline', true)
-            ON CONFLICT (version) DO UPDATE SET cert_pem=EXCLUDED.cert_pem`, string(ca.RootPEM()))
-		_, _ = pool.Exec(rootCtx, `
-            INSERT INTO appliance_ca_versions (version, cert_pem, subject, key_fingerprint, active)
-            VALUES ($1,$2,$3,$4,true)
-            ON CONFLICT (version) DO UPDATE SET cert_pem=EXCLUDED.cert_pem, subject=EXCLUDED.subject, key_fingerprint=EXCLUDED.key_fingerprint`,
-			ca.Version, string(ca.IntermediatePEM()), ca.Subject(), ca.KeyFingerprint())
 		slog.Info("appliance CA chain loaded (root offline → online intermediate)", "intermediate_version", ca.Version, "subject", ca.Subject())
 		mtlsAddr := envOrDefault("CTRLAPI_MTLS_ADDR", ":9443")
 		applianceMTLSAPI := api.ApplianceMTLSRouter(pool, rdb, sharedReplay, licSvc, ca, assignKey, regRoot, ptls)
 		go func() {
+			defer recoverAndLog("mTLS listener")
 			if err := apihttp.StartMTLS(rootCtx, pool, ca, mtlsAddr, applianceMTLSAPI); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				slog.Error("mTLS listener error", "err", err)
 			}
 		}()
 	} else {
-		slog.Warn("appliance CA unavailable — PKI/mTLS disabled", "path", intKeyPath, "err", err)
+		slog.Error("appliance CA unavailable — PKI/mTLS disabled; restore the CA files (never re-create them on a Central that has appliances)", "err", err)
 	}
 
 	// Console two-step sign-in. Without the key no operator can sign in: the console refuses rather than accept a password alone.
@@ -295,6 +272,9 @@ func serve() {
 		Addr:              cfg.Addr,
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       apihttp.ServerReadTimeout, // audit Phase 1 M10
+		WriteTimeout:      apihttp.ServerWriteTimeout,
+		IdleTimeout:       apihttp.ServerIdleTimeout,
 	}
 
 	errCh := make(chan error, 1)
@@ -320,15 +300,83 @@ func serve() {
 	slog.Info("bye")
 }
 
+// housekeepingStepTimeout bounds each housekeeping statement, so one slow pass cannot hold up the others
+// (perf audit D9-M1). Retention deletes whole periods and gets longer.
+const (
+	housekeepingStepTimeout = 60 * time.Second
+	retentionStepTimeout    = 10 * time.Minute
+)
+
+// housekeepingPass runs one pass. A panic is logged and the loop carries on (audit Phase 1 L19).
+func housekeepingPass(ctx context.Context, tb *api.Base, lastPrune *time.Time) {
+	defer recoverAndLog("housekeeping")
+	step := func(name string, fn func(context.Context)) {
+		limit := housekeepingStepTimeout
+		if name == "retention" {
+			limit = retentionStepTimeout
+		}
+		sctx, cancel := context.WithTimeout(ctx, limit)
+		defer cancel()
+		defer recoverAndLog("housekeeping: " + name)
+		fn(sctx)
+	}
+	step("terminal timeouts", func(ctx context.Context) {
+		if n, err := api.ReconcileTerminalTimeouts(ctx, tb); err != nil {
+			slog.Warn("terminal-delivery timeout reconcile failed", "err", err)
+		} else if n > 0 {
+			slog.Warn("retirement unconfirmed (no ack within policy)", "count", n)
+		}
+	})
+	step("replacements", func(ctx context.Context) {
+		if n, err := api.ReconcileReplacements(ctx, tb); err != nil {
+			slog.Warn("replacement window reconcile failed", "err", err)
+		} else if n > 0 {
+			slog.Warn("replacement window elapsed (operator decision required)", "count", n)
+		}
+	})
+	if time.Since(*lastPrune) < time.Hour {
+		return
+	}
+	*lastPrune = time.Now()
+	step("fetch log retention", func(ctx context.Context) {
+		if n, err := api.PruneAssignmentFetchLog(ctx, tb); err != nil {
+			slog.Warn("assignment fetch log retention failed", "err", err)
+		} else if n > 0 {
+			slog.Info("assignment fetch log retention", "deleted", n)
+		}
+	})
+	step("superseded certificates", func(ctx context.Context) {
+		if n, err := api.RevokeSupersededCertificates(ctx, tb); err != nil {
+			slog.Warn("superseded certificate revocation failed", "err", err)
+		} else if n > 0 {
+			slog.Info("superseded appliance certificates revoked", "count", n)
+		}
+	})
+	step("retention", func(ctx context.Context) {
+		if done, err := api.ApplyRetention(ctx, tb); err != nil {
+			slog.Warn("data retention failed", "err", err)
+		} else if len(done) > 0 {
+			slog.Info("data retention applied", "done", done)
+		}
+	})
+}
+
+// recoverAndLog is deferred by long-lived goroutines: a panic is logged with its stack instead of ending the
+// process (audit Phase 1 L19).
+func recoverAndLog(what string) {
+	if p := recover(); p != nil {
+		slog.Error(what+" panicked", "panic", p, "stack", string(debug.Stack()))
+	}
+}
+
 func loadRegistryRoot() ed25519.PrivateKey {
 	regRootPath := envOrDefault("CTRLAPI_REGISTRY_ROOT_KEY", "/etc/stayconnect/assignment-registry-root.key")
-	raw, err := os.ReadFile(regRootPath)
-	if err != nil || len(raw) != ed25519.PrivateKeySize {
+	k, err := loadEd25519File(regRootPath)
+	if err != nil {
 		slog.Warn("assignment registry root key unavailable — signed registry disabled",
-			"path", regRootPath, "hint", "run: ctrlapi gen-registry-key --out "+regRootPath)
+			"path", regRootPath, "err", err, "hint", "run: ctrlapi gen-registry-key --out "+regRootPath)
 		return nil
 	}
-	k := ed25519.PrivateKey(raw)
 	slog.Info("assignment registry root key loaded",
 		"key_id", assignment.KeyID(k.Public().(ed25519.PublicKey)), "path", regRootPath)
 	return k
@@ -341,23 +389,117 @@ func envOrDefault(k, d string) string {
 	return d
 }
 
-// relocateRootOffline moves the root CA key out of the runtime PKI directory once the intermediate is signed.
-func relocateRootOffline(rootKeyPath string) {
+// caPaths are the appliance CA files. The root key is only written by init-ca, straight to the offline directory.
+type caPaths struct {
+	rootCert, intCert, intKey, rootKeyOffline string
+}
+
+func caPathsFromEnv() caPaths {
+	rootKeyPath := envOrDefault("CTRLAPI_ROOT_CA_KEY", "/etc/stayconnect/pki/root-ca.key")
+	intKeyPath := envOrDefault("CTRLAPI_INTERMEDIATE_CA_KEY", "/etc/stayconnect/pki/intermediate-ca.key")
 	offlineDir := envOrDefault("CTRLAPI_ROOT_CA_OFFLINE_DIR", "/etc/stayconnect/pki-offline")
-	if _, err := os.Stat(rootKeyPath); err != nil {
-		return // already moved / absent
+	return caPaths{
+		rootCert:       pki.CertSibling(rootKeyPath),
+		intCert:        pki.CertSibling(intKeyPath),
+		intKey:         intKeyPath,
+		rootKeyOffline: filepath.Join(offlineDir, "root-ca.key"),
 	}
-	if err := os.MkdirAll(offlineDir, 0o700); err != nil {
-		slog.Warn("root CA offline relocate: mkdir failed", "err", err)
-		return
+}
+
+// startPKI loads the CA (never creating it) and records it in appliance_ca_versions without overwriting: a
+// stored row that differs from the loaded certificate means the files belong to another Central, and the PKI
+// stays off with the row untouched.
+func startPKI(ctx context.Context, pool *pgxpool.Pool, p caPaths) (*pki.CA, error) {
+	ca, err := pki.LoadCA(p.rootCert, p.intCert, p.intKey, 1)
+	if err != nil {
+		return nil, err
 	}
-	dst := offlineDir + "/root-ca.key"
-	if err := os.Rename(rootKeyPath, dst); err != nil {
-		slog.Warn("root CA offline relocate failed — move it offline manually", "from", rootKeyPath, "err", err)
-		return
+	if err := recordCA(ctx, pool, ca); err != nil {
+		return nil, err
 	}
-	_ = os.Chmod(dst, 0o600)
-	slog.Warn("root CA private key relocated offline; move to cold storage", "offline_path", dst)
+	return ca, nil
+}
+
+func recordCA(ctx context.Context, pool *pgxpool.Pool, ca *pki.CA) error {
+	rows := []struct {
+		version              int
+		pem, subject, keyFpr string
+	}{
+		{0, string(ca.RootPEM()), "StayConnect Root CA", "offline"},
+		{ca.Version, string(ca.IntermediatePEM()), ca.Subject(), ca.KeyFingerprint()},
+	}
+	for _, r := range rows {
+		if _, err := pool.Exec(ctx, `
+            INSERT INTO appliance_ca_versions (version, cert_pem, subject, key_fingerprint, active)
+            VALUES ($1,$2,$3,$4,true) ON CONFLICT (version) DO NOTHING`, r.version, r.pem, r.subject, r.keyFpr); err != nil {
+			return fmt.Errorf("record appliance CA version %d: %w", r.version, err)
+		}
+		var stored string
+		if err := pool.QueryRow(ctx, `SELECT cert_pem FROM appliance_ca_versions WHERE version=$1`, r.version).Scan(&stored); err != nil {
+			return fmt.Errorf("read appliance CA version %d: %w", r.version, err)
+		}
+		if !samePEMCert(stored, r.pem) {
+			return fmt.Errorf("the database records a different appliance CA (version %d) than the loaded files; refusing to start the PKI", r.version)
+		}
+	}
+	return nil
+}
+
+// samePEMCert compares the first certificate of two PEM texts by DER, ignoring whitespace and line breaks.
+func samePEMCert(a, b string) bool {
+	ba, _ := pem.Decode([]byte(a))
+	bb, _ := pem.Decode([]byte(b))
+	return ba != nil && bb != nil && bytes.Equal(ba.Bytes, bb.Bytes)
+}
+
+// runInitCA creates the appliance CA of a brand-new Central. It refuses when any CA file exists or the
+// database already records a CA: a restored or moved Central carries its CA, it never gets a new one.
+func runInitCA(args []string) error {
+	fs := flag.NewFlagSet("init-ca", flag.ExitOnError)
+	noDB := fs.Bool("no-db", false, "do not check or record appliance_ca_versions (the first serve records it)")
+	_ = fs.Parse(args)
+	p := caPathsFromEnv()
+	var pool *pgxpool.Pool
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if !*noDB {
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+		if pool, err = db.Open(ctx, cfg.DBURL); err != nil {
+			return err
+		}
+		defer pool.Close()
+	}
+	if _, err := initCA(ctx, pool, p); err != nil {
+		return err
+	}
+	fmt.Printf("appliance CA created: %s, %s, %s; the root key is %s — move it to cold storage and delete it here\n",
+		p.rootCert, p.intCert, p.intKey, p.rootKeyOffline)
+	return nil
+}
+
+func initCA(ctx context.Context, pool *pgxpool.Pool, p caPaths) (*pki.CA, error) {
+	if pool != nil {
+		var n int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM appliance_ca_versions`).Scan(&n); err != nil {
+			return nil, err
+		}
+		if n > 0 {
+			return nil, errors.New("the database already records an appliance CA; restore its files instead of creating a new CA")
+		}
+	}
+	ca, err := pki.InitCA(p.rootKeyOffline, p.rootCert, p.intCert, p.intKey, 1)
+	if err != nil {
+		return nil, err
+	}
+	if pool != nil {
+		if err := recordCA(ctx, pool, ca); err != nil {
+			return nil, err
+		}
+	}
+	return ca, nil
 }
 
 // runAssignmentKey changes the state of an assignment-signing key and re-signs the trust registry:

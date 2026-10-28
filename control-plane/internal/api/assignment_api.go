@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"crypto/ed25519"
-	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -31,14 +30,6 @@ func assignTTLSeconds() int64 {
 		return 0
 	}
 	return v
-}
-
-func assignUUID() string {
-	var b [16]byte
-	_, _ = rand.Read(b[:])
-	b[6] = (b[6] & 0x0f) | 0x40
-	b[8] = (b[8] & 0x3f) | 0x80
-	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
 // identityFprFromPubB64 must match the edge's fingerprint: hex(sha256(pub)[:8]) of the raw Ed25519 key.
@@ -105,8 +96,12 @@ func (b *AssignmentBase) IssueTx(ctx context.Context, tx pgx.Tx, applianceID, st
 		return nil, errors.New("refusing to sign an assignment with no customer or site")
 	}
 
+	// Only "no assignment yet" is version 0; any other error stops issuance rather than restart at 1 (audit Phase 1 L3).
 	var prevVersion int64
-	_ = tx.QueryRow(ctx, `SELECT version FROM appliance_signed_assignments WHERE appliance_id=$1 FOR UPDATE`, applianceID).Scan(&prevVersion)
+	if err := tx.QueryRow(ctx, `SELECT version FROM appliance_signed_assignments WHERE appliance_id=$1 FOR UPDATE`, applianceID).
+		Scan(&prevVersion); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("previous assignment version: %w", err)
+	}
 	now := time.Now().UTC().Truncate(time.Second)
 
 	// expires_at is a refresh horizon, not a kill switch: past it the appliance marks the assignment stale but keeps
@@ -116,7 +111,7 @@ func (b *AssignmentBase) IssueTx(ctx context.Context, tx pgx.Tx, applianceID, st
 		expiresAt = now.Add(time.Duration(ttl) * time.Second).Unix()
 	}
 	doc := &assignment.Document{
-		AssignmentID:   assignUUID(),
+		AssignmentID:   newUUIDv4(),
 		ApplianceID:    applianceID,
 		IdentityKeyFpr: identityFprFromPubB64(pubB64),
 		Serial:         serial,

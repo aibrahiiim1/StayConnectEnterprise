@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -78,7 +79,8 @@ type box struct {
 
 func newBox(serial, hwf string) box {
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
-	return box{priv: priv, pubB64: base64.RawStdEncoding.EncodeToString(pub), serial: serial, hwf: hwf}
+	// The fingerprint is hex, as the appliance sends it (registration refuses anything else, audit Phase 1 M11).
+	return box{priv: priv, pubB64: base64.RawStdEncoding.EncodeToString(pub), serial: serial, hwf: hex.EncodeToString([]byte(hwf))}
 }
 
 func registerToken(t *testing.T, bx box, body []byte) string {
