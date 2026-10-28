@@ -350,8 +350,21 @@ func (s *server) runRestore(ctx context.Context, name, identity, by string, rec 
 		return
 	}
 	ok("maintenance", "the appliance stopped serving while the database was replaced")
-	// From here on every exit must clear it.
-	defer maintenanceOff()
+	// From here on every exit clears it, except a double failure that leaves no database under the live name: then the
+	// appliance stays in maintenance (cleared by a reboot, /run) and the services are NOT restarted, since they would
+	// only crash-loop against a missing database and look broken rather than "in maintenance".
+	stuck := false
+	defer func() {
+		if !stuck {
+			maintenanceOff()
+		}
+	}()
+	critical := func(step, detail string) {
+		stuck = true
+		slog.Error("database restore: CRITICAL, manual repair needed; staying in maintenance and not restarting services",
+			"step", step, "detail", detail)
+		fail(step, detail)
+	}
 
 	// ---- 3. load into STAGING. The live database is still untouched. -----------------------------------
 	if out, err := admin("CREATE DATABASE " + staging); err != nil {
@@ -458,8 +471,7 @@ func (s *server) runRestore(ctx context.Context, name, identity, by string, rec 
 	if out, err := admin("ALTER DATABASE " + staging + " RENAME TO " + pgDatabase); err != nil {
 		// Roll back the half-done swap: put the original name back.
 		if out2, err2 := admin("ALTER DATABASE " + aside + " RENAME TO " + pgDatabase); err2 != nil {
-			s.startDependents(ctx)
-			fail("swap", "CRITICAL: the restored database could not be renamed in AND the original could not "+
+			critical("swap", "CRITICAL: the restored database could not be renamed in AND the original could not "+
 				"be renamed back. The original data is intact under "+aside+". "+tailLine(string(out2)))
 			return
 		}
@@ -488,8 +500,7 @@ func (s *server) runRestore(ctx context.Context, name, identity, by string, rec 
 		} else {
 			_ = out
 		}
-		s.startDependents(ctx)
-		fail(step, "CRITICAL: "+detail+" The rollback ALSO failed. The original data is intact under "+
+		critical(step, "CRITICAL: "+detail+" The rollback ALSO failed. The original data is intact under "+
 			aside+" and must be renamed back by hand.")
 	}
 
@@ -512,8 +523,7 @@ func (s *server) runRestore(ctx context.Context, name, identity, by string, rec 
 		// A rename back is fast and certain, and does not depend on a second dump being good.
 		_, _ = admin("ALTER DATABASE " + pgDatabase + " RENAME TO " + staging)
 		if out, err := admin("ALTER DATABASE " + aside + " RENAME TO " + pgDatabase); err != nil {
-			s.startDependents(ctx)
-			fail("integrity", "CRITICAL: the restored database failed its integrity check and the original "+
+			critical("integrity", "CRITICAL: the restored database failed its integrity check and the original "+
 				"could not be renamed back. The original data is intact under "+aside+". "+tailLine(string(out)))
 			return
 		}
