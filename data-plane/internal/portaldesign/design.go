@@ -72,7 +72,8 @@ var templateOptionEnums = map[string][]string{
 }
 
 var (
-	reColor      = regexp.MustCompile(`^#[0-9a-fA-F]{3,8}$|^rgb\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\)$`)
+	// Only the hex lengths CSS reads (3, 4, 6, 8); a 5- or 7-digit value was accepted and silently ignored (audit P5 L10).
+	reColor      = regexp.MustCompile(`^#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$|^rgb\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\)$`)
 	reLength     = regexp.MustCompile(`^\d{1,3}(px|rem|em|%)$`)
 	reFontStack  = regexp.MustCompile(`^[\p{L}\p{N} ,'"._-]*$`)
 	reLangCode   = regexp.MustCompile(`^[a-z]{2,3}(-[a-z0-9]{2,8})?$`)
@@ -272,7 +273,25 @@ func fontStackProblem(v string) string {
 	if !reFontStack.MatchString(v) {
 		return "may contain only font names, quotes and commas"
 	}
+	if !quotesBalanced(v) {
+		return "has a quote that is not closed"
+	}
 	return ""
+}
+
+// quotesBalanced: an open quote in a font stack swallows the next CSS declaration (audit P5 L10). Inside one kind of
+// quote the other kind is an ordinary character.
+func quotesBalanced(v string) bool {
+	var open rune
+	for _, r := range v {
+		switch {
+		case open == 0 && (r == '"' || r == '\''):
+			open = r
+		case r == open:
+			open = 0
+		}
+	}
+	return open == 0
 }
 
 func imageURLProblem(v string) string {
@@ -283,7 +302,8 @@ func imageURLProblem(v string) string {
 	if len(v) > limit {
 		return fmt.Sprintf("is larger than %d KB; upload the image instead", limit/1024)
 	}
-	if _, err := CheckImageURL(v); err != nil {
+	// The fragment rule: an image at any other appliance path (/auth/social/start) made every guest's browser call that route (audit P5 L4).
+	if _, err := checkFragmentImage(v); err != nil {
 		return err.Error()
 	}
 	return ""
@@ -436,7 +456,7 @@ func ForGuests(d map[string]any) map[string]any {
 	}
 	for _, k := range imageFields {
 		if s, ok := d[k].(string); ok && s != "" && imageURLProblem(s) == "" {
-			v, _ := CheckImageURL(s)
+			v, _ := checkFragmentImage(s)
 			out[k] = v
 		}
 	}
