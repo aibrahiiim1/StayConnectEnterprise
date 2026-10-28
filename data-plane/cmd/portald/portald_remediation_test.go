@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode"
 )
 
 // P5 M1: both listeners come from one constructor carrying every bound.
@@ -255,6 +256,24 @@ func TestADesignExpiryUnderLoadAsksScdOnce(t *testing.T) {
 	wg.Wait()
 	if n := atomic.LoadInt32(&calls); n != 1 {
 		t.Fatalf("scd was asked %d times for one design", n)
+	}
+}
+
+// audit P5 CC4: invisible format characters are written as \u escapes, so a reader sees what a literal holds.
+func TestSourcesCarryNoInvisibleFormatCharacters(t *testing.T) {
+	files, _ := filepath.Glob("*.go")
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, line := range strings.Split(string(b), "\n") {
+			for _, r := range line {
+				if unicode.Is(unicode.Cf, r) {
+					t.Errorf("%s:%d carries U+%04X; write it as an escape", f, i+1, r)
+				}
+			}
+		}
 	}
 }
 
