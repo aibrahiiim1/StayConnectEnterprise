@@ -12,7 +12,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -222,23 +221,6 @@ func (h *handler) authOTPLink(w http.ResponseWriter, r *http.Request) {
 		key = "err.otp.device"
 	}
 	h.renderGuestNotice(w, r, http.StatusForbidden, "link.title", key, "/", "errpage.back")
-}
-
-// portalLinkBase is the origin the client reached the portal by (reachable pre-sign-in); "" if it is not a
-// plain http(s) origin, and the message then carries the code alone.
-func portalLinkBase(r *http.Request) string {
-	o := portalOrigin(r)
-	if o == "" {
-		return ""
-	}
-	u, err := url.Parse(o)
-	if err != nil || u.Host == "" || u.Path != "" {
-		return ""
-	}
-	if host, _, err := net.SplitHostPort(u.Host); err == nil && host == "" {
-		return ""
-	}
-	return o
 }
 
 const connectHTML = guestHead + `

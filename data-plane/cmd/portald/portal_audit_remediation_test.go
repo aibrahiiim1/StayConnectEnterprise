@@ -200,8 +200,10 @@ func TestTheStubOAuthIsAbsentFromAProductionBuild(t *testing.T) {
 	h, _ := auditHandler(t, map[string]func(map[string]any) (int, string){})
 	q := url.Values{"provider": {"google"}, "state": {"s"}, "redirect_uri": {"https://evil.example/cb"},
 		"email": {"a@example.com"}, "auto": {"1"}}
-	rec := serveAcct(h, auditReq(http.MethodGet, "/api/oauth/stub/authorize?"+q.Encode(), nil))
-	if loc := rec.Header().Get("Location"); strings.Contains(loc, "evil.example") || rec.Code == http.StatusFound {
+	req := auditReq(http.MethodGet, "/api/oauth/stub/authorize?"+q.Encode(), nil)
+	rec := serveAcct(h, req)
+	// Absent means the catch-all: a redirect to the portal's own root (perf D3-M1), never to the given address.
+	if loc := rec.Header().Get("Location"); strings.Contains(loc, "evil.example") || (rec.Code == http.StatusFound && loc != h.probeTarget(req)) {
 		t.Fatalf("the stub redirected in a production build: %d %q", rec.Code, loc)
 	}
 	rec = serveAcct(h, auditReq(http.MethodPost, "/api/oauth/stub/authorize-confirm", url.Values{"provider": {"google"}, "state": {"s"},

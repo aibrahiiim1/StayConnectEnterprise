@@ -13,6 +13,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/phone"
 )
 
 type Twilio struct {
@@ -38,6 +40,10 @@ func NewTwilio(accountSID, authToken, fromNumber string) (*Twilio, error) {
 func (t *Twilio) Send(ctx context.Context, m Message) error {
 	if m.To == "" {
 		return errors.New("twilio: empty recipient")
+	}
+	// Checked here as WhatsApp does, so a malformed number costs no provider call (audit P5 L9); sent as given.
+	if _, err := phone.Normalize(m.To); err != nil {
+		return errors.New("twilio: invalid recipient")
 	}
 	form := url.Values{}
 	form.Set("To", m.To)

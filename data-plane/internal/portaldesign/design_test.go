@@ -202,3 +202,55 @@ func TestTheDesignerMirrorsThisPackage(t *testing.T) {
 		t.Errorf("the designer asks for the password on %v; the server on %v", keys, AdvancedFields)
 	}
 }
+
+// Audit P5 L4: a design image is an upload, an https address or an inline image, never another appliance route.
+func TestDesignImagesCannotNameAnotherApplianceRoute(t *testing.T) {
+	for _, k := range imageFields {
+		for _, bad := range []string{"/auth/social/start?provider=google", "/logout", "/auth/voucher"} {
+			if len(errorsFor(map[string]any{k: bad})) == 0 {
+				t.Errorf("%s=%q was accepted", k, bad)
+			}
+			if _, served := ForGuests(map[string]any{k: bad})[k]; served {
+				t.Errorf("%s=%q was served to guests", k, bad)
+			}
+		}
+		for _, good := range []string{"/assets/0123456789abcdef.png", "https://hotel.example/logo.png"} {
+			if errs := errorsFor(map[string]any{k: good}); len(errs) > 0 {
+				t.Errorf("%s=%q refused: %v", k, good, errs)
+			}
+			if ForGuests(map[string]any{k: good})[k] != good {
+				t.Errorf("%s=%q not served", k, good)
+			}
+		}
+	}
+}
+
+// Audit P5 L10: colours have a length CSS reads; a font stack's quotes close.
+func TestColoursAndFontStacksAreWellFormed(t *testing.T) {
+	for _, bad := range []string{"#12345", "#1234567", "#12"} {
+		if len(errorsFor(map[string]any{"brand_color": bad})) == 0 {
+			t.Errorf("brand_color %q was accepted", bad)
+		}
+		if _, served := ForGuests(map[string]any{"brand_color": bad})["brand_color"]; served {
+			t.Errorf("brand_color %q was served", bad)
+		}
+	}
+	for _, good := range []string{"#abc", "#abcd", "#aabbcc", "#aabbccdd", "rgb(1, 2, 3)"} {
+		if errs := errorsFor(map[string]any{"brand_color": good}); len(errs) > 0 {
+			t.Errorf("brand_color %q refused: %v", good, errs)
+		}
+	}
+	for _, bad := range []string{`"Gill Sans, serif`, `Arial, 'Helvetica`, `"a' , b`} {
+		if len(errorsFor(map[string]any{"font_family": bad})) == 0 {
+			t.Errorf("font_family %q was accepted", bad)
+		}
+		if _, served := ForGuests(map[string]any{"font_family": bad})["font_family"]; served {
+			t.Errorf("font_family %q was served", bad)
+		}
+	}
+	for _, good := range []string{`"Gill Sans", serif`, `'Hoefler Text', "Baskerville", serif`, `"Ma'ruf Sans", sans-serif`, "system-ui"} {
+		if errs := errorsFor(map[string]any{"font_family": good}); len(errs) > 0 {
+			t.Errorf("font_family %q refused: %v", good, errs)
+		}
+	}
+}

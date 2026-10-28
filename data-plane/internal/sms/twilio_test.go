@@ -73,11 +73,28 @@ func TestTwilioErrorSurfacesMessage(t *testing.T) {
 	tw, _ := NewTwilio("ACtest", "secret", "+15555550000")
 	tw.BaseURL = srv.URL
 
-	err := tw.Send(context.Background(), Message{To: "+1xxx", Text: "x"})
+	err := tw.Send(context.Background(), Message{To: "+15550000000", Text: "x"})
 	if err == nil {
 		t.Fatal("expected error on 400")
 	}
 	if !strings.Contains(err.Error(), "Invalid 'To' Phone Number") {
 		t.Errorf("err didn't include upstream message: %v", err)
+	}
+}
+
+// Audit P5 L9: a malformed number is refused before any provider call.
+func TestTwilioRefusesAMalformedNumberWithoutCallingTheProvider(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
+	defer srv.Close()
+	tw, _ := NewTwilio("ACtest", "secret", "+15555550000")
+	tw.BaseURL = srv.URL
+	for _, to := range []string{"+1xxx", "5551234567", "+12"} {
+		if err := tw.Send(context.Background(), Message{To: to, Text: "x"}); err == nil {
+			t.Errorf("%q was accepted", to)
+		}
+	}
+	if called {
+		t.Fatal("the provider was called for a malformed number")
 	}
 }

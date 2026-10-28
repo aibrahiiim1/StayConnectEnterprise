@@ -138,6 +138,14 @@ type designEntry struct {
 type designCache struct {
 	mu      sync.Mutex
 	entries map[string]designEntry
+	// inflight holds the one fetch per key under way, so an expiry under load asks scd once, not once per request (perf D3-M2).
+	inflight map[string]*designFlight
+}
+
+type designFlight struct {
+	done   chan struct{}
+	design map[string]any
+	ok     bool
 }
 
 var previewProfilePattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
@@ -164,27 +172,43 @@ func (h *handler) guestDesign(r *http.Request) (map[string]any, bool) {
 	}
 	key, query := designSelector(r)
 	c := h.designs
-	if c != nil {
-		c.mu.Lock()
-		if e, hit := c.entries[key]; hit && time.Since(e.fetched) < designCacheTTL {
-			c.mu.Unlock()
-			return e.design, e.ok
-		}
-		c.mu.Unlock()
+	if c == nil {
+		return h.fetchGuestDesign(r.Context(), query)
 	}
-	d, ok := h.fetchGuestDesign(r.Context(), query)
-	if c != nil {
-		c.mu.Lock()
-		if c.entries == nil {
-			c.entries = map[string]designEntry{}
-		}
-		if len(c.entries) >= designCacheMax {
-			c.evict()
-		}
-		c.entries[key] = designEntry{fetched: time.Now(), design: d, ok: ok}
+	c.mu.Lock()
+	if e, hit := c.entries[key]; hit && time.Since(e.fetched) < designCacheTTL {
 		c.mu.Unlock()
+		return e.design, e.ok
 	}
-	return d, ok
+	if f, busy := c.inflight[key]; busy {
+		c.mu.Unlock()
+		select {
+		case <-f.done:
+			return f.design, f.ok
+		case <-r.Context().Done():
+			return nil, false
+		}
+	}
+	f := &designFlight{done: make(chan struct{})}
+	if c.inflight == nil {
+		c.inflight = map[string]*designFlight{}
+	}
+	c.inflight[key] = f
+	c.mu.Unlock()
+	// Detached from this request so its end cannot fail the others waiting on it; fetchGuestDesign has its own bound.
+	f.design, f.ok = h.fetchGuestDesign(context.WithoutCancel(r.Context()), query)
+	c.mu.Lock()
+	if c.entries == nil {
+		c.entries = map[string]designEntry{}
+	}
+	if len(c.entries) >= designCacheMax {
+		c.evict()
+	}
+	c.entries[key] = designEntry{fetched: time.Now(), design: f.design, ok: f.ok}
+	delete(c.inflight, key)
+	c.mu.Unlock()
+	close(f.done)
+	return f.design, f.ok
 }
 
 // evict drops what has expired and, if that frees nothing, the oldest entry. Called with the lock held.

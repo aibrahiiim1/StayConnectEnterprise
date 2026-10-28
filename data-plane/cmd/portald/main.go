@@ -89,11 +89,14 @@ func newHandler(c cfg) (*handler, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Go's default of two idle connections opened and closed a socket to scd for every extra call in a burst (perf D3-L4).
 	tr := &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			var d net.Dialer
 			return d.DialContext(ctx, "unix", c.ScdSocket)
 		},
+		MaxIdleConnsPerHost: scdMaxIdleConns,
+		IdleConnTimeout:     scdIdleConnTimeout,
 	}
 	// Phase 2 DARK commerce config (env-only, all flags default OFF; fail closed on a malformed value).
 	commCfg, err := iamv2.LoadCommerceConfigFromEnv(os.Getenv)
@@ -129,7 +132,7 @@ func clientIP(r *http.Request) net.IP {
 	return net.ParseIP(host)
 }
 
-// portalAssetDir is written by Hotel Admin and served here. Both run as the same service user.
+// portalAssetDir is written by Hotel Admin (edged) and only read here; portald runs as its own service user.
 const portalAssetDir = "/opt/stayconnect/portal-assets"
 
 // neuteredFS serves files only: http.FileServer would list directories and publish every uploaded image, including replaced ones, to the guest network before sign-in.
@@ -520,6 +523,8 @@ func (h *handler) routes() http.Handler {
 	r.Use(h.portalTimeout(portalRequestTimeout))
 	// Text responses are gzipped for clients that accept it; images pass through.
 	r.Use(gzipResponses)
+	// One cap for every guest body, so ParseForm and each JSON decoder are bounded together (audit P5 M1).
+	r.Use(limitGuestBodies)
 
 	r.Get("/", h.index)
 	// Routes that check a credential or send a message pass the flood damper first (throttle.go).
@@ -528,13 +533,13 @@ func (h *handler) routes() http.Handler {
 	r.Post("/auth/account/register", h.damped(h.accountRegister))
 	r.Post("/auth/account/signin", h.damped(h.accountSignIn))
 	r.Post("/auth/account/forgot", h.damped(h.accountForgot))
-	r.Post("/auth/account/resend", h.accountResend)
-	r.Post("/auth/account/grace", h.accountGrace)
+	r.Post("/auth/account/resend", h.damped(h.accountResend))
+	r.Post("/auth/account/grace", h.damped(h.accountGrace))
 	r.Get("/account/verification", h.accountVerificationPage)
 	r.Get("/account/verify", h.accountVerifyPage)
-	r.Post("/account/verify", h.accountVerify)
+	r.Post("/account/verify", h.damped(h.accountVerify))
 	r.Get("/account/reset", h.accountResetPage)
-	r.Post("/account/reset", h.accountReset)
+	r.Post("/account/reset", h.damped(h.accountReset))
 	r.Post("/auth/resume", h.damped(h.authResume))
 	r.Post("/auth/resume/forget", h.authResumeForget)
 	r.Post("/auth/otp/request", h.damped(h.authOTPRequest))
@@ -549,18 +554,19 @@ func (h *handler) routes() http.Handler {
 	// The development OAuth stub exists only in a -tags devlicense build; a production binary has no such route.
 	mountStubOAuth(r, h)
 	// Phase 3 is mounted unconditionally as a pure proxy: while dark scd answers with the same uniform non-success a wrong room gets, so a guest cannot tell whether the feature exists.
-	r.Post("/auth/pms/phase3", h.authPMSPhase3)
+	// The budgeted routes are damped through their own budget and refusal (throttle.go).
+	r.Post("/auth/pms/phase3", h.dampedBudget(h.authPMSPhase3, h.refuseDampedSignIn))
 	// Read-only; answers "nothing to say" for every device that has not just run out.
 	r.Post("/access/status", h.accessStatus)
 	// Phase 5 is mounted unconditionally for the same reason: the hop failing gives the same uniform non-success a wrong PIN gets.
-	r.Post("/poststay/issue", h.postStayIssue)
-	r.Post("/auth/post-stay-pin", h.postStayAuth)
+	r.Post("/poststay/issue", h.dampedBudget(h.postStayIssue, h.refuseDampedSignIn))
+	r.Post("/auth/post-stay-pin", h.dampedBudget(h.postStayAuth, h.refuseDampedSignIn))
 
 	// Phase 6 likewise: whether device management exists is decided twice behind this layer (deployment gate, per-appliance setting), and the guest gets the same uniform answer either way.
-	r.Post("/devices/list", h.deviceList)
-	r.Post("/devices/release", h.deviceRelease)
+	r.Post("/devices/list", h.dampedBudget(h.deviceList, h.refuseDampedDevice))
+	r.Post("/devices/release", h.dampedBudget(h.deviceRelease, h.refuseDampedDevice))
 	r.Get("/devices/replace", h.replacePage)
-	r.Post("/devices/replace", h.replaceDevice)
+	r.Post("/devices/replace", h.damped(h.replaceDevice))
 	r.Get("/api/auth-methods", h.authMethods)
 	r.Get("/api/branding", h.branding)
 	// The shipped wording is unauthenticated like the rest of /api here: it is the same text already in every served page.
@@ -568,7 +574,7 @@ func (h *handler) routes() http.Handler {
 
 	// The hotel's images are served from the appliance because a captive device has no internet; read-only, from a directory only Hotel Admin writes, with the content type decided at upload from the bytes, never from an extension.
 	r.Handle("/assets/*", http.StripPrefix("/assets/",
-		http.FileServer(neuteredFS{http.Dir(portalAssetDir)})))
+		immutableAssets(http.FileServer(neuteredFS{http.Dir(portalAssetDir)}))))
 
 	// Commerce bridge routes are mounted only when the portal surface is ON; otherwise 404 and no scd commerce call.
 	if h.commerceCfg.PortalOn() {
@@ -578,7 +584,7 @@ func (h *handler) routes() http.Handler {
 	}
 
 	r.Get("/packages", h.packagesPage)
-	r.Post("/packages/acquire", h.acquirePackage)
+	r.Post("/packages/acquire", h.damped(h.acquirePackage))
 	r.Post("/auth/open", h.damped(h.authOpen))
 	r.Get("/pay/return", h.payReturn)
 	r.Get("/api/pay/status", h.payStatusAPI)
@@ -595,7 +601,11 @@ func (h *handler) routes() http.Handler {
 	// RFC 8908 captive portal API: TLS only, 404 over HTTP.
 	r.Get("/captive-portal/api", h.captivePortalAPI)
 
-	r.NotFound(func(w http.ResponseWriter, req *http.Request) { h.index(w, req) })
+	// Any other path is what an unsigned device's apps ask of other sites: a small redirect, as the Google and Windows probes get, not a full page each time (perf D3-M1).
+	r.NotFound(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		http.Redirect(w, req, h.probeTarget(req), http.StatusFound)
+	})
 	return r
 }
 
@@ -619,11 +629,10 @@ func main() {
 
 	go h.pollTLSState(rootCtx)
 
-	httpSrv := &http.Server{Addr: c.HTTPAddr, Handler: h.httpFront(mux), ReadHeaderTimeout: 5 * time.Second}
-	httpsSrv := &http.Server{
-		Addr: c.HTTPSAddr, Handler: h.tlsFront(mux), ReadHeaderTimeout: 5 * time.Second,
-		TLSConfig: portalTLSConfig(newPortalCertServer(h.tlsState)), ErrorLog: httpsErrorLog(),
-	}
+	httpSrv := newPortalServer(c.HTTPAddr, h.httpFront(mux))
+	httpsSrv := newPortalServer(c.HTTPSAddr, h.tlsFront(mux))
+	httpsSrv.TLSConfig = portalTLSConfig(newPortalCertServer(h.tlsState))
+	httpsSrv.ErrorLog = httpsErrorLog()
 
 	go func() {
 		slog.Info("portald HTTP", "addr", c.HTTPAddr)
@@ -644,18 +653,6 @@ func main() {
 	defer cancel()
 	_ = httpSrv.Shutdown(shutCtx)
 	_ = httpsSrv.Shutdown(shutCtx)
-}
-
-func humanDuration(d time.Duration) string {
-	if d <= 0 {
-		return "—"
-	}
-	h := int(d.Hours())
-	m := int(d.Minutes()) % 60
-	if h > 0 {
-		return fmt.Sprintf("%dh %dm", h, m)
-	}
-	return fmt.Sprintf("%dm", m)
 }
 
 // redactLoggedQuery strips the query from r.RequestURI so a code in a link never reaches the journal.
