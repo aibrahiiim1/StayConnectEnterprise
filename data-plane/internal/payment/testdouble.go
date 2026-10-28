@@ -1,3 +1,8 @@
+//go:build !stayconnect_production
+
+// Audit P6 L2: the provider test doubles (and their fixed signing secret) are never compiled into a production
+// binary (built with -tags stayconnect_production). The file keeps its path because transitions T0037/T0038 cite it.
+
 package payment
 
 import (

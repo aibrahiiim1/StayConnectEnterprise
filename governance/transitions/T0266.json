@@ -1,0 +1,33 @@
+{
+  "transition_id": "T0266",
+  "seq": 266,
+  "timestamp": "2026-10-28T17:48:44Z",
+  "timestamp_derivation": "Computed from the session clock after the remediation was merged and validated on the branch, before the commit that introduces this receipt.",
+  "record_type": "AUDIT_REMEDIATION",
+  "authorisation": "D80, the Product Owner's mission of 2026-10-28.",
+  "remediation": "Eight workstreams (Central; scd and appliance foundations; portald; acctd and payments; pmsd; netd; edged and hotel-admin; DB, tooling and cross-cutting) re-checked every finding against master 55c01890 and fixed the actionable ones with tests. Backend 258 rows: FIXED 143, ALREADY-FIXED 6, PARTIAL 48, NOT-REPRODUCIBLE 2, OPEN-DECISION 40, OPEN 19 (before: OPEN 229, OPEN-DECISION 22, PARTIAL 4, FIXED 3). Performance 82 rows: FIXED 27, ALREADY-FIXED 1, PARTIAL 12, OPEN-DECISION 24, OPEN 18 (before: OPEN 71, OPEN-DECISION 11). Five backend Highs: P1 H1 and P2 H1 FIXED, P8 H1 already fixed, P0-2 PARTIAL (libraries updated; Go 1.26 is decision AD-60), P1 H2 OPEN-DECISION (AD-1). The audits are not closed.",
+  "migrations": "Appliance 0159 (session and controlled-operation indexes), 0160 (roster reads use the resync index), 0161 (a trigger function no longer executable by PUBLIC; fixes a definer-review test failing on master). Central 0057 (an appliance being deleted cannot be activated) and 0058 (fetch-log prune and history indexes). All additive; verified on disposable full-schema databases. Not integrated, left as decisions or open: P5 L11 index, P6 M1 backoff, P6 M3 function, D1-L3 fillfactor, P3 L6/CC3 checksum, the public.audit_log index of D7-H1.",
+  "coordinator_decisions": "The P8 L2 sysctl change (IPv6 forwarding off) was reverted: it would let router advertisements configure a public IPv6 address on the WAN, an unverifiable networking change (AD-25). The duplicate P4 M3 fix was resolved in favour of acctd's. Migration 0160's up script, first committed empty by an extraction error, was completed and re-verified.",
+  "legacy_pki": "The Product Owner confirmed the former servers have been permanently removed; recorded in docs/CA_CEREMONY_RUNBOOK.md and current_state_facts.legacy_pki_custody without claiming any key destruction (erasure never observed or verified).",
+  "deployment": "NOT deployed. The delivery environment has no route to the test appliance 172.21.96.97 or to Central (its egress proxy refuses the project's hosts) and no Remote Control computer was connected. Upgrade notes: installation manual E.5.1 and DEPLOYMENT_CLOUD 7.1.",
+  "verification": "data-plane, control-plane and license full unit suites; integration-tagged vet of both modules; full-schema harnesses: Phase-4 financial (incl. definer abuse), pmsd (with edged, acctd, netd, scd integration), production privilege; Central database suite 192 pass / 0 fail / 1 skip (Pebble); hotel-admin 1062 tests and tsc; cloud-admin 253 tests and tsc; self-tests of the changed scripts; governance validators.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0265."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "55c01890f02d28063b5fb72fcbd56de4126ecbc8",
+  "previous_delivery": "T0265",
+  "decision": "D80",
+  "go_live": "NOT authorised."
+}

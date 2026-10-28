@@ -13,11 +13,11 @@
 
 ## Where the work is (2026-10-28)
 
-Latest merged deliveries: #256–#261 (installer, enrollment F1, installer acceptance, Central `:9443` from outside,
-modules follow the licence, financial modules configurable but never executable; T0259–T0262), #262 (repository
-cleanup, T0263) and #263 (retired targets removed with one safeguard, D78/T0264, and the integrated cleanup, D79/T0265:
-documents consolidated, audits turned into [`docs/AUDIT_BACKLOG.md`](docs/AUDIT_BACKLOG.md), removed files indexed in
-[`docs/ARCHIVE.md`](docs/ARCHIVE.md), `CLAUDE.md` compacted, legacy Root CA custody reconciled).
+Merged: #256–#263 (installer, enrollment, modules, cleanups; T0259–T0265). Then the **audit remediation** (D80/T0266,
+PR from `claude/vigilant-keller-sag14r`): every backend, performance and hardening finding re-checked and the
+actionable ones fixed with tests; statuses in [`docs/AUDIT_BACKLOG.md`](docs/AUDIT_BACKLOG.md), open decisions in
+[`docs/AUDIT_DECISIONS.md`](docs/AUDIT_DECISIONS.md) (AD-1…AD-68). **Not deployed** anywhere: read the upgrade notes
+(installation manual E.5.1; DEPLOYMENT_CLOUD §7.1) before upgrading the test appliance.
 
 ## Environments (Product-Owner record, 2026-10-28)
 
@@ -39,8 +39,9 @@ proxy refuses them), so deployments run from the workstation.
 * Card payment and room charge execute only with their execution switches, each a separate PO authorisation (manual C.12).
 * A blank-VM install of the current release was not repeated after #256; rebuild with the same identity (manual E.4
   Case 2) is self-tested but not run on a VM.
-* 251 backend and 82 performance audit findings are open ([AUDIT_BACKLOG.md](docs/AUDIT_BACKLOG.md)), including four of
-  the five backend High findings.
+* Audit backlog after T0266: backend 143 fixed, 48 partial, 40 waiting on a decision, 19 open; performance 27 fixed,
+  12 partial, 24 waiting on a decision, 18 open. High findings still open: P1 H2 (AD-1) and the Go 1.26 toolchain (AD-60).
+* The audit-remediation release is not on the test appliance yet (no route from the cloud delivery environment).
 * High availability and white label are licence keys with no implementation.
 * PO decisions still open (handbook §24.2): the off-host copy destination for Central dumps; whether Ubuntu 24.04 is
   supported; Go-Live, LIVE card payments and further PMS postings; high availability (§16.5).

@@ -330,7 +330,7 @@
   ],
   "allowed_actions": [
     "Develop normally: scope, implement, focused self-review, targeted tests and builds, commit and push to the delivery branch and its pull request. The four comprehensive gates do not run on pull requests (D42).",
-    "Deploy completed software changes to the test appliance 172.21.96.97 under the standing Product-Owner authorization of 2026-10-28 (D79): build, install, service restart, deployment verification, retry, rollback and recording the exact deployed commit sha. It does not cover the production Central, migrations, destructive data changes, networking, PMS or financial traffic, Root-CA or trust changes, or Go-Live. Never deploy to or test against a retired host (current_state_facts.retired_hosts), and never default a test or drill to the production Central.",
+    "Deploy completed software changes to the test appliance 172.21.96.97 under the standing Product-Owner deployment authorization for the test appliance (current_state_facts.standing_test_appliance_deployment_authorization): build, install, service restart, deployment verification, retry, rollback and recording the exact deployed commit sha. It does not cover the production Central, migrations, destructive data changes, networking, PMS or financial traffic, Root-CA or trust changes, or Go-Live. Never deploy to or test against a retired host (current_state_facts.retired_hosts), and never default a test or drill to the production Central.",
     "Maintain project governance, current-state parity, decisions, receipts, manifests, export packs and documentation.",
     "Open and update the single delivery pull request, stop at READY FOR PRODUCT OWNER TESTING, and merge with a merge commit only after explicit Product Owner acceptance recorded as the po-merge-approved label (or a mission that authorized the merge in advance). Run the comprehensive validation only on 'FULL CHECK THE WHOLE CODE'. Repository-only engineering that touches no live environment is unrestricted.",
     "NOT ALLOWED WITHOUT A NEW PRODUCT-OWNER DECISION: a new product, architecture or security decision; destructive or historical data mutation; a new database migration or schema decision; networking or topology changes; PMS configuration, posting or traffic; financial or payment-provider activity; Guest activation or Guest Go-Live; Root-CA or trust-root changes; and Go-Live."
@@ -341,10 +341,10 @@
     "Any Production contact or mutation.",
     "Re-executing, reopening or extending Phase 7, which is ACCEPTED_AND_CLOSED, and implementing any numbered development phase: none is open or authorized, and no Phase 8 exists."
   ],
-  "next_authorized_action": "Work normal missions under the PRODUCT-OWNER-LED DELIVERY model D42 (2026-09-26): implement, target-test, deploy routine software to the test appliance 172.21.96.97 under the standing authorization D79 (the production Central only when a mission names it), stop at READY FOR PRODUCT OWNER TESTING, and merge only after explicit Product Owner acceptance (po-merge-approved). The comprehensive validation runs only on 'FULL CHECK THE WHOLE CODE'. Retired hosts (current_state_facts.retired_hosts) are never contacted.",
+  "next_authorized_action": "Work normal missions under the PRODUCT-OWNER-LED DELIVERY model D42 (2026-09-26): implement, target-test, deploy routine software to the test appliance 172.21.96.97 under its standing deployment authorization (current_state_facts.standing_test_appliance_deployment_authorization) (the production Central only when a mission names it), stop at READY FOR PRODUCT OWNER TESTING, and merge only after explicit Product Owner acceptance (po-merge-approved). The comprehensive validation runs only on 'FULL CHECK THE WHOLE CODE'. Retired hosts (current_state_facts.retired_hosts) are never contacted.",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase7-Plan.md",
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
-  "latest_accepted_po_decision": "D79",
+  "latest_accepted_po_decision": "D80",
   "current_state_facts": {
     "_note": "MACHINE-READABLE CURRENT STATE. Every current-state surface in this repository is validated against these fields by tools/validate-current-state-parity.py, which runs in the Project Governance gate. They exist because prose alone let a contradiction survive a green gate: current_maturity still said an authorization was awaited and iam_v2 was 49/0 while this file already recorded 63 tables and an executed Live Increment 9. A fact that is only asserted in sentences cannot be diffed; a fact recorded here can be.",
     "phase": "7",
@@ -1340,7 +1340,8 @@
       "host": "172.21.96.97",
       "central": "central.onegate.getsemantics.com (41.128.240.133)",
       "release": "onegate-appliance-d25999781b1a (master code of PR #261), as recorded in CONTINUATION.md and the installation manual Appendix 3; not re-read in this delivery",
-      "status": "TEST. Go-Live not authorised. Routine software deployments are covered by the standing authorization D79."
+      "status": "TEST. Go-Live not authorised. Routine software deployments are covered by the standing authorization D79.",
+      "deployed_note": "The audit-remediation release (T0266) is NOT deployed: the delivery environment has no route to 172.21.96.97 (its egress proxy refuses the project's hosts) and no Remote Control computer was connected. Deploy from the workstation under D79."
     },
     "standing_test_appliance_deployment_authorization": "STANDING PRODUCT-OWNER AUTHORIZATION, 2026-10-28 (D79/T0265), CONTINUING UNTIL REVOKED OR CHANGED: routine software deployments to the test appliance 172.21.96.97 within approved work, without separate deployment approval each time. COVERED: build and package, install, service restart, deployment verification, retry and rollback, and recording the exact deployed commit read back from the installed artifact. NOT COVERED, each a separate Product-Owner decision: the production Central; a new product, architecture or security decision; destructive or historical data mutation; a new migration or schema decision; networking or topology changes; PMS configuration, posting or traffic; financial or payment-provider activity; Guest activation or Go-Live; Root-CA or trust changes. The deployed source may run ahead of master; it is never master state.",
     "legacy_pki_custody": {
@@ -1352,9 +1353,15 @@
       "production_root_key_cold_storage": "NOT RECORDED: whether installation manual F step 2 (moving the production Central's Root key offline) has been done could not be checked from the repository.",
       "record": "docs/CA_CEREMONY_RUNBOOK.md",
       "summary": "No legacy key copy is known to remain in the Product Owner's possession or on any host the project operates. This rests on the Product Owner's confirmation, not on a verified destruction; any surviving image or snapshot of the removed servers would still contain the keys. No current system trusts them."
+    },
+    "audit_backlog": {
+      "record": "docs/AUDIT_BACKLOG.md",
+      "decisions": "docs/AUDIT_DECISIONS.md",
+      "as_of": "T0266",
+      "note": "Backend 258 rows: FIXED 143, ALREADY-FIXED 6, PARTIAL 48, NOT-REPRODUCIBLE 2, OPEN-DECISION 40, OPEN 19 (before: OPEN 229, OPEN-DECISION 22, PARTIAL 4, FIXED 3). Performance 82 rows: FIXED 27, ALREADY-FIXED 1, PARTIAL 12, OPEN-DECISION 24, OPEN 18 (before: OPEN 71, OPEN-DECISION 11). The audits are NOT closed: decisions remain."
     }
   },
-  "latest_transition_id": "T0265",
+  "latest_transition_id": "T0266",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1850,16 +1857,16 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "INTEGRATED_CLEANUP",
-    "decision": "D78 (environments; retired targets) and D79 (integrated cleanup; standing test-appliance deployment authorization; legacy PKI custody), both Product-Owner records of 2026-10-28.",
-    "decision_note": "Retired-target safeguard and dependency removal (T0264); repository cleanup and documentation consolidation, audits consolidated into docs/AUDIT_BACKLOG.md, removed files indexed in docs/ARCHIVE.md, CLAUDE.md compacted without rule changes, the Phase-1B Planning Pack retired, legacy Root CA custody reconciled (T0265). No deployment and no live contact.",
-    "manifest": "docs/manifests/RetiredTargetsCleanup-change-manifest.md",
-    "base": "3679e67455c5cc1adff57ed65a20873c4b66bfff",
-    "transition": "T0265",
-    "previous_delivery": "T0263",
+    "kind": "AUDIT_REMEDIATION",
+    "decision": "D80 (Product-Owner mission of 2026-10-28: remediate the backend, performance and security audit findings end to end; finish the PR #263 clean-up).",
+    "decision_note": "Every finding evaluated; fixes in code with tests; decision-dependent findings consolidated in docs/AUDIT_DECISIONS.md; statuses in docs/AUDIT_BACKLOG.md. Additive appliance migrations 0159-0161 and Central migrations 0057-0058. Nothing deployed: the delivery environment cannot reach the test appliance or Central.",
+    "manifest": "docs/manifests/AuditRemediation2-change-manifest.md",
+    "base": "55c01890f02d28063b5fb72fcbd56de4126ecbc8",
+    "base_note": "Master after the merge of PR #263.",
+    "transition": "T0266",
+    "previous_delivery": "T0265",
     "branch": "claude/vigilant-keller-sag14r",
-    "note": "T0264 and T0265, one PR (#263). Go-Live not authorised.",
-    "pr": 263
+    "note": "T0266. Go-Live not authorised."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
