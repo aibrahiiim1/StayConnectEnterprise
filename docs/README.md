@@ -95,13 +95,15 @@ The product words used throughout (Client, Admin Console, Client Portal, Site) a
   controlled work only for the listed triggers, one delivery owner per branch.
 - [OPERATIONAL_SETTINGS_POLICY.md](OPERATIONAL_SETTINGS_POLICY.md) — values an administrator may change ship as settings.
 - [GITHUB_EXECUTION_AND_DELIVERY_RULE.md](GITHUB_EXECUTION_AND_DELIVERY_RULE.md) — the GitHub repo
-  `aibrahiiim1/StayConnectEnterprise` is the only authoritative source; every delivery carries its changed-file manifest.
+  `aibrahiiim1/StayConnectEnterprise` is the only authoritative source. Its changed-file manifest
+  (`tools/generate-change-manifest.py`, kept in [`manifests/`](manifests/)) is produced for a controlled delivery or a
+  milestone closure, not for routine work (§4, and `CLAUDE.md` §0). Its one-Phase-per-PR cadence and the 20-section
+  [final-report template](templates/PHASE_FINAL_REPORT_TEMPLATE.md) belong to Phases 1–7 and are kept as records.
 - [ZERO_STALE_LEFTOVERS_RULE.md](ZERO_STALE_LEFTOVERS_RULE.md) — no stale or contradictory artifact survives a completed task.
 - Machine-readable current state: `governance/project-state.json` (validate with `python tools/project-state.py validate`);
   decisions in `governance/decision-register.json`, one receipt per transition in `governance/transitions/`.
-- Superseded delivery models, kept as records: [GITHUB_EXECUTION_AND_DELIVERY_RULE.md](GITHUB_EXECUTION_AND_DELIVERY_RULE.md)'s
-  one-Phase-per-PR cadence and the 20-section [final-report template](templates/PHASE_FINAL_REPORT_TEMPLATE.md) (Phases 1–7),
-  and the nightly model [NIGHTLY_AUTHORITATIVE_DELIVERY.md](NIGHTLY_AUTHORITATIVE_DELIVERY.md) (replaced by D42).
+- Superseded, kept as a record: the nightly model [NIGHTLY_AUTHORITATIVE_DELIVERY.md](NIGHTLY_AUTHORITATIVE_DELIVERY.md)
+  (replaced by D42).
 
 ---
 
@@ -118,6 +120,7 @@ The product words used throughout (Client, Admin Console, Client Portal, Site) a
 | Edge / appliance architecture | [EDGE_ARCHITECTURE.md](EDGE_ARCHITECTURE.md) · [EDGE_NETWORKING.md](EDGE_NETWORKING.md) · [CLIENT_NETWORKING.md](CLIENT_NETWORKING.md) |
 | Client networks / VLANs | [GUEST_VLAN_CONFIGURATION.md](GUEST_VLAN_CONFIGURATION.md) · [ARUBA_SSID_VLAN_MAPPING.md](ARUBA_SSID_VLAN_MAPPING.md) |
 | DHCP | [DHCP_MANAGEMENT.md](DHCP_MANAGEMENT.md) · [DHCP_OPTION_114.md](DHCP_OPTION_114.md) · [EXTERNAL_DHCP_MODE.md](EXTERNAL_DHCP_MODE.md) |
+| Sync protocol (historical — the appliance's telemetry subsystem was removed, CLAUDE.md §0E) | [SYNC_PROTOCOL.md](SYNC_PROTOCOL.md) |
 | Deployment | [DEPLOYMENT_CLOUD.md](DEPLOYMENT_CLOUD.md) · [DEPLOYMENT_APPLIANCE.md](DEPLOYMENT_APPLIANCE.md) |
 | Roles & scope | [ROLE_AND_SCOPE_MATRIX.md](ROLE_AND_SCOPE_MATRIX.md) |
 | Data ownership | [DATA_OWNERSHIP.md](DATA_OWNERSHIP.md) |

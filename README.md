@@ -43,5 +43,6 @@ design system ([`design-system/README.md`](design-system/README.md)). Token valu
 ## Working on it
 
 How work is delivered (branches, tests, PRE-LIVE, the Product Owner's merge approval) is in [`CLAUDE.md`](CLAUDE.md) and
-[`docs/PO_LED_DELIVERY_MODEL.md`](docs/PO_LED_DELIVERY_MODEL.md). For local development, `make infra-up` and `make migrate` start a
-database and apply Central's migrations; `make ctrlapi-run` serves Central's API on `:8080`.
+[`docs/PO_LED_DELIVERY_MODEL.md`](docs/PO_LED_DELIVERY_MODEL.md). For local development (GNU make and Docker), `make infra-up`
+and `make migrate` start a TimescaleDB and Redis and apply Central's migrations; `make ctrlapi-run` serves Central's API on
+`127.0.0.1:8080`.

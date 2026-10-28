@@ -1192,7 +1192,7 @@ Everything below was compared with the code at `7e4686ae`. **The code wins.** Th
 | `docs/HOTEL_ADMIN_IP_ALIAS.md` | Contains the placeholder phrase "the retired development reference appliance" in an example | Redaction artefact |
 | `docs/OFFLINE_OPERATION.md` | Email OTP and Mews/Apaleo "upstream_fail" rows; in-memory PMS cache; `nft add rule inet filter output …`; "HA boot-reconcile path" | Email OTP removed; PMS offline basis is the DB mirror; table is `inet stayconnect` with **no output chain**; there is no HA |
 | `docs/SECURITY_HARDENING.md` | Items 1–5 OPEN (plaintext Gmail password, WAN-open 8080/3000, dev DB credentials, IPv6 bypass, cookies off) | Largely closed: password read from a file; no 8080/3000 exposure; IPv6 dropped; cookies Secure by default; DB passwords generated |
-| `docs/CONTROL_PLANE_MIGRATION.md` | Central on `150.0.0.252` with NATS 4222 and telemetry | Superseded; **removed 2026-10-28** (in git history) |
+| `docs/CONTROL_PLANE_MIGRATION.md` | Central on `150.0.0.252` with NATS 4222 and telemetry | Entirely superseded — **do not use** |
 | `docs/DEPLOYMENT_CLOUD.md` | Central Redis has AOF | Persistence is disabled (`--appendonly no --save ""`) |
 | `docs/CLOUD_ARCHITECTURE.md` | Licence "schema_version 3"; ctrlapi has 5 sub-commands | Version 4; 10 sub-commands |
 | `docs/LICENSING_AND_ENTITLEMENTS.md` | Module list omits `whatsapp_otp` | Ten modules in code |

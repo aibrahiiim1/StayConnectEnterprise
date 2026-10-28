@@ -24,15 +24,16 @@ The latest deliveries, all merged to master under the Product Owner's approval:
 | #260 | modules follow the licence: the Hotel module installed; room sign-in only where it is in use | D76 / T0261 |
 | #261 | card payment and room charge configurable, never executable; high availability and white label never shown available | D77 / T0262 |
 
-On 2026-10-28 every merged branch was deleted (GitHub and local: only `master` remains), and finished working documents
-were removed: 44 per-delivery change manifests and five superseded status reports (all in git history).
+On 2026-10-28 every merged branch was deleted, on GitHub and locally; only `master` remains (T0263). The 45 historical
+documents a first pass deleted (39 change manifests, six superseded reports) were restored in the same PR: each is
+a delivery record or is cited by a record, so they stay, marked historical where they were already marked.
 
 ## Environments
 
 | Role | Host | State |
 |---|---|---|
-| Production Central | `172.21.96.196` (`sc-central.echofusion.com`) | **not updated** by #256–#261 |
-| PRE-LIVE appliance | `172.21.60.25` | **not updated** by #256–#261; Go-Live not authorised |
+| Production Central | `172.21.96.196` (`sc-central.echofusion.com`) | #256–#261 were **not deployed** to it; its running release was not read back in this period |
+| PRE-LIVE appliance | `172.21.60.25` | #256–#261 were **not deployed** to it; Go-Live not authorised |
 | Test Central (lab) | `central.onegate.getsemantics.com` — public `41.128.240.133`, private `172.21.96.96` | release `onegate-central-05481cb57334` |
 | Test appliance (lab) | `172.21.96.97` | release `onegate-appliance-d25999781b1a` (master code of #261) |
 
@@ -40,8 +41,9 @@ The test pair has its own trust universe; never point it at PRE-LIVE or the prod
 
 ## Open, and known
 
-* **The production Central will not come back from a reboot** until it applies the current `central-infra.yml`
-  (finding R1; the procedure is the installation manual F.6). A Product-Owner decision.
+* **The production Central is expected not to come back from a reboot** until it applies the current
+  `central-infra.yml` (finding R1, proven on the test Central; the production host's compose file was not inspected).
+  The procedure is the installation manual F.6. A Product-Owner decision.
 * PRE-LIVE and the production Central do not yet run F1, the installer fixes or the module changes.
 * Card payment and room charge execute only with their execution switches (provider calls, LIVE, PMS transmit),
   each a separate Product-Owner authorisation (manual C.12).
@@ -49,7 +51,13 @@ The test pair has its own trust universe; never point it at PRE-LIVE or the prod
 * Rebuilding an appliance with the same identity (manual E.4 Case 2) is self-tested but not run on a VM.
 * The backend audit (`docs/audit/`) and the performance audit (`docs/performance-audit/`) are open backlogs of findings.
 * High availability and white label are licence keys with no implementation.
-* Product-Owner decisions still open: the off-host backup destination, Root CA custody, HA, Ubuntu 24.04 support.
+* Product-Owner decisions still open (system handbook §24.2): the off-host copy destination for Central dumps, and
+  shredding the Root-CA backup once it is confirmed on offline media; whether Ubuntu 24.04 is supported; Go-Live, LIVE
+  card payments and further PMS postings; retiring the obsolete documents listed in handbook §23. High availability is
+  also a product decision (§16.5).
+* A local backup ref `refs/original/refs/heads/feat/operator-journeys-consolidation` (tip `c6905b3f`) holds the
+  pre-redaction form of the T0164 commits, whose redacted form is on master. It was never on GitHub and was left in
+  place; dropping it is the Product Owner's call.
 
 ## Build environment
 

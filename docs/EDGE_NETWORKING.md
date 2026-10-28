@@ -5,7 +5,7 @@
 > configuration, transactionally and without losing management connectivity.
 > Model & renderers: `data-plane/internal/netcfg/`. Schema:
 > `data-plane/migrations/0002_edge_networking.up.sql`. Design rationale:
-> `PHASE19_ASSESSMENT.md` (removed 2026-10-28; in git history).
+> [PHASE19_ASSESSMENT.md](PHASE19_ASSESSMENT.md).
 
 > **Current state.** This describes the Phase 19 model. A new appliance now offers a prepared, not-yet-active Access network (`10.20.0.0/20`) that an
 > administrator activates, and `br-lan` is only a legacy bridge. Staging, Access/Trunk, recovery, portal profiles and per-network sign-in are in

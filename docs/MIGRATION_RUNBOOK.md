@@ -31,7 +31,7 @@
 > (cloud + edge on one Postgres instance, separate databases/DSNs) — the same
 > steps apply per-site in production.
 >
-> Ground rules (from `CURRENT_STATE_ASSESSMENT.md` (removed 2026-10-28; in git history) §9):
+> Ground rules (from [CURRENT_STATE_ASSESSMENT.md](CURRENT_STATE_ASSESSMENT.md) §9):
 > never leave the VM half-migrated — every phase ends with health checks and
 > the relevant phase suites; scd re-pointing is the riskiest step and is done
 > by DSN swap only (identical schema shape).
