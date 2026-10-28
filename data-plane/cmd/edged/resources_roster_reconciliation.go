@@ -396,4 +396,3 @@ func boundedDBMessage(msg string) string {
 	}
 	return msg
 }
-
