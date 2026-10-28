@@ -246,32 +246,59 @@ func ReconcileTerminalTimeouts(ctx context.Context, b *Base) (int64, error) {
 	var ids []string
 	for rows.Next() {
 		var id string
-		if rows.Scan(&id) == nil {
-			ids = append(ids, id)
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
 		}
+		ids = append(ids, id)
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
 	var n int64
 	for _, id := range ids {
-		if _, err := b.DB.Exec(ctx, `UPDATE appliance_terminal_delivery SET delivery_state='terminal_delivery_failed' WHERE appliance_id=$1`, id); err != nil {
+		// The state change and its alert commit together, so a failed alert never leaves a silent failure
+		// (audit Phase 1 L6). The state is re-checked under the update.
+		raised, err := failTerminalDelivery(ctx, b, id)
+		if err != nil {
 			return n, err
 		}
-		var serial string
-		_ = b.DB.QueryRow(ctx, `SELECT COALESCE(serial,'') FROM appliances WHERE id=$1`, id).Scan(&serial)
-		// detail is jsonb; a bare string is rejected by Postgres.
-		detail, _ := json.Marshal(map[string]string{
-			"reason": "the appliance did not acknowledge its retirement within policy; retirement is UNCONFIRMED and its credentials were NOT revoked. Investigate, or retire it again as an emergency.",
-		})
-		if _, err := b.DB.Exec(ctx, `
-            INSERT INTO appliance_security_alerts (appliance_id, serial, kind, detail, status)
-            VALUES ($1,$2,'terminal_delivery_failed',$3::jsonb,'open')`, id, serial, string(detail)); err != nil {
-			return n, err
+		if !raised {
+			continue
 		}
 		audit.System(ctx, b.DB, "appliance.terminal_delivery_failed", "appliance", id,
 			map[string]any{"note": "no ack within policy; not reported as decommissioned"})
 		n++
 	}
 	return n, nil
+}
+
+func failTerminalDelivery(ctx context.Context, b *Base, id string) (bool, error) {
+	tx, err := b.DB.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(ctx)
+	tag, err := tx.Exec(ctx, `UPDATE appliance_terminal_delivery SET delivery_state='terminal_delivery_failed'
+         WHERE appliance_id=$1 AND delivery_state='terminal_delivery_pending'`, id)
+	if err != nil || tag.RowsAffected() == 0 {
+		return false, err
+	}
+	var serial string
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(serial,'') FROM appliances WHERE id=$1`, id).Scan(&serial); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return false, err
+	}
+	// detail is jsonb; a bare string is rejected by Postgres.
+	detail, _ := json.Marshal(map[string]string{
+		"reason": "the appliance did not acknowledge its retirement within policy; retirement is UNCONFIRMED and its credentials were NOT revoked. Investigate, or retire it again as an emergency.",
+	})
+	if _, err := tx.Exec(ctx, `
+        INSERT INTO appliance_security_alerts (appliance_id, serial, kind, detail, status)
+        VALUES ($1,$2,'terminal_delivery_failed',$3::jsonb,'open')`, id, serial, string(detail)); err != nil {
+		return false, err
+	}
+	return true, tx.Commit(ctx)
 }
 
 // StrictApplianceAssignmentHandler serves GET /v1/appliance/assignment under the full mTLS trust rules; it is the
