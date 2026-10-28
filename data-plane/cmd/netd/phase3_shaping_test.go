@@ -29,6 +29,7 @@ type tcCall struct {
 	minor  int
 	down   int
 	up     int
+	group  string
 }
 
 type fakeTC struct {
@@ -182,12 +183,12 @@ func (f *fakeTC) RemoveClassification(ctx context.Context, bridge string, ip net
 	return nil
 }
 
-func (f *fakeTC) ReRateSession(ctx context.Context, bridge string, ip net.IP, down, up int) error {
+func (f *fakeTC) ReRateSessionIn(ctx context.Context, bridge string, ip net.IP, down, up int, groupCid string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	minor, _ := shape.MinorForIP(ip)
 	ifb := shape.IFBName(bridge)
-	f.calls = append(f.calls, tcCall{op: "rerate", bridge: bridge, ip: ip.String(), minor: minor, down: down, up: up})
+	f.calls = append(f.calls, tcCall{op: "rerate", bridge: bridge, ip: ip.String(), minor: minor, down: down, up: up, group: groupCid})
 	if err, ok := f.failReRate[ip.String()]; ok {
 		return err
 	}

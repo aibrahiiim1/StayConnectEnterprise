@@ -42,7 +42,8 @@ type shaper interface {
 	AbortSession(ctx context.Context, bridge string, ip net.IP) error
 	// RemoveClassification strips tc classification only; it does not deny access.
 	RemoveClassification(ctx context.Context, bridge string, ip net.IP) error
-	ReRateSession(ctx context.Context, bridge string, ip net.IP, downKbps, upKbps int) error
+	// ReRateSessionIn re-rates with the shape the session was prepared with: empty groupCid is PER_DEVICE.
+	ReRateSessionIn(ctx context.Context, bridge string, ip net.IP, downKbps, upKbps int, groupCid string) error
 	SessionForwarding(ctx context.Context, bridge string, ip net.IP) (bool, error)
 	DeleteSession(ctx context.Context, bridge string, ip net.IP) error
 	// ReadClasses reads what is actually installed; netd's memory misses exactly the dangerous leftovers.
@@ -104,6 +105,8 @@ type phase3Shaping struct {
 	// endedTorn remembers torn-down sessions the plan still lists so their teardown is not repeated each pass.
 	endedTorn   map[string]bool
 	passClasses map[string]map[int]shape.ClassBytes
+	// passGroups records the SHARED group classes already re-rated in this pass, so a group is re-rated once per pass, not once per device.
+	passGroups map[string]bool
 }
 
 type passLeases struct {
@@ -233,8 +236,8 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 		p.owner.src = &passLeases{src: saved.src}
 		defer func() { p.owner = saved }()
 	}
-	p.passClasses = nil
-	defer func() { p.passClasses = nil }()
+	p.passClasses, p.passGroups = nil, nil
+	defer func() { p.passClasses, p.passGroups = nil, nil }()
 	p.pruneLeaseMemory(now)
 
 	desired := map[string]map[int]shapeplan.Session{}
@@ -422,6 +425,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 
 	// 3. Shape what must be forwarded, staged and fail-closed (see provisionSession); tc class inventories are read once per device per pass.
 	p.passClasses = map[string]map[int]shape.ClassBytes{}
+	p.passGroups = map[string]bool{}
 	for _, bridge := range sortedKeys(bridges) {
 		byMinor := desired[bridge]
 		if len(byMinor) == 0 {

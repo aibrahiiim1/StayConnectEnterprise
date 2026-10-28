@@ -165,7 +165,14 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 		if _, held := p.classes[key]; held {
 			present, err := p.classPresentCached(ctx, bridge, minor)
 			if err == nil && present {
-				if rerr := p.shp.ReRateSession(ctx, bridge, ip, s.DownKbps, s.UpKbps); rerr != nil {
+				groupCid, gproblem := p.reRateGroup(ctx, bridge, s)
+				if gproblem != "" {
+					// A failed group re-rate leaves the last authorised rates in force.
+					res.Failed++
+					res.Problems = append(res.Problems, "re-rate "+s.SessionID+": "+gproblem)
+					return
+				}
+				if rerr := p.shp.ReRateSessionIn(ctx, bridge, ip, s.DownKbps, s.UpKbps, groupCid); rerr != nil {
 					// A failed re-rate leaves the last authorised rate in force.
 					res.Failed++
 					res.Problems = append(res.Problems, "re-rate "+s.SessionID+": "+rerr.Error())
@@ -314,6 +321,33 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 		p.failClosed(ctx, bridge, ip, res, "session "+s.SessionID+": activation never proven")
 		p.endSeries(bridge, s.SessionID)
 	}
+}
+
+// reRateGroup re-rates a SHARED session's group class to the plan's allowance, once per pass, and returns the group the
+// session is re-rated under ("" for PER_DEVICE). A SHARED session keeps its floor under the group; the group alone
+// carries the allowance (audit Phase 8 M4 / Phase 6 M4).
+func (p *phase3Shaping) reRateGroup(ctx context.Context, bridge string, s shapeplan.Session) (string, string) {
+	if s.SpeedAllocation != speedAllocationShared {
+		return "", ""
+	}
+	groupCid := shape.GroupClassid(s.EntitlementID)
+	if groupCid == "" {
+		return "", "SHARED allocation with no entitlement to group by"
+	}
+	k := bridge + "|" + groupCid
+	if p.passGroups != nil && p.passGroups[k] {
+		return groupCid, ""
+	}
+	if err := p.shp.EnsureGroupClass(ctx, bridge, groupCid, s.DownKbps); err != nil {
+		return "", "shared group (download): " + err.Error()
+	}
+	if err := p.shp.EnsureGroupClass(ctx, shape.IFBName(bridge), groupCid, s.UpKbps); err != nil {
+		return "", "shared group (upload): " + err.Error()
+	}
+	if p.passGroups != nil {
+		p.passGroups[k] = true
+	}
+	return groupCid, ""
 }
 
 // provisionalOrLess caps the lease at the provisional one without overshooting the hard boundary.

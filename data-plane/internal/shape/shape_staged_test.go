@@ -108,6 +108,26 @@ func TestReRateIsClassChangeNotDeleteAdd(t *testing.T) {
 	}
 }
 
+// A SHARED session is re-rated under its group with its floor as rate and the group's rate as ceiling, exactly as
+// it was prepared; never to rate == ceil == the whole allowance under the root (audit Phase 8 M4 / Phase 6 M4).
+func TestSharedReRateKeepsTheGroupParentAndTheFloor(t *testing.T) {
+	c, rr := newTestClient()
+	group := GroupClassid("ent-1")
+	if err := c.ReRateSessionIn(context.Background(), "br-guest", testIP, 8000, 2000, group); err != nil {
+		t.Fatal(err)
+	}
+	cid := ClassidForIP(testIP)
+	if !rr.has("class change dev br-guest parent " + group + " classid " + cid + " htb rate 800kbit ceil 8000kbit") {
+		t.Fatalf("download re-rate is not floor-under-group: %v", rr.cmds)
+	}
+	if !rr.has("class change dev ifb-guest parent " + group + " classid " + cid + " htb rate 200kbit ceil 2000kbit") {
+		t.Fatalf("upload re-rate is not floor-under-group: %v", rr.cmds)
+	}
+	if rr.has("rate 8000kbit ceil 8000kbit") {
+		t.Fatalf("a SHARED session was guaranteed the whole allowance: %v", rr.cmds)
+	}
+}
+
 func TestAbortRemovesAndVerifies(t *testing.T) {
 	c, rr := newTestClient()
 	rr.classShow = "" // `class show` returns nothing => the class is gone
