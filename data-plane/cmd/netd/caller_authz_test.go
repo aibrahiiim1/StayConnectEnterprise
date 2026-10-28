@@ -336,6 +336,25 @@ func TestFlowsEndRevokesThePhase3ElementThenFlushes(t *testing.T) {
 	}
 }
 
+type panickingGate struct{ *fakeGate }
+
+func (panickingGate) List(context.Context) ([]gateElem, error) { panic("nft output unparseable") }
+
+// Audit Phase 8 L8: a panic inside the revocation must not leave the enforcement lock held.
+func TestFlowsEndReleasesTheLockOnPanic(t *testing.T) {
+	p := liveWriter(newFakeTC())
+	p.gate = panickingGate{newFakeGate()}
+	srv := &server{phase3: p}
+	func() {
+		defer func() { _ = recover() }()
+		_, _ = srv.endFlows(context.Background(), net.ParseIP("10.0.0.7"), "", &fakeFlows{})
+	}()
+	if !p.mu.TryLock() {
+		t.Fatal("a panic in endFlows left the enforcement lock held: every later pass would deadlock")
+	}
+	p.mu.Unlock()
+}
+
 func TestFlowsEndHandlerRefusesBadInput(t *testing.T) {
 	srv := &server{phase3: liveWriter(newFakeTC())}
 	for _, body := range []string{"", "{", `{"ip":"not-an-ip"}`, `{"ip":"::1"}`, `{"ip":"0.0.0.0"}`} {

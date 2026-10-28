@@ -684,7 +684,11 @@ func (s *server) phase3EpochsHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]any{"error": "forbidden"})
 		return
 	}
-	if !s.phase3.mode.Active {
+	// The scope watcher replaces mode under the lock, so it is read under the lock (audit Phase 8 L8).
+	s.phase3.mu.Lock()
+	active := s.phase3.mode.Active
+	s.phase3.mu.Unlock()
+	if !active {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "phase3_dark"})
 		return
 	}
