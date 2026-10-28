@@ -22,6 +22,7 @@ import { ActivateDialog } from "@/components/appliance-dialogs";
 import { ListState } from "@/components/record-view";
 import { usePermissions } from "@/lib/permissions";
 import { usePoll } from "@/lib/use-poll";
+import { keepUnchanged } from "@/lib/keep-unchanged";
 import { useQueryState } from "@/lib/use-query-state";
 import { ACTIVATION, ACTIVATION_ORDER, CONNECTION, CONNECTION_ORDER, LICENSE, LICENSE_ORDER } from "@/lib/status";
 import { cn } from "@/lib/utils";
@@ -62,7 +63,9 @@ function Appliances() {
     setRefreshing(true);
     try {
       const r = await api.get<Items<ApplianceRow>>(`/cloud/v1/appliances${query}`, opts);
-      setRows(sortAppliances(itemsOf(r)));
+      // Unchanged rows keep their objects, so only changed rows re-render (performance audit D8-M2).
+      const next = sortAppliances(itemsOf(r));
+      setRows((prev) => keepUnchanged(prev, next));
       setErr(null);
     } catch (e) {
       setErr(e);

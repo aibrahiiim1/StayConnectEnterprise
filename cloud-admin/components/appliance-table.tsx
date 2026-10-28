@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ApplianceRow } from "@/lib/api";
@@ -34,7 +35,6 @@ export function ApplianceTable({
   showCustomer?: boolean;
   onActivate?: (a: ApplianceRow) => void;
 }) {
-  const router = useRouter();
   return (
     <Table aria-label="Appliances">
       <THead>
@@ -48,50 +48,67 @@ export function ApplianceTable({
         </TR>
       </THead>
       <TBody>
-        {rows.map((a) => {
-          const href = `/appliances/${a.id}`;
-          return (
-            <TR key={a.id} onClick={() => router.push(href)}>
-              <TD className="max-w-[16rem]">
-                <Link href={href} onClick={(e) => e.stopPropagation()} className={ROW_LINK}>
-                  {a.serial}
-                </Link>
-                <div className="truncate text-xs text-muted-foreground" title={[a.hostname, a.model].filter(Boolean).join(" · ") || undefined}>
-                  {[a.hostname, a.model].filter(Boolean).join(" · ") || "—"}
-                </div>
-              </TD>
-              {showCustomer && (
-                <TD className="hidden max-w-[16rem] md:table-cell">
-                  {a.customer_name ? (
-                    <>
-                      <div className="truncate" title={a.customer_name}>{a.customer_name}</div>
-                      <div className="truncate text-xs text-muted-foreground" title={a.site_name ?? undefined}>{a.site_name ?? "—"}</div>
-                    </>
-                  ) : (
-                    <span className="text-muted-foreground">Not assigned yet</span>
-                  )}
-                </TD>
-              )}
-              <TD nowrap><ActivationBadge value={a.activation} /></TD>
-              <TD className="hidden sm:table-cell">
-                <ConnectionBadge value={a.connection} />
-                <SecondLine text={connectionSentence(a)} unless={connectionInfo(a.connection).label} />
-              </TD>
-              <TD className="hidden lg:table-cell">
-                <LicenseBadge value={a.license?.state} />
-                {a.license && a.license.state !== "none" && (
-                  <SecondLine text={licenseSentence(a.license)} unless={licenseInfo(a.license.state).label} />
-                )}
-              </TD>
-              <TD className="w-0">
-                {a.activation === "waiting" && onActivate && (
-                  <RowActions subject={a.serial} primary={{ label: "Activate", onSelect: () => onActivate(a) }} />
-                )}
-              </TD>
-            </TR>
-          );
-        })}
+        {rows.map((a) => (
+          <ApplianceTableRow key={a.id} a={a} showCustomer={showCustomer} onActivate={onActivate} />
+        ))}
       </TBody>
     </Table>
   );
 }
+
+/**
+ * One row, memoised: with the page keeping unchanged row objects (keepUnchanged), a refresh re-renders only the
+ * rows whose data changed (performance audit D8-M2).
+ */
+export const ApplianceTableRow = memo(function ApplianceTableRow({
+  a,
+  showCustomer,
+  onActivate,
+}: {
+  a: ApplianceRow;
+  showCustomer: boolean;
+  onActivate?: (a: ApplianceRow) => void;
+}) {
+  const router = useRouter();
+  const href = `/appliances/${a.id}`;
+  return (
+    <TR onClick={() => router.push(href)}>
+      <TD className="max-w-[16rem]">
+        <Link href={href} onClick={(e) => e.stopPropagation()} className={ROW_LINK}>
+          {a.serial}
+        </Link>
+        <div className="truncate text-xs text-muted-foreground" title={[a.hostname, a.model].filter(Boolean).join(" · ") || undefined}>
+          {[a.hostname, a.model].filter(Boolean).join(" · ") || "—"}
+        </div>
+      </TD>
+      {showCustomer && (
+        <TD className="hidden max-w-[16rem] md:table-cell">
+          {a.customer_name ? (
+            <>
+              <div className="truncate" title={a.customer_name}>{a.customer_name}</div>
+              <div className="truncate text-xs text-muted-foreground" title={a.site_name ?? undefined}>{a.site_name ?? "—"}</div>
+            </>
+          ) : (
+            <span className="text-muted-foreground">Not assigned yet</span>
+          )}
+        </TD>
+      )}
+      <TD nowrap><ActivationBadge value={a.activation} /></TD>
+      <TD className="hidden sm:table-cell">
+        <ConnectionBadge value={a.connection} />
+        <SecondLine text={connectionSentence(a)} unless={connectionInfo(a.connection).label} />
+      </TD>
+      <TD className="hidden lg:table-cell">
+        <LicenseBadge value={a.license?.state} />
+        {a.license && a.license.state !== "none" && (
+          <SecondLine text={licenseSentence(a.license)} unless={licenseInfo(a.license.state).label} />
+        )}
+      </TD>
+      <TD className="w-0">
+        {a.activation === "waiting" && onActivate && (
+          <RowActions subject={a.serial} primary={{ label: "Activate", onSelect: () => onActivate(a) }} />
+        )}
+      </TD>
+    </TR>
+  );
+});
