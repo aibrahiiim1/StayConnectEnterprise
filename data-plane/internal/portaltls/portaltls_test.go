@@ -236,23 +236,31 @@ func TestHostnamesThatCouldEscapeTheDirectoryAreRefused(t *testing.T) {
 	}
 }
 
-func TestAMissingKeyGroupFallsBackToRootOnlyAndSaysSo(t *testing.T) {
-	s, _, _ := fixture(t)
+func TestAMissingKeyGroupFailsTheInstallAndAlerts(t *testing.T) {
+	s, ca, now := fixture(t)
+	csrPEM, err := s.NewPendingKey(host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chain, err := ca.IssueForCSR(csrPEM, now.Add(-time.Hour), now.Add(90*24*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
 	var warned []string
 	s.LookupGID = func(string) (int, bool) { return 0, false }
 	s.Chown = func(string, int, int) error { t.Fatal("must not chown to a group that does not exist"); return nil }
 	s.Warn = func(msg string, _ ...any) { warned = append(warned, msg) }
-	if _, err := s.NewPendingKey(host); err != nil {
-		t.Fatal(err)
+	if _, err := s.Install(host, chain); !errors.Is(err, portaltls.ErrKeyGroupMissing) {
+		t.Fatalf("install = %v, want ErrKeyGroupMissing", err)
 	}
-	if len(warned) == 0 {
-		t.Fatal("the fallback must be reported")
+	if len(warned) == 0 || !strings.Contains(warned[len(warned)-1], "ALERT") {
+		t.Fatalf("the failure must be alerted: %v", warned)
 	}
-	if runtime.GOOS != "windows" {
-		fi, _ := os.Stat(s.PendingKeyPath(host))
-		if fi.Mode().Perm() != 0o600 {
-			t.Fatalf("mode %v, want 0600", fi.Mode().Perm())
-		}
+	if _, err := os.Stat(s.KeyPath(host)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("no key may be installed when the group is missing")
+	}
+	if !s.HasPending(host) {
+		t.Fatal("the pending key must be kept so the install can be retried")
 	}
 }
 

@@ -707,6 +707,13 @@ func (a *portalTLSAgent) collect(ctx context.Context, row *ptCertRow, now time.T
 	switch strings.ToUpper(o.Status) {
 	case "ISSUED":
 		inst, err := a.store.Install(host, []byte(o.ChainPEM))
+		if errors.Is(err, portaltls.ErrKeyGroupMissing) {
+			// Not Central's fault and not a bad certificate: keep the pending key and the order state, say why.
+			row.LastError = "the certificate was not installed: " + boundText(err.Error(), 300)
+			a.retryAt[host] = now.Add(ptOrderBackoff)
+			slog.Error("portal-tls: ALERT: the certificate was not installed because the key group is missing", "host", host)
+			return
+		}
 		if err != nil {
 			// What Central delivered is not safe to serve (wrong key, wrong name, untrusted chain...). The
 			// pending key is dropped so the next order uses a new one.
