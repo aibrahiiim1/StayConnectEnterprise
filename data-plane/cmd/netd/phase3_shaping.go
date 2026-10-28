@@ -96,6 +96,10 @@ type phase3Shaping struct {
 	secClock securityClock
 	// unprovenUnknown: the activation journal was unreadable at startup, so an unproven activation is treated as having spent its grace.
 	unprovenUnknown bool
+	// journalUnreadable and classSaveFailed are the two reasons for unprovenUnknown: the first lasts until restart,
+	// the second only until the next successful class-state save (audit Phase 8 L3).
+	journalUnreadable bool
+	classSaveFailed   bool
 	// classes/epochCeiling/bootID are the durable half; without them a restart or reboot re-issues epoch 1 and accounting stalls or misattributes.
 	classes     map[string]managedClass
 	bootID      string
@@ -183,10 +187,20 @@ func (p *phase3Shaping) submit(ctx context.Context, env shapeplan.Envelope, now 
 		p.noteRejection("phase3_dark")
 		return shapingPlanResponse{Accepted: false, Reason: "phase3_dark"}, errPlanRefused{"phase3_dark"}
 	}
+	if env.ExpiresAt.After(now.Add(maxPlanValidity)) {
+		p.noteRejection("plan_validity_too_long")
+		return shapingPlanResponse{Accepted: false, Reason: "plan_validity_too_long"}, errPlanRefused{"plan_validity_too_long"}
+	}
 	last, hasLast := p.lastAccepted, p.hasAccepted
+	var storeProblem string
 	if !hasLast && p.store != nil {
 		// After a restart the in-memory history is empty but the durable one is not.
-		last, hasLast = p.store.load()
+		var lerr error
+		last, hasLast, lerr = p.store.load()
+		if lerr != nil {
+			// The replay guard is unknown; acceptance is still bounded by maxPlanValidity, and the pass is reported degraded.
+			storeProblem = "the stored plan generation could not be read (" + lerr.Error() + "); replay protection rests on the plan validity cap until a new record is saved"
+		}
 	}
 	scope := shapeplan.Scope{TenantID: p.mode.TenantID, SiteID: p.mode.SiteID,
 		ApplianceID: p.mode.ApplianceID, AssignGen: p.mode.AssignGen}
@@ -207,8 +221,16 @@ func (p *phase3Shaping) submit(ctx context.Context, env shapeplan.Envelope, now 
 	// Admission advances even on partial application so a replay of an older generation cannot reinstate revoked access.
 	// Resubmitting the same generation and hash is allowed so the producer can retry until the kernel converges.
 	p.lastAccepted, p.hasAccepted = accepted, true
+	if storeProblem != "" {
+		res.Degraded = true
+		res.Problems = append(res.Problems, storeProblem)
+	}
 	if p.store != nil {
-		p.store.save(accepted)
+		if err := p.store.save(accepted); err != nil {
+			res.Degraded = true
+			res.Problems = append(res.Problems, "the accepted plan generation was not saved durably: "+err.Error()+
+				"; the plan is applied but not reported converged")
+		}
 	}
 	// Convergence is recorded only when nothing failed.
 	if !res.Degraded {
@@ -249,6 +271,9 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 		}
 	}
 	var tear []shapeplan.Session
+	// clashed remembers a class two sessions claimed: removing the first claimant from desired is not enough, or a
+	// third session with the same class would find no clash and be installed (audit Phase 8 L6).
+	clashed := map[string]bool{}
 
 	for _, s := range env.Sessions {
 		if s.Bridge == "" {
@@ -282,7 +307,14 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 		if desired[s.Bridge] == nil {
 			desired[s.Bridge] = map[int]shapeplan.Session{}
 		}
+		if clashed[minorKey(s.Bridge, minor)] {
+			res.Failed++
+			res.Problems = append(res.Problems,
+				fmt.Sprintf("class conflict on %s: session %s also maps to contested minor %d", s.Bridge, s.SessionID, minor))
+			continue
+		}
 		if other, clash := desired[s.Bridge][minor]; clash && other.SessionID != s.SessionID {
+			clashed[minorKey(s.Bridge, minor)] = true
 			// Two live sessions claiming one class is a producer defect; installing either would misattribute traffic, so neither is installed.
 			res.Failed++
 			res.Problems = append(res.Problems,
@@ -365,7 +397,9 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 				if !ok {
 					continue
 				}
-				if _, want := desired[el.Bridge][minor]; want {
+				// Match the address, not only its class number: a stale element for another address with the same
+				// low 12 bits is not wanted (audit Phase 8 L7).
+				if want, ok := desired[el.Bridge][minor]; ok && net.ParseIP(want.IP).Equal(el.IP) {
 					continue
 				}
 				if err := p.denyAccess(ctx, el.Bridge, el.IP); err != nil {
@@ -447,7 +481,11 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 			res.Failed++
 			res.Problems = append(res.Problems, "durable class state not written: "+err.Error())
 			// The activation clock is in that file; if it cannot be written, an unprovable activation gets no fresh grace after restart.
-			p.unprovenUnknown = true
+			p.unprovenUnknown, p.classSaveFailed = true, true
+		} else if p.classSaveFailed {
+			// The clock is durable again; one failed save must not deny every new guest until a restart.
+			p.classSaveFailed = false
+			p.unprovenUnknown = p.journalUnreadable
 		}
 	}
 

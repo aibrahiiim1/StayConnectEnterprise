@@ -161,6 +161,42 @@ func TestDurable_AFailedWriteAheadDeniesAdmissionEntirely(t *testing.T) {
 	}
 }
 
+// Audit Phase 8 L4: a failed write-ahead puts the previous record back (strikes and backoff survive), and the
+// "backoff elapsed, one fresh attempt" state is persisted as a record the journal's own validator accepts.
+func TestDurable_AFailedWriteAheadKeepsTheStrikeHistory(t *testing.T) {
+	h := newDurHarness(t)
+	brokenDB(h)
+	h.pass(t, nil)
+	h.advance(phase3ActivationGrace + time.Second)
+	h.pass(t, nil) // grace spent: strike 1, backoff
+	at := h.attempts(t)
+	if len(at) != 1 || at[0].Strikes != 1 {
+		t.Fatalf("setup: expected one strike, got %+v", at)
+	}
+	key := at[0].Key
+
+	h.advance(quarantineBackoff(1) + time.Second)
+	h.enf.confirmErr = nil // durable state is readable (not active): the backoff yields one fresh attempt
+	h.p.journal.writeErr = errors.New("no space left on device")
+	h.pass(t, nil)
+	if q := h.p.quarantined[key]; q == nil || q.Strikes != 1 || q.BackoffUntilBootMs == 0 {
+		t.Fatalf("a failed write-ahead forgot the strike history: %+v", q)
+	}
+	if err := validateAttempts(h.p.journalAttempts()); err != nil {
+		t.Fatalf("the in-memory record would be refused by the journal's own validator: %v", err)
+	}
+
+	h.p.journal.writeErr = nil
+	h.pass(t, nil)
+	h.restart(t)
+	if h.p.unprovenUnknown {
+		t.Fatal("the journal written in the fresh-attempt state does not load back")
+	}
+	if got := h.attempts(t); len(got) != 1 || got[0].Strikes < 1 {
+		t.Fatalf("the strike history did not survive: %+v", got)
+	}
+}
+
 // A write that reached the page cache but failed fsync is a durability failure like any other.
 func TestDurable_AnFsyncFailureDeniesAdmission(t *testing.T) {
 	h := newDurHarness(t)

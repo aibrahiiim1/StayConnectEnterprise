@@ -545,6 +545,75 @@ func TestAcceptedGenerationSurvivesRestart(t *testing.T) {
 	}
 }
 
+// Audit Phase 8 M8: a plan whose generation could not be saved durably is applied but not reported converged; a
+// corrupt record is reported, not silently read as "no history"; a far-future expiry is refused.
+func TestAcceptedGenerationSaveFailureIsDegraded(t *testing.T) {
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "not-a-dir")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p := liveWriter(newFakeTC())
+	p.store = &planStore{path: filepath.Join(blocker, "plan.json")} // its parent is a file: every write fails
+	res, err := p.submit(context.Background(), standardPlan(3), time.Now())
+	if err != nil || !res.Accepted {
+		t.Fatalf("submit: %+v %v", res, err)
+	}
+	if !res.Degraded || p.hasConverged {
+		t.Fatalf("a plan whose replay guard was not saved was reported converged: %+v", res)
+	}
+
+	corrupt := filepath.Join(dir, "plan.json")
+	if err := os.WriteFile(corrupt, []byte("{\"generation\": 7, trunc"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p2 := liveWriter(newFakeTC())
+	p2.store = &planStore{path: corrupt}
+	res, err = p2.submit(context.Background(), standardPlan(4), time.Now())
+	if err != nil || !res.Degraded || !strings.Contains(strings.Join(res.Problems, " "), "could not be read") {
+		t.Fatalf("a corrupt replay record was not reported: %+v %v", res, err)
+	}
+
+	far := standardPlan(5)
+	far.ExpiresAt = time.Now().Add(24 * time.Hour)
+	if res, err := p2.submit(context.Background(), far, time.Now()); err == nil || res.Reason != "plan_validity_too_long" {
+		t.Fatalf("a plan valid for a day was accepted: %+v %v", res, err)
+	}
+}
+
+// Audit Phase 8 L3: one failed class-state save withholds fresh grace only until the next successful save, not until
+// a restart; an unreadable journal still withholds it.
+func TestClassStateSaveFailureClearsAfterTheNextSave(t *testing.T) {
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "not-a-dir")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p := liveWriter(newFakeTC())
+	p.classStore = &classStore{path: filepath.Join(blocker, "classes.json")}
+	if _, err := p.submit(context.Background(), standardPlan(1), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if !p.unprovenUnknown {
+		t.Fatal("a failed class-state save did not withhold fresh grace")
+	}
+	p.classStore = &classStore{path: filepath.Join(dir, "classes.json")}
+	if _, err := p.submit(context.Background(), standardPlan(2), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if p.unprovenUnknown {
+		t.Fatal("one failed save still denies every new guest after a successful save")
+	}
+	p.journalUnreadable, p.unprovenUnknown = true, true
+	p.classStore = &classStore{path: filepath.Join(blocker, "classes.json")}
+	_, _ = p.submit(context.Background(), standardPlan(3), time.Now())
+	p.classStore = &classStore{path: filepath.Join(dir, "classes.json")}
+	_, _ = p.submit(context.Background(), standardPlan(4), time.Now())
+	if !p.unprovenUnknown {
+		t.Fatal("a successful class save cleared the unknown history of an unreadable journal")
+	}
+}
+
 // Teardown happens before shaping; the other order leaves ended access forwarded while capacity is handed out.
 func TestShapingTearsDownBeforeShaping(t *testing.T) {
 	tc := newFakeTC()
@@ -737,6 +806,43 @@ func TestConflictingSessionsAreBothRefused(t *testing.T) {
 	}
 	if tc.countInstalled() != 0 {
 		t.Fatal("a conflicting class was installed")
+	}
+}
+
+// Audit Phase 8 L6: a third session claiming an already contested class is refused too.
+func TestAThirdSessionOnAContestedClassIsRefused(t *testing.T) {
+	tc := newFakeTC()
+	p := liveWriter(tc)
+	res, err := p.submit(context.Background(), envelope(1,
+		shapeplan.Session{SessionID: "a", IP: "10.0.0.1", Bridge: "br-guest", DownKbps: 1000, UpKbps: 500, Entitled: true},
+		shapeplan.Session{SessionID: "b", IP: "10.0.16.1", Bridge: "br-guest", DownKbps: 2000, UpKbps: 900, Entitled: true},
+		shapeplan.Session{SessionID: "c", IP: "10.0.32.1", Bridge: "br-guest", DownKbps: 3000, UpKbps: 900, Entitled: true},
+	), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Shaped != 0 || tc.countInstalled() != 0 {
+		t.Fatalf("a third claimant of a contested class was installed: %+v", res)
+	}
+}
+
+// Audit Phase 8 L7: the stray sweep compares the address, not only the class number.
+func TestStrayAuthorizationWithTheSameClassNumberIsRemoved(t *testing.T) {
+	tc, g := newFakeTC(), newFakeGate()
+	p := liveWriter(tc)
+	p.gate = g
+	stale := net.ParseIP("10.0.16.1") // same low 12 bits as 10.0.0.1
+	if err := g.Authorize(context.Background(), "br-guest", stale, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	res, err := p.submit(context.Background(), envelope(1,
+		shapeplan.Session{SessionID: "a", IP: "10.0.0.1", Bridge: "br-guest", DownKbps: 1000, UpKbps: 500, Entitled: true},
+	), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.isAuthorized("br-guest", "10.0.16.1") {
+		t.Fatalf("a stale authorization for another address with the same class number was kept: %+v", res)
 	}
 }
 

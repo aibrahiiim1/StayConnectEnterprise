@@ -131,8 +131,7 @@ func (p *phase3Shaping) proveActive(ctx context.Context, key, sessionID, bridge 
 	bootID, bootErr := p.currentBootID()
 	if bootErr != nil {
 		// A bound not anchored to a boot cannot be interpreted later; treat it as an exhausted grace.
-		q.Strikes++
-		q.BackoffUntilBootMs = nowBoot + quarantineBackoff(q.Strikes).Milliseconds()
+		q.strike(nowBoot)
 		return activationFailed, problem +
 			" — and the boot identity is not trustworthy (" + bootErr.Error() + "); failing closed"
 	}
@@ -144,8 +143,7 @@ func (p *phase3Shaping) proveActive(ctx context.Context, key, sessionID, bridge 
 		q.BeganWall = p.wallStamp()
 		if perr := p.persistAttempts(); perr != nil {
 			// A restart would not know this grace had started, so stop granting it.
-			q.Strikes++
-			q.BackoffUntilBootMs = nowBoot + quarantineBackoff(q.Strikes).Milliseconds()
+			q.strike(nowBoot)
 			return activationFailed, problem +
 				" — and the activation bound could not be made durable (" + perr.Error() + "); failing closed"
 		}
@@ -155,8 +153,7 @@ func (p *phase3Shaping) proveActive(ctx context.Context, key, sessionID, bridge 
 		return activationUnproven, problem + " — holding a provisional lease only"
 	}
 	// Grace spent: record the strike and clear the start so the next permitted attempt gets a full grace.
-	q.Strikes++
-	q.BackoffUntilBootMs = nowBoot + quarantineBackoff(q.Strikes).Milliseconds()
+	q.strike(nowBoot)
 	q.BeganBootMs = 0
 	q.DeadlineBootMs = 0
 	if perr := p.persistAttempts(); perr != nil {

@@ -132,7 +132,7 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 			}
 		}
 	}
-	if q := p.quarantined[key]; q != nil && q.BackoffUntilBootMs != 0 {
+	if q := p.quarantined[key]; q != nil && q.BackoffUntilBootMs != 0 && !q.freshAttempt {
 		hold := nowBoot < q.BackoffUntilBootMs
 		if !hold && p.enforcement != nil {
 			if _, err := p.enforcement.Confirm(ctx, s.SessionID); err != nil {
@@ -156,7 +156,7 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 				itoa(int((q.BackoffUntilBootMs-nowBoot)/1000))+"s")
 			return
 		}
-		q.BackoffUntilBootMs = 0 // the backoff has elapsed and durable state is readable: one fresh attempt
+		q.freshAttempt = true // the backoff has elapsed and durable state is readable: one fresh attempt
 	}
 
 	// Re-rate of an already-active class: a `tc class change` in place (no new generation, no new origin,

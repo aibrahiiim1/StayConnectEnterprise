@@ -212,6 +212,10 @@ func (j *activationJournal) save(tenant, site, appliance string, attempts []acti
 		return j.writeErr
 	}
 	sort.Slice(attempts, func(a, b int) bool { return attempts[a].Key < attempts[b].Key })
+	// Never write a file load would refuse: a refused journal is read as unknown history after the restart (audit Phase 8 L4).
+	if err := validateAttempts(attempts); err != nil {
+		return fmt.Errorf("activation journal not written, it would not load back: %w", err)
+	}
 	raw, err := json.Marshal(journalState{
 		TenantID: tenant, SiteID: site, ApplianceID: appliance, Attempts: attempts})
 	if err != nil {
@@ -275,6 +279,17 @@ type quarantineState struct {
 	Strikes            int
 	// BeganWall is audit only, carried so a rewrite keeps it.
 	BeganWall string
+	// freshAttempt marks an elapsed backoff that has been spent on one fresh attempt. It is in memory only: the
+	// elapsed backoff stays in the record, so a record with strikes always carries a backoff or an attempt and the
+	// journal's own validator accepts it after a restart (audit Phase 8 L4).
+	freshAttempt bool
+}
+
+// strike records an attempt that exhausted its grace and starts the next backoff.
+func (q *quarantineState) strike(nowBoot int64) {
+	q.Strikes++
+	q.BackoffUntilBootMs = nowBoot + quarantineBackoff(q.Strikes).Milliseconds()
+	q.freshAttempt = false
 }
 
 // crossBoot is TRUE for an empty identity on either side: comparing "" with "" must not read as "same boot",
@@ -341,6 +356,12 @@ func (p *phase3Shaping) beginAttempt(ctx context.Context, key, sessionID string,
 		// Without a trustworthy boot identity a reboot is undetectable; record nothing, authorize nobody.
 		return "the boot identity is not trustworthy (" + bootErr.Error() + "); not authorizing"
 	}
+	prevQ, hadPrev := p.quarantined[key]
+	var prev quarantineState
+	if hadPrev && prevQ != nil {
+		prev = *prevQ
+	}
+	hadPrev = hadPrev && prevQ != nil
 	q := p.quarantineFor(key)
 	if q.BeganBootMs != 0 && !q.crossBoot(bootID) {
 		return "" // already begun on this boot's timeline; the existing deadline stands
@@ -350,8 +371,13 @@ func (p *phase3Shaping) beginAttempt(ctx context.Context, key, sessionID string,
 	q.DeadlineBootMs = nowBoot + phase3ActivationGrace.Milliseconds()
 	q.BeganWall = p.wallStamp()
 	if err := p.journal.save(p.mode.TenantID, p.mode.SiteID, p.mode.ApplianceID, p.journalAttempts()); err != nil {
-		// Roll back so a later pass does not believe a bound exists that was never written.
-		delete(p.quarantined, key)
+		// Roll back so a later pass does not believe a bound exists that was never written. The previous record is
+		// put back, not deleted: deleting it would forget the strikes and reset the backoff (audit Phase 8 L4).
+		if hadPrev {
+			*q = prev
+		} else {
+			delete(p.quarantined, key)
+		}
 		return "the activation bound could not be made durable (" + err.Error() + "); not authorizing"
 	}
 	return ""
@@ -363,6 +389,7 @@ func (p *phase3Shaping) beginAttempt(ctx context.Context, key, sessionID string,
 func (p *phase3Shaping) restoreAttempts(l journalLoad) {
 	p.quarantined = map[string]*quarantineState{}
 	p.unprovenUnknown = l.Unreadable
+	p.journalUnreadable, p.classSaveFailed = l.Unreadable, false
 	for _, a := range l.Attempts {
 		if a.Key == "" {
 			continue

@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/shapeplan"
 )
@@ -60,46 +61,46 @@ type planStore struct {
 	path string
 }
 
-func (s *planStore) load() (shapeplan.Accepted, bool) {
+// load returns the stored plan. A missing file is "no history" (false, nil); a file that exists but cannot be read
+// or parsed is an error: the replay guard it held is unknown, which the caller reports (audit Phase 8 M8).
+func (s *planStore) load() (shapeplan.Accepted, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.path == "" {
-		return shapeplan.Accepted{}, false
+		return shapeplan.Accepted{}, false, nil
 	}
 	raw, err := os.ReadFile(s.path)
+	if errors.Is(err, os.ErrNotExist) {
+		return shapeplan.Accepted{}, false, nil
+	}
 	if err != nil {
-		return shapeplan.Accepted{}, false
+		return shapeplan.Accepted{}, false, fmt.Errorf("accepted-plan record unreadable: %w", err)
 	}
 	var p shapeplan.Accepted
-	if json.Unmarshal(raw, &p) != nil || p.Generation <= 0 {
-		return shapeplan.Accepted{}, false
+	if err := json.Unmarshal(raw, &p); err != nil || p.Generation <= 0 {
+		return shapeplan.Accepted{}, false, fmt.Errorf("accepted-plan record is corrupt (%d bytes)", len(raw))
 	}
-	return p, true
+	return p, true, nil
 }
 
-func (s *planStore) save(p shapeplan.Accepted) {
+// save writes the accepted plan durably (temp file, fsync, rename, directory fsync) and reports a failure: a lost
+// write is a lost replay guard, so the caller must not report the plan converged (audit Phase 8 M8).
+func (s *planStore) save(p shapeplan.Accepted) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.path == "" {
-		return
+		return nil
 	}
 	raw, err := json.Marshal(p)
 	if err != nil {
-		return
+		return err
 	}
-	_ = os.MkdirAll(filepathDir(s.path), 0o750)
-	tmp := s.path + ".tmp"
-	if os.WriteFile(tmp, raw, 0o600) == nil {
-		_ = os.Rename(tmp, s.path)
-	}
+	return writeFileAtomic(s.path, raw, 0o600)
 }
 
-func filepathDir(p string) string {
-	if i := strings.LastIndexAny(p, `/\`); i > 0 {
-		return p[:i]
-	}
-	return "."
-}
+// maxPlanValidity caps how far ahead a plan may claim to be current. acctd issues 90 s plans; a far-future expiry
+// would keep an old plan replayable for as long as it claims, should the replay guard be lost (audit Phase 8 M8).
+const maxPlanValidity = 10 * time.Minute
 
 type peerConnKey struct{}
 
