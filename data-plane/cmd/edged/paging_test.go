@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+	"time"
 )
 
 func TestParsePage_DefaultsAndBounds(t *testing.T) {
@@ -26,6 +27,10 @@ func TestParsePage_DefaultsAndBounds(t *testing.T) {
 		{"page_size=0", 0, 0, 0, true},
 		{"page_size=201", 0, 0, 0, true},
 		{"page_size=ten", 0, 0, 0, true},
+		// P9 L12: a page so large that its offset would overflow is refused, not a 500.
+		{"page=100000", 0, 100000, 50, false},
+		{"page=100001", 0, 0, 0, true},
+		{"page=9223372036854775807", 0, 0, 0, true},
 		// An older client's ?limit= still sizes the page, capped at what the endpoint always allowed.
 		{"limit=500", 500, 1, 500, false},
 		{"limit=900", 500, 1, 500, false},
@@ -213,5 +218,38 @@ func TestHeaderSearchTextDecodesAnEncodedName(t *testing.T) {
 		if got := headerSearchText(r, staySearchHeader); got != want {
 			t.Errorf("header %q decoded to %q, want %q", raw, got, want)
 		}
+	}
+}
+
+// P9 L12: a usage window that does not parse, or ends before it starts, is refused instead of silently replaced.
+func TestUsageWindowRefusesBadDates(t *testing.T) {
+	for q, bad := range map[string]bool{
+		"": false,
+		"from=2026-10-01T00:00:00Z&to=2026-10-02T00:00:00Z": false,
+		"from=yesterday":          true,
+		"to=2026-13-01T00:00:00Z": true,
+		"from=2026-10-02T00:00:00Z&to=2026-10-01T00:00:00Z": true,
+	} {
+		r := httptest.NewRequest(http.MethodGet, "/usage?"+q, nil)
+		if _, _, err := parseWindow(r); (err != nil) != bad {
+			t.Errorf("%q: err=%v, want bad=%v", q, err, bad)
+		}
+	}
+}
+
+// P9 L12: the fresh ledger probe on a read-only route runs at most once per ledgerFreshEvery.
+func TestFreshLedgerProbeIsRationed(t *testing.T) {
+	ledgerFreshMu.Lock()
+	ledgerFreshLast = time.Time{}
+	ledgerFreshMu.Unlock()
+	now := time.Now()
+	if !allowFreshLedgerProbe(now) {
+		t.Fatal("the first fresh probe runs")
+	}
+	if allowFreshLedgerProbe(now.Add(time.Second)) {
+		t.Fatal("a second fresh probe within the interval is served from the cached status")
+	}
+	if !allowFreshLedgerProbe(now.Add(ledgerFreshEvery)) {
+		t.Fatal("after the interval a fresh probe runs again")
 	}
 }

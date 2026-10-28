@@ -164,9 +164,12 @@ func (s *server) listClientDevices(w http.ResponseWriter, r *http.Request) {
 	}
 	page := 1
 	if v := r.URL.Query().Get("page"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			page = n
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > pageMax {
+			jsonErr(w, http.StatusBadRequest, "bad_request", fmt.Sprintf("page must be a whole number from 1 to %d", pageMax))
+			return
 		}
+		page = n
 	}
 	const size = 50
 	ctx, cancel := dbCtx(r)
