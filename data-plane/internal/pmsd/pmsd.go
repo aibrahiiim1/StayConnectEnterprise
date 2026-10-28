@@ -6,10 +6,13 @@ package pmsd
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
@@ -134,6 +137,16 @@ func (r Revision) Validate() error {
 	}
 	if _, err := loadLocation(r.SourceTimezone); err != nil {
 		return coded(CodeConfigInvalid, errors.New("invalid source timezone"))
+	}
+	// A pin without TLS would connect in plaintext while the operator believes the link is pinned; edged's authoring
+	// refuses the same combination (audit P7 L3). The pin's format is checked here, not first at dial time.
+	if r.TLSCertSHA256 != "" {
+		if !r.TLS {
+			return coded(CodeConfigInvalid, errors.New("tls.cert_sha256 is set but tls.enabled is not true"))
+		}
+		if b, err := hex.DecodeString(strings.ToLower(strings.ReplaceAll(r.TLSCertSHA256, ":", ""))); err != nil || len(b) != sha256.Size {
+			return coded(CodeConfigInvalid, errors.New("tls.cert_sha256 is not a SHA-256 fingerprint"))
+		}
 	}
 	return nil
 }

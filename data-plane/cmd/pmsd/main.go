@@ -5,6 +5,8 @@ package main
 import (
 	"context"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"github.com/stayconnect/enterprise/data-plane/internal/postinghandoff"
 	"log/slog"
 	"net"
@@ -77,14 +79,27 @@ func main() {
 	}()
 
 	// No assignment-verification key here: tenant/site come from the Central-signed assignment (pmsd.CentralAssignmentLoader), not a pmsd-local trust root.
+	// A key that is set must decode to at least 32 bytes; with the connector on, a bad one stops start-up and names the
+	// variable (never the value) instead of surfacing later as an unnamed CONFIG_INVALID at dial time (audit P7 L8).
+	// An absent key keeps its existing meaning: the dial refuses without it. Dark (connector off) never stops here.
+	keyErr := func(name string, err error) {
+		if err != nil && cfg.ConnectorOn() {
+			log.Error("pmsd: key setting invalid", "variable", name, "code", "CONFIG_INVALID", "reason", err.Error())
+			os.Exit(1)
+		}
+	}
 	keyring := pmsd.MapKeyring{}
 	if kid := os.Getenv("PMSD_SECRET_KEY_ID"); kid != "" {
-		if kb, err := hex.DecodeString(os.Getenv("PMSD_SECRET_KEY_HEX")); err == nil {
+		kb, err := decodeKeyEnv(os.Getenv, "PMSD_SECRET_KEY_HEX")
+		keyErr("PMSD_SECRET_KEY_HEX", err)
+		if err == nil && kb != nil {
 			keyring[kid] = kb
 		}
 	}
-	evKey, _ := hex.DecodeString(os.Getenv("PMSD_EVIDENCE_KEY_HEX"))
-	identKey, _ := hex.DecodeString(os.Getenv("PMSD_EVENT_IDENTITY_KEY_HEX"))
+	evKey, err := decodeKeyEnv(os.Getenv, "PMSD_EVIDENCE_KEY_HEX")
+	keyErr("PMSD_EVIDENCE_KEY_HEX", err)
+	identKey, err := decodeKeyEnv(os.Getenv, "PMSD_EVENT_IDENTITY_KEY_HEX")
+	keyErr("PMSD_EVENT_IDENTITY_KEY_HEX", err)
 	evKeyVer := envInt("PMSD_EVIDENCE_KEY_VERSION")
 	identKeyVer := envInt("PMSD_EVENT_IDENTITY_KEY_VERSION")
 	netDialer := func(ctx context.Context, network, address string) (net.Conn, error) {
@@ -158,6 +173,26 @@ func main() {
 		os.Exit(1)
 	}
 	log.Info("pmsd: stopped cleanly")
+}
+
+// minKeyBytes is the documented key size (openssl rand -hex 32).
+const minKeyBytes = 32
+
+// decodeKeyEnv returns nil, nil for an unset variable; a set one must be hex of at least minKeyBytes. The error
+// never carries the value.
+func decodeKeyEnv(getenv func(string) string, name string) ([]byte, error) {
+	v := strings.TrimSpace(getenv(name))
+	if v == "" {
+		return nil, nil
+	}
+	b, err := hex.DecodeString(v)
+	if err != nil {
+		return nil, errors.New("not hexadecimal")
+	}
+	if len(b) < minKeyBytes {
+		return nil, fmt.Errorf("shorter than %d bytes", minKeyBytes)
+	}
+	return b, nil
 }
 
 func envInt(name string) int {
