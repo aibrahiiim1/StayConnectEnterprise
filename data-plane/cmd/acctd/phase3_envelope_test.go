@@ -38,7 +38,7 @@ func derivedPlan() enforce.Plan {
 // "Not mentioned" must never end access: a truncated body would look like a mass revocation.
 func TestEnvelopeStatesTheWholeDesiredState(t *testing.T) {
 	p := testArm(t, filepath.Join(t.TempDir(), "gen.json"))
-	env := p.buildEnvelope(derivedPlan(), []string{"br-empty"}, "br-lan", time.Now())
+	env := mustEnvelope(t, p)
 
 	if len(env.Sessions) != 3 {
 		t.Fatalf("envelope carried %d sessions, want all 3", len(env.Sessions))
@@ -103,7 +103,7 @@ func TestPlanGenerationSurvivesAProducerRestart(t *testing.T) {
 	p := testArm(t, path)
 	var last int64
 	for i := 0; i < 3; i++ {
-		env := p.buildEnvelope(derivedPlan(), []string{"br-empty"}, "br-lan", time.Now())
+		env := mustEnvelope(t, p)
 		if env.PlanGeneration <= last {
 			t.Fatalf("generation went backwards: %d after %d", env.PlanGeneration, last)
 		}
@@ -111,7 +111,7 @@ func TestPlanGenerationSurvivesAProducerRestart(t *testing.T) {
 	}
 
 	restarted := testArm(t, path)
-	env := restarted.buildEnvelope(derivedPlan(), []string{"br-empty"}, "br-lan", time.Now())
+	env := mustEnvelope(t, restarted)
 	if env.PlanGeneration <= last {
 		t.Fatalf("a restarted producer re-issued generation %d after %d", env.PlanGeneration, last)
 	}
@@ -138,7 +138,7 @@ func TestRefusedPlanIsReportedWithItsReason(t *testing.T) {
 	p.enf = nil
 
 	refusing := &fakeNetd{result: shapingResult{Accepted: false, Reason: shapeplan.ReasonWrongSite}}
-	res, err := refusing.SubmitShapingPlan(context.Background(), p.buildEnvelope(derivedPlan(), []string{"br-empty"}, "br-lan", time.Now()))
+	res, err := refusing.SubmitShapingPlan(context.Background(), mustEnvelope(t, p))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,5 +157,68 @@ func TestRefusedPlanIsReportedWithItsReason(t *testing.T) {
 	down := &fakeNetd{err: errors.New("netd socket unavailable")}
 	if _, err := down.SubmitShapingPlan(context.Background(), shapeplan.Envelope{}); err == nil {
 		t.Fatal("expected a transport failure")
+	}
+}
+
+func mustEnvelope(t *testing.T, p *phase3) shapeplan.Envelope {
+	t.Helper()
+	env, err := p.buildEnvelope(derivedPlan(), []string{"br-empty"}, "br-lan", time.Now())
+	if err != nil {
+		t.Fatalf("buildEnvelope: %v", err)
+	}
+	return env
+}
+
+// Audit P6 M2: a counter file that is missing, corrupt or behind netd's last accepted generation must not
+// make the first plan after a restart stale on netd.
+func TestFirstPlanAfterLostCounterIsNotStaleOnNetd(t *testing.T) {
+	now := time.Now()
+	// netd accepted a generation from a counter that was at a million when the file was lost.
+	netdLast := shapeplan.Accepted{Generation: 1_000_000, Hash: "whatever"}
+	nsScope := shapeplan.Scope{TenantID: "tenant-1", SiteID: "site-1", ApplianceID: "appl-1", AssignGen: 7}
+
+	dir := t.TempDir()
+	cases := map[string]func(path string){
+		"missing": func(string) {},
+		"corrupt": func(path string) { _ = os.WriteFile(path, []byte("{not json"), 0o600) },
+		"behind": func(path string) {
+			raw, _ := json.Marshal(counterState{Generation: 12, Runtime: 3})
+			_ = os.WriteFile(path, raw, 0o600)
+		},
+	}
+	for name, prepare := range cases {
+		path := filepath.Join(dir, name+".json")
+		prepare(path)
+		p := testArm(t, path)
+		env := mustEnvelope(t, p)
+		if reason, ok := shapeplan.Validate(env, nsScope, netdLast, true, now); !ok {
+			t.Fatalf("%s counter: netd refused the first plan after restart: %s", name, reason)
+		}
+	}
+}
+
+// A saved generation ahead of the clock still wins: the floor never moves the counter backwards.
+func TestSavedGenerationAheadOfClockIsKept(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gen.json")
+	ahead := time.Now().UnixMilli() + 10_000_000
+	raw, _ := json.Marshal(counterState{Generation: ahead, Runtime: 1})
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p := testArm(t, path)
+	if env := mustEnvelope(t, p); env.PlanGeneration != ahead+1 {
+		t.Fatalf("generation = %d, want %d", env.PlanGeneration, ahead+1)
+	}
+}
+
+// Audit P6 M2: a generation that cannot be saved must not be submitted.
+func TestUnsavableGenerationIsNotSubmitted(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p := testArm(t, filepath.Join(blocker, "gen.json"))
+	if _, err := p.buildEnvelope(derivedPlan(), []string{"br-empty"}, "br-lan", time.Now()); err == nil {
+		t.Fatal("a generation that was never saved was handed out for submission")
 	}
 }

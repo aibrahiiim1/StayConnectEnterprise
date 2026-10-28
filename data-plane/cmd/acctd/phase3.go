@@ -184,12 +184,16 @@ const planValidity = 90 * time.Second
 
 // buildEnvelope lists every live session exactly once, entitled or not: "not mentioned" must never end access,
 // since it is indistinguishable from a truncated body.
-func (p *phase3) buildEnvelope(plan enforce.Plan, managedBridges []string, fallbackBridge string, now time.Time) shapeplan.Envelope {
-	gen, runtime := p.plans.next()
+// A generation that could not be saved is an error: submitting it would let a restart re-issue it.
+func (p *phase3) buildEnvelope(plan enforce.Plan, managedBridges []string, fallbackBridge string, now time.Time) (shapeplan.Envelope, error) {
+	gen, runtime, err := p.plans.next()
+	if err != nil {
+		return shapeplan.Envelope{}, err
+	}
 	return shapeproducer.BuildEnvelope(plan, shapeproducer.Scope{
 		TenantID: p.tenant, SiteID: p.site, ApplianceID: p.scope.ApplianceID,
 		AssignmentID: p.scope.AssignmentID, AssignmentGen: p.scope.AssignmentGe,
-	}, gen, runtime, managedBridges, fallbackBridge, now, planValidity)
+	}, gen, runtime, managedBridges, fallbackBridge, now, planValidity), nil
 }
 
 // reconcileShaping submits the full desired state every tick, not a delta, so a restart, reboot or manual tc
@@ -202,7 +206,14 @@ func (p *phase3) reconcileShaping(ctx context.Context, netd planSubmitter, fallb
 	if !ok {
 		return
 	}
-	res, err := netd.SubmitShapingPlan(ctx, p.buildEnvelope(plan, p.managedBridges(ctx), fallbackBridge, time.Now()))
+	env, err := p.buildEnvelope(plan, p.managedBridges(ctx), fallbackBridge, time.Now())
+	if err != nil {
+		// Audit P6 M2: never submit a generation that is not durably saved; report it on health instead.
+		p.degraded = "shaping plan not submitted: " + err.Error()
+		slog.Error("phase3: the plan generation could not be saved; plan not submitted", "err", err)
+		return
+	}
+	res, err := netd.SubmitShapingPlan(ctx, env)
 	if err != nil {
 		// Re-derived next tick; what must not happen is pretending it was applied.
 		p.degraded = "shaping plan not applied: " + err.Error()
