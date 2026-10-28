@@ -170,5 +170,4 @@ func (s *server) authorizeViaIAMv2(w http.ResponseWriter, r *http.Request,
 	}
 }
 
-
 var _ = context.Background // keep context imported for future use by callers

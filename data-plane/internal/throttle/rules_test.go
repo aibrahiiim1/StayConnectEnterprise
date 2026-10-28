@@ -25,7 +25,7 @@ func TestReasonFollowsLongestRetry(t *testing.T) {
 	s, _ := New(db, tkey, time.Minute)
 	ctx := context.Background()
 	rules := []Rule{
-		{Kind: ScopeDevice, Value: "aa:bb", Method: "account", Limit: 1},                        // window retry only
+		{Kind: ScopeDevice, Value: "aa:bb", Method: "account", Limit: 1},                         // window retry only
 		{Kind: ScopeIP, Value: "10.0.0.9", Method: "account", Limit: 1, Block: 15 * time.Minute}, // long block
 	}
 	_, _ = s.Allow(ctx, rules...)
