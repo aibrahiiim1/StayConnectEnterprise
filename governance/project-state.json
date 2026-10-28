@@ -1215,7 +1215,7 @@
     "nightly_authoritative_validation": "RETIRED by D42 (2026-09-26, T0196). From T0182 to T0195 the four gates ran a failing sentinel on every pull_request and a 06:00 Africa/Cairo orchestrator re-ran them for the single delivery candidate and merged an all-green head unattended. On 2026-09-26 the orchestrator workflow was first disabled in GitHub (disabled_manually) and PR #190 labelled nightly-hold, so no scheduled run could merge anything; T0196 then removed the workflow, tools/nightly_delivery.py, tools/nightly-status.py and scripts/ci/nightly-orchestrate.py. The first 06:00 scheduled run was therefore never observed. The record of the model is docs/NIGHTLY_AUTHORITATIVE_DELIVERY.md (superseded) and T0182-T0195.",
     "session_start_check": "None owed by the delivery model. Nothing runs unattended under D42, so there is no nightly verdict to read at session start (tools/nightly-status.py was removed by T0196). A session starts from the state of its own delivery branch and pull request.",
     "central_console_runtime_identity": {
-      "_note": "What Central (172.21.96.196) serves as its operator console, read back from /opt/stayconnect/central/DEPLOYED.json and the installed release.",
+      "_note": "HISTORICAL: the retired Central 172.21.96.196 (retired 2026-10-28), as last read back. What Central (172.21.96.196) serves as its operator console, read back from /opt/stayconnect/central/DEPLOYED.json and the installed release.",
       "source_commit": "b5775652f8b65903318f9f9289ff008888335509",
       "source_state": "clean",
       "build_id": "27FSW7HOEo9169qlvTvkV",
@@ -1227,7 +1227,7 @@
     },
     "prelive_guest_access_testing": "ENABLED on PRE-LIVE 172.21.60.25 for Product Owner testing (D43, T0197, 2026-09-26). STAYCONNECT_PHASE2_MASTER=1 and STAYCONNECT_PHASE2_PORTAL=1 in /etc/stayconnect/scd.env and portald.env; rollback copies *.bak-pre-guest-activation-20260926T193029Z (the portald.env copy removed by the retention sweep was reconstructed exactly as *-reconstructed). Live proof 2026-09-26: scripts/guest-access-e2e-test.sh 53/53 -- captive before sign-in, enforced (nft phase3_auth_ipv4) and online (generate_204 = 204, ICMP 1.1.1.1) after activation for all three methods, device limits, joining, reconnect, termination and backend-enforced method switches, with pms_postings, posting_outbox and payment_transactions unchanged. Test state reset afterwards.",
     "central_ctrlapi_runtime_identity": {
-      "_note": "The Central API binary on 172.21.96.196, read back from the host.",
+      "_note": "HISTORICAL: the retired Central 172.21.96.196 (retired 2026-10-28), as last read back. The Central API binary on 172.21.96.196, read back from the host.",
       "sha256": "1bbe9fc6b2dac97914c7689a4763b781c528d23fe9373099f6511db42ae0ef00",
       "source_commit": "b5775652f8b65903318f9f9289ff008888335509",
       "vcs_modified": false,
@@ -1239,10 +1239,19 @@
     },
     "central_host": {
       "_note": "Where OneGate Central runs. Appliances reach it by name; the address is a property of the host, the name is a property of the fleet.",
-      "address": "172.21.96.196",
-      "name": "sc-central.echofusion.com",
-      "moved": "Central moved to 172.21.96.196 on 2026-09-27 (central-export.sh --final on 150.0.0.252, central-install.sh --mode restore on the new host, release onegate-central-abda23d1f3a3). Every key, certificate and the licence database were carried over; the identity is unchanged: vendor 2fbdfcbde209ebb5, assignment 027a2c97f6c8fcdb, registry root 84655767f9834fa2, appliance Root CA D2:60:C6:EE:21:EB:D7:79:… .",
-      "name_resolution": "sc-central.echofusion.com is published on the gateway DNS (FortiGate 172.21.60.1) and points at 172.21.96.196 since 2026-09-27. PRE-LIVE's interim /etc/hosts line was removed after the switch; a restarted scd then reconnected over DNS alone (mTLS transport verified, assignment served, licence refreshed).",
+      "address": "41.128.240.133",
+      "private_address": "172.21.96.96",
+      "name": "central.onegate.getsemantics.com",
+      "recorded": "Product-Owner record, 2026-10-28: this is the current production Central; 172.21.96.196 is retired and must not be contacted.",
+      "trust_universe": "Installed fresh by central-install.sh, so it has its own vendor key, assignment key, registry root, appliance CA and internal TLS CA (installation manual Appendix 3). Appliances provisioned against the retired Central, PRE-LIVE among them, do not trust it.",
+      "release": "onegate-central-05481cb57334 (installation manual A3.7)",
+      "retired_host": {
+        "address": "172.21.96.196",
+        "name": "sc-central.echofusion.com",
+        "status": "RETIRED 2026-10-28 (Product-Owner record). Not an operational target.",
+        "history": "Central from 2026-09-27 to 2026-10-28. Central moved to 172.21.96.196 on 2026-09-27 (central-export.sh --final on 150.0.0.252, central-install.sh --mode restore on the new host, release onegate-central-abda23d1f3a3). Every key, certificate and the licence database were carried over; the identity is unchanged: vendor 2fbdfcbde209ebb5, assignment 027a2c97f6c8fcdb, registry root 84655767f9834fa2, appliance Root CA D2:60:C6:EE:21:EB:D7:79:… .",
+        "name_resolution_then": "sc-central.echofusion.com is published on the gateway DNS (FortiGate 172.21.60.1) and points at 172.21.96.196 since 2026-09-27. PRE-LIVE's interim /etc/hosts line was removed after the switch; a restarted scd then reconnected over DNS alone (mTLS transport verified, assignment served, licence refreshed)."
+      },
       "former_host": "150.0.0.252: ctrlapi, the console and Caddy stopped and disabled since the move, nothing listening on 443/9443/8080/3000. Not an operational target; not to be re-enabled (the new Central has since issued licence version 3). It still holds the encrypted Root CA backup; a checksum-verified copy (sha256 a5aa19446fb20294fb3ea1d22d42bb6668a75b39d3900a6763bf715c35bd504c) was taken off the host on 2026-09-27 for offline custody. Shred the host copy, then decommission, once the backup is confirmed on offline media."
     },
     "product_terminology": {
@@ -1278,7 +1287,7 @@
     "prelive_phase4_flag_posture": "PRE-LIVE 172.21.60.25 since 2026-09-30 (D47): scd runs STAYCONNECT_PHASE4_MASTER, _PAYMENT, _PAYMENT_PROVIDER, _POSTING, _FINANCIAL_REVIEW, _OUTBOX_WORKER and _PMS_TRANSMIT; pmsd runs _MASTER, _OUTBOX_WORKER and _PMS_TRANSMIT; edged runs _MASTER, _POSTING and _FINANCIAL_REVIEW. STAYCONNECT_PAYMENT_LIVE_ALLOWED is set nowhere. Real PMS postings ever: one (T0204, USD 1.00, PA OK). Payment-provider traffic ever: none.",
     "phase4_flags_off_scope": "phase4_flags_off records the DELIVERED REPOSITORY configuration (no file in the tree enables a Phase-4 flag; scripts/ci/phase4-dark-check.sh asserts it). It is not a statement about the PRE-LIVE environment, whose posture is recorded in prelive_phase4_flag_posture."
   },
-  "latest_transition_id": "T0262",
+  "latest_transition_id": "T0263",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1773,20 +1782,20 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "FINANCIAL_MODULES_CONFIGURABLE",
-    "decision": "D77 (available means configurable; execution separate; nothing unimplemented available, 2026-10-28).",
-    "decision_note": "Deployed to the test appliance 172.21.96.97 only (release onegate-appliance-d25999781b1a). Not deployed to PRE-LIVE or Central. No provider call, posting or financial transaction was made.",
-    "manifest": "docs/manifests/FinancialModulesConfigurable-change-manifest.md",
-    "base": "f99716d87d4bc0d6bfb82c6ef7db2c3611f7bedb",
-    "base_note": "Master after the merge of PR #260 (f99716d8).",
-    "head": "d2599978",
-    "head_note": "The last content commit of branch fix/financial-modules-configurable. Governance commits follow it.",
-    "transition": "T0262",
-    "previous_delivery": "T0261",
-    "pr": 261,
-    "pr_state": "PR #261; its protected merge is authorised by the Product Owner's mission",
-    "note": "T0262. Go-Live not authorised.",
-    "branch": "fix/financial-modules-configurable"
+    "kind": "REPOSITORY_CLEANUP",
+    "decision": "None new. A housekeeping request of the Product Owner under the decisions in force (D77 the latest).",
+    "decision_note": "Documentation and repository housekeeping only: no product code, no deployment. Branches deleted; no document deleted (the first pass's deletions were restored in review).",
+    "manifest": "docs/manifests/RepositoryCleanup-change-manifest.md",
+    "base": "d6647840580c363eeadc508a4a099bf3d8fe9769",
+    "base_note": "Master after the merge of PR #261 (d6647840).",
+    "head": "19be3661",
+    "head_note": "The last documentation commit of branch docs/cleanup. Governance commits follow it.",
+    "transition": "T0263",
+    "previous_delivery": "T0262",
+    "pr": 262,
+    "pr_state": "PR #262; merge awaits the Product Owner's approval",
+    "note": "T0263. Go-Live not authorised.",
+    "branch": "docs/cleanup"
   },
   "onboarding_reconciliation": {
     "decision": "D37",

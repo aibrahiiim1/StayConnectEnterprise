@@ -1,8 +1,15 @@
-# StayConnect Enterprise — Documentation Index
+# OneGate — Documentation Index
 
 Start here. This index is organized by what you're trying to do. If you're new to
-StayConnect, read the **Complete Operations Manual** first — it takes a site from
-an unpacked appliance to live, licensed client Wi-Fi and covers day-2 operations.
+OneGate, start with the two current references:
+
+- the [system handbook](architecture/ONEGATE_SYSTEM_HANDBOOK.md) — the system as built, compared with the code (where a
+  document and the code disagree, the code wins);
+- the [Fresh VM Installation Manual](runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md) — building, installing and
+  verifying an appliance and a Central; its Appendix 3 records what was validated on the test pair.
+
+Where another document here disagrees with those two, they win. The other manuals and guides were written for earlier
+states and have not been re-verified against the current release.
 The product words used throughout (Client, Admin Console, Client Portal, Site) are defined in
 [PRODUCT_TERMINOLOGY.md](PRODUCT_TERMINOLOGY.md).
 
@@ -22,15 +29,16 @@ The product words used throughout (Client, Admin Console, Client Portal, Site) a
 
 - [runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md](runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md) — **building a new
   appliance (and a separate Central) from a blank VM**: planning, build, install, initial configuration, an executable
-  verification checklist, recovery/upgrade/rollback and the known defects of the current installer. Read this before
-  any fresh install.
+  verification checklist, recovery/upgrade/rollback, and what a licence, the installation and the site each decide about a
+  module (C.12). Its Appendix 3 records what was validated on the test pair. Read this before any fresh install.
 - [APPLIANCE_ONBOARDING_MANUAL.md](APPLIANCE_ONBOARDING_MANUAL.md) — the shortest
   UI-only path to bring one site online (zero-touch, two consoles).
 
-## 2. Complete Operations Manual — **recommended starting point**
+## 2. Complete Operations Manual — **not re-verified against the current release**
 
 - [STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md](STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md)
-  — end-to-end: architecture, install, WAN/LAN, registration, activation,
+  — background reading only; for installation and current behaviour use the system handbook and the installation manual
+  above. It covers, end to end: architecture, install, WAN/LAN, registration, activation,
   convergence, the license model & states, concurrent capacity, client networks / VLANs (with
   worked VLAN 100 / VLAN 200 examples), DHCP/DNS/NAT/portal, auth methods, access
   plans & vouchers, integrations, renewal & anti-replay, recovery, Central-outage
@@ -88,17 +96,22 @@ The product words used throughout (Client, Admin Console, Client Portal, Site) a
 
 ## 9. Governance & delivery (permanent rules)
 
-- [GITHUB_EXECUTION_AND_DELIVERY_RULE.md](GITHUB_EXECUTION_AND_DELIVERY_RULE.md) — the
-  GitHub repo `aibrahiiim1/StayConnectEnterprise` is the only authoritative source;
-  one Phase per branch + one PR; every final report embeds the deterministic
-  changed-file manifest.
-- [ZERO_STALE_LEFTOVERS_RULE.md](ZERO_STALE_LEFTOVERS_RULE.md) — no stale/contradictory
-  artifact may survive a completed task; enforced by `tools/project-state.py` and
-  `tools/validate-project-state.sh`.
-- [templates/PHASE_FINAL_REPORT_TEMPLATE.md](templates/PHASE_FINAL_REPORT_TEMPLATE.md) —
-  mandatory 20-section final-report structure.
-- Machine-readable current state: `governance/project-state.json` (validate with
-  `make governance-validate`); changed-file manifest: `tools/generate-change-manifest.py`.
+- [PO_LED_DELIVERY_MODEL.md](PO_LED_DELIVERY_MODEL.md) — **how work is delivered now** (D42, with D67 for PRE-LIVE missions):
+  implement → targeted tests → PRE-LIVE when authorised → *ready for Product Owner testing* → merge only with the Product Owner's
+  approval (the `po-merge-approved` label on the exact head).
+- [FAST_DELIVERY_AND_PARALLEL_AGENT_PROTOCOL.md](FAST_DELIVERY_AND_PARALLEL_AGENT_PROTOCOL.md) — fast development by default,
+  controlled work only for the listed triggers, one delivery owner per branch.
+- [OPERATIONAL_SETTINGS_POLICY.md](OPERATIONAL_SETTINGS_POLICY.md) — values an administrator may change ship as settings.
+- [GITHUB_EXECUTION_AND_DELIVERY_RULE.md](GITHUB_EXECUTION_AND_DELIVERY_RULE.md) — the GitHub repo
+  `aibrahiiim1/StayConnectEnterprise` is the only authoritative source. Its changed-file manifest
+  (`tools/generate-change-manifest.py`, kept in [`manifests/`](manifests/)) is produced for a controlled delivery or a
+  milestone closure, not for routine work (§4, and `CLAUDE.md` §0). Its one-Phase-per-PR cadence and the 20-section
+  [final-report template](templates/PHASE_FINAL_REPORT_TEMPLATE.md) belong to Phases 1–7 and are kept as records.
+- [ZERO_STALE_LEFTOVERS_RULE.md](ZERO_STALE_LEFTOVERS_RULE.md) — no stale or contradictory artifact survives a completed task.
+- Machine-readable current state: `governance/project-state.json` (validate with `python tools/project-state.py validate`);
+  decisions in `governance/decision-register.json`, one receipt per transition in `governance/transitions/`.
+- Superseded, kept as a record: the nightly model [NIGHTLY_AUTHORITATIVE_DELIVERY.md](NIGHTLY_AUTHORITATIVE_DELIVERY.md)
+  (replaced by D42).
 
 ---
 

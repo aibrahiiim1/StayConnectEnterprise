@@ -166,13 +166,15 @@ operational number, that number ships as a setting.
 
 ## 0D. CURRENT ENVIRONMENT, AND WHAT IS NO LONGER A TARGET
 
-**Standing record, 2026-09-12.** Supersedes every earlier address list in this file.
+**Standing record, 2026-09-12; Central corrected by the Product Owner on 2026-10-28.** Supersedes every earlier address
+list in this file.
 
 | Role | Host | Notes |
 |---|---|---|
-| **Central** | `172.21.96.196` (`sc-central.echofusion.com`) | Moved here from `150.0.0.252` on 2026-09-27 with every key, certificate and the licence database carried over (`central-export.sh --final` → `central-install.sh --mode restore`). Identity, activation and licensing ([`docs/CENTRAL_CONTROL_PLANE.md`](docs/CENTRAL_CONTROL_PLANE.md)): `ctrlapi` (behind Caddy on `443`; appliance mutual-TLS listener on `9443`), `cloud-admin`, Caddy, Postgres/TimescaleDB and Redis (`deploy/compose/central-infra.yml`). Installed and upgraded by `deploy/scripts/central-install.sh` ([`docs/DEPLOYMENT_CLOUD.md`](docs/DEPLOYMENT_CLOUD.md)). Central runs no message bus (§0E). Verify the actual endpoints and TLS identity before connecting; do not assume them from this table. |
+| **Central** | `41.128.240.133` (`central.onegate.getsemantics.com`) | Production Central since 2026-10-28 (Product-Owner record). Installed fresh by `central-install.sh`, so it has **its own trust universe**: appliances provisioned against the former Central do not trust it ([installation manual](docs/runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md) F, Appendix 3). Identity, activation and licensing ([`docs/CENTRAL_CONTROL_PLANE.md`](docs/CENTRAL_CONTROL_PLANE.md)): `ctrlapi` (behind Caddy on `443`; appliance mutual-TLS listener on `9443`), `cloud-admin`, Caddy, Postgres/TimescaleDB and Redis (`deploy/compose/central-infra.yml`). Installed and upgraded by `deploy/scripts/central-install.sh` ([`docs/DEPLOYMENT_CLOUD.md`](docs/DEPLOYMENT_CLOUD.md)). Central runs no message bus (§0E). Verify the actual endpoints and TLS identity before connecting; do not assume them from this table. |
+| Former Central | `172.21.96.196` (`sc-central.echofusion.com`) | **RETIRED 2026-10-28 (Product-Owner record). Not an operational target: do not contact it.** It was Central from 2026-09-27 (moved from `150.0.0.252` with every key, certificate and the licence database) and its trust universe is the one PRE-LIVE was provisioned in. What it served and proved stays as recorded. |
 | Former Central | `150.0.0.252` | **STOPPED, not an operational target.** `ctrlapi`, the console and Caddy are stopped and disabled since the move; re-enabling it would issue licence versions the new Central does not know. It still holds the encrypted Root CA key backup (`/opt/stayconnect/ca-ceremony-backup/`, [`docs/CA_CEREMONY_RUNBOOK.md`](docs/CA_CEREMONY_RUNBOOK.md)); a verified copy was taken off the host on 2026-09-27, and the host copy is shredded only after the backup is confirmed on offline media. |
-| **PRE-LIVE appliance** | `172.21.60.25` | The only appliance. **PRE-LIVE remains PRE-LIVE. Go-Live is not authorised.** It reaches Central by the name `sc-central.echofusion.com`, published on the gateway DNS (FortiGate, `172.21.60.1`), which points it at `172.21.96.196` since 2026-09-27. No `/etc/hosts` override. |
+| **PRE-LIVE appliance** | `172.21.60.25` | The only appliance. **PRE-LIVE remains PRE-LIVE. Go-Live is not authorised.** It was provisioned against the former Central `172.21.96.196` (by the name `sc-central.echofusion.com` on the gateway DNS), which is now retired; serving it from the current Central would need it re-provisioned in that trust universe, a Product-Owner decision. |
 | ~~Development reference appliance~~ | *(address removed from the current tree — T0194)* | **RETIRED.** Not an operational target. Do not contact it, do not diagnose against it, do not treat it as a source of anything. |
 
 **Retiring a target does not falsify its records.** What the retired development reference appliance proved keeps
@@ -299,6 +301,9 @@ wider: see §0G (D67).
 > across the PRE-LIVE appliance (`172.21.60.25`) and Central (`172.21.96.196`): deployments, database
 > migrations, test-database reset or reconstruction, test-account resets, test-licence reissuance, directly
 > related repairs, verification, documentation, and Git delivery including push, PR and the protected merge.
+
+*Note, 2026-10-28:* the Central named in the decision, `172.21.96.196`, is retired (§0D). The decision text is kept as
+recorded; which Central a PRE-LIVE mission covers now is the Product Owner's to state.
 
 * **PRE-LIVE data is disposable.** Preserving test accounts, historical test records or test licences is never a
   reason to stop. Recreate what the mission needs. Do not touch a real person's account to do it: use or create

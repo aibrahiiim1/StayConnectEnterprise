@@ -726,7 +726,7 @@ unchanged. `apply-pending-migrations.sh --list` prints the pending set without c
 > **Central is never combined with an appliance.** It is its own VM/host with its own IP, DNS name, keys and database. An appliance
 > and Central on one machine would also put the vendor's signing keys inside a customer site.
 >
-> **[PO] Installing a *new* Central creates a *new trust universe*** (new vendor key, assignment key, registry root, appliance Root/Intermediate CA, internal TLS CA). Appliances provisioned against the existing production Central (`sc-central.echofusion.com`, `172.21.96.196`) will **not** trust it. Do this only for a named, authorised environment (lab, second region, or a rebuild in `restore` mode of the existing one). This manual does not authorise creating any environment.
+> **[PO] Installing a *new* Central creates a *new trust universe*** (new vendor key, assignment key, registry root, appliance Root/Intermediate CA, internal TLS CA). Appliances provisioned against another Central — the current production Central (`central.onegate.getsemantics.com`, `41.128.240.133`), or the retired `172.21.96.196` (`sc-central.echofusion.com`) — will **not** trust it. Do this only for a named, authorised environment (lab, second region, or a rebuild in `restore` mode of the existing one). This manual does not authorise creating any environment.
 
 ### F.1 Planning
 

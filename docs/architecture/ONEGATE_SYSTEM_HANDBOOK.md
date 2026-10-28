@@ -1197,7 +1197,7 @@ Everything below was compared with the code at `7e4686ae`. **The code wins.** Th
 | `docs/CLOUD_ARCHITECTURE.md` | Licence "schema_version 3"; ctrlapi has 5 sub-commands | Version 4; 10 sub-commands |
 | `docs/LICENSING_AND_ENTITLEMENTS.md` | Module list omits `whatsapp_otp` | Ten modules in code |
 | `docs/CENTRAL_CONTROL_PLANE.md` | §6 appliance paths omit `portal-tls/*`; some staff-console address inconsistency vs DEPLOYMENT_CLOUD | Endpoint family is documented in its §9 |
-| `docs/CA_CEREMONY_RUNBOOK.md`, `ASSIGNMENT_KEY_CUSTODY_RUNBOOK.md` | Name `150.0.0.252` as the performing host | Historical record; current Central is `172.21.96.196` |
+| `docs/CA_CEREMONY_RUNBOOK.md`, `ASSIGNMENT_KEY_CUSTODY_RUNBOOK.md` | Name `150.0.0.252` as the performing host | Historical record; current Central is `41.128.240.133` (`central.onegate.getsemantics.com`; `172.21.96.196` retired 2026-10-28) |
 | `docs/architecture/adr/ADR-0001-pmsd-connector-ownership.md` | Legacy scd path authoritative; pmsd dark | Reversed: pmsd is the live runtime |
 | `docs/runbooks/PMS-Interface-Commissioning.md` | Only `protel-fias`; bounds "derived" | Four kinds; bounds are catalogue fields with defaults |
 | `docs/architecture/ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md` | EMAIL factor verified by an emailed code; remember cookie `og_client` only | Email OTP removed; three cookies exist; an account's email can pin a client group (doc/code tension recorded) |

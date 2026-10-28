@@ -1,0 +1,36 @@
+{
+  "transition_id": "T0263",
+  "seq": 263,
+  "timestamp": "2026-10-28T00:39:10Z",
+  "timestamp_derivation": "Computed from the workstation clock after the cleanup was committed and validated, and before the commit that introduces this receipt.",
+  "record_type": "REPOSITORY_CLEANUP",
+  "authorisation": "The Product Owner's request of 2026-10-28: remove unwanted and unneeded documents (plans already done, old documents), update any document that does not reflect the current state, and remove every merged branch.",
+  "context": "Six deliveries (#256-#261) merged on 2026-10-27/28 left 128 merged branches on GitHub and locally, a hundred stale local PR refs, and finished per-delivery documents.",
+  "changes": "Branches: every merged branch deleted on GitHub (28) and locally (217), plus 100 stale local refs/remotes/pr/* (old PR heads, never on GitHub); on GitHub only master remains besides this PR's branch. Nothing unmerged was lost. The one local branch with unique commits, fix/guest-network-untagged-parent (PR #24, closed unmerged 2026-09-09), was compared change by change with master: all six of its fixes (svc_netd UPDATE grant on network_interfaces, logged inventory-sync errors, every netplan parent declared, sorted and optional, the Kea factory-clean bootstrap, its reversible rollback and confirm, the run seam, the listening check with rebind restart, and waitBridgesRunning) are on master from 0f095fc1 with their tests, which pass; its sync_checkpoints grant is moot (table dropped by 0093). The local backup-pre-redact branch (never on GitHub) pointed at c6905b3f, which the local ref refs/original/refs/heads/feat/operator-journeys-consolidation still holds; its four unique commits are the pre-redaction form of the T0164 commits on master (d4c9f508). That ref was left in place. Documents: a first pass (f7a12168) deleted 45 files, 39 change manifests and six superseded documents; the review restored all 45 byte for byte and reverted the eight link notes, because each is a delivery record (GH-COMPLETE-MANIFEST; the branches the manifests name no longer exist), verified evidence (PHASE19_FINAL_REPORT, CURRENT_STATE_ASSESSMENT, CONTROL_PLANE_MIGRATION) or cited by a record (Phase 7 evidence and plan, GDPR finding F9, MIGRATION_RUNBOOK, OFFLINE_OPERATION, ARUBA_SSID_VLAN_MAPPING, EDGE_NETWORKING, EDGE_ARCHITECTURE, TARGET_ARCHITECTURE). README.md, docs/README.md and CONTINUATION.md rewritten to the current state; claims there that were not verified are stated as such.",
+  "kept_on_purpose": "Every document present at the base, including all change manifests and historical reports; the backend and performance audits, which are open backlogs; the local refs/original backup ref (the Product Owner's call).",
+  "verification": "Deleted set computed from git diff --name-status (45 = 39 + 6) and restored set equal to it; after the restore the branch differs from master only in README.md, docs/README.md, CONTINUATION.md, governance, this delivery's manifest and generated packs. Every relative link and repository path in the three entry documents resolves. README dev loop run in throwaway containers: all 56 Central up-migrations apply to timescale/timescaledb:2.16.1-pg16 and ctrlapi answers /healthz 200 on 127.0.0.1:8080. PR #24 equivalence: netd Kea/bootstrap/seam tests and the netcfg parent tests pass on this head (golang:1.25.12). Governance validators as recorded in the PR.",
+  "follow_up": "Reference documents (user guides, the operations manual, SYSTEM_OVERVIEW as a marked historical snapshot) were not re-verified line by line; the system handbook and the installation manual are the current references. Retiring the obsolete documents of handbook section 23 stays a Product-Owner decision (handbook 24.2).",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0262."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "base": "d6647840580c363eeadc508a4a099bf3d8fe9769",
+  "base_note": "Master after the merge of PR #261.",
+  "head": "19be3661",
+  "head_note": "The last documentation commit of branch docs/cleanup. Governance commits follow it.",
+  "previous_delivery": "T0262",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE.",
+  "revision": "Corrected before merge in PR #262: the first version stated 40 manifests and that removing them lost nothing; the review restored the 45 deleted files and recorded the exact counts.",
+  "central_record": "Product-Owner record of 2026-10-28, made in PR #262: the current production Central is 41.128.240.133 (central.onegate.getsemantics.com); 172.21.96.196 is retired and must not be contacted. Current documents and current_state_facts.central_host were corrected; dated history, evidence and decision text were not changed."
+}

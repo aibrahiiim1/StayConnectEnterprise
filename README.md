@@ -1,33 +1,48 @@
-# StayConnect Enterprise
+# OneGate by Semantics
 
-Linux-based inline gateway appliance + cloud control plane — an enterprise alternative to IACBOX.
+A Linux gateway appliance that gives a property's clients managed Internet access (captive portal, vouchers, accounts,
+room sign-in through the PMS, paid packages), and **OneGate Central**, the vendor's server for appliance identity,
+activation and licensing. Each appliance runs its site on its own; Central never holds guest data
+([`docs/CENTRAL_CONTROL_PLANE.md`](docs/CENTRAL_CONTROL_PLANE.md)).
 
 ## Layout
 
-| Path            | Purpose                                                              |
-|-----------------|----------------------------------------------------------------------|
-| `control-plane` | Go API, DB migrations, admin-facing services (cloud or on-prem)      |
-| `data-plane`    | Gateway daemons that run on the appliance (scd, acctd, portald, policyd) |
-| `hotel-admin`   | OneGate Admin Console (formerly Hotel Admin) — the Next.js console served by each appliance   |
-| `cloud-admin`   | OneGate Central — the vendor's Next.js console for licensing, activation and fleet status ([`docs/CENTRAL_CONTROL_PLANE.md`](docs/CENTRAL_CONTROL_PLANE.md)) |
-| `design-system` | The OneGate design system: canonical tokens and the component and pattern guide shared by all three front-ends |
-| `deploy`        | docker-compose stacks, nftables templates, appliance image pipeline  |
-| `docs`          | Architecture, data model, API specs                                  |
-| `scripts`       | Dev helpers                                                          |
+| Path            | Purpose |
+|-----------------|---------|
+| `data-plane`    | The appliance's Go services: `scd` (sessions, identity, licence, Central link), `edged` (Admin Console API), `portald` (Client Portal), `netd` (client networks, firewall, DHCP), `acctd` (accounting and shaping), `pmsd` (PMS connector), `keybootstrap`, `svc-run` |
+| `control-plane` | OneGate Central: `ctrlapi` and its database migrations |
+| `hotel-admin`   | The Admin Console (Next.js), served by each appliance |
+| `cloud-admin`   | The Central console (Next.js) |
+| `license`       | The signed licence and module model shared by both sides |
+| `design-system` | Tokens and the component guide shared by the three front-ends |
+| `deploy`        | Release builders, installers, systemd units, compose files, Gate-P database grants, env templates |
+| `governance`    | The machine-readable project state, decision register and transition receipts |
+| `tools`         | Governance validators, the change-manifest generator, pack builder |
+| `docs`          | Manuals, architecture, runbooks — start at [`docs/README.md`](docs/README.md) |
+
+## Build and install
+
+An appliance and a Central are each installed from **one release** built from one commit:
+
+```bash
+bash deploy/scripts/appliance-build.sh     # → dist/appliance/onegate-appliance-<sha12>.tar.gz
+bash deploy/scripts/central-build.sh       # → dist/central/onegate-central-<sha12>.tar.gz
+```
+
+then `deploy/scripts/appliance-install.sh` (fresh install, re-run, `--upgrade`) and `deploy/scripts/central-install.sh` /
+`central-deploy.sh`. The whole procedure, with verification, recovery and upgrades, is the
+[installation manual](docs/runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md); the system as built is the
+[system handbook](docs/architecture/ONEGATE_SYSTEM_HANDBOOK.md).
 
 ## Front-ends
 
-The product's user-facing name is **OneGate**. Its three front-ends — the Client Portal (formerly Guest Portal; served by
-`data-plane/cmd/portald`), the Admin Console (`hotel-admin`) and Central (`cloud-admin`) — share one design
-system, described in [`design-system/README.md`](design-system/README.md). Token values live only in
-`design-system/tokens.css`; run `node tools/sync-design-tokens.mjs` after changing them. Operator
-documentation is in [`docs/user-guide/`](docs/user-guide/README.md).
+The Client Portal (served by `data-plane/cmd/portald`), the Admin Console (`hotel-admin`) and Central (`cloud-admin`) share one
+design system ([`design-system/README.md`](design-system/README.md)). Token values live only in `design-system/tokens.css`; run
+`node tools/sync-design-tokens.mjs` after changing them. Operator documentation is in [`docs/user-guide/`](docs/user-guide/README.md).
 
-## Phase 0 quickstart
+## Working on it
 
-```bash
-make infra-up          # Postgres+Timescale, Redis
-make migrate           # apply SQL migrations
-make ctrlapi-run       # start control-plane API on :8080
-curl localhost:8080/healthz
-```
+How work is delivered (branches, tests, PRE-LIVE, the Product Owner's merge approval) is in [`CLAUDE.md`](CLAUDE.md) and
+[`docs/PO_LED_DELIVERY_MODEL.md`](docs/PO_LED_DELIVERY_MODEL.md). For local development (GNU make and Docker), `make infra-up`
+and `make migrate` start a TimescaleDB and Redis and apply Central's migrations; `make ctrlapi-run` serves Central's API on
+`127.0.0.1:8080`.
