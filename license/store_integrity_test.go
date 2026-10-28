@@ -268,3 +268,60 @@ func TestLoadDistinguishesMissingFromDamaged(t *testing.T) {
 		t.Fatalf("damaged: want a non-ErrNoLicense error, got %v", err)
 	}
 }
+
+// P2 H1 (review of the fallback): a damaged current.json never restores a superseded licence from the previous copy.
+// Active v1 then Suspended v2 are installed; with current.json damaged, current.json.prev holds v1. Evaluating must
+// fail closed, not report the superseded Active terms.
+func TestStoreDamagedCurrentDoesNotRestoreSupersededLicence(t *testing.T) {
+	s := newSigner(t)
+	dir := t.TempDir()
+	store := NewStore(dir, NewVerifier(s.PublicKey()))
+	now := time.Now().UTC()
+	v1 := signedVersion(t, s, now.Add(-2*time.Hour), 1, "aaaaaaaa-0000-0000-0000-000000000001")
+	v2 := signedVersion(t, s, now.Add(-time.Hour), 2, "aaaaaaaa-0000-0000-0000-000000000002")
+	if _, err := store.Install(v1, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Install(v2, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, currentFile), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if doc, err := store.Load(); !errors.Is(err, ErrStateDamaged) {
+		t.Fatalf("load with damaged current.json: want ErrStateDamaged, got doc=%v err=%v", doc, err)
+	}
+	ev, err := store.Evaluate(now)
+	if !errors.Is(err, ErrStateDamaged) {
+		t.Fatalf("evaluate with damaged current.json: want ErrStateDamaged, got %v (state %v)", err, ev.State)
+	}
+	if ev.State != StateExpired {
+		t.Fatalf("evaluate must fail closed, got state %v", ev.State)
+	}
+}
+
+// The previous copy is still used when it is the accepted licence (only current.json's write was lost).
+func TestStoreDamagedCurrentUsesPreviousCopyOfTheAcceptedLicence(t *testing.T) {
+	s := newSigner(t)
+	dir := t.TempDir()
+	store := NewStore(dir, NewVerifier(s.PublicKey()))
+	now := time.Now().UTC()
+	v1 := signedVersion(t, s, now.Add(-time.Hour), 1, "aaaaaaaa-0000-0000-0000-000000000001")
+	if _, err := store.Install(v1, now); err != nil {
+		t.Fatal(err)
+	}
+	prev, err := os.ReadFile(filepath.Join(dir, currentFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, currentFile+prevSuffix), prev, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, currentFile), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := store.Load()
+	if err != nil || doc.LicenseVersion != 1 {
+		t.Fatalf("load of the accepted licence's previous copy: doc=%v err=%v", doc, err)
+	}
+}

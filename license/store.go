@@ -297,7 +297,36 @@ func (s *Store) Load() (*Document, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The document read may be the previous copy (readFileOrPrev). It must not be older than what the store has
+	// accepted: a damaged current.json would otherwise restore superseded terms (for example an Active v1 after a
+	// Suspended v2), the very rollback the version guard exists to refuse. Fail closed instead.
+	st, err := s.readState()
+	if err != nil {
+		return nil, err
+	}
+	if stale := supersededByState(doc, st); stale != "" {
+		return nil, fmt.Errorf("%w: %s: %s", ErrStateDamaged, currentFile, stale)
+	}
 	return doc, nil
+}
+
+// supersededByState reports why doc is older than the licence the store last accepted, or "" when it is not.
+func supersededByState(doc *Document, st storeState) string {
+	if st.HighestVersion > 0 {
+		if doc.LicenseVersion < st.HighestVersion {
+			return fmt.Sprintf("license_version %d is older than the accepted %d", doc.LicenseVersion, st.HighestVersion)
+		}
+		if doc.LicenseVersion == st.HighestVersion && st.AcceptedLicenseID != "" && doc.LicenseID != st.AcceptedLicenseID {
+			return fmt.Sprintf("license %s is not the accepted %s at version %d", doc.LicenseID, st.AcceptedLicenseID,
+				doc.LicenseVersion)
+		}
+		return ""
+	}
+	if !st.InstalledIssuedAt.IsZero() && doc.IssuedAt.Before(st.InstalledIssuedAt) {
+		return fmt.Sprintf("issued_at %s is older than the installed %s", doc.IssuedAt.Format(time.RFC3339),
+			st.InstalledIssuedAt.Format(time.RFC3339))
+	}
+	return ""
 }
 
 // Evaluation uses the high-water mark if the system clock moves back beyond tolerance.
