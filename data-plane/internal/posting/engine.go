@@ -2,14 +2,14 @@ package posting
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/postinghandoff"
 )
 
 // Engine creates postings under the fail-closed gate and executes them through per-interface outbox lanes.
@@ -254,11 +254,9 @@ SELECT a.id::text, a.internal_posting_id::text, a.pms_interface_id::text, o.id::
 	return n, nil
 }
 
-// psHash must equal internal/postinghandoff.BodyHash for the same body.
-func psHash(body string) string {
-	s := sha256.Sum256([]byte(body))
-	return hex.EncodeToString(s[:])
-}
+// psHash is the hand-off's own command identity, shared rather than copied (audit P6 CC2): pmsd checks the
+// attempt's recorded hash against postinghandoff.BodyHash.
+func psHash(body string) string { return postinghandoff.BodyHash(body) }
 
 // presendAbortReason names the pre-send failures that end the charge as definitely not posted; anything else
 // (interface lifecycle, onboarding, currency) only declines and leaves the work queued.
