@@ -187,6 +187,21 @@ func TestIntegration_F8_IssueAndVerify(t *testing.T) {
 	}
 }
 
+// Audit P6 L10: a malformed profile id is the single failure answer, not a raw database error.
+func TestIntegration_F8_MalformedProfileIsTheSameAnswer(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	f := seed(t, p)
+	s := New(p, nil)
+	for _, id := range []string{"not-a-uuid", "", "1234", "00000000-0000-0000-0000-00000000000g"} {
+		_, err := s.Verify(context.Background(), VerifyRequest{
+			Tenant: f.tenant, Site: f.site, Profile: id, PIN: "ANYTHING", Device: f.device})
+		if !errors.Is(err, ErrNotAuthenticable) || err.Error() != ErrNotAuthenticable.Error() {
+			t.Fatalf("profile %q: err = %v, want the single ErrNotAuthenticable", id, err)
+		}
+	}
+}
+
 // The next occupant must not be able to use the previous guest's PIN.
 func TestIntegration_F8_NextOccupantCannotUseThePreviousPIN(t *testing.T) {
 	p := pool(t)

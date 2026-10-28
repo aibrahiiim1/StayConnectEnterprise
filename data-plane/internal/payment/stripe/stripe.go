@@ -42,6 +42,9 @@ const (
 	// Ambiguous-create resolution lists sessions newest-first back to this age, at most maxListPages.
 	resolveWindow = 30 * 24 * time.Hour
 	maxListPages  = 50
+	// resolveSkew allows generously for the appliance's database clock and Stripe's disagreeing when the window
+	// starts at the checkout's creation time; a clock wrong by more than a day breaks TLS long before this.
+	resolveSkew = 24 * time.Hour
 
 	metaKey = "onegate_client_ref"
 )
@@ -553,7 +556,7 @@ func (a *Adapter) QueryStatus(ctx context.Context, q payment.StatusQuery) (payme
 	}
 	sid := strings.TrimSpace(q.ProviderSessionRef)
 	if sid == "" {
-		found, id, err := a.resolveByClientRef(ctx, key, q.ClientRef)
+		found, id, err := a.resolveByClientRef(ctx, key, q.ClientRef, q.CreatedAt)
 		if err != nil {
 			return payment.StatusResult{}, err
 		}
@@ -768,11 +771,18 @@ func (a *Adapter) listAll(ctx context.Context, key, path string, f url.Values, e
 // resolveByClientRef: listing is strongly consistent and covers sessions with no PaymentIntent (created lazily); the
 // metadata search is supplementary. found=false only when the list was read to its end within the window and the search
 // found nothing.
-func (a *Adapter) resolveByClientRef(ctx context.Context, key, clientRef string) (bool, string, error) {
+//
+// The window starts at the checkout's creation (less resolveSkew) when it is known (audit P6 L3): the client
+// reference did not exist before then, and a 30-day window cannot be listed within the page bound on a busy account.
+func (a *Adapter) resolveByClientRef(ctx context.Context, key, clientRef string, createdAt time.Time) (bool, string, error) {
 	var id string
 	stop := errors.New("found")
+	from := a.now().Add(-resolveWindow)
+	if !createdAt.IsZero() && createdAt.Add(-resolveSkew).After(from) {
+		from = createdAt.Add(-resolveSkew)
+	}
 	f := url.Values{}
-	f.Set("created[gte]", strconv.FormatInt(a.now().Add(-resolveWindow).Unix(), 10))
+	f.Set("created[gte]", strconv.FormatInt(from.Unix(), 10))
 	err := a.listAll(ctx, key, "/v1/checkout/sessions", f, func(raw json.RawMessage) error {
 		var s session
 		if err := json.Unmarshal(raw, &s); err != nil {

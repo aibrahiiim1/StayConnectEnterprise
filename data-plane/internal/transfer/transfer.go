@@ -7,6 +7,7 @@ package transfer
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -37,6 +38,9 @@ var (
 	ErrNoGracePackage = errors.New("transfer: no eligible no-posting package at the destination")
 	ErrNotAuthorized  = errors.New("transfer: an operator and a bounded reason are required")
 )
+
+// errPreviewUnavailable is the blocker shown when a preview check could not be read.
+const errPreviewUnavailable = "transfer: the transfer could not be checked right now; try again"
 
 type Store struct{ pool *pgxpool.Pool }
 
@@ -139,7 +143,9 @@ func (s *Store) blocker(ctx context.Context, tenant, site, fromStay, toStay, fro
 		       (SELECT count(*) FROM iam_v2.entitlements
 		         WHERE tenant_id=$1 AND site_id=$2 AND stay_id=$4 AND status IN ('PENDING','ACTIVE','SUSPENDED'))`,
 		tenant, site, fromStay, toStay).Scan(&liveSource, &liveDest); err != nil {
-		return err.Error()
+		// Audit P6 L11: a fixed message for the operator; the database's text goes to the log only.
+		slog.Warn("transfer preview: live access could not be counted", "err", err)
+		return errPreviewUnavailable
 	}
 	if liveSource == 0 {
 		return ErrSourceNotTransferable.Error()
@@ -240,7 +246,8 @@ func (s *Store) Execute(ctx context.Context, req Request) (Result, error) {
 		   AND ipr.price_minor = 0
 		   AND ipr.settlement_methods = ARRAY['NOT_REQUIRED']::text[]
 		   AND ipr.package_type IN ('CHECKOUT_GRACE','FREE_STAY','GENERAL')
-		 ORDER BY CASE ipr.package_type WHEN 'CHECKOUT_GRACE' THEN 0 WHEN 'FREE_STAY' THEN 1 ELSE 2 END
+		 ORDER BY CASE ipr.package_type WHEN 'CHECKOUT_GRACE' THEN 0 WHEN 'FREE_STAY' THEN 1 ELSE 2 END,
+		          ip.code, ipr.id -- audit P6 L11: a deterministic choice among equals
 		 LIMIT 1`, req.Tenant, req.Site).Scan(&pkgRev, &planRev); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Result{}, ErrNoGracePackage

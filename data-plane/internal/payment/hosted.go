@@ -74,6 +74,9 @@ type StatusQuery struct {
 	MerchantAccount    string
 	Mode               Mode
 	Credentials        Credentials
+	// CreatedAt is when the checkout row (and its client reference) was created; no provider session for this
+	// client reference can be older. Zero means unknown. An adapter may use it to bound a search.
+	CreatedAt time.Time
 }
 
 type StatusResult struct {

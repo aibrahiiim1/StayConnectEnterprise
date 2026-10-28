@@ -2,14 +2,14 @@ package posting
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/postinghandoff"
 )
 
 // Engine creates postings under the fail-closed gate and executes them through per-interface outbox lanes.
@@ -254,11 +254,9 @@ SELECT a.id::text, a.internal_posting_id::text, a.pms_interface_id::text, o.id::
 	return n, nil
 }
 
-// psHash must equal internal/postinghandoff.BodyHash for the same body.
-func psHash(body string) string {
-	s := sha256.Sum256([]byte(body))
-	return hex.EncodeToString(s[:])
-}
+// psHash is the hand-off's own command identity, shared rather than copied (audit P6 CC2): pmsd checks the
+// attempt's recorded hash against postinghandoff.BodyHash.
+func psHash(body string) string { return postinghandoff.BodyHash(body) }
 
 // presendAbortReason names the pre-send failures that end the charge as definitely not posted; anything else
 // (interface lifecycle, onboarding, currency) only declines and leaves the work queued.
@@ -325,6 +323,10 @@ func (e *Engine) decline(ctx context.Context, tx pgx.Tx, out *Outcome, claim *Cl
 //	sent, no matched PA     -> UNKNOWN; HELD_RECOVERY and nothing retries it (no timer, backoff or second P#)
 //	                           until an audited CONFIRM_NOT_POSTED_RETRY, which the database requires for attempt 2
 func (e *Engine) settle(ctx context.Context, claim *Claim, attemptID string, out Outcome, pa *PA, sendErr error) (Outcome, error) {
+	// Audit P6 L8: the outcome of bytes already on the wire is recorded even when the worker is stopping; a
+	// cancelled context here would leave an acknowledged charge SENDING, and recovery would make it UNKNOWN.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), settleTimeout)
+	defer cancel()
 	tx, err := e.repo.pool.Begin(ctx)
 	if err != nil {
 		return out, fail(ErrRepo, "could not begin the settlement transaction")

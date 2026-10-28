@@ -2,18 +2,14 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
+	"errors"
 	"log/slog"
-	"net"
-	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
-
-	"strconv"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -27,20 +23,24 @@ import (
 
 type cfg struct {
 	DBURL        string
-	ScdSocket    string
 	TickSeconds  int
 	TenantID     string
 	ApplianceID  string
 	LegacyBridge string
 }
 
-func loadCfg() cfg {
-	return cfg{
-		DBURL:        envOr("ACCTD_DB_URL", "postgres://stayconnect:stayconnect@127.0.0.1:5432/stayconnect?sslmode=disable"),
-		ScdSocket:    envOr("ACCTD_SCD_SOCKET", "/run/stayconnect/scd.sock"),
-		TickSeconds:  tickSeconds(os.Getenv),
+// loadCfg requires ACCTD_DB_URL (audit P6 L14): a built-in fallback carried a published password and turned
+// TLS off, so a missing env file silently connected with development credentials.
+func loadCfg(getenv func(string) string) (cfg, error) {
+	c := cfg{
+		DBURL:        getenv("ACCTD_DB_URL"),
+		TickSeconds:  tickSeconds(getenv),
 		LegacyBridge: envOr("ACCTD_LEGACY_BRIDGE", "br-lan"),
 	}
+	if c.DBURL == "" {
+		return c, errors.New("ACCTD_DB_URL is not set; acctd has no built-in database URL")
+	}
+	return c, nil
 }
 func envOr(k, d string) string {
 	if v := os.Getenv(k); v != "" {
@@ -77,21 +77,12 @@ func tickSeconds(getenv func(string) string) int {
 	return n
 }
 
-type snapshot map[string]snapEntry
-
-type snapEntry struct {
-	BytesUp   uint64
-	BytesDown uint64
-}
-
 type acctd struct {
 	db           *pgxpool.Pool
 	shp          *shape.Client
-	scd          *http.Client
 	tenantID     string
 	applID       string
 	legacyBridge string
-	prev         snapshot
 	p3           *phase3 // nil while dark
 }
 
@@ -101,7 +92,11 @@ func main() {
 
 	startupbackoff.Guard("acctd")
 
-	c := loadCfg()
+	c, err := loadCfg(os.Getenv)
+	if err != nil {
+		slog.Error("acctd: refusing to start", "err", err)
+		os.Exit(1)
+	}
 
 	rootCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -120,7 +115,7 @@ func main() {
 		return
 	}
 	slog.Info("acctd identity resolved", "tenant_id", c.TenantID, "appliance_id", c.ApplianceID)
-	go watchAssignmentReexec(rootCtx, asgStore)
+	go watchAssignmentReexec(rootCtx, asgStore, assignedGen)
 
 	pool, err := pgxpool.New(rootCtx, c.DBURL)
 	if err != nil {
@@ -132,11 +127,9 @@ func main() {
 	a := &acctd{
 		db:           pool,
 		shp:          shape.New(),
-		scd:          newUnixClient(c.ScdSocket),
 		tenantID:     c.TenantID,
 		applID:       c.ApplianceID,
 		legacyBridge: c.LegacyBridge,
-		prev:         snapshot{},
 	}
 
 	// The Phase-3 arm exists only when its flags are on; while dark p3 is nil and every call on it is a no-op.
@@ -156,7 +149,7 @@ func main() {
 
 	// Plans are scoped to this appliance and assignment; netd checks them against its own copy.
 	p3scope := planScope{TenantID: c.TenantID, SiteID: assignedSite, ApplianceID: c.ApplianceID,
-		AssignmentGe: assignedGen}
+		AssignmentGen: assignedGen}
 	if rec, err := asgStore.Load(); err == nil && rec != nil && rec.Current != nil {
 		p3scope.AssignmentID = rec.Current.AssignmentID
 	}
@@ -184,10 +177,8 @@ func main() {
 		case <-rootCtx.Done():
 			return
 		case <-tick.C:
-			if err := a.loop(rootCtx); err != nil {
-				slog.Error("loop", "err", err)
-			}
-			// Order matters: measure first so this tick's usage is attributed before anything is closed out,
+			// Phase 3 (phase3.accountingPass) is the sole accounting writer, so two writers can never disagree
+			// about one guest's usage. Order matters: measure first so this tick's usage is attributed before anything is closed out,
 			// then enforce expiry, then submit the plan to netd. All are no-ops while dark.
 			now := time.Now()
 			if n := p3.accountingPass(rootCtx, a.shp, netdShaping, c.LegacyBridge, now); n > 0 {
@@ -206,46 +197,4 @@ func main() {
 			livez.Report("acctd", p3.degradedSummary())
 		}
 	}
-}
-
-func newUnixClient(socketPath string) *http.Client {
-	tr := &http.Transport{
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			var d net.Dialer
-			return d.DialContext(ctx, "unix", socketPath)
-		},
-	}
-	return &http.Client{Transport: tr, Timeout: 3 * time.Second}
-}
-
-type activeSession struct {
-	id, tid, vid       string
-	ip                 net.IP
-	bridge             string
-	dataCap            int64
-	durSec             int
-	startedAt          time.Time
-	totalUp, totalDown int64
-	voucherBytes       int64 // across all sessions of the voucher: devices share the cap
-}
-
-// loop is a no-op: Phase 3 (phase3.accountingPass) is the sole accounting writer, so two writers can never
-// disagree about one guest's usage.
-func (a *acctd) loop(ctx context.Context) error {
-	a.prev = snapshot{}
-	return nil
-}
-
-func (a *acctd) revoke(ctx context.Context, ip, reason string) {
-	body, _ := json.Marshal(map[string]string{"ip": ip, "reason": reason})
-	req, _ := http.NewRequestWithContext(ctx, "POST",
-		"http://unix/v1/sessions/revoke", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := a.scd.Do(req)
-	if err != nil {
-		slog.Error("revoke", "ip", ip, "err", err)
-		return
-	}
-	defer resp.Body.Close()
-	slog.Info("revoked", "ip", ip, "reason", reason, "status", resp.StatusCode)
 }

@@ -93,4 +93,13 @@ func TestDegradedSummaryCarriesBothProblems(t *testing.T) {
 	if !strings.Contains(got, reasonCountersUnreadable) || !strings.Contains(got, "stale_generation") {
 		t.Fatalf("a summary dropped one of two concurrent problems: %q", got)
 	}
+	// Audit P4 M3: a repeatedly failing expiry is reported alongside, and alone.
+	p.expiryDegraded = reasonExpiryStuck
+	if got := p.degradedSummary(); !strings.Contains(got, reasonExpiryStuck) || !strings.Contains(got, reasonCountersUnreadable) {
+		t.Fatalf("summary = %q", got)
+	}
+	p.acctDegraded, p.degraded = "", ""
+	if got := p.degradedSummary(); got != reasonExpiryStuck {
+		t.Fatalf("summary = %q, want only the stuck expiry", got)
+	}
 }
