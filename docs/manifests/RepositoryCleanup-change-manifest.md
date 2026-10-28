@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `d6647840580c363eeadc508a4a099bf3d8fe9769`
-- **HEAD commit:** `e3a742726846fe660f261dd72b0d4ce059c833f8`
-- **Provenance (generation HEAD = inventory_head):** `875ca812341885f5238f0eb96f85ed5d0ca6c391`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `1db439b41adbbdb41df0a45de40e818616adf5f9`
+- **Provenance (generation HEAD = inventory_head):** `1db439b41adbbdb41df0a45de40e818616adf5f9`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `docs/cleanup`
 - **Remote branch:** `origin/docs/cleanup`
 - **Changed files:** 28
@@ -12,27 +12,27 @@
 
 | Path | Classification | Git status | Domain | Workstream | Rollback | Purpose (last commit subject in range) |
 |---|---|---|---|---|---|---|
-| `CONTINUATION.md` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Docs cleanup review: the 45 historical documents restored; entry documents corrected |
+| `CONTINUATION.md` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Docs index: start from the verified handbook and installation manual; CONTINUATION names the open PR branch |
 | `README.md` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Docs cleanup review: the 45 historical documents restored; entry documents corrected |
-| `docs/README.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Docs cleanup review: the 45 historical documents restored; entry documents corrected |
+| `docs/README.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Docs index: start from the verified handbook and installation manual; CONTINUATION names the open PR branch |
 | `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0263 records the repository cleanup and its change manifest |
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0263 records the repository cleanup and its change manifest |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0263 records the repository cleanup and its change manifest |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0263 records the repository cleanup and its change manifest |
-| `docs/manifests/RepositoryCleanup-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Governance: T0263 corrected before merge (45 historical documents restored, exact counts) and its manifest |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0263 and the manifest that covers them |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0263 and the manifest that covers them |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0263 and the manifest that covers them |
+| `docs/manifests/RepositoryCleanup-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Governance: export packs at T0263 (review head) and the manifest that covers them |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0263 (review head) and the manifest that covers them |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0263 (review head) and the manifest that covers them |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0263 (review head) and the manifest that covers them |
 | `exports/chatgpt/phase-evidence/GIT_STAT_82e0ec72.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Governance: export packs at T0263 and the manifest that covers them |
-| `exports/chatgpt/phase-evidence/GIT_STAT_875ca812.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0263 and the manifest that covers them |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0263 and the manifest that covers them |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0263 and the manifest that covers them |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0263 and the manifest that covers them |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0263 and the manifest that covers them |
+| `exports/chatgpt/phase-evidence/GIT_STAT_875ca812.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Governance: export packs at T0263 (review head) and the manifest that covers them |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0263 (review head) and the manifest that covers them |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0263 (review head) and the manifest that covers them |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0263 (review head) and the manifest that covers them |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0263 (review head) and the manifest that covers them |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0263 (review head) and the manifest that covers them |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0263 and the manifest that covers them |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0263 records the repository cleanup and its change manifest |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0263 and the manifest that covers them |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0263 (review head) and the manifest that covers them |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0263 records the repository cleanup and its change manifest |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0263 and the manifest that covers them |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0263 and the manifest that covers them |
@@ -43,14 +43,14 @@
 
 ## Total diff statistics (`git diff --stat`)
 ```text
- CONTINUATION.md                                    | 101 ++++++++++----------
+ CONTINUATION.md                                    | 103 ++++++++++-----------
  README.md                                          |  63 ++++++++-----
- docs/README.md                                     |  35 ++++---
+ docs/README.md                                     |  49 ++++++----
  .../StayConnect-IAM-Phase0-Contract.md             |   2 +-
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   2 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   2 +-
  docs/context/StayConnect-IAM-Handoff.md            |   2 +-
- .../manifests/RepositoryCleanup-change-manifest.md | 103 +++++++++++++++++++++
+ .../manifests/RepositoryCleanup-change-manifest.md |  92 ++++++++++++++++++
  .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 352774 -> 352773 bytes
  .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 171615 -> 171629 bytes
  ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 44049 -> 44051 bytes
@@ -71,31 +71,20 @@
  .../StayConnect-IAM-Phase1B-Plan.md                |   2 +-
  governance/project-state.json                      |  30 +++---
  governance/transitions/T0263.json                  |  35 +++++++
- 28 files changed, 314 insertions(+), 163 deletions(-)
+ 28 files changed, 316 insertions(+), 166 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
 ```text
 M  docs/manifests/RepositoryCleanup-change-manifest.md
-M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
-M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
-M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-D  exports/chatgpt/phase-evidence/GIT_STAT_79205d50.txt
-A  exports/chatgpt/phase-evidence/GIT_STAT_875ca812.txt
-M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
-M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/phase1b-planning/MANIFEST.md
-M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
-M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
-M  exports/chatgpt/stayconnectenterprise/MIGRATION_RUNBOOK.md
-M  exports/chatgpt/stayconnectenterprise/OFFLINE_OPERATION.md
-M  exports/chatgpt/stayconnectenterprise/SYSTEM_OVERVIEW.md
-M  exports/chatgpt/stayconnectenterprise/TARGET_ARCHITECTURE.md
+M  governance/project-state.json
+M  governance/transitions/T0263.json
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 1db439b4 Docs index: start from the verified handbook and installation manual; CONTINUATION names the open PR branch
+HISTORICAL: b311ea78 Governance: export packs at T0263 (review head) and the manifest that covers them
 HISTORICAL: 875ca812 Governance: T0263 corrected before merge (45 historical documents restored, exact counts) and its manifest
 HISTORICAL: e3a74272 Docs cleanup review: the 45 historical documents restored; entry documents corrected
 HISTORICAL: e2c28f32 Governance: export packs at T0263 and the manifest that covers them

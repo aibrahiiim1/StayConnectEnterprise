@@ -27,8 +27,8 @@
   "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
   "base": "d6647840580c363eeadc508a4a099bf3d8fe9769",
   "base_note": "Master after the merge of PR #261.",
-  "head": "e3a74272",
-  "head_note": "The review commit of branch docs/cleanup (after the first-pass commit f7a12168, whose deletions it restores). Governance commits follow it.",
+  "head": "1db439b4",
+  "head_note": "The last documentation commit of branch docs/cleanup (after the first-pass commit f7a12168, whose deletions e3a74272 restores). Governance commits follow it.",
   "previous_delivery": "T0262",
   "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE.",
   "revision": "Corrected before merge in PR #262: the first version stated 40 manifests and that removing them lost nothing; the review restored the 45 deleted files and recorded the exact counts."
