@@ -26,8 +26,17 @@ func otpDB(t *testing.T) *pgxpool.Pool {
 		t.Fatalf("connect: %v", err)
 	}
 	t.Cleanup(func() { db.Close() })
-	if _, err := db.Exec(context.Background(), `TRUNCATE auth_otps`); err != nil {
+	if _, err := db.Exec(context.Background(), `TRUNCATE auth_otps CASCADE`); err != nil {
 		t.Fatalf("reset (schema applied?): %v", err)
+	}
+	// The full schema requires the tenant and the active key generation the rows reference.
+	if _, err := db.Exec(context.Background(), `INSERT INTO tenants (id, slug, name) VALUES ($1::uuid, 'otp-test', 'OTP test')
+	     ON CONFLICT (id) DO NOTHING`, otpTenant); err != nil {
+		t.Fatalf("seed tenant: %v", err)
+	}
+	if _, err := db.Exec(context.Background(), `INSERT INTO otp_hmac_key_generations (generation, active) VALUES (1, true)
+	     ON CONFLICT (generation) DO NOTHING`); err != nil {
+		t.Fatalf("seed key generation: %v", err)
 	}
 	return db
 }
@@ -67,10 +76,10 @@ func TestKeyedIssueThenVerify(t *testing.T) {
 	if strings.Contains(stored, ":") || len(stored) != 64 {
 		t.Fatalf("keyed digest must be a bare 64-hex HMAC, got %q", stored)
 	}
-	if _, err := Verify(ctx, db, ring, iss.ChallengeID, iss.Code); err != nil {
+	if _, err := verify(ctx, db, ring, iss.ChallengeID, iss.Code); err != nil {
 		t.Fatalf("keyed verify: %v", err)
 	}
-	if _, err := Verify(ctx, db, ring, iss.ChallengeID, iss.Code); err != ErrAlreadyUsed {
+	if _, err := verify(ctx, db, ring, iss.ChallengeID, iss.Code); err != ErrAlreadyUsed {
 		t.Fatalf("second verify must be ErrAlreadyUsed, got %v", err)
 	}
 }
@@ -84,7 +93,7 @@ func TestKeyedWrongCodeIncrementsAttemptsThenLocks(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < DefaultMaxAttempts; i++ {
-		if _, err := Verify(ctx, db, ring, iss.ChallengeID, "000000"); err != ErrCodeMismatch {
+		if _, err := verify(ctx, db, ring, iss.ChallengeID, "000000"); err != ErrCodeMismatch {
 			t.Fatalf("wrong attempt %d: want ErrCodeMismatch, got %v", i, err)
 		}
 	}
@@ -93,7 +102,7 @@ func TestKeyedWrongCodeIncrementsAttemptsThenLocks(t *testing.T) {
 	if attempts != DefaultMaxAttempts {
 		t.Fatalf("attempts=%d want %d", attempts, DefaultMaxAttempts)
 	}
-	if _, err := Verify(ctx, db, ring, iss.ChallengeID, iss.Code); err != ErrAttemptsExceeded {
+	if _, err := verify(ctx, db, ring, iss.ChallengeID, iss.Code); err != ErrAttemptsExceeded {
 		t.Fatalf("after cap: want ErrAttemptsExceeded, got %v", err)
 	}
 }
@@ -112,7 +121,7 @@ func TestLegacyRowVerifiesUnderRing(t *testing.T) {
 		otpTenant, stored).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Verify(ctx, db, ring, id, code); err != nil {
+	if _, err := verify(ctx, db, ring, id, code); err != nil {
 		t.Fatalf("legacy row must verify under ring (compat window): %v", err)
 	}
 }
@@ -133,7 +142,7 @@ func TestLegacyIssueUnchangedWhenNoRing(t *testing.T) {
 	if !strings.Contains(stored, ":") {
 		t.Fatalf("legacy issue must store salt:sha256, got %q", stored)
 	}
-	if _, err := Verify(ctx, db, nil, iss.ChallengeID, iss.Code); err != nil {
+	if _, err := verify(ctx, db, nil, iss.ChallengeID, iss.Code); err != nil {
 		t.Fatalf("legacy verify: %v", err)
 	}
 }
@@ -155,7 +164,7 @@ func TestKeyedConcurrentSingleWinner(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := Verify(ctx, db, ring, iss.ChallengeID, iss.Code); err == nil {
+			if _, err := verify(ctx, db, ring, iss.ChallengeID, iss.Code); err == nil {
 				atomic.AddInt64(&wins, 1)
 			}
 		}()
