@@ -551,11 +551,19 @@ func main() {
 		return heldCustomerID(ctx, pool, heldAssignmentDir)
 	}}
 	ident, err := idStore.LoadBound()
+	identityDamaged := errors.Is(err, identity.ErrIdentityDamaged)
+	if identityDamaged {
+		// Never re-register under a new key: that would turn this activated appliance into an unknown one. scd keeps serving
+		// the Admin Console so an operator can see and repair it.
+		slog.Error("identity: identity.json exists but its key is missing or does not match; registration stopped until it is repaired",
+			"err", err)
+		ident, err = nil, nil
+	}
 	if err != nil {
 		slog.Error("identity: load failed", "err", err)
 		os.Exit(1)
 	}
-	if ident == nil && mayRegister(c.AutoRegister, c.CtrlAPIBase, removedRec) {
+	if ident == nil && !identityDamaged && mayRegister(c.AutoRegister, c.CtrlAPIBase, removedRec) {
 		rctx, rcancel := context.WithTimeout(rootCtx, 10*time.Second)
 		ident, err = idStore.Register(rctx, c.CtrlAPIBase, nil)
 		rcancel()
@@ -691,7 +699,7 @@ func main() {
 		if raw, err := base64.RawStdEncoding.DecodeString(ident.PublicKeyB64); err == nil && len(raw) == ed25519.PublicKeySize {
 			s.identityKeyFpr = applianceauth.KeyID(ed25519.PublicKey(raw))
 		}
-	} else if mayRegister(c.AutoRegister, c.CtrlAPIBase, removedRec) {
+	} else if !identityDamaged && mayRegister(c.AutoRegister, c.CtrlAPIBase, removedRec) {
 		// Keep trying while unregistered; on success scd re-executes so every Central agent starts with the new identity (registration.go).
 		s.reg = newRegistrar(
 			func(ctx context.Context) (*identity.Identity, error) {
