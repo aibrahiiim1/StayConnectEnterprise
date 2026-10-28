@@ -677,7 +677,7 @@ MUTATIONS = [
   "governance/project-state.json",
    ("json_set", [(["next_authorized_action"],
                   "Execute to DONE the Product-Owner-authorised FUNCTIONAL-COMPLETENESS CLOSURE that D41 "
-                  "asks for, including the controlled PRE-LIVE work on 172.21.60.25 the mission names.")])),
+                  "asks for, including the controlled PRE-LIVE work on the PRE-LIVE appliance the mission names.")])),
  ("M67 closure declared while blockers still present it as the current work",
   "governance/project-state.json",
    ("json_set", [(["blockers"],
@@ -687,7 +687,7 @@ MUTATIONS = [
   "governance/project-state.json",
    ("json_set", [(["allowed_actions"],
                   ["Execute the authorised functional-completeness closure to DONE, including controlled "
-                   "work on PRE-LIVE 172.21.60.25 as the mission authorises it."])])),
+                   "work on PRE-LIVE as the mission authorises it."])])),
  # The whole list is replaced rather than one element's status, because json_set's drift message joins the
  # path with "/" and an integer index would raise a TypeError there instead of reporting drift.
  ("M69 closure declared while an activity is still AUTHORIZED_IN_PROGRESS",
