@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -456,6 +457,52 @@ func TestResolveByClientRef(t *testing.T) {
 	_, srv = worldServer(t, &world{list: `{"data":[{"id":"cs_x","client_reference_id":"sc_ffffffffffffffffffffffffffffffff"}],"has_more":true}`})
 	if _, err := adapter(srv).QueryStatus(context.Background(), query("")); err == nil {
 		t.Fatal("unbounded list proved NOT_FOUND")
+	}
+}
+
+// Audit P6 L3: on a busy account (6,000 sessions in 30 days) an ambiguous create that made no session must
+// still resolve to NOT_FOUND, by listing from the checkout's creation instead of 30 days back.
+func TestResolveByClientRefOnABusyAccount(t *testing.T) {
+	const total = 6000
+	step := 30 * 24 * time.Hour / total
+	type row struct {
+		id      string
+		created int64
+	}
+	rows := make([]row, total) // newest first, as Stripe lists
+	for i := range rows {
+		rows[i] = row{id: fmt.Sprintf("cs_busy_%d", i), created: fixedNow.Add(-time.Duration(i) * step).Unix()}
+	}
+	_, srv := newFake(t, func(w http.ResponseWriter, r *http.Request, form url.Values) {
+		switch r.URL.Path {
+		case "/v1/checkout/sessions":
+			gte, _ := strconv.ParseInt(form.Get("created[gte]"), 10, 64)
+			start := 0
+			if after := form.Get("starting_after"); after != "" {
+				for i, x := range rows {
+					if x.id == after {
+						start = i + 1
+					}
+				}
+			}
+			var data []string
+			i := start
+			for ; i < len(rows) && len(data) < 100 && rows[i].created >= gte; i++ {
+				data = append(data, fmt.Sprintf(`{"id":%q,"client_reference_id":"sc_ffffffffffffffffffffffffffffffff"}`, rows[i].id))
+			}
+			more := i < len(rows) && rows[i].created >= gte
+			fmt.Fprintf(w, `{"data":[%s],"has_more":%t}`, strings.Join(data, ","), more)
+		case "/v1/payment_intents/search":
+			fmt.Fprint(w, `{"data":[],"has_more":false}`)
+		default:
+			w.WriteHeader(404)
+		}
+	})
+	q := query("")
+	q.CreatedAt = fixedNow.Add(-time.Hour)
+	res, err := adapter(srv).QueryStatus(context.Background(), q)
+	if err != nil || res.State != payment.CheckoutNotFound {
+		t.Fatalf("busy account: %+v %v", res, err)
 	}
 }
 

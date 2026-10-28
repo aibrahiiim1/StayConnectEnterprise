@@ -567,6 +567,13 @@ func (a *Adapter) QueryStatus(ctx context.Context, q payment.StatusQuery) (payme
 	if sr != nil && t.Order.ID != 0 && t.Order.ID != sr.orderID {
 		return payment.StatusResult{}, errf("transaction does not belong to this checkout's order")
 	}
+	// Audit P6 L4: ownership must be shown, not assumed because the inquiry returned the transaction. At least
+	// one of the order fields must be present and match; otherwise fail closed.
+	ownsByRef := t.Order.MerchantOrderID != "" && t.Order.MerchantOrderID == q.ClientRef
+	ownsByOrder := sr != nil && t.Order.ID != 0 && t.Order.ID == sr.orderID
+	if !ownsByRef && !ownsByOrder {
+		return payment.StatusResult{}, errf("transaction ownership cannot be established (no order reference); manual review required")
+	}
 	txnRef := strconv.FormatInt(t.ID, 10)
 	switch {
 	case t.IsVoided:

@@ -355,7 +355,7 @@ func (e *CheckoutEngine) queryAndApply(ctx context.Context, t txnRow) error {
 		session = *t.sessionRef
 	}
 	res, qerr := ad.QueryStatus(ctx, StatusQuery{ClientRef: t.clientRef, ProviderSessionRef: session,
-		MerchantAccount: acct.MerchantRef, Mode: acct.Mode, Credentials: acct.Credentials})
+		MerchantAccount: acct.MerchantRef, Mode: acct.Mode, Credentials: acct.Credentials, CreatedAt: t.created})
 	e.bookkeep(ctx, t.id, res.State, qerr == nil)
 	e.Health.Record(acct.ID, qerr == nil)
 	if qerr != nil {
@@ -569,7 +569,7 @@ func (e *CheckoutEngine) SweepReversals(ctx context.Context, tenantID, siteID st
 			session = *t.sessionRef
 		}
 		res, qerr := ad.QueryStatus(ctx, StatusQuery{ClientRef: t.clientRef, ProviderSessionRef: session,
-			MerchantAccount: acct.MerchantRef, Mode: acct.Mode, Credentials: acct.Credentials})
+			MerchantAccount: acct.MerchantRef, Mode: acct.Mode, Credentials: acct.Credentials, CreatedAt: t.created})
 		e.bookkeep(ctx, t.id, res.State, qerr == nil)
 		if qerr == nil {
 			e.recordReversals(ctx, t, res.Events)

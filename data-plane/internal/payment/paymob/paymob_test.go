@@ -353,6 +353,24 @@ func TestStatusMapping(t *testing.T) {
 	}
 }
 
+// Audit P6 L4: a transaction whose order fields are absent is not ours just because the inquiry returned it.
+func TestTransactionWithoutOrderFieldsFailsClosed(t *testing.T) {
+	noOrder := strings.Replace(txn(`"success":true,"pending":false`),
+		`"order":{"id":98765,"merchant_order_id":"`+ref+`"},`, ``, 1)
+	for name, sref := range map[string]string{"by session": sessRef(fixedNow.Add(time.Hour)), "by client ref": ""} {
+		_, srv := statusServer(t, 200, noOrder)
+		if res, err := newAdapter(t, srv).QueryStatus(context.Background(), query(sref)); err == nil {
+			t.Errorf("%s: a transaction with no order reference mapped to %+v", name, res)
+		}
+	}
+	// One matching field is enough.
+	onlyID := strings.Replace(txn(`"success":true,"pending":false`), `,"merchant_order_id":"`+ref+`"`, ``, 1)
+	_, srv := statusServer(t, 200, onlyID)
+	if res, err := newAdapter(t, srv).QueryStatus(context.Background(), query(sessRef(fixedNow.Add(time.Hour)))); err != nil || res.State != payment.CheckoutCaptured {
+		t.Fatalf("order id alone: %+v %v", res, err)
+	}
+}
+
 func TestAmbiguousCreateResolvedByClientRef(t *testing.T) {
 	_, srv := statusServer(t, 200, txn(`"success":true,"pending":false`))
 	res, err := newAdapter(t, srv).QueryStatus(context.Background(), query(""))
