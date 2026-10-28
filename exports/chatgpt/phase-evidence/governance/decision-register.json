@@ -1188,6 +1188,19 @@
       "does_not_authorize": "Contacting retired infrastructure; altering the production Central, its PKI/trust or networking; PMS posting, LIVE payments or Go-Live; destructive database operations; rewriting Git history; deployments outside the standing authorization's exclusions.",
       "implementation": "Branch claude/vigilant-keller-sag14r, PR #263, recorded by T0265. Removed and indexed in docs/ARCHIVE.md: 43 historical delivery manifests, the backend and performance audit folders and SECURITY_HARDENING.md (consolidated into docs/AUDIT_BACKLOG.md), superseded working documents, 10 obsolete pre-split test scripts, the Phase-1B Planning Pack (and its builder; a validator now refuses its return). Consolidated: docs/networking/ (DHCP, client VLANs and SSIDs, moved network documents), user-guide/central-roles.md. CLAUDE.md compacted. Legacy PKI: no current trust dependency; workstation copy no longer held (PO); the host copies on retired or stopped hosts are not disposed because no authorized access exists from the delivery environment (current_state_facts.legacy_pki_custody).",
       "supersedes_in_part": "The standing PRE-LIVE deployment decision of 2026-09-24 (kept by D42) and D78's statement that no standing authorization exists for the test appliance."
+    },
+    {
+      "id": "D80",
+      "decided_on": "2026-10-28",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-10-28",
+      "status": "ACTIVE",
+      "title": "AUDIT REMEDIATION MISSION (2026-10-28). Remove the remaining merged temporary branch through the permitted GitHub process; reconcile legacy certificate records with the Product Owner's confirmation that the former servers have been permanently removed, without claiming unverified key destruction; evaluate every finding in docs/AUDIT_BACKLOG.md against master and fix every actionable one within approved boundaries; defer decision-dependent findings into one consolidated list; deliver through the protected PR path and merge; deploy and verify on the test appliance under D79 when appropriate.",
+      "authorization_evidence": "The Product Owner's mission of 2026-10-28 (GOAL: complete the remaining cleanup from PR #263 and comprehensively remediate the backend, performance and security audit findings in one end-to-end mission).",
+      "does_not_authorize": "A production Central deployment, active PKI changes, destructive migrations, financial transactions, PMS posting, history rewriting, Go-Live, contacting retired servers, or weakening validation. New product, architecture, security, licensing, networking, PMS or financial semantics stay Product-Owner decisions (docs/AUDIT_DECISIONS.md).",
+      "implementation": "Branch claude/vigilant-keller-sag14r, recorded by T0266: eight remediation workstreams merged; appliance migrations 0159-0161 and Central migrations 0057-0058 (additive); installer creates a new Central's CA with ctrlapi init-ca; docs/AUDIT_BACKLOG.md and docs/AUDIT_DECISIONS.md."
     }
   ]
 }
