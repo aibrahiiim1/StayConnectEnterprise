@@ -133,4 +133,11 @@ func TestSuspendResumeStateDecidedUnderLock(t *testing.T) {
 	if err := f.base.Lic.Revoke(f.ctx, doc.LicenseID); !errors.Is(err, licensing.ErrNoLicense) {
 		t.Fatalf("a second revoke is ErrNoLicense, got %v", err)
 	}
+	// Audit Phase 1 CC5: lookups compare id = $1::uuid; a value that is not a uuid names no licence.
+	if err := f.base.Lic.Revoke(f.ctx, "not-a-uuid"); !errors.Is(err, licensing.ErrNoLicense) {
+		t.Fatalf("a non-uuid licence id is ErrNoLicense, got %v", err)
+	}
+	if _, err := f.base.Lic.Reissue(f.ctx, "not-a-uuid", ""); !errors.Is(err, licensing.ErrNoLicense) {
+		t.Fatalf("reissue of a non-uuid licence id is ErrNoLicense, got %v", err)
+	}
 }

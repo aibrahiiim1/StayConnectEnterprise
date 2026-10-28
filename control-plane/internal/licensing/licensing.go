@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -27,6 +28,10 @@ func newUUID() string {
 	b[8] = (b[8] & 0x3f) | 0x80
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
+
+// uuidRe guards lookups by licence id: "id = $1::uuid" uses the primary key, where "id::text = $1" could not
+// (audit Phase 1 CC5), and a value that is not a uuid names no licence.
+var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 type Service struct {
 	DB     *pgxpool.Pool
@@ -307,8 +312,11 @@ func (s *Service) Revoke(ctx context.Context, licenseID string) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
+	if !uuidRe.MatchString(licenseID) {
+		return ErrNoLicense
+	}
 	var applianceID string
-	err = tx.QueryRow(ctx, `SELECT COALESCE(appliance_ids[1]::text,'') FROM licenses WHERE id::text = $1`, licenseID).Scan(&applianceID)
+	err = tx.QueryRow(ctx, `SELECT COALESCE(appliance_ids[1]::text,'') FROM licenses WHERE id = $1::uuid`, licenseID).Scan(&applianceID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNoLicense
 	}
@@ -322,7 +330,7 @@ func (s *Service) Revoke(ctx context.Context, licenseID string) error {
 	}
 	tag, err := tx.Exec(ctx, `
         UPDATE licenses SET status = 'revoked', revoked_at = now()
-         WHERE id::text = $1 AND status IN ('active','suspended')
+         WHERE id = $1::uuid AND status IN ('active','suspended')
     `, licenseID)
 	if err != nil {
 		return err
@@ -418,8 +426,11 @@ func (s *Service) reissueLocked(ctx context.Context, licenseID, createdBy string
 }
 
 func (s *Service) reissueTx(ctx context.Context, tx pgx.Tx, licenseID, createdBy string, mutate func(*IssueParams) error) (*lic.Document, error) {
+	if !uuidRe.MatchString(licenseID) {
+		return nil, ErrNoLicense
+	}
 	var applianceID string
-	err := tx.QueryRow(ctx, `SELECT COALESCE(appliance_ids[1]::text,'') FROM licenses WHERE id::text = $1`, licenseID).Scan(&applianceID)
+	err := tx.QueryRow(ctx, `SELECT COALESCE(appliance_ids[1]::text,'') FROM licenses WHERE id = $1::uuid`, licenseID).Scan(&applianceID)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && applianceID == "") {
 		return nil, ErrNoLicense
 	}
@@ -430,7 +441,7 @@ func (s *Service) reissueTx(ctx context.Context, tx pgx.Tx, licenseID, createdBy
 		return nil, err
 	}
 	cur, err := scanTerms(tx.QueryRow(ctx, `SELECT `+currentTermsColumns+`
-          FROM licenses WHERE id::text = $1 AND status IN ('active','suspended')`, licenseID))
+          FROM licenses WHERE id = $1::uuid AND status IN ('active','suspended')`, licenseID))
 	if err != nil {
 		return nil, err
 	}

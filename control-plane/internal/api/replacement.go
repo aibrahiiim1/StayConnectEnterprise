@@ -83,7 +83,7 @@ func (b *Base) completeReplacementIfPending(ctx context.Context, r *http.Request
 		if ver, err = b.beginTerminalDelivery(ctx, tx, oldID, assignment.StateDecommissioned, reason, false); err != nil {
 			return err
 		}
-		recordLifecycle(ctx, tx, oldID, "assigned", "retiring", actor, clientIPFromReq(r), reason)
+		recordLifecycle(ctx, tx, oldID, "assigned", "retiring", actor, clientIP(r), reason)
 		return tx.Commit(ctx)
 	}()
 	if err != nil {

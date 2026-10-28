@@ -184,11 +184,11 @@ func (b *Base) activate(w http.ResponseWriter, r *http.Request) {
 	if _, err := tx.Exec(ctx, `
         INSERT INTO appliance_assignments (appliance_id, tenant_id, site_id, operator_id, source_ip, reason)
         VALUES ($1,$2,$3,NULLIF($4,'')::uuid,$5,$6)`,
-		id, customerID, siteID, operatorID, clientIPFromReq(r), strings.TrimSpace("activate "+in.Reason)); err != nil {
+		id, customerID, siteID, operatorID, clientIP(r), strings.TrimSpace("activate "+in.Reason)); err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "assign failed")
 		return
 	}
-	recordLifecycle(ctx, tx, id, lifecycle, "assigned", email, clientIPFromReq(r), "activate "+in.Reason)
+	recordLifecycle(ctx, tx, id, lifecycle, "assigned", email, clientIP(r), "activate "+in.Reason)
 
 	ab := &AssignmentBase{Base: b, SignKey: b.AssignKey}
 	asg, err := ab.IssueTx(ctx, tx, id, assignment.StateAssigned)
@@ -363,7 +363,7 @@ func (b *Base) move(w http.ResponseWriter, r *http.Request) {
 	if _, err := tx.Exec(ctx, `
         INSERT INTO appliance_assignments (appliance_id, tenant_id, site_id, prev_tenant_id, prev_site_id, operator_id, source_ip, reason)
         VALUES ($1,$2,$3,NULLIF($4,'')::uuid,NULLIF($5,'')::uuid,NULLIF($6,'')::uuid,$7,$8)`,
-		id, in.CustomerID, in.SiteID, prevCustomer, prevSite, operatorID, clientIPFromReq(r), in.Reason); err != nil {
+		id, in.CustomerID, in.SiteID, prevCustomer, prevSite, operatorID, clientIP(r), in.Reason); err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "move failed")
 		return
 	}
@@ -390,7 +390,7 @@ func (b *Base) move(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "commit failed")
 		return
 	}
-	recordLifecycle(ctx, b.DB, id, "assigned", "assigned", email, clientIPFromReq(r), "moved: "+in.Reason)
+	recordLifecycle(ctx, b.DB, id, "assigned", "assigned", email, clientIP(r), "moved: "+in.Reason)
 	audit.Op(ctx, b.DB, r, "appliance.moved", "appliance", id, map[string]any{
 		"_tenant_id": in.CustomerID, "site_id": in.SiteID, "prev_site_id": prevSite,
 		"license_carried": carry, "new_license_id": newLicenseID, "new_license_version": newLicenseVersion,
@@ -472,7 +472,7 @@ func (b *Base) retire(w http.ResponseWriter, r *http.Request) {
 	if in.Emergency {
 		to = lifecycleForTerminal(terminal)
 	}
-	recordLifecycle(ctx, tx, id, row.lifecycle, to, email, clientIPFromReq(r), in.Reason)
+	recordLifecycle(ctx, tx, id, row.lifecycle, to, email, clientIP(r), in.Reason)
 	if err := tx.Commit(ctx); err != nil {
 		failInternal(w, r, "Retirement could not start. Try again.", err)
 		return
@@ -554,7 +554,7 @@ func (b *Base) replace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, email := actorOf(r)
-	recordLifecycle(ctx, b.DB, id, "assigned", "assigned", email, clientIPFromReq(r), "marked for replacement: "+in.Reason)
+	recordLifecycle(ctx, b.DB, id, "assigned", "assigned", email, clientIP(r), "marked for replacement: "+in.Reason)
 	audit.Op(ctx, b.DB, r, "appliance.replacement_started", "appliance", id, map[string]any{
 		"_tenant_id": deref(row.CustomerID), "site_id": deref(row.SiteID), "reason": in.Reason,
 		"window_hours": int(replacementWindow.Hours())})

@@ -223,7 +223,7 @@ func (b *Base) AckHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	recordLifecycle(ctx, tx, ident.ApplianceID, prevLifecycle, terminal, "appliance",
-		clientIPFromReq(r), "retirement acknowledged by the appliance")
+		clientIP(r), "retirement acknowledged by the appliance")
 	if err := tx.Commit(ctx); err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "ack failed")
 		return
@@ -351,10 +351,10 @@ func (b *AssignmentBase) StrictApplianceAssignmentHandler(w http.ResponseWriter,
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	idFpr := ""
-	_ = b.DB.QueryRow(ctx, `SELECT COALESCE(public_key,'') FROM appliances WHERE id=$1`, appID).Scan(&idFpr)
+	pubB64 := ""
+	_ = b.DB.QueryRow(ctx, `SELECT COALESCE(public_key,'') FROM appliances WHERE id=$1`, appID).Scan(&pubB64)
 	if doc.ApplianceID != appID ||
-		(doc.IdentityKeyFpr != "" && doc.IdentityKeyFpr != identityFprFromPubB64(idFpr)) {
+		(doc.IdentityKeyFpr != "" && doc.IdentityKeyFpr != identityFprFromPubB64(pubB64)) {
 		logFetch(ctx, b.DB, appID, "", "denied:not-self")
 		w.WriteHeader(http.StatusNoContent)
 		return

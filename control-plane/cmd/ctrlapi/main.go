@@ -70,7 +70,8 @@ func main() {
 		case "init-ca":
 			err = runInitCA(os.Args[2:])
 		case "serve", "":
-			goto serve
+			serve()
+			return
 		default:
 			fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n", os.Args[1])
 			fmt.Fprintf(os.Stderr, "usage: ctrlapi [serve | init-ca | seed-admin | gen-vendor-key | gen-assignment-key | gen-registry-key | assignment-key verify-only|revoke | gen-mfa-key | check-mfa-key | reset-mfa | unlock-signin]\n")
@@ -82,7 +83,6 @@ func main() {
 		}
 		return
 	}
-serve:
 	serve()
 }
 

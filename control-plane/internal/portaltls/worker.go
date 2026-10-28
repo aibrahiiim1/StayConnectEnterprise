@@ -171,7 +171,7 @@ func (s *Service) processNextOrder(ctx context.Context, st *Settings, prov DNSPr
 	// attempts counts claims, so an order whose pass never finished (a crash or restart mid-order) still reaches
 	// maxAttempts instead of being reclaimed for ever (audit Phase 1 M12).
 	if attempts >= maxAttempts {
-		if _, err := tx.Exec(ctx, `UPDATE portal_certificate_orders SET status='FAILED', error=$2 WHERE id::text=$1`,
+		if _, err := tx.Exec(ctx, `UPDATE portal_certificate_orders SET status='FAILED', error=$2 WHERE id=$1::uuid`,
 			id, fmt.Sprintf("gave up after %d attempts that did not finish", attempts)); err != nil {
 			return false, err
 		}
@@ -198,7 +198,7 @@ func (s *Service) processNextOrder(ctx context.Context, st *Settings, prov DNSPr
 		rows, err := tx.Query(ctx, `
             SELECT CASE WHEN status='PROCESSING' THEN now() ELSE issued_at END
               FROM portal_certificate_orders
-             WHERE kind='ONEGATE' AND counts_new AND id::text<>$1
+             WHERE kind='ONEGATE' AND counts_new AND id<>$1::uuid
                AND (issued_at > now() - interval '7 days' OR status='PROCESSING')`, id)
 		if err != nil {
 			return false, err
@@ -219,7 +219,7 @@ func (s *Service) processNextOrder(ctx context.Context, st *Settings, prov DNSPr
 		var now time.Time
 		_ = tx.QueryRow(ctx, `SELECT now()`).Scan(&now)
 		if ok, retryAt := WeeklyCap(st.WeeklyNewLimit, counted, now); !ok {
-			if _, err := tx.Exec(ctx, `UPDATE portal_certificate_orders SET status='QUEUED', next_attempt_at=$2 WHERE id::text=$1`, id, retryAt); err != nil {
+			if _, err := tx.Exec(ctx, `UPDATE portal_certificate_orders SET status='QUEUED', next_attempt_at=$2 WHERE id=$1::uuid`, id, retryAt); err != nil {
 				return false, err
 			}
 			AppendEvent(ctx, tx, applianceID, hostname, EvOrderDeferred, ActorSystem, map[string]any{
@@ -231,7 +231,7 @@ func (s *Service) processNextOrder(ctx context.Context, st *Settings, prov DNSPr
         UPDATE portal_certificate_orders
            SET status='PROCESSING', counts_new=$2, next_attempt_at=now() + $3::interval, acme_directory_url=$4,
                attempts=attempts+1
-         WHERE id::text=$1`, id, countsNew, fmt.Sprintf("%d seconds", int(processingRent.Seconds())), dirURL); err != nil {
+         WHERE id=$1::uuid`, id, countsNew, fmt.Sprintf("%d seconds", int(processingRent.Seconds())), dirURL); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -284,7 +284,7 @@ func (s *Service) runOrder(ctx context.Context, st *Settings, prov DNSProvider, 
 	}
 	res, err := s.issue(ictx, c, prov, hostname, ChallengeNameFor(kind, hostname, challengeLabel, st.ZoneName), csrDER,
 		func(u string) {
-			_, _ = s.DB.Exec(ctx, `UPDATE portal_certificate_orders SET acme_order_url=$2 WHERE id::text=$1`, id, u)
+			_, _ = s.DB.Exec(ctx, `UPDATE portal_certificate_orders SET acme_order_url=$2 WHERE id=$1::uuid`, id, u)
 		})
 	if err != nil {
 		s.forgetAccountIfGone(ctx, err)
@@ -309,7 +309,7 @@ func (s *Service) completeOrder(ctx context.Context, id, applianceID, hostname s
         UPDATE portal_certificate_orders
            SET status='ISSUED', issued_at=now(), not_before=$2, not_after=$3, serial=$4, chain_pem=$5,
                renew_after=$6, ari_checked_at=now(), acme_order_url=$7, error=NULL
-         WHERE id::text=$1 AND status='PROCESSING'`,
+         WHERE id=$1::uuid AND status='PROCESSING'`,
 		id, res.NotBefore, res.NotAfter, res.Serial, res.ChainPEM, res.RenewAfter, res.OrderURL)
 	if err != nil {
 		slog.Error("portal tls: could not record an issued certificate", "order_id", id, "err", err)
@@ -321,7 +321,7 @@ func (s *Service) completeOrder(ctx context.Context, id, applianceID, hostname s
             UPDATE portal_certificate_orders
                SET issued_at=now(), not_before=$2, not_after=$3, serial=$4, chain_pem=$5,
                    revoke_requested_at=now(), revoke_reason=$6
-             WHERE id::text=$1`, id, res.NotBefore, res.NotAfter, res.Serial, res.ChainPEM, RevokeCessation)
+             WHERE id=$1::uuid`, id, res.NotBefore, res.NotAfter, res.Serial, res.ChainPEM, RevokeCessation)
 		AppendEvent(ctx, tx, applianceID, hostname, EvRevokeRequested, ActorSystem, map[string]any{
 			"order_id": id, "serial": res.Serial, "reason": RevokeCessation, "why": "issued after the order was cancelled"})
 		_ = tx.Commit(ctx)
@@ -330,7 +330,7 @@ func (s *Service) completeOrder(ctx context.Context, id, applianceID, hostname s
 	}
 	_, _ = tx.Exec(ctx, `
         UPDATE portal_certificate_orders SET status='SUPERSEDED'
-         WHERE appliance_id=$1 AND hostname=$2 AND status='ISSUED' AND id::text<>$3`, applianceID, hostname, id)
+         WHERE appliance_id=$1 AND hostname=$2 AND status='ISSUED' AND id<>$3::uuid`, applianceID, hostname, id)
 	AppendEvent(ctx, tx, applianceID, hostname, EvOrderIssued, ActorSystem, map[string]any{
 		"order_id": id, "serial": res.Serial, "not_after": res.NotAfter, "renew_after": res.RenewAfter})
 	if err := tx.Commit(ctx); err != nil {
@@ -348,7 +348,7 @@ func (s *Service) failOrder(ctx context.Context, id, applianceID, hostname strin
 	next := time.Now().Add(Backoff(attempts))
 	_, _ = s.DB.Exec(ctx, `
         UPDATE portal_certificate_orders SET status=$2, attempts=$3, next_attempt_at=$4, error=$5
-         WHERE id::text=$1 AND status='PROCESSING'`, id, status, attempts, next, msg)
+         WHERE id=$1::uuid AND status='PROCESSING'`, id, status, attempts, next, msg)
 	kind := EvOrderRetry
 	detail := map[string]any{"order_id": id, "attempt": attempts, "error": msg}
 	if final {
@@ -394,7 +394,7 @@ func (s *Service) processRevocations(ctx context.Context, st *Settings, applianc
 	for _, r := range work {
 		if r.notAfter != nil && r.notAfter.Before(time.Now()) {
 			// Expired: the CA would refuse to revoke it.
-			_, _ = s.DB.Exec(ctx, `UPDATE portal_certificate_orders SET status='REVOKED', revoked_at=now() WHERE id::text=$1`, r.id)
+			_, _ = s.DB.Exec(ctx, `UPDATE portal_certificate_orders SET status='REVOKED', revoked_at=now() WHERE id=$1::uuid`, r.id)
 			AppendEvent(ctx, s.DB, r.app, r.host, EvCertRevoked, ActorSystem, map[string]any{"order_id": r.id, "note": "already expired"})
 			continue
 		}
@@ -420,13 +420,13 @@ func (s *Service) processRevocations(ctx context.Context, st *Settings, applianc
 			if msg != r.prevErr {
 				AppendEvent(ctx, s.DB, r.app, r.host, EvRevokeError, ActorSystem, map[string]any{"order_id": r.id, "error": msg})
 			}
-			_, _ = s.DB.Exec(ctx, `UPDATE portal_certificate_orders SET error=$2 WHERE id::text=$1`, r.id, msg)
+			_, _ = s.DB.Exec(ctx, `UPDATE portal_certificate_orders SET error=$2 WHERE id=$1::uuid`, r.id, msg)
 			if first == nil {
 				first = err
 			}
 			continue
 		}
-		_, _ = s.DB.Exec(ctx, `UPDATE portal_certificate_orders SET status='REVOKED', revoked_at=now() WHERE id::text=$1`, r.id)
+		_, _ = s.DB.Exec(ctx, `UPDATE portal_certificate_orders SET status='REVOKED', revoked_at=now() WHERE id=$1::uuid`, r.id)
 		AppendEvent(ctx, s.DB, r.app, r.host, EvCertRevoked, ActorSystem, map[string]any{"order_id": r.id, "reason": r.reason})
 	}
 	return first
@@ -475,7 +475,7 @@ func (s *Service) refreshARI(ctx context.Context) {
 	for _, c := range work {
 		leaf, err := leafFromChain(c.chain)
 		if err != nil || c.dir == "" {
-			_, _ = s.DB.Exec(ctx, `UPDATE portal_certificate_orders SET ari_checked_at=now() WHERE id::text=$1`, c.id)
+			_, _ = s.DB.Exec(ctx, `UPDATE portal_certificate_orders SET ari_checked_at=now() WHERE id=$1::uuid`, c.id)
 			continue
 		}
 		actx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -483,12 +483,12 @@ func (s *Service) refreshARI(ctx context.Context) {
 		cancel()
 		if ok && (c.renewAfter == nil || c.renewAfter.Before(start) || c.renewAfter.After(end)) {
 			ra := pickInWindow(start, end)
-			_, _ = s.DB.Exec(ctx, `UPDATE portal_certificate_orders SET renew_after=$2, ari_checked_at=now() WHERE id::text=$1`, c.id, ra)
+			_, _ = s.DB.Exec(ctx, `UPDATE portal_certificate_orders SET renew_after=$2, ari_checked_at=now() WHERE id=$1::uuid`, c.id, ra)
 			AppendEvent(ctx, s.DB, c.app, c.host, EvARIUpdated, ActorSystem, map[string]any{
 				"order_id": c.id, "renew_after": ra, "window_start": start, "window_end": end})
 			continue
 		}
-		_, _ = s.DB.Exec(ctx, `UPDATE portal_certificate_orders SET ari_checked_at=now() WHERE id::text=$1`, c.id)
+		_, _ = s.DB.Exec(ctx, `UPDATE portal_certificate_orders SET ari_checked_at=now() WHERE id=$1::uuid`, c.id)
 	}
 }
 
