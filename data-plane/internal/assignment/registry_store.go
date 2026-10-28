@@ -2,6 +2,7 @@ package assignment
 
 import (
 	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"os"
@@ -23,11 +24,35 @@ type RegistryStore struct {
 	RootPub ed25519.PublicKey // baked-in trust anchor
 }
 
-func (s *RegistryStore) recPath() string {
-	if filepath.Ext(s.Path) == ".json" {
-		return s.Path
+func (s *RegistryStore) recPath() string { return s.Path }
+
+// adoptedMarkerPath is a one-way marker written when a signed registry is first adopted: from then on the unsigned plain trust file is never used,
+// even if the signed registry file goes missing.
+func (s *RegistryStore) adoptedMarkerPath() string { return s.Path + ".adopted" }
+
+// EverAdopted reports whether a signed registry was ever adopted on this appliance.
+func (s *RegistryStore) EverAdopted() bool {
+	_, err := os.Stat(s.adoptedMarkerPath())
+	return err == nil
+}
+
+// verifyAdopted checks an already-adopted registry: signature and expiry, but not NotBefore, which matters only at adoption. A clock that drifts back
+// must not make the current registry "not yet valid" and push trust back to an older registry.
+func verifyAdopted(rootPub ed25519.PublicKey, sr *SignedRegistry, now time.Time) (sigOK bool, reason string) {
+	if sr == nil {
+		return false, "no registry"
 	}
-	return s.Path
+	if sr.SignerKeyID != KeyID(rootPub) {
+		return false, "registry signed by an unknown root key"
+	}
+	sig, err := base64.StdEncoding.DecodeString(sr.Signature)
+	if err != nil || !ed25519.Verify(rootPub, regSigningBytes(sr), sig) {
+		return false, "registry signature invalid (modified or wrong signer)"
+	}
+	if sr.NotAfter != 0 && now.Unix() > sr.NotAfter {
+		return true, "registry expired"
+	}
+	return true, ""
 }
 
 func (s *RegistryStore) Load() *registryRecord {
@@ -58,16 +83,23 @@ func (s *RegistryStore) Current() *Registry {
 	return rec.Current.Registry()
 }
 
-// The best last-known-good key registry: current if it verifies against the baked-in root, else previous; nil if NEITHER verifies, in which case the
-// caller must refuse to trust anything rather than downgrade to an unsigned source.
+// The best last-known-good key registry: the current one if it verifies against the baked-in root (NotBefore is not re-checked once adopted). The
+// previous registry is used only when the current one's signature fails (a damaged file), never for a validity-window reason: the previous registry
+// may still list a key the current one revoked. nil means the caller must refuse to trust anything rather than downgrade to an unsigned source.
 func (s *RegistryStore) Trusted() *Registry {
 	rec := s.Load()
 	if rec == nil {
 		return nil
 	}
 	now := time.Now()
-	if rec.Current != nil && VerifyRegistry(s.RootPub, rec.Current, now) == "" {
-		return rec.Current.Registry()
+	if rec.Current != nil {
+		sigOK, reason := verifyAdopted(s.RootPub, rec.Current, now)
+		if reason == "" {
+			return rec.Current.Registry()
+		}
+		if sigOK {
+			return nil
+		}
 	}
 	if rec.Previous != nil && VerifyRegistry(s.RootPub, rec.Previous, now) == "" {
 		return rec.Previous.Registry()
@@ -118,6 +150,11 @@ func (s *RegistryStore) Adopt(sr *SignedRegistry, now time.Time) (adopted bool, 
 	if err := s.save(rec); err != nil {
 		return false, "persist failed: " + err.Error()
 	}
+	if !s.EverAdopted() {
+		if err := writeDurable(s.adoptedMarkerPath(), []byte(rec.AdoptedAt+"\n"), 0o644); err != nil {
+			return false, "persist failed: " + err.Error()
+		}
+	}
 	return true, ""
 }
 
@@ -132,9 +169,5 @@ func (s *RegistryStore) save(rec *registryRecord) error {
 	if err != nil {
 		return err
 	}
-	tmp := s.recPath() + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.recPath())
+	return writeDurable(s.recPath(), b, 0o644)
 }
