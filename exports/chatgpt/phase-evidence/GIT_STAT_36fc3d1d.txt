@@ -1,4 +1,0 @@
-commit 36fc3d1df587f24e8fb9cdc331f4708454a07ae7
-Date:   Wed Oct 28 11:07:06 2026 +0300
-
-    Governance: T0263 at the final head, with the Central record, and its manifest

@@ -18,8 +18,8 @@
 > PMS is on the WAN-side site network); **LAN** carries client connectivity and client
 > VLAN/trunk behavior. There is **no separate physical management NIC** and **no approved
 > third HA-sync NIC.** The historical "separate `mgmt` at `172.21.15.30`" and "optional
-> `hasync` third NIC" wording below is **superseded** — see `SYSTEM_OVERVIEW.md` (WAN=`ens160`,
-> LAN=`ens192`) and `STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md` (WAN/LAN). Where this file
+> `hasync` third NIC" wording below is **superseded** — see the installation manual
+> A.2–A.3 (WAN = management, LAN = Clients) and `STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md` (WAN/LAN). Where this file
 > still says "mgmt", read it as **"the WAN/management interface"**.
 
 ## 1. Interfaces & addressing (approved two-NIC model)
@@ -30,7 +30,7 @@
 | **LAN = client** (`ens192`, over `br-lan` / per-VLAN bridges) | `10.20.0.1/24` (and per-VLAN gateways) | client gateway: DHCP/DNS/captive portal/shaping + 802.1Q client VLAN trunk; option 114 → `http://10.20.0.1:8380/` (**keep the RFC 8910 stanza in the repo Kea config — it was VM-only drift once already**) |
 
 Client traffic masquerades out the **WAN** interface, never onto the client LAN. ESXi installs:
-the LAN portgroup needs Promiscuous/MAC-changes/Forged-transmits = Accept (SYSTEM_OVERVIEW §3).
+the LAN portgroup needs Promiscuous/MAC-changes/Forged-transmits = Accept (installation manual A.3).
 
 **Superseded:** a third **`hasync`** NIC (e.g. `ens224`) for VRRP/conntrackd/Postgres
 replication is **no longer part of the approved topology**. Under the two-NIC rule the HA
@@ -92,8 +92,8 @@ once, or the site installs a real cert.
 
 | Destination | Protocol | Purpose |
 |---|---|---|
-| `sc-central.echofusion.com:443` | HTTPS | token-less registration, and all appliance calls before a certificate exists |
-| `sc-central.echofusion.com:9443` | HTTPS, mutual TLS | assignment, licence, certificate renewal, hello once a certificate is issued |
+| `central.onegate.getsemantics.com:443` (the `CENTRAL_BASE` name) | HTTPS | token-less registration, and all appliance calls before a certificate exists |
+| `central.onegate.getsemantics.com:9443` (`CENTRAL_MTLS_BASE`) | HTTPS, mutual TLS | assignment, licence, certificate renewal, hello once a certificate is issued |
 | Twilio / SendGrid / Google / Stripe / Mews / Apaleo | HTTPS | only if the respective feature is enabled |
 | hotel PMS (FIAS) | TCP on the site LAN | local — not internet |
 

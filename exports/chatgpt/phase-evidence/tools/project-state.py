@@ -1220,9 +1220,9 @@ def check_closure_coherence(st):
     no service restart" while the same file recorded the Product Owner's end-to-end authorisation for exactly
     those steps. That was reconciled forward. The mirror image then survived every gate: after the closure
     had actually completed, `next_authorized_action` still said "Execute to DONE the ... FUNCTIONAL-
-    COMPLETENESS CLOSURE ... including the controlled PRE-LIVE work on 172.21.60.25 the mission names",
+    COMPLETENESS CLOSURE ... including the controlled PRE-LIVE work on <the PRE-LIVE appliance> the mission names",
     `blockers` still said "THE CURRENT WORK IS THE FUNCTIONAL-COMPLETENESS CLOSURE", `allowed_actions` still
-    authorised "controlled work on PRE-LIVE 172.21.60.25", and functional_completeness_remaining still
+    authorised "controlled work on PRE-LIVE <the PRE-LIVE appliance>", and functional_completeness_remaining still
     carried a key literally named `known_gap_not_closed` -- all while `_state` in the same object declared
     every gap closed.
 

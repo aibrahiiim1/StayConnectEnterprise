@@ -5,14 +5,15 @@
 > DATA_OWNERSHIP.md, LICENSING_AND_ENTITLEMENTS.md,
 > [OFFLINE_OPERATION.md](OFFLINE_OPERATION.md). Central is specified by
 > CENTRAL_CONTROL_PLANE.md, which wins over this file wherever they differ.
-> The pre-refactor system is described in [SYSTEM_OVERVIEW.md](SYSTEM_OVERVIEW.md) (historical).
+> The current system is described in the system handbook; the pre-refactor system in
+> [SYSTEM_OVERVIEW.md](SYSTEM_OVERVIEW.md) (historical).
 
 > **⚠️ Corrections (2026-07-16):**
 > 1. **Appliance topology — approved two-NIC rule.** The appliance has **exactly two physical
 >    NICs: WAN and LAN.** **WAN is also the management interface;** **LAN** is the guest gateway
 >    (incl. VLAN trunk). The "separate management interface + guest interface + optional HA-sync
 >    interface" wording in §3/§4/§6/§7 below is **superseded**: management is the WAN NIC, and
->    there is **no approved third HA-sync NIC** (see `SYSTEM_OVERVIEW.md` WAN=`ens160`/LAN=`ens192`,
+>    there is **no approved third HA-sync NIC** (see the installation manual A.2–A.3,
 >    `STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md`, `DEPLOYMENT_APPLIANCE.md` §1/§7).
 > 2. **HA-sync transport is an OPEN architecture decision** under two NICs (the old design assumed
 >    a dedicated third NIC). Do not claim a WAN/LAN HA transport is implemented.
