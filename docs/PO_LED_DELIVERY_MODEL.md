@@ -120,7 +120,8 @@ Blocker:                 - NONE / exact blocker
 **Permanent Product-Owner decision D67, 2026-10-24, recorded by T0243.**
 
 When the Product Owner requests a PRE-LIVE mission, that request is the full authorization for executing it
-end to end across the PRE-LIVE appliance (`172.21.60.25`) and Central (`172.21.96.196`):
+end to end across the PRE-LIVE appliance (`172.21.60.25`) and Central (`172.21.96.196`; retired 2026-10-28 — the
+decision text is kept as recorded, and which Central a PRE-LIVE mission covers now is the Product Owner's to state):
 
 * deployments to either host, including Central releases built from master or from the mission's branch;
 * database migrations on either host;

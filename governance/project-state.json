@@ -1215,7 +1215,7 @@
     "nightly_authoritative_validation": "RETIRED by D42 (2026-09-26, T0196). From T0182 to T0195 the four gates ran a failing sentinel on every pull_request and a 06:00 Africa/Cairo orchestrator re-ran them for the single delivery candidate and merged an all-green head unattended. On 2026-09-26 the orchestrator workflow was first disabled in GitHub (disabled_manually) and PR #190 labelled nightly-hold, so no scheduled run could merge anything; T0196 then removed the workflow, tools/nightly_delivery.py, tools/nightly-status.py and scripts/ci/nightly-orchestrate.py. The first 06:00 scheduled run was therefore never observed. The record of the model is docs/NIGHTLY_AUTHORITATIVE_DELIVERY.md (superseded) and T0182-T0195.",
     "session_start_check": "None owed by the delivery model. Nothing runs unattended under D42, so there is no nightly verdict to read at session start (tools/nightly-status.py was removed by T0196). A session starts from the state of its own delivery branch and pull request.",
     "central_console_runtime_identity": {
-      "_note": "What Central (172.21.96.196) serves as its operator console, read back from /opt/stayconnect/central/DEPLOYED.json and the installed release.",
+      "_note": "HISTORICAL: the retired Central 172.21.96.196 (retired 2026-10-28), as last read back. What Central (172.21.96.196) serves as its operator console, read back from /opt/stayconnect/central/DEPLOYED.json and the installed release.",
       "source_commit": "b5775652f8b65903318f9f9289ff008888335509",
       "source_state": "clean",
       "build_id": "27FSW7HOEo9169qlvTvkV",
@@ -1227,7 +1227,7 @@
     },
     "prelive_guest_access_testing": "ENABLED on PRE-LIVE 172.21.60.25 for Product Owner testing (D43, T0197, 2026-09-26). STAYCONNECT_PHASE2_MASTER=1 and STAYCONNECT_PHASE2_PORTAL=1 in /etc/stayconnect/scd.env and portald.env; rollback copies *.bak-pre-guest-activation-20260926T193029Z (the portald.env copy removed by the retention sweep was reconstructed exactly as *-reconstructed). Live proof 2026-09-26: scripts/guest-access-e2e-test.sh 53/53 -- captive before sign-in, enforced (nft phase3_auth_ipv4) and online (generate_204 = 204, ICMP 1.1.1.1) after activation for all three methods, device limits, joining, reconnect, termination and backend-enforced method switches, with pms_postings, posting_outbox and payment_transactions unchanged. Test state reset afterwards.",
     "central_ctrlapi_runtime_identity": {
-      "_note": "The Central API binary on 172.21.96.196, read back from the host.",
+      "_note": "HISTORICAL: the retired Central 172.21.96.196 (retired 2026-10-28), as last read back. The Central API binary on 172.21.96.196, read back from the host.",
       "sha256": "1bbe9fc6b2dac97914c7689a4763b781c528d23fe9373099f6511db42ae0ef00",
       "source_commit": "b5775652f8b65903318f9f9289ff008888335509",
       "vcs_modified": false,
@@ -1239,10 +1239,19 @@
     },
     "central_host": {
       "_note": "Where OneGate Central runs. Appliances reach it by name; the address is a property of the host, the name is a property of the fleet.",
-      "address": "172.21.96.196",
-      "name": "sc-central.echofusion.com",
-      "moved": "Central moved to 172.21.96.196 on 2026-09-27 (central-export.sh --final on 150.0.0.252, central-install.sh --mode restore on the new host, release onegate-central-abda23d1f3a3). Every key, certificate and the licence database were carried over; the identity is unchanged: vendor 2fbdfcbde209ebb5, assignment 027a2c97f6c8fcdb, registry root 84655767f9834fa2, appliance Root CA D2:60:C6:EE:21:EB:D7:79:… .",
-      "name_resolution": "sc-central.echofusion.com is published on the gateway DNS (FortiGate 172.21.60.1) and points at 172.21.96.196 since 2026-09-27. PRE-LIVE's interim /etc/hosts line was removed after the switch; a restarted scd then reconnected over DNS alone (mTLS transport verified, assignment served, licence refreshed).",
+      "address": "41.128.240.133",
+      "private_address": "172.21.96.96",
+      "name": "central.onegate.getsemantics.com",
+      "recorded": "Product-Owner record, 2026-10-28: this is the current production Central; 172.21.96.196 is retired and must not be contacted.",
+      "trust_universe": "Installed fresh by central-install.sh, so it has its own vendor key, assignment key, registry root, appliance CA and internal TLS CA (installation manual Appendix 3). Appliances provisioned against the retired Central, PRE-LIVE among them, do not trust it.",
+      "release": "onegate-central-05481cb57334 (installation manual A3.7)",
+      "retired_host": {
+        "address": "172.21.96.196",
+        "name": "sc-central.echofusion.com",
+        "status": "RETIRED 2026-10-28 (Product-Owner record). Not an operational target.",
+        "history": "Central from 2026-09-27 to 2026-10-28. Central moved to 172.21.96.196 on 2026-09-27 (central-export.sh --final on 150.0.0.252, central-install.sh --mode restore on the new host, release onegate-central-abda23d1f3a3). Every key, certificate and the licence database were carried over; the identity is unchanged: vendor 2fbdfcbde209ebb5, assignment 027a2c97f6c8fcdb, registry root 84655767f9834fa2, appliance Root CA D2:60:C6:EE:21:EB:D7:79:… .",
+        "name_resolution_then": "sc-central.echofusion.com is published on the gateway DNS (FortiGate 172.21.60.1) and points at 172.21.96.196 since 2026-09-27. PRE-LIVE's interim /etc/hosts line was removed after the switch; a restarted scd then reconnected over DNS alone (mTLS transport verified, assignment served, licence refreshed)."
+      },
       "former_host": "150.0.0.252: ctrlapi, the console and Caddy stopped and disabled since the move, nothing listening on 443/9443/8080/3000. Not an operational target; not to be re-enabled (the new Central has since issued licence version 3). It still holds the encrypted Root CA backup; a checksum-verified copy (sha256 a5aa19446fb20294fb3ea1d22d42bb6668a75b39d3900a6763bf715c35bd504c) was taken off the host on 2026-09-27 for offline custody. Shred the host copy, then decommission, once the backup is confirmed on offline media."
     },
     "product_terminology": {

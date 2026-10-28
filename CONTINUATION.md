@@ -34,19 +34,18 @@ a delivery record or is cited by a record, so they stay, marked historical where
 
 | Role | Host | State |
 |---|---|---|
-| Production Central | `172.21.96.196` (`sc-central.echofusion.com`) | #256–#261 were **not deployed** to it; its running release was not read back in this period |
 | PRE-LIVE appliance | `172.21.60.25` | #256–#261 were **not deployed** to it; Go-Live not authorised |
-| Test Central (lab) | `central.onegate.getsemantics.com` — public `41.128.240.133`, private `172.21.96.96` | release `onegate-central-05481cb57334` |
-| Test appliance (lab) | `172.21.96.97` | release `onegate-appliance-d25999781b1a` (master code of #261) |
+| **Production Central** (Product-Owner record, 2026-10-28) | `central.onegate.getsemantics.com` — public `41.128.240.133`, private `172.21.96.96` | release `onegate-central-05481cb57334`; its own trust universe |
+| Former Central | `172.21.96.196` (`sc-central.echofusion.com`) | **retired 2026-10-28**; not an operational target |
+| Test appliance | `172.21.96.97` | release `onegate-appliance-d25999781b1a` (master code of #261), activated on the current Central |
 
-The test pair has its own trust universe; never point it at PRE-LIVE or the production Central, or the reverse.
+The current Central and the test appliance share one trust universe; PRE-LIVE belongs to the former Central's.
 
 ## Open, and known
 
-* **The production Central is expected not to come back from a reboot** until it applies the current
-  `central-infra.yml` (finding R1, proven on the test Central; the production host's compose file was not inspected).
-  The procedure is the installation manual F.6. A Product-Owner decision.
-* PRE-LIVE and the production Central do not yet run F1, the installer fixes or the module changes.
+* The current Central carries the R1 fix (Redis auth file out of `/tmp`; installation manual A3.7).
+* PRE-LIVE was provisioned against the retired Central and does not run F1, the installer fixes or the module changes.
+  Serving it from the current Central needs it re-provisioned in that trust universe: a Product-Owner decision.
 * Card payment and room charge execute only with their execution switches (provider calls, LIVE, PMS transmit),
   each a separate Product-Owner authorisation (manual C.12).
 * A blank-VM install of the current release was not repeated after #256 (it needs the test VM reset).
