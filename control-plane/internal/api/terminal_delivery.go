@@ -391,10 +391,14 @@ func strictMTLSSelf(w http.ResponseWriter, r *http.Request, db *pgxpool.Pool, ap
 	// NOT decimal — match that exact form or the serial check never passes.
 	certSerial := fmt.Sprintf("%x", cert.SerialNumber)
 	var n int
-	_ = db.QueryRow(r.Context(), `
+	// A failed lookup is Central's outage (503), not "certificate not active" (audit Phase 1 L7).
+	if err := db.QueryRow(r.Context(), `
         SELECT count(*) FROM appliance_certificates
          WHERE appliance_id=$1 AND fingerprint_sha256=$2 AND cert_serial=$3 AND status='active'`,
-		applianceID, fpr, certSerial).Scan(&n)
+		applianceID, fpr, certSerial).Scan(&n); err != nil {
+		failDB(w, r, "Central could not check the certificate. Try again later.", err)
+		return false
+	}
 	if n == 0 {
 		Fail(w, r, http.StatusForbidden, CodeForbidden,
 			"certificate fingerprint/serial not an active credential issued to this appliance")

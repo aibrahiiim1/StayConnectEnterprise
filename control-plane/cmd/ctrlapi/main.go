@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -196,34 +197,7 @@ func serve() {
 			case <-rootCtx.Done():
 				return
 			case <-t.C:
-				if n, err := api.ReconcileTerminalTimeouts(rootCtx, tb); err != nil {
-					slog.Warn("terminal-delivery timeout reconcile failed", "err", err)
-				} else if n > 0 {
-					slog.Warn("retirement unconfirmed (no ack within policy)", "count", n)
-				}
-				if n, err := api.ReconcileReplacements(rootCtx, tb); err != nil {
-					slog.Warn("replacement window reconcile failed", "err", err)
-				} else if n > 0 {
-					slog.Warn("replacement window elapsed (operator decision required)", "count", n)
-				}
-				if time.Since(lastPrune) >= time.Hour {
-					lastPrune = time.Now()
-					if n, err := api.PruneAssignmentFetchLog(rootCtx, tb); err != nil {
-						slog.Warn("assignment fetch log retention failed", "err", err)
-					} else if n > 0 {
-						slog.Info("assignment fetch log retention", "deleted", n)
-					}
-					if n, err := api.RevokeSupersededCertificates(rootCtx, tb); err != nil {
-						slog.Warn("superseded certificate revocation failed", "err", err)
-					} else if n > 0 {
-						slog.Info("superseded appliance certificates revoked", "count", n)
-					}
-					if done, err := api.ApplyRetention(rootCtx, tb); err != nil {
-						slog.Warn("data retention failed", "err", err)
-					} else if len(done) > 0 {
-						slog.Info("data retention applied", "done", done)
-					}
-				}
+				housekeepingPass(rootCtx, tb, &lastPrune)
 			}
 		}
 	}()
@@ -256,6 +230,7 @@ func serve() {
 		mtlsAddr := envOrDefault("CTRLAPI_MTLS_ADDR", ":9443")
 		applianceMTLSAPI := api.ApplianceMTLSRouter(pool, rdb, sharedReplay, licSvc, ca, assignKey, regRoot, ptls)
 		go func() {
+			defer recoverAndLog("mTLS listener")
 			if err := apihttp.StartMTLS(rootCtx, pool, ca, mtlsAddr, applianceMTLSAPI); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				slog.Error("mTLS listener error", "err", err)
 			}
@@ -323,6 +298,75 @@ func serve() {
 		slog.Error("server shutdown error", "err", err)
 	}
 	slog.Info("bye")
+}
+
+// housekeepingStepTimeout bounds each housekeeping statement, so one slow pass cannot hold up the others
+// (perf audit D9-M1). Retention deletes whole periods and gets longer.
+const (
+	housekeepingStepTimeout = 60 * time.Second
+	retentionStepTimeout    = 10 * time.Minute
+)
+
+// housekeepingPass runs one pass. A panic is logged and the loop carries on (audit Phase 1 L19).
+func housekeepingPass(ctx context.Context, tb *api.Base, lastPrune *time.Time) {
+	defer recoverAndLog("housekeeping")
+	step := func(name string, fn func(context.Context)) {
+		limit := housekeepingStepTimeout
+		if name == "retention" {
+			limit = retentionStepTimeout
+		}
+		sctx, cancel := context.WithTimeout(ctx, limit)
+		defer cancel()
+		defer recoverAndLog("housekeeping: " + name)
+		fn(sctx)
+	}
+	step("terminal timeouts", func(ctx context.Context) {
+		if n, err := api.ReconcileTerminalTimeouts(ctx, tb); err != nil {
+			slog.Warn("terminal-delivery timeout reconcile failed", "err", err)
+		} else if n > 0 {
+			slog.Warn("retirement unconfirmed (no ack within policy)", "count", n)
+		}
+	})
+	step("replacements", func(ctx context.Context) {
+		if n, err := api.ReconcileReplacements(ctx, tb); err != nil {
+			slog.Warn("replacement window reconcile failed", "err", err)
+		} else if n > 0 {
+			slog.Warn("replacement window elapsed (operator decision required)", "count", n)
+		}
+	})
+	if time.Since(*lastPrune) < time.Hour {
+		return
+	}
+	*lastPrune = time.Now()
+	step("fetch log retention", func(ctx context.Context) {
+		if n, err := api.PruneAssignmentFetchLog(ctx, tb); err != nil {
+			slog.Warn("assignment fetch log retention failed", "err", err)
+		} else if n > 0 {
+			slog.Info("assignment fetch log retention", "deleted", n)
+		}
+	})
+	step("superseded certificates", func(ctx context.Context) {
+		if n, err := api.RevokeSupersededCertificates(ctx, tb); err != nil {
+			slog.Warn("superseded certificate revocation failed", "err", err)
+		} else if n > 0 {
+			slog.Info("superseded appliance certificates revoked", "count", n)
+		}
+	})
+	step("retention", func(ctx context.Context) {
+		if done, err := api.ApplyRetention(ctx, tb); err != nil {
+			slog.Warn("data retention failed", "err", err)
+		} else if len(done) > 0 {
+			slog.Info("data retention applied", "done", done)
+		}
+	})
+}
+
+// recoverAndLog is deferred by long-lived goroutines: a panic is logged with its stack instead of ending the
+// process (audit Phase 1 L19).
+func recoverAndLog(what string) {
+	if p := recover(); p != nil {
+		slog.Error(what+" panicked", "panic", p, "stack", string(debug.Stack()))
+	}
 }
 
 func loadRegistryRoot() ed25519.PrivateKey {

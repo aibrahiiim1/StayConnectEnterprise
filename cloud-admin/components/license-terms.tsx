@@ -36,13 +36,16 @@ export type TermsField = "maxGuests" | "validDays" | "validUntil" | "graceDays";
 
 export function termsIssue(d: TermsDraft, today: Date = new Date()): { field: TermsField; message: string } | null {
   if (!whole(d.maxGuests) || Number(d.maxGuests) < 1) return { field: "maxGuests", message: "Enter how many clients may be online at once (1 or more)." };
+  if (Number(d.maxGuests) > 1_000_000) return { field: "maxGuests", message: "Enter at most 1,000,000 clients." };
   if (d.validMode === "days") {
     if (!whole(d.validDays) || Number(d.validDays) < 1) return { field: "validDays", message: "Enter how many days the license is valid (1 or more)." };
+    if (Number(d.validDays) > 3650) return { field: "validDays", message: "A license runs at most 3650 days (10 years)." };
   } else {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(d.validUntil)) return { field: "validUntil", message: "Choose the date the license ends." };
     if (new Date(`${d.validUntil}T23:59:59Z`).getTime() <= today.getTime()) return { field: "validUntil", message: "The end date must be in the future." };
   }
   if (!whole(d.graceDays)) return { field: "graceDays", message: "Enter the grace period in whole days (0 or more)." };
+  if (Number(d.graceDays) > 365) return { field: "graceDays", message: "The grace period is at most 365 days." };
   return null;
 }
 

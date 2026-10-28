@@ -112,5 +112,27 @@ func ARIWindow(ctx context.Context, hc *http.Client, directoryURL string, cert *
 		v.SuggestedWindow.Start.IsZero() || v.SuggestedWindow.End.Before(v.SuggestedWindow.Start) {
 		return start, end, false
 	}
-	return v.SuggestedWindow.Start, v.SuggestedWindow.End, true
+	return clampARIWindow(v.SuggestedWindow.Start, v.SuggestedWindow.End, cert.NotAfter)
+}
+
+// ariMinLead is how long before expiry a renewal must start at the latest, whatever the CA suggests.
+const ariMinLead = 7 * 24 * time.Hour
+
+// clampARIWindow ignores a window ending after the certificate expires and keeps the window no later than
+// ariMinLead before expiry (audit Phase 1 L17).
+func clampARIWindow(start, end, notAfter time.Time) (time.Time, time.Time, bool) {
+	if end.After(notAfter) {
+		return start, end, false
+	}
+	latest := notAfter.Add(-ariMinLead)
+	if start.After(latest) {
+		start = latest
+	}
+	if end.After(latest) {
+		end = latest
+	}
+	if end.Before(start) {
+		end = start
+	}
+	return start, end, true
 }

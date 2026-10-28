@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -29,15 +28,34 @@ type Service struct {
 	// Overrides names the test-only environment overrides in force; shown to operators.
 	Overrides []string
 
-	acmeMu sync.Mutex // one ACME conversation at a time: orders, revocations, account registration
-	nudge  chan struct{}
+	// acmeSem allows one ACME conversation at a time (orders, revocations, account registration). It is a
+	// one-slot channel rather than a mutex so a request path can give up when its deadline passes instead of
+	// hanging behind a whole order (audit Phase 1 M13).
+	acmeSem chan struct{}
+	nudge   chan struct{}
 }
+
+// ErrACMEBusy: another ACME conversation is running and the caller's deadline passed while waiting.
+var ErrACMEBusy = errors.New("Central is busy with another certificate operation; try again in a few minutes")
+
+// acquireACME waits for the ACME slot until ctx ends.
+func (s *Service) acquireACME(ctx context.Context) error {
+	select {
+	case s.acmeSem <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ErrACMEBusy
+	}
+}
+
+func (s *Service) releaseACME() { <-s.acmeSem }
 
 func New(db *pgxpool.Pool, opts Options) *Service {
 	s := &Service{
 		DB: db, Opts: opts, Secrets: Secrets{Dir: opts.SecretsDir},
-		HTTP:  &http.Client{Timeout: 20 * time.Second},
-		nudge: make(chan struct{}, 1),
+		HTTP:    &http.Client{Timeout: 20 * time.Second},
+		nudge:   make(chan struct{}, 1),
+		acmeSem: make(chan struct{}, 1),
 	}
 	s.NewProvider = s.defaultProvider
 	return s

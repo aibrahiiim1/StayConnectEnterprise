@@ -78,6 +78,12 @@ func isDBError(err error) bool {
 		errors.Is(err, context.DeadlineExceeded) || pgconn.Timeout(err)
 }
 
+// failDB answers 503 for a failed read and logs the cause: an outage is not an empty page (audit Phase 1 L7).
+func failDB(w http.ResponseWriter, r *http.Request, msg string, err error) {
+	slog.Warn(msg, "path", r.URL.Path, "trace_id", middleware.GetReqID(r.Context()), "err", err)
+	Fail(w, r, http.StatusServiceUnavailable, "unavailable", msg)
+}
+
 func isUniqueViolation(err error) bool {
 	var pe *pgconn.PgError
 	return errors.As(err, &pe) && pe.Code == "23505"

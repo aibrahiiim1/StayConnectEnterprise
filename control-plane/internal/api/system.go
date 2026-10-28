@@ -6,11 +6,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/stayconnect/enterprise/control-plane/internal/assignment"
 	"github.com/stayconnect/enterprise/control-plane/internal/audit"
@@ -99,108 +102,144 @@ func (b *Base) patchSecurityAlert(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, map[string]any{"id": id, "status": in.Status, "from": prev})
 }
 
-// trust returns public material and fingerprints only; never a private key or certificate PEM.
+// trust returns public material and fingerprints only; never a private key or certificate PEM. A failed query
+// is a 503, never a page of empty sections (audit Phase 1 L7).
 func (b *Base) trust(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := DBCtx(r)
 	defer cancel()
+	fail := func(err error) {
+		slog.Warn("trust page query failed", "err", err)
+		Fail(w, r, http.StatusServiceUnavailable, "unavailable", "Central could not read its trust records. Try again in a moment.")
+	}
 
 	cas := []map[string]any{}
-	if rows, err := b.DB.Query(ctx, `
-        SELECT version, subject, COALESCE(key_fingerprint,''), active, cert_pem FROM appliance_ca_versions ORDER BY version`); err == nil {
-		for rows.Next() {
-			var ver int
-			var subject, keyFpr, pemText string
-			var active bool
-			if rows.Scan(&ver, &subject, &keyFpr, &active, &pemText) != nil {
-				continue
-			}
-			kind := "intermediate"
-			if ver == 0 {
-				kind = "root"
-			}
-			var notAfter *time.Time
-			var fpr *string
-			if block, _ := pem.Decode([]byte(pemText)); block != nil {
-				sum := sha256.Sum256(block.Bytes)
-				f := hex.EncodeToString(sum[:])
-				fpr = &f
-				if c, err := x509.ParseCertificate(block.Bytes); err == nil {
-					na := c.NotAfter
-					notAfter = &na
-				}
-			}
-			cas = append(cas, map[string]any{"version": ver, "kind": kind, "subject": subject,
-				"fingerprint_sha256": fpr, "key_fingerprint": keyFpr, "active": active, "not_after": notAfter})
+	rows, err := b.DB.Query(ctx, `
+        SELECT version, subject, COALESCE(key_fingerprint,''), active, cert_pem FROM appliance_ca_versions ORDER BY version`)
+	if err != nil {
+		fail(err)
+		return
+	}
+	for rows.Next() {
+		var ver int
+		var subject, keyFpr, pemText string
+		var active bool
+		if err := rows.Scan(&ver, &subject, &keyFpr, &active, &pemText); err != nil {
+			rows.Close()
+			fail(err)
+			return
 		}
-		rows.Close()
+		kind := "intermediate"
+		if ver == 0 {
+			kind = "root"
+		}
+		var notAfter *time.Time
+		var fpr *string
+		if block, _ := pem.Decode([]byte(pemText)); block != nil {
+			sum := sha256.Sum256(block.Bytes)
+			f := hex.EncodeToString(sum[:])
+			fpr = &f
+			if c, err := x509.ParseCertificate(block.Bytes); err == nil {
+				na := c.NotAfter
+				notAfter = &na
+			}
+		}
+		cas = append(cas, map[string]any{"version": ver, "kind": kind, "subject": subject,
+			"fingerprint_sha256": fpr, "key_fingerprint": keyFpr, "active": active, "not_after": notAfter})
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		fail(err)
+		return
 	}
 
 	certs := []map[string]any{}
 	var active, revoked, expiring int
-	if rows, err := b.DB.Query(ctx, `
+	rows, err = b.DB.Query(ctx, `
         SELECT c.id::text, c.appliance_id::text, a.serial, COALESCE(t.name,''), c.fingerprint_sha256, c.cert_serial,
                c.ca_version, c.not_before, c.not_after, c.status, c.created_at, c.revoked_at, COALESCE(c.revocation_reason,'')
           FROM appliance_certificates c
           JOIN appliances a ON a.id = c.appliance_id
           LEFT JOIN tenants t ON t.id = a.tenant_id
-         ORDER BY c.created_at DESC LIMIT 500`); err == nil {
-		now := time.Now()
-		for rows.Next() {
-			var id, appID, serial, cust, fpr, cser, status, reason string
-			var caVer int
-			var nb, na, created time.Time
-			var revokedAt *time.Time
-			if rows.Scan(&id, &appID, &serial, &cust, &fpr, &cser, &caVer, &nb, &na, &status, &created, &revokedAt, &reason) != nil {
-				continue
-			}
-			switch status {
-			case "active":
-				active++
-				if na.Sub(now) <= 30*24*time.Hour {
-					expiring++
-				}
-			case "revoked":
-				revoked++
-			}
-			certs = append(certs, map[string]any{"id": id, "appliance_id": appID, "serial": serial,
-				"customer_name": strPtr(cust), "fingerprint_sha256": fpr, "cert_serial": cser, "ca_version": caVer,
-				"not_before": nb, "not_after": na, "status": status, "created_at": created,
-				"revoked_at": revokedAt, "revocation_reason": strPtr(reason)})
+         ORDER BY c.created_at DESC LIMIT 500`)
+	if err != nil {
+		fail(err)
+		return
+	}
+	now := time.Now()
+	for rows.Next() {
+		var id, appID, serial, cust, fpr, cser, status, reason string
+		var caVer int
+		var nb, na, created time.Time
+		var revokedAt *time.Time
+		if err := rows.Scan(&id, &appID, &serial, &cust, &fpr, &cser, &caVer, &nb, &na, &status, &created, &revokedAt, &reason); err != nil {
+			rows.Close()
+			fail(err)
+			return
 		}
-		rows.Close()
+		switch status {
+		case "active":
+			active++
+			if na.Sub(now) <= 30*24*time.Hour {
+				expiring++
+			}
+		case "revoked":
+			revoked++
+		}
+		certs = append(certs, map[string]any{"id": id, "appliance_id": appID, "serial": serial,
+			"customer_name": strPtr(cust), "fingerprint_sha256": fpr, "cert_serial": cser, "ca_version": caVer,
+			"not_before": nb, "not_after": na, "status": status, "created_at": created,
+			"revoked_at": revokedAt, "revocation_reason": strPtr(reason)})
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		fail(err)
+		return
 	}
 
 	keys := []map[string]any{}
-	if rows, err := b.DB.Query(ctx, `
+	rows, err = b.DB.Query(ctx, `
         SELECT k.key_id, k.public_key, k.state, k.activated_at, k.verify_only_at, k.revoked_at,
                COALESCE(k.reason,''), COALESCE(u.current_assignments, 0)
           FROM assignment_signing_keys k
           LEFT JOIN assignment_signer_usage u ON u.key_id = k.key_id
-         ORDER BY k.activated_at DESC`); err == nil {
-		for rows.Next() {
-			var keyID, state, reason string
-			var pub []byte
-			var activated time.Time
-			var verifyOnlyAt, revokedAt *time.Time
-			var deps int64
-			if rows.Scan(&keyID, &pub, &state, &activated, &verifyOnlyAt, &revokedAt, &reason, &deps) != nil {
-				continue
-			}
-			sum := sha256.Sum256(pub)
-			keys = append(keys, map[string]any{"key_id": keyID, "fingerprint": hex.EncodeToString(sum[:16]),
-				"state": state, "can_sign": assignment.CanSign(state), "can_verify": assignment.CanVerify(state),
-				"current_assignments": deps, "created_at": activated, "activated_at": activated, "verify_only_at": verifyOnlyAt,
-				"revoked_at": revokedAt, "reason": strPtr(reason)})
+         ORDER BY k.activated_at DESC`)
+	if err != nil {
+		fail(err)
+		return
+	}
+	for rows.Next() {
+		var keyID, state, reason string
+		var pub []byte
+		var activated time.Time
+		var verifyOnlyAt, revokedAt *time.Time
+		var deps int64
+		if err := rows.Scan(&keyID, &pub, &state, &activated, &verifyOnlyAt, &revokedAt, &reason, &deps); err != nil {
+			rows.Close()
+			fail(err)
+			return
 		}
-		rows.Close()
+		sum := sha256.Sum256(pub)
+		keys = append(keys, map[string]any{"key_id": keyID, "fingerprint": hex.EncodeToString(sum[:16]),
+			"state": state, "can_sign": assignment.CanSign(state), "can_verify": assignment.CanVerify(state),
+			"current_assignments": deps, "created_at": activated, "activated_at": activated, "verify_only_at": verifyOnlyAt,
+			"revoked_at": revokedAt, "reason": strPtr(reason)})
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		fail(err)
+		return
 	}
 
 	var registry any
 	var regVersion int64
 	var regIssued time.Time
-	if err := b.DB.QueryRow(ctx, `SELECT registry_version, issued_at FROM assignment_registry WHERE is_current LIMIT 1`).
-		Scan(&regVersion, &regIssued); err == nil {
+	switch err := b.DB.QueryRow(ctx, `SELECT registry_version, issued_at FROM assignment_registry WHERE is_current LIMIT 1`).
+		Scan(&regVersion, &regIssued); {
+	case err == nil:
 		registry = map[string]any{"version": regVersion, "issued_at": regIssued}
+	case !errors.Is(err, pgx.ErrNoRows):
+		fail(err)
+		return
 	}
 
 	WriteJSON(w, http.StatusOK, map[string]any{

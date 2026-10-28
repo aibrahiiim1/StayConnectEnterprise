@@ -77,8 +77,18 @@ func (s *Service) CreateOrder(ctx context.Context, applianceID string, in OrderR
 		return nil, &Refusal{Status: http.StatusConflict, Code: "order_open", Message: "an order is already open for this hostname",
 			Extra: map[string]any{"order_id": id}}
 	}
+	// The daily cap is counted and the order inserted in one transaction under a per-appliance lock, so
+	// concurrent requests cannot all pass the count (audit Phase 1 L18).
+	tx, err := s.DB.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('portal_tls_orders'), hashtext($1))`, applianceID); err != nil {
+		return nil, err
+	}
 	var today int
-	if err := s.DB.QueryRow(ctx, `SELECT count(*) FROM portal_certificate_orders WHERE appliance_id=$1 AND created_at > now() - interval '24 hours'`,
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM portal_certificate_orders WHERE appliance_id=$1 AND created_at > now() - interval '24 hours'`,
 		applianceID).Scan(&today); err != nil {
 		return nil, err
 	}
@@ -87,9 +97,12 @@ func (s *Service) CreateOrder(ctx context.Context, applianceID string, in OrderR
 	}
 
 	var id string
-	err = s.DB.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
         INSERT INTO portal_certificate_orders (appliance_id, hostname, kind, csr_der)
         VALUES ($1,$2,$3,$4) RETURNING id::text`, applianceID, hostname, kind, csr.Raw).Scan(&id)
+	if err == nil {
+		err = tx.Commit(ctx)
+	}
 	if isUniqueViolation(err) {
 		if oid, ok := s.openOrder(ctx, applianceID, hostname); ok {
 			return nil, &Refusal{Status: http.StatusConflict, Code: "order_open", Message: "an order is already open for this hostname",

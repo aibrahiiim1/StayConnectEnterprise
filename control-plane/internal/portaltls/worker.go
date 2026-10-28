@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"sort"
 	"time"
 
@@ -56,7 +57,7 @@ func (s *Service) Run(ctx context.Context) {
 	t := time.NewTicker(WorkerInterval)
 	defer t.Stop()
 	for {
-		s.Tick(ctx)
+		s.safeTick(ctx)
 		select {
 		case <-ctx.Done():
 			return
@@ -64,6 +65,16 @@ func (s *Service) Run(ctx context.Context) {
 		case <-s.nudge:
 		}
 	}
+}
+
+// safeTick runs one pass; a panic is logged and the worker carries on with the next pass (audit Phase 1 L19).
+func (s *Service) safeTick(ctx context.Context) {
+	defer func() {
+		if p := recover(); p != nil {
+			slog.Error("portal tls: worker pass panicked; continuing", "panic", p, "stack", string(debug.Stack()))
+		}
+	}()
+	s.Tick(ctx)
 }
 
 func (s *Service) Tick(ctx context.Context) {
@@ -77,9 +88,13 @@ func (s *Service) Tick(ctx context.Context) {
 		return
 	}
 	s.syncAllDNS(ctx, prov)
-	s.acmeMu.Lock()
-	_ = s.processRevocations(ctx, &st, "")
-	s.acmeMu.Unlock()
+	if s.acquireACME(ctx) != nil {
+		return
+	}
+	func() {
+		defer s.releaseACME()
+		_ = s.processRevocations(ctx, &st, "")
+	}()
 	for i := 0; i < 20 && ctx.Err() == nil; i++ {
 		worked, err := s.processNextOrder(ctx, &st, prov)
 		if err != nil {
@@ -107,11 +122,19 @@ func (s *Service) syncAllDNS(ctx context.Context, prov DNSProvider) {
 	}
 	var work []hostRow
 	for rows.Next() {
-		if h, err := scanHost(rows); err == nil {
-			work = append(work, h)
+		h, err := scanHost(rows)
+		if err != nil {
+			rows.Close()
+			slog.Warn("portal tls: DNS work row unreadable", "err", err)
+			return
 		}
+		work = append(work, h)
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		slog.Warn("portal tls: DNS work query failed", "err", err)
+		return
+	}
 	for _, h := range work {
 		if ctx.Err() != nil {
 			return
@@ -145,6 +168,17 @@ func (s *Service) processNextOrder(ctx context.Context, st *Settings, prov DNSPr
 	if err != nil {
 		return false, err
 	}
+	// attempts counts claims, so an order whose pass never finished (a crash or restart mid-order) still reaches
+	// maxAttempts instead of being reclaimed for ever (audit Phase 1 M12).
+	if attempts >= maxAttempts {
+		if _, err := tx.Exec(ctx, `UPDATE portal_certificate_orders SET status='FAILED', error=$2 WHERE id::text=$1`,
+			id, fmt.Sprintf("gave up after %d attempts that did not finish", attempts)); err != nil {
+			return false, err
+		}
+		AppendEvent(ctx, tx, applianceID, hostname, EvOrderFailed, ActorSystem, map[string]any{
+			"order_id": id, "attempt": attempts, "error": "attempts did not finish (interrupted)"})
+		return true, tx.Commit(ctx)
+	}
 
 	countsNew := false
 	if kind == KindOneGate {
@@ -172,11 +206,16 @@ func (s *Service) processNextOrder(ctx context.Context, st *Settings, prov DNSPr
 		var counted []time.Time
 		for rows.Next() {
 			var t time.Time
-			if rows.Scan(&t) == nil {
-				counted = append(counted, t)
+			if err := rows.Scan(&t); err != nil {
+				rows.Close()
+				return false, err
 			}
+			counted = append(counted, t)
 		}
 		rows.Close()
+		if err := rows.Err(); err != nil {
+			return false, err
+		}
 		var now time.Time
 		_ = tx.QueryRow(ctx, `SELECT now()`).Scan(&now)
 		if ok, retryAt := WeeklyCap(st.WeeklyNewLimit, counted, now); !ok {
@@ -190,7 +229,8 @@ func (s *Service) processNextOrder(ctx context.Context, st *Settings, prov DNSPr
 	}
 	if _, err := tx.Exec(ctx, `
         UPDATE portal_certificate_orders
-           SET status='PROCESSING', counts_new=$2, next_attempt_at=now() + $3::interval, acme_directory_url=$4
+           SET status='PROCESSING', counts_new=$2, next_attempt_at=now() + $3::interval, acme_directory_url=$4,
+               attempts=attempts+1
          WHERE id::text=$1`, id, countsNew, fmt.Sprintf("%d seconds", int(processingRent.Seconds())), dirURL); err != nil {
 		return false, err
 	}
@@ -199,11 +239,15 @@ func (s *Service) processNextOrder(ctx context.Context, st *Settings, prov DNSPr
 	}
 
 	res, permanent, err := s.runOrder(ctx, st, prov, dirURL, id, applianceID, hostname, kind, csrDER)
+	// The outcome is recorded even when shutdown cancels ctx: a certificate issued just before is never lost
+	// and ordered again (audit Phase 1 M12).
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
 	if err != nil {
-		s.failOrder(ctx, id, applianceID, hostname, attempts+1, permanent, err)
+		s.failOrder(rctx, id, applianceID, hostname, attempts+1, permanent, err)
 		return true, nil
 	}
-	s.completeOrder(ctx, id, applianceID, hostname, res)
+	s.completeOrder(rctx, id, applianceID, hostname, res)
 	return true, nil
 }
 
@@ -228,8 +272,10 @@ func (s *Service) runOrder(ctx context.Context, st *Settings, prov DNSProvider, 
 		}
 		challengeLabel = d.ChallengeLabel
 	}
-	s.acmeMu.Lock()
-	defer s.acmeMu.Unlock()
+	if err := s.acquireACME(ctx); err != nil {
+		return nil, false, err
+	}
+	defer s.releaseACME()
 	ictx, cancel := context.WithTimeout(ctx, issueBudget)
 	defer cancel()
 	c, err := s.acmeClient(ictx, st, dirURL)
@@ -334,11 +380,16 @@ func (s *Service) processRevocations(ctx context.Context, st *Settings, applianc
 	var work []rv
 	for rows.Next() {
 		var r rv
-		if rows.Scan(&r.id, &r.app, &r.host, &r.chain, &r.dir, &r.reason, &r.notAfter, &r.prevErr) == nil {
-			work = append(work, r)
+		if err := rows.Scan(&r.id, &r.app, &r.host, &r.chain, &r.dir, &r.reason, &r.notAfter, &r.prevErr); err != nil {
+			rows.Close()
+			return err
 		}
+		work = append(work, r)
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
 	var first error
 	for _, r := range work {
 		if r.notAfter != nil && r.notAfter.Before(time.Now()) {
@@ -408,11 +459,18 @@ func (s *Service) refreshARI(ctx context.Context) {
 	var work []cert
 	for rows.Next() {
 		var c cert
-		if rows.Scan(&c.id, &c.app, &c.host, &c.chain, &c.dir, &c.renewAfter) == nil {
-			work = append(work, c)
+		if err := rows.Scan(&c.id, &c.app, &c.host, &c.chain, &c.dir, &c.renewAfter); err != nil {
+			rows.Close()
+			slog.Warn("portal tls: renewal-info row unreadable", "err", err)
+			return
 		}
+		work = append(work, c)
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		slog.Warn("portal tls: renewal-info query failed", "err", err)
+		return
+	}
 	hc := s.acmeHTTP()
 	for _, c := range work {
 		leaf, err := leafFromChain(c.chain)
@@ -453,12 +511,19 @@ func (s *Service) recheckDomains(ctx context.Context, st Settings) {
 	var work []item
 	for rows.Next() {
 		var it item
-		if rows.Scan(&it.d.ID, &it.d.ApplianceID, &it.d.FQDN, &it.d.VerifyToken, &it.d.ChallengeLabel, &it.d.Status,
-			&it.d.LastCheckedAt, &it.d.LastError, &it.host) == nil {
-			work = append(work, it)
+		if err := rows.Scan(&it.d.ID, &it.d.ApplianceID, &it.d.FQDN, &it.d.VerifyToken, &it.d.ChallengeLabel, &it.d.Status,
+			&it.d.LastCheckedAt, &it.d.LastError, &it.host); err != nil {
+			rows.Close()
+			slog.Warn("portal tls: domain recheck row unreadable", "err", err)
+			return
 		}
+		work = append(work, it)
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		slog.Warn("portal tls: domain recheck query failed", "err", err)
+		return
+	}
 	for _, it := range work {
 		s.checkAndRecordDomain(ctx, &it.d, it.host, st)
 	}
@@ -508,7 +573,9 @@ func (s *Service) FinalizeRelease(ctx context.Context, applianceID string) error
 			return errors.New("the portal DNS record could not be deleted: " + h.DNSError)
 		}
 	}
-	s.acmeMu.Lock()
-	defer s.acmeMu.Unlock()
+	if err := s.acquireACME(ctx); err != nil {
+		return err
+	}
+	defer s.releaseACME()
 	return s.processRevocations(ctx, &st, applianceID)
 }

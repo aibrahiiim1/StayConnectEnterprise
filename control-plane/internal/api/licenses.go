@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -39,6 +40,12 @@ type licenseTerms struct {
 const (
 	defaultValidDays = 365
 	defaultGraceDays = 30
+	// Upper bounds on signed terms: past them a duration overflows or a typo signs a licence for centuries
+	// (audit Phase 1 L10).
+	maxValidDays  = 3650
+	maxValidYears = 10
+	maxGraceDays  = 365
+	maxGuestCap   = 1_000_000
 )
 
 // params turns the request terms into issue parameters. valid_until wins over valid_days; with neither the
@@ -49,6 +56,8 @@ func (t licenseTerms) params(applianceID, createdBy string) (licensing.IssuePara
 	switch {
 	case t.MaxConcurrentOnlineGuests < 0:
 		return p, errors.New("max_concurrent_online_guests cannot be negative")
+	case t.MaxConcurrentOnlineGuests > maxGuestCap:
+		return p, fmt.Errorf("max_concurrent_online_guests must be at most %d", maxGuestCap)
 	case t.UnlimitedOnlineGuests && t.MaxConcurrentOnlineGuests != 0:
 		return p, errors.New("give either max_concurrent_online_guests or unlimited_online_guests, not both")
 	case t.MaxConcurrentOnlineGuests == 0 && !t.UnlimitedOnlineGuests:
@@ -60,11 +69,19 @@ func (t licenseTerms) params(applianceID, createdBy string) (licensing.IssuePara
 	}
 	p.Modules = ids
 	if t.GracePeriodDays != nil {
+		if *t.GracePeriodDays < 0 || *t.GracePeriodDays > maxGraceDays {
+			return p, fmt.Errorf("grace_period_days must be between 0 and %d", maxGraceDays)
+		}
 		p.GracePeriodDays = *t.GracePeriodDays
 	}
 	switch {
 	case t.ValidUntil != nil:
+		if t.ValidUntil.After(time.Now().AddDate(maxValidYears, 0, 0)) {
+			return p, fmt.Errorf("valid_until must be at most %d years from now", maxValidYears)
+		}
 		p.ValidUntil = *t.ValidUntil
+	case t.ValidDays > maxValidDays:
+		return p, fmt.Errorf("valid_days must be at most %d", maxValidDays)
 	case t.ValidDays > 0:
 		p.ValidFor = time.Duration(t.ValidDays) * 24 * time.Hour
 	case t.ValidDays < 0:

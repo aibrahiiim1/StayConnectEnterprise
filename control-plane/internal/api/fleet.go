@@ -3,12 +3,14 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 // Every appliance state in the fleet reads comes from DeriveState over facts read by queryAppliances.
@@ -99,7 +101,10 @@ func (b *Base) queryAppliances(ctx context.Context, customerID, applianceID stri
                 SELECT x.id, x.status, x.valid_until, x.grace_period_days, x.offline_grace_days,
                        x.max_concurrent_online_guests, x.license_version, COALESCE(x.modules, '{}') AS modules
                   FROM licenses x
-                 WHERE a.id = ANY(x.appliance_ids) AND x.status IN ('active','suspended','revoked')
+                 -- Every licence names exactly one appliance (licensing.IssueTx), so appliance_ids[1] matches the
+                 -- partial indexes of 0041; "= ANY" scanned every licence per appliance (perf audit D9-M2).
+                 WHERE x.appliance_ids[1] = a.id AND cardinality(x.appliance_ids) > 0
+                   AND x.status IN ('active','suspended','revoked')
                  ORDER BY (x.status IN ('active','suspended')) DESC, x.issued_at DESC
                  LIMIT 1) l ON true
          WHERE ($1 = '' OR a.tenant_id::text = $1)
@@ -237,16 +242,23 @@ func (b *Base) getAppliance(w http.ResponseWriter, r *http.Request) {
 	raw, _ := json.Marshal(row)
 	_ = json.Unmarshal(raw, &out)
 
+	// A failed read is a 503, never a page with empty sections (audit Phase 1 L7).
+	unavailable := func(err error) {
+		failDB(w, r, "Central could not read this appliance's details. Try again in a moment.", err)
+	}
 	var wan, lan, hwf, pub, certFpr string
 	var certNotAfter *time.Time
 	var replOf, replBy *string
 	var replDeadline *time.Time
-	_ = b.DB.QueryRow(ctx, `
+	if err := b.DB.QueryRow(ctx, `
         SELECT COALESCE(wan_mac,''), COALESCE(lan_mac,''), COALESCE(hardware_fingerprint,''), COALESCE(public_key,''),
                COALESCE(current_cert_fingerprint,''), cert_not_after,
                replacement_of::text, replaced_by::text, replacement_deadline
           FROM appliances WHERE id=$1`, id).
-		Scan(&wan, &lan, &hwf, &pub, &certFpr, &certNotAfter, &replOf, &replBy, &replDeadline)
+		Scan(&wan, &lan, &hwf, &pub, &certFpr, &certNotAfter, &replOf, &replBy, &replDeadline); err != nil {
+		unavailable(err)
+		return
+	}
 	if certFpr == "" {
 		certNotAfter = nil
 	}
@@ -259,13 +271,17 @@ func (b *Base) getAppliance(w http.ResponseWriter, r *http.Request) {
 	var asgVersion, ackedVersion int64
 	var asgState string
 	var asgIssued time.Time
-	if err := b.DB.QueryRow(ctx, `
+	switch err := b.DB.QueryRow(ctx, `
         SELECT version, state, issued_at, last_acked_version FROM appliance_signed_assignments WHERE appliance_id=$1`, id).
-		Scan(&asgVersion, &asgState, &asgIssued, &ackedVersion); err == nil {
+		Scan(&asgVersion, &asgState, &asgIssued, &ackedVersion); {
+	case err == nil:
 		out["assignment"] = map[string]any{"version": asgVersion, "state": asgState,
 			"signer_key_id": signerKeyID(b, ctx, id), "issued_at": asgIssued, "acked_version": ackedVersion}
-	} else {
+	case errors.Is(err, pgx.ErrNoRows):
 		out["assignment"] = nil
+	default:
+		unavailable(err)
+		return
 	}
 
 	lics, err := b.queryLicenses(ctx, licenseFilter{applianceID: id, includeSuperseded: true})
@@ -274,7 +290,12 @@ func (b *Base) getAppliance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out["licenses"] = lics
-	out["events"] = b.applianceEvents(ctx, id)
+	events, err := b.applianceEvents(ctx, id)
+	if err != nil {
+		unavailable(err)
+		return
+	}
+	out["events"] = events
 
 	if row.replacementPending || replOf != nil || replBy != nil {
 		out["replacement"] = map[string]any{"pending": row.replacementPending, "deadline": replDeadline,
@@ -292,26 +313,39 @@ func (b *Base) getAppliance(w http.ResponseWriter, r *http.Request) {
 
 // applianceEvents is the appliance's recent audit trail, newest first: {ts, action, actor_email, reason}.
 // actor_email is the operator's email, or "system" / "appliance" for actions nobody signed in for.
-func (b *Base) applianceEvents(ctx context.Context, id string) []map[string]any {
+//
+// The two conditions are separate branches of a UNION ALL so each can use its own index (migration 0058); with
+// an OR the query walked the whole audit log backwards for a quiet appliance (perf audit D9-L1). A row matching
+// both appears once.
+func (b *Base) applianceEvents(ctx context.Context, id string) ([]map[string]any, error) {
 	out := []map[string]any{}
 	rows, err := b.DB.Query(ctx, `
-        SELECT l.ts, l.action, COALESCE(o.email, l.actor_type), COALESCE(l.payload->>'reason','')
-          FROM audit_log l
-          LEFT JOIN operators o ON l.actor_type = 'operator' AND o.id::text = l.actor_id
-         WHERE (l.target_type = 'appliance' AND l.target_id = $1::text) OR l.payload->>'appliance_id' = $1::text
-         ORDER BY l.ts DESC LIMIT 50`, id)
+        WITH ev AS (
+            (SELECT ts, action, actor_type, actor_id, payload FROM audit_log
+              WHERE target_type = 'appliance' AND target_id = $1::text
+              ORDER BY ts DESC LIMIT 50)
+            UNION ALL
+            (SELECT ts, action, actor_type, actor_id, payload FROM audit_log
+              WHERE payload->>'appliance_id' = $1::text
+                AND NOT (target_type IS NOT DISTINCT FROM 'appliance' AND target_id IS NOT DISTINCT FROM $1::text)
+              ORDER BY ts DESC LIMIT 50))
+        SELECT ev.ts, ev.action, COALESCE(o.email, ev.actor_type), COALESCE(ev.payload->>'reason','')
+          FROM ev
+          LEFT JOIN operators o ON ev.actor_type = 'operator' AND o.id::text = ev.actor_id
+         ORDER BY ev.ts DESC LIMIT 50`, id)
 	if err != nil {
-		return out
+		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var at time.Time
 		var action, actor, reason string
-		if rows.Scan(&at, &action, &actor, &reason) == nil {
-			out = append(out, map[string]any{"ts": at, "action": action, "actor_email": actor, "reason": strPtr(reason)})
+		if err := rows.Scan(&at, &action, &actor, &reason); err != nil {
+			return nil, err
 		}
+		out = append(out, map[string]any{"ts": at, "action": action, "actor_email": actor, "reason": strPtr(reason)})
 	}
-	return out
+	return out, rows.Err()
 }
 
 type LicenseRow struct {
