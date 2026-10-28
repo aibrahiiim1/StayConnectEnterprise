@@ -6,9 +6,6 @@ package poststay
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/subtle"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
@@ -16,9 +13,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"golang.org/x/crypto/argon2"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/codegen"
+	"github.com/stayconnect/enterprise/data-plane/internal/passwordhash"
 	"github.com/stayconnect/enterprise/data-plane/internal/throttle"
 	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 )
@@ -35,14 +32,6 @@ const CapPostStayIdentity = "post_stay_identity"
 const (
 	pinLength = 8
 	pinMode   = codegen.ModeAlnum
-)
-
-const (
-	argonTime    = 1
-	argonMemory  = 64 * 1024
-	argonThreads = 4
-	argonKeyLen  = 32
-	argonSaltLen = 16
 )
 
 var (
@@ -80,51 +69,17 @@ func generatePIN() (string, error) {
 	return codes[0], nil
 }
 
-func hashPIN(pin string) (string, error) {
-	salt := make([]byte, argonSaltLen)
-	if _, err := rand.Read(salt); err != nil {
-		return "", err
-	}
-	key := argon2.IDKey([]byte(pin), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
-	return fmt.Sprintf("$argon2id$v=19$m=%d,t=%d,p=%d$%s$%s", argonMemory, argonTime, argonThreads,
-		base64.RawStdEncoding.EncodeToString(salt), base64.RawStdEncoding.EncodeToString(key)), nil
-}
+// The PIN is hashed with the one argon2id implementation (internal/passwordhash): same PHC format and parameters
+// (64 MiB, t=1, p=4, 16-byte salt, 32-byte key) as before, so stored hashes still verify, and the same process-wide
+// bound on concurrent hashes applies.
+func hashPIN(pin string) (string, error) { return passwordhash.Hash(pin) }
 
 // dummyHash is verified when no profile matches, so response time does not reveal whether a profile exists.
-var dummyHash = mustDummy()
-
-func mustDummy() string {
-	h, err := hashPIN("dummy-constant-work")
-	if err != nil {
-		panic("poststay: cannot build the constant-work hash: " + err.Error())
-	}
-	return h
-}
+var dummyHash = passwordhash.Dummy()
 
 func verifyPIN(pin, encoded string) bool {
-	parts := strings.Split(encoded, "$")
-	if len(parts) != 6 || parts[1] != "argon2id" {
-		return false
-	}
-	var mem uint32
-	var t, p int
-	if _, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &mem, &t, &p); err != nil {
-		return false
-	}
-	// A hostile or corrupt hash must not force huge allocations or spinning.
-	if mem < 8 || mem > 262144 || t < 1 || t > 10 || p < 1 || p > 16 {
-		return false
-	}
-	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
-	if err != nil || len(salt) < 8 || len(salt) > 64 {
-		return false
-	}
-	want, err := base64.RawStdEncoding.DecodeString(parts[5])
-	if err != nil || len(want) < 16 || len(want) > 64 {
-		return false
-	}
-	got := argon2.IDKey([]byte(pin), salt, uint32(t), mem, uint8(p), uint32(len(want)))
-	return subtle.ConstantTimeCompare(got, want) == 1
+	ok, err := passwordhash.Verify(pin, encoded)
+	return err == nil && ok
 }
 
 // NormalizePIN matches codegen.Normalize (uppercase, strip dashes/spaces/tabs). It does not fold confusable
