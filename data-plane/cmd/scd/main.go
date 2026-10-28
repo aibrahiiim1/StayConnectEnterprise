@@ -793,6 +793,7 @@ func main() {
 	// voucher codes) by the caller's identity; see admin_surface.go. After Recoverer and Timeout and before every route, so a
 	// refusal is still logged, recovered and bounded.
 	r.Use(s.peerGate)
+	r.Use(guestCapacity(maxGuestInFlight))
 	r.Get("/v1/health", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
 	r.Method("GET", "/metrics", s.met.Handler())
 	// The voucher surface lives here because the DEK does: scd is root and unix-socket only. Reveal and export recover a code in
