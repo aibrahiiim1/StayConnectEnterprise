@@ -362,6 +362,7 @@ func TestSigninProtectionBoundsMatchTheMigration(t *testing.T) {
 // The throttle counts the address Caddy sets in X-Real-IP, not a value a browser could put first in X-Forwarded-For.
 func TestClientIPPrefersTheAddressCaddySets(t *testing.T) {
 	r := httptest.NewRequest("POST", "/edge/v1/auth/login", nil)
+	r.RemoteAddr = "127.0.0.1:40000" // the appliance's proxy
 	r.Header.Set("X-Forwarded-For", "10.9.9.9, 198.51.100.7")
 	r.Header.Set("X-Real-IP", "198.51.100.7")
 	if got := clientIP(r); got != "198.51.100.7" {
@@ -370,5 +371,17 @@ func TestClientIPPrefersTheAddressCaddySets(t *testing.T) {
 	r.Header.Del("X-Real-IP")
 	if got := clientIP(r); got != "10.9.9.9" {
 		t.Fatalf("without X-Real-IP the first forwarded address is used, got %q", got)
+	}
+}
+
+// P9 L5: a peer that is not the loopback proxy cannot choose its address with forwarding headers.
+func TestClientIPIgnoresForwardingHeadersFromANonLoopbackPeer(t *testing.T) {
+	r := httptest.NewRequest("POST", "/edge/v1/auth/login", nil)
+	r.RemoteAddr = "198.51.100.4:50002"
+	r.Header.Set("X-Real-IP", "10.1.1.1")
+	r.Header.Set("X-Forwarded-For", "10.2.2.2")
+	r.Header.Set("True-Client-IP", "10.3.3.3")
+	if got := clientIP(r); got != "198.51.100.4" {
+		t.Fatalf("clientIP = %q, want the peer address", got)
 	}
 }

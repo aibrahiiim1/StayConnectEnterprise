@@ -294,10 +294,12 @@ func main() {
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
+	// No middleware.RealIP: it let a client choose RemoteAddr through True-Client-IP (audit P9 L5). clientIP trusts
+	// the proxy's X-Real-IP only from a loopback peer.
 	// No path, query or client address in the request log.
 	r.Use(reqlog.Middleware)
 	r.Use(middleware.Recoverer)
+	r.Use(limitRequestBody)
 	// 15 s for every request but the network applies, which wait for netd (route_timeout.go).
 	r.Use(routeTimeout(defaultRequestTimeout, networkApplyTimeout))
 
@@ -468,7 +470,9 @@ func main() {
 		}
 	}
 
-	srv := &http.Server{Addr: c.Addr, Handler: r, ReadHeaderTimeout: 5 * time.Second}
+	// ReadTimeout bounds a slow body (the largest is an 8 MB portal image); no WriteTimeout, backup downloads stream.
+	srv := &http.Server{Addr: c.Addr, Handler: r, ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout: 2 * time.Minute, IdleTimeout: 2 * time.Minute}
 	go func() {
 		slog.Info("edged listening", "addr", c.Addr, "site_id", c.SiteID, "version", version)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

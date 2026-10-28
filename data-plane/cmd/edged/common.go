@@ -80,6 +80,15 @@ func (s *server) auditErr(r *http.Request, action, targetType, targetID string, 
 }
 
 func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	// Forwarding headers are believed only from a loopback peer, the appliance's own proxy chain (audit P9 L5);
+	// any other peer is the client itself.
+	if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
+		return host
+	}
 	// edged sits behind Caddy. X-Real-IP comes first: the Admin Console vhost sets it from the accepted connection,
 	// so a browser cannot choose it, and the sign-in throttle counts per source address with it.
 	if rip := strings.TrimSpace(r.Header.Get("X-Real-IP")); rip != "" {
@@ -87,10 +96,6 @@ func clientIP(r *http.Request) string {
 	}
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		return strings.TrimSpace(strings.Split(xff, ",")[0])
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
 	}
 	return host
 }
