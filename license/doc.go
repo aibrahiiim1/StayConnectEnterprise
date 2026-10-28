@@ -159,6 +159,13 @@ func (d *Document) Validate() error {
 	if d.OfflineGraceDays < 0 || d.OfflineGraceDays > 365 {
 		return fmt.Errorf("offline_grace_days out of range")
 	}
+	// Central refuses more than 365; the bound also keeps the grace arithmetic in Evaluate from overflowing.
+	if d.GracePeriodDays > 365 {
+		return fmt.Errorf("grace_period_days out of range")
+	}
+	if !d.ValidFrom.IsZero() && d.ValidFrom.After(d.ValidUntil) {
+		return fmt.Errorf("valid_from must not be after valid_until")
+	}
 	if d.Status != DocActive && d.Status != DocSuspended {
 		return fmt.Errorf("unknown status %q", d.Status)
 	}

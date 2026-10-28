@@ -27,13 +27,28 @@ func NewSigner(priv ed25519.PrivateKey) *Signer {
 	return &Signer{priv: priv, keyID: KeyIDFor(priv.Public().(ed25519.PublicKey))}
 }
 
-// The private key uses Go's 64-byte Ed25519 form and mode 0600.
+// The private key uses Go's 64-byte Ed25519 form and mode 0600. An existing key file is never overwritten.
 func GenerateVendorKey(path string) (ed25519.PublicKey, error) {
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(path, priv, 0o600); err != nil {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := f.Write(priv); err != nil {
+		f.Close()
+		os.Remove(path)
+		return nil, err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		os.Remove(path)
+		return nil, err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(path)
 		return nil, err
 	}
 	return pub, nil
