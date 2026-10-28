@@ -145,3 +145,6 @@ func FormatCT(code string) string {
 
 // AnswerDeadline is the bound after which a transmitted PS with no matched PA is UNKNOWN; it is not a retry timer.
 const AnswerDeadline = 30 * time.Second
+
+// settleTimeout bounds recording an attempt's outcome, which runs detached from the worker's cancellation.
+const settleTimeout = 10 * time.Second

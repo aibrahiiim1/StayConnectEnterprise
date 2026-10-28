@@ -325,6 +325,10 @@ func (e *Engine) decline(ctx context.Context, tx pgx.Tx, out *Outcome, claim *Cl
 //	sent, no matched PA     -> UNKNOWN; HELD_RECOVERY and nothing retries it (no timer, backoff or second P#)
 //	                           until an audited CONFIRM_NOT_POSTED_RETRY, which the database requires for attempt 2
 func (e *Engine) settle(ctx context.Context, claim *Claim, attemptID string, out Outcome, pa *PA, sendErr error) (Outcome, error) {
+	// Audit P6 L8: the outcome of bytes already on the wire is recorded even when the worker is stopping; a
+	// cancelled context here would leave an acknowledged charge SENDING, and recovery would make it UNKNOWN.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), settleTimeout)
+	defer cancel()
 	tx, err := e.repo.pool.Begin(ctx)
 	if err != nil {
 		return out, fail(ErrRepo, "could not begin the settlement transaction")

@@ -317,6 +317,35 @@ func TestIntegrationPosting_HappyPathPostsOnce(t *testing.T) {
 	}
 }
 
+// Audit P6 L8: a charge the PMS acknowledged while the worker was being stopped is recorded as posted, not
+// left SENDING for recovery to turn into UNKNOWN.
+func TestIntegrationPosting_AnswerDuringShutdownIsStillRecorded(t *testing.T) {
+	p := pool(t)
+	s := seedProperty(t, p, "USD", 2)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tr := &stubTransport{answer: func(pn int64) (*PA, error) {
+		cancel() // the stop request arrives while the PS is on the wire
+		return &PA{PNumber: pn, AS: "OK"}, nil
+	}}
+	e := NewEngine(liveCfg, NewRepo(p), tr)
+	id, err := e.CreatePosting(context.Background(), s.pinned(idem(t)+"-"+s.iface))
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	out, err := e.RunOnce(ctx, s.tenant, s.site, s.iface)
+	if err != nil || out.Result != "POSTED" {
+		t.Fatalf("an acknowledged charge during shutdown must be recorded as POSTED: %+v %v", out, err)
+	}
+	st, err := NewRepo(p).ReadState(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.ExecutionState != "POSTED" || st.HasUnknownHistory {
+		t.Fatalf("read model: %+v", st)
+	}
+}
+
 // Every refusal must cost nothing: no posting, no outbox row, no P#, no bytes.
 func TestIntegrationPosting_FailClosedConsumesNothing(t *testing.T) {
 	p := pool(t)
