@@ -2,7 +2,7 @@
 
 - **Base commit:** `55c01890f02d28063b5fb72fcbd56de4126ecbc8`
 - **HEAD commit:** `STAGED-INDEX (delivery_head)`
-- **Provenance (generation HEAD = inventory_head):** `a173f4184fb269d95ec19f7fb182856f626bbdc4`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **Provenance (generation HEAD = inventory_head):** `c3b6b92c44d973ae6ab7df3ab1a979d31a815eca`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `claude/vigilant-keller-sag14r`
 - **Remote branch:** `origin/claude/vigilant-keller-sag14r`
 - **Changed files:** 476
@@ -421,22 +421,22 @@
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: generated blocks re-rendered at T0266; manifest refreshed |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: generated blocks re-rendered at T0266; manifest refreshed |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: generated blocks re-rendered at T0266; manifest refreshed |
-| `docs/manifests/AuditRemediation2-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Governance: generated blocks re-rendered at T0266; manifest refreshed |
+| `docs/manifests/AuditRemediation2-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Governance: export packs at T0266 and the manifest that covers them |
 | `docs/runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Docs: Central CA creation by ctrlapi init-ca; upgrade notes for the audit remediation (appliance E.5.1, Central 7.1) |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/GIT_STAT_801c5533.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/GIT_STAT_a173f418.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0266 and the manifest that covers them |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0266 and the manifest that covers them |
+| `exports/chatgpt/phase-evidence/GIT_STAT_801c5533.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Governance: export packs at T0266 and the manifest that covers them |
+| `exports/chatgpt/phase-evidence/GIT_STAT_a173f418.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Governance: export packs at T0266 and the manifest that covers them |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0266 and the manifest that covers them |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0266 and the manifest that covers them |
+| `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0266 and the manifest that covers them |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: generated blocks re-rendered at T0266; manifest refreshed |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0266 and the manifest that covers them |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: generated blocks re-rendered at T0266; manifest refreshed |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0266 and the manifest that covers them |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0266 and the manifest that covers them |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0266 and the manifest that covers them |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0266 and the manifest that covers them |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Audit backlog and decision list rebuilt after the remediation; governance D80/T0266 |
 | `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Audit backlog and decision list rebuilt after the remediation; governance D80/T0266 |
 | `governance/transitions/T0266.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Audit backlog and decision list rebuilt after the remediation; governance D80/T0266 |
@@ -476,8 +476,8 @@
 | `hotel-admin/test/whoami-revalidation.test.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | hotel-admin: polls pause in hidden tabs, never stack, cancel superseded pages; one shared /health (perf D8-M1, D8-L1, D8-L2, D7-M3) |
 | `license/doc.go` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Licence store integrity and fetch hardening (audit P2 H1, M2, M4 step 3, L11, L12, L13, L14, L24) |
 | `license/sign.go` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Licence store integrity and fetch hardening (audit P2 H1, M2, M4 step 3, L11, L12, L13, L14, L24) |
-| `license/store.go` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Licence store integrity and fetch hardening (audit P2 H1, M2, M4 step 3, L11, L12, L13, L14, L24) |
-| `license/store_integrity_test.go` | CREATED | `A` | tests/tooling | OTHER | rollback REMOVES it | Licence store integrity and fetch hardening (audit P2 H1, M2, M4 step 3, L11, L12, L13, L14, L24) |
+| `license/store.go` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | licence store: a damaged current.json never restores a superseded licence from the previous copy |
+| `license/store_integrity_test.go` | CREATED | `A` | tests/tooling | OTHER | rollback REMOVES it | licence store: a damaged current.json never restores a superseded licence from the previous copy |
 | `license/verify.go` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Licence store integrity and fetch hardening (audit P2 H1, M2, M4 step 3, L11, L12, L13, L14, L24) |
 | `scripts/build-appliance-binaries.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | P0-3 / X1, P3 L12: pin the Go build image by digest; refuse a devlicense appliance build |
 | `scripts/ci/apply-pending-migrations-selftest.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Test hygiene: the edge-migrate and apply-pending self-tests remove their container's volume |
@@ -617,7 +617,7 @@
  .../edged/guest_data_rights_integration_test.go    |   26 +-
  data-plane/cmd/edged/health.go                     |   17 +-
  data-plane/cmd/edged/health_checks.go              |   19 +-
- .../cmd/edged/health_trim_integration_test.go      |   58 ++
+ .../cmd/edged/health_trim_integration_test.go      |   58 +
  data-plane/cmd/edged/health_unixget_test.go        |   49 +
  data-plane/cmd/edged/ledger_admin.go               |   25 +-
  data-plane/cmd/edged/main.go                       |    9 +-
@@ -717,7 +717,7 @@
  data-plane/cmd/scd/card_checkout.go                |   10 +-
  data-plane/cmd/scd/card_status_limit_test.go       |   25 +
  data-plane/cmd/scd/card_verify.go                  |    1 -
- .../scd/commerce_connection_integration_test.go    |   58 ++
+ .../scd/commerce_connection_integration_test.go    |   58 +
  data-plane/cmd/scd/commerce_handlers.go            |   67 ++
  data-plane/cmd/scd/guest_capacity.go               |   35 +
  data-plane/cmd/scd/guest_capacity_test.go          |   49 +
@@ -766,7 +766,7 @@
  data-plane/internal/grace/grace_test.go            |   10 +-
  data-plane/internal/hwid/command_timeout_test.go   |   29 +
  data-plane/internal/hwid/hwid.go                   |   15 +-
- data-plane/internal/iamv2/account_recheck_test.go  |   58 ++
+ data-plane/internal/iamv2/account_recheck_test.go  |   58 +
  data-plane/internal/iamv2/adapters.go              |   72 +-
  data-plane/internal/identity/identity.go           |   45 +-
  .../internal/identity/identity_damaged_test.go     |   79 ++
@@ -785,7 +785,7 @@
  .../internal/netcfg/render_portal_conn_cap_test.go |   62 ++
  data-plane/internal/nft/nft.go                     |    2 -
  data-plane/internal/notifyloader/health_test.go    |  101 ++
- data-plane/internal/notifyloader/loader.go         |  292 +++---
+ data-plane/internal/notifyloader/loader.go         |  292 ++---
  data-plane/internal/notifyloader/loader_test.go    |   24 +-
  data-plane/internal/otp/otp.go                     |   95 +-
  data-plane/internal/otp/otp_issue_race_test.go     |   71 ++
@@ -875,7 +875,7 @@
  ...ed_operations_are_read_through_indexes.down.sql |    7 +
  ...lled_operations_are_read_through_indexes.up.sql |   25 +
  ...60_a_roster_reads_use_the_resync_index.down.sql |  224 ++++
- ...0160_a_roster_reads_use_the_resync_index.up.sql |  233 +++++
+ ...0160_a_roster_reads_use_the_resync_index.up.sql |  233 ++++
  ...function_is_not_executable_by_everyone.down.sql |    3 +
  ...r_function_is_not_executable_by_everyone.up.sql |   10 +
  data-plane/scd                                     |  Bin 0 -> 25937077 bytes
@@ -890,7 +890,7 @@
  deploy/scripts/central-migrate.sh                  |  124 ++-
  deploy/scripts/central-preflight.sh                |    4 +-
  deploy/scripts/provision-fresh-appliance.sh        |    2 +
- docs/AUDIT_BACKLOG.md                              |  932 ++++++++---------
+ docs/AUDIT_BACKLOG.md                              |  932 ++++++++--------
  docs/AUDIT_DECISIONS.md                            |  661 ++++++++++++
  docs/CA_CEREMONY_RUNBOOK.md                        |   10 +-
  docs/DEPLOYMENT_CLOUD.md                           |   17 +-
@@ -900,7 +900,7 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |    6 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |    6 +-
  docs/context/StayConnect-IAM-Handoff.md            |    6 +-
- .../manifests/AuditRemediation2-change-manifest.md | 1099 ++++++++++++++++++++
+ .../manifests/AuditRemediation2-change-manifest.md | 1130 ++++++++++++++++++++
  .../ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md        |   19 +-
  .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 352005 -> 352140 bytes
  .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 172089 -> 172550 bytes
@@ -955,8 +955,8 @@
  hotel-admin/test/whoami-revalidation.test.tsx      |    3 +-
  license/doc.go                                     |    7 +
  license/sign.go                                    |   19 +-
- license/store.go                                   |  235 ++++-
- license/store_integrity_test.go                    |  270 +++++
+ license/store.go                                   |  264 ++++-
+ license/store_integrity_test.go                    |  327 ++++++
  license/verify.go                                  |   14 +-
  scripts/build-appliance-binaries.sh                |   12 +-
  scripts/ci/apply-pending-migrations-selftest.sh    |    4 +-
@@ -967,27 +967,18 @@
  scripts/edge-migrate.sh                            |   71 +-
  tools/validate-migration-location.py               |    2 +
  tools/validate-standing-records.py                 |    2 +
- 476 files changed, 17690 insertions(+), 2934 deletions(-)
+ 476 files changed, 17807 insertions(+), 2934 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
 ```text
-M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
-M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
-D  exports/chatgpt/phase-evidence/GIT_STAT_801c5533.txt
-A  exports/chatgpt/phase-evidence/GIT_STAT_a173f418.txt
-M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
-M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/phase-evidence/governance/decision-register.json
-M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md
+(clean)
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: c3b6b92c licence store: a damaged current.json never restores a superseded licence from the previous copy
+HISTORICAL: 3117f8be Governance: export packs at T0266 and the manifest that covers them
 HISTORICAL: a173f418 Governance: generated blocks re-rendered at T0266; manifest refreshed
 HISTORICAL: 710073f9 Governance: T0266 change manifest
 HISTORICAL: 800f54b2 Audit backlog and decision list rebuilt after the remediation; governance D80/T0266
