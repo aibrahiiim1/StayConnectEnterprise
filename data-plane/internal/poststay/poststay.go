@@ -11,6 +11,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -331,6 +332,9 @@ func (s *Store) chargeThrottle(ctx context.Context, req VerifyRequest) error {
 	return nil
 }
 
+// profileIDRE is the canonical text form of a profile id (a database uuid).
+var profileIDRE = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
 // Verify returns ErrNotAuthenticable for every failure, indistinguishable by value and (via the dummy hash) by time.
 func (s *Store) Verify(ctx context.Context, req VerifyRequest) (string, error) {
 	if s.thr != nil {
@@ -339,6 +343,12 @@ func (s *Store) Verify(ctx context.Context, req VerifyRequest) (string, error) {
 		}
 	}
 
+	if !profileIDRE.MatchString(req.Profile) {
+		// Audit P6 L10: a malformed id is the same answer, after the same work, as a wrong PIN; it must not
+		// surface the database's parse error early.
+		_ = verifyPIN(NormalizePIN(req.PIN), dummyHash)
+		return "", ErrNotAuthenticable
+	}
 	var hash string
 	err := s.pool.QueryRow(ctx, `SELECT p.pin_hash
 		FROM iam_v2.post_stay_profiles p
