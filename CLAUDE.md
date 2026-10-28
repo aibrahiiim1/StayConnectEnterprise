@@ -1,155 +1,103 @@
 # StayConnect — Direct Execution Mode
 
-## ABSOLUTE USER EXECUTION POLICY
-
-These instructions are permanent project operating rules and override all project workflow preferences, governance habits, review habits, validation habits, and previously established agent conventions whenever they conflict.
-
-The user is the final authority for this repository.
-
----
-
-## 0. TWO MODES — read this before anything else
-
-**Product-Owner decision (permanent, supersedes any older wording anywhere in this repository that demands heavy governance after routine work).** The governance process was too heavy for day-to-day development. Safety controls stay; ceremony goes.
-
-Every task runs in one of two modes. **Decide the mode first, from what the work TOUCHES — never from how large, complex or file-heavy it is.**
-
-### FAST DEVELOPMENT — the DEFAULT
-
-Anything that does not hit a CONTROLLED trigger below. UI colours, wording, CSS, layout, spacing, button behaviour, small validation fixes, ordinary UI bugs, bounded refactors, routine implementation defects — and ordinary feature, API and business-logic work too.
-
-Do: implement the requested outcome, fix routine defects directly related to it, run only the **relevant targeted** build/tests, make a local Git commit when useful, report concisely.
-
-**Do NOT automatically run or update any of these:** `governance/project-state.json` · governance transitions · evidence packs · ChatGPT/project packs · change manifests · project-wide CI · PR creation or merge · project-wide stale-state audits · unrelated documentation.
-
-**Do not turn a small change into a release process.**
-
-Related changes may accumulate locally across several requests. The merge to master happens **only after Product Owner acceptance** (§0F, D42); documentation sync happens once for the finished batch, and the comprehensive validation runs only on **"FULL CHECK THE WHOLE CODE"**. Governance closure does not follow every intermediate edit.
-
-### CONTROLLED — only for what actually touches these
-
-* database schema or migration
-* production/appliance deployment
-* destructive or historical-data modification
-* PMS protocol, configuration or traffic
-* financial posting, payment, settlement, reversal or FX
-* guest authentication, Entitlement or enforcement core
-* enrollment / assignment / licensing identity foundations
-* security, certificates, PKI or trust roots
-* networking architecture or appliance topology
-* an architecture, contract or product-semantics decision
-* Go-Live / cutover
-
-CONTROLLED work keeps the existing safety, verification, evidence, CI and Product-Owner authorization appropriate to that action — the governance rules in `docs/` apply in full, and only here.
-
-**A change is NOT controlled merely because many files changed, tests were added, or the implementation is technically complex.**
-
-### Governance synchronization is MILESTONE-BASED, not edit-based
-
-Synchronize authoritative current-state documentation when there is a meaningful approved milestone, a verified live acceptance, a controlled deployment, a product/architecture decision, or an explicit release closure. Routine local development creates no governance transition. Cosmetic, UI, text, layout, refactor and routine bug fixes create no governance transition unless they materially change authoritative production state.
-
-### Scope discipline
-
-Do not open side projects while implementing a request. On discovering another issue: fix it in the same run **only** if it directly blocks the correctness or safety of the requested task; **stop and state the exact decision** if it needs a new Product-Owner decision; otherwise record it as backlog and carry on. Do not start project-wide audits, refactors, observability work, documentation cleanups or unrelated consistency work unless asked.
-
-### What this does NOT relax
-
-Authorization is still never inferred for production changes, PMS traffic, financial actions, destructive data operations, Root-CA changes or Go-Live (§12 stands). No fake data, fake topology, invented managed state or invented protocol behaviour. Approved product and architecture contracts remain binding until the Product Owner changes them. Git remains mandatory and the GitHub repository remains authoritative.
+**Permanent project operating rules.** They override workflow preferences, governance, review and validation
+habits and earlier agent conventions wherever they conflict. **The user (Product Owner, PO) is the final
+authority.** Compacted on 2026-10-28 (T0265) without changing any rule; the full earlier wording is in Git
+history.
 
 ---
 
-## 0A. PERMANENT PRODUCT-OWNER EXECUTION RULE — ONE MISSION, END TO END
+## 0. TWO MODES — decide first, from what the work TOUCHES
 
-**Permanent Product-Owner policy. It sits beside §0 and governs how far a single authorization reaches. Where older wording in this file reads as "stop and ask again" for a step the current mission already authorized, this section wins.**
+Never decide the mode from how large, complex or file-heavy the work is. Many files, added tests or technical
+complexity do **not** make work controlled. Safety controls stay; ceremony goes (this supersedes older wording
+that demands heavy governance after routine work).
 
-**1. One authorization covers its whole mission.** When the Product Owner authorizes a defined mission, that initial authorization *is* the explicit authorization for every routine step named in it or necessarily included in it. It is not a licence to begin and then ask permission to continue.
+**FAST DEVELOPMENT — the default.** UI, wording, CSS, layout, button behaviour, small validation fixes, UI bugs,
+bounded refactors, routine defects, and ordinary feature, API and business-logic work. Implement the outcome, fix
+directly related routine defects, run only the **relevant targeted** build/tests, commit locally when useful,
+report concisely. Do **not** automatically run or update: `governance/project-state.json`, transitions, evidence
+or ChatGPT/project packs, change manifests, project-wide CI, PR creation or merge, project-wide stale-state audits,
+unrelated documentation. Do not turn a small change into a release process. Related changes may accumulate across
+requests; merge to master **only after PO acceptance** (§0F); documentation syncs once per finished batch; the
+comprehensive validation runs only on **"FULL CHECK THE WHOLE CODE"**.
 
-**2. Carry it to DONE.** The agent completes the authorized mission without returning for routine intermediate approvals.
+**CONTROLLED — only for work that touches:** database schema or migration · production/appliance deployment ·
+destructive or historical-data modification · PMS protocol, configuration or traffic · financial posting, payment,
+settlement, reversal or FX · guest authentication, Entitlement or enforcement core · enrollment/assignment/licensing
+identity foundations · security, certificates, PKI or trust roots · networking architecture or appliance topology ·
+an architecture, contract or product-semantics decision · Go-Live/cutover. Controlled work keeps its safety,
+verification, evidence, CI and PO authorization; the governance rules in `docs/` apply in full, and only here.
 
-**3. Inside an authorized mission the agent owns**, where directly related: investigation and diagnosis · implementation · directly-related bug fixes · targeted and regression tests · build and package · CI and required gates · lockfile/dependency corrections the mission requires · manifest and generated-artifact corrections governance requires · commits · pushes · PR creation · directly-related PR/CI fixes · protected merge · deployment **if that exact environment was included in the mission** · deployment verification · rollback and retry when directly required · directly-related documentation and governance synchronization · final post-merge and post-deployment verification.
+**Governance sync is milestone-based:** an approved milestone, a verified live acceptance, a controlled deployment,
+a product/architecture decision or an explicit release closure. Routine, cosmetic, UI, text, refactor and bug-fix
+work creates no governance transition unless it materially changes authoritative production state.
 
-**4. A progress report is INFORMATIONAL, never an approval checkpoint.** Do not stop merely because CI is running, a test failed, a build failed, a directly-related dependency needs correcting, a manifest is stale, a generated pack needs refreshing, a PR needs another directly-related commit, or deployment verification found a routine directly-related defect. Diagnose, fix, verify, continue.
+**Scope discipline.** No side projects. Fix another issue in the same run **only** if it blocks the correctness or
+safety of the task; if it needs a new PO decision, stop and state that exact decision; otherwise record it as
+backlog. No project-wide audits, refactors, observability or documentation clean-ups unless asked.
 
-**5. Return to the Product Owner ONLY for a genuinely NEW decision** outside the original mission: changed product semantics · architecture change · a security or trust-boundary change not already authorized · destructive or historical data mutation not already authorized · a new DB schema/migration not already authorized · PMS configuration, PMS traffic or financial traffic not already authorized · networking/topology change · deployment to an environment not already authorized · Root-CA or trust-root change · Go-Live or cutover.
+**Never relaxed.** Authorization is never inferred for production changes, PMS traffic, financial actions,
+destructive data operations, Root-CA changes or Go-Live (§12). No fake data, topology, managed state or protocol
+behaviour. Approved product and architecture contracts bind until the PO changes them. Git is mandatory; the GitHub
+repository is authoritative.
 
-**6. ONE MISSION does not mean ONE COMMIT or ONE PR.** Use as many directly-required commits, PRs and fix cycles as reaching DONE safely takes.
+## 0A. ONE MISSION, END TO END (permanent PO rule; wins over any older "stop and ask again")
 
-**7. CONTROLLED work stays CONTROLLED.** This rule creates **no** blanket authorization for future controlled actions. The mission must name the controlled boundary it authorizes. Once named, the agent does not re-request that *same* authorization at each intermediate step — and the authorization does not carry into an unrelated later mission.
+1. A PO authorization of a defined mission **is** the authorization for every routine step named in it or
+   necessarily included in it — not a licence to begin and then ask to continue.
+2. Carry it to DONE without routine intermediate approvals. Inside the mission the agent owns, where directly
+   related: diagnosis, implementation, related fixes, targeted and regression tests, build/package, CI and required
+   gates, lockfile/dependency and manifest/generated-artifact corrections, commits, pushes, PR creation, PR/CI fixes,
+   protected merge, deployment **to an environment the mission includes**, deployment verification, rollback/retry,
+   related documentation and governance sync, final post-merge/post-deployment verification.
+3. A progress report is informational, never an approval checkpoint: running CI, a failed test or build, a stale
+   manifest or pack, another needed commit, a routine deployment defect → diagnose, fix, verify, continue.
+4. Return to the PO **only** for a genuinely new decision: changed product semantics · architecture · an
+   unauthorized security/trust-boundary change · unauthorized destructive or historical data mutation · an
+   unauthorized schema/migration · unauthorized PMS configuration/traffic or financial traffic · networking/topology ·
+   deployment to an environment not authorized · Root-CA/trust-root change · Go-Live/cutover.
+5. One mission may need many commits, PRs and fix cycles.
+6. CONTROLLED stays CONTROLLED: no blanket authorization for future controlled actions; the mission must name the
+   controlled boundary, after which the same authorization is not re-requested per step, and it does not carry into
+   an unrelated later mission.
+7. FAST stays lightweight: a simple request is not a release/deploy mission unless the PO put release, merge or
+   deployment in the goal. Speed never buys out required tests, security checks, evidence, rollback safety or
+   production-grade verification.
+8. **One delivery owner per branch.** Two sessions never commit or push to the same delivery branch; on detecting a
+   concurrent writer, settle one owner and have the other stand down.
 
-**8. FAST DEVELOPMENT stays lightweight.** A simple local UI or code request does not become a release/deploy mission unless the Product Owner put release, merge or deployment in the goal.
+Lifecycles: a task without release/deploy authorization is **REQUEST → EXECUTE → TARGETED CHECK → RESULT → STOP**
+(§3, §10). An authorized mission is **AUTHORIZATION → EXECUTE → FIX DIRECT BLOCKERS → TEST → CI → PR → MERGE →
+AUTHORIZED DEPLOYMENT → VERIFY → GOVERNANCE SYNC → ONE FINAL REPORT**; its own end is the stopping point. A mission
+naming push, PR, merge or deployment **is** the solicitation §6 requires, for that mission only. Where a mission's
+governance checks need a manifest refresh, block re-render or pack rebuild to merge, that is part of the mission.
 
-**9. Speed never buys out quality.** Required tests, security checks, evidence, rollback safety and production-grade verification remain mandatory wherever they apply.
+## 0B. FAST DELIVERY, CI AND PARALLEL AGENTS
 
-**10. ONE ACTIVE DELIVERY OWNER PER BRANCH.** Two agent sessions must not commit or push to the same active delivery branch. On detecting a concurrent writer, establish a single owner and have the other stand down before continuing.
+Authoritative: [`docs/FAST_DELIVERY_AND_PARALLEL_AGENT_PROTOCOL.md`](docs/FAST_DELIVERY_AND_PARALLEL_AGENT_PROTOCOL.md)
+(enforced by `tools/validate-delivery-protocol.py`; that file wins).
 
-**11. The normal interaction pattern:**
+* Normal work does not run the preflight, governance suites or the four gates (D42). **FULL CHECK THE WHOLE CODE**
+  runs `python tools/full-check.py --ref <branch>` (the four gates, dispatched), `bash tools/preflight.sh` and the
+  full local suites.
+* **Master requires exactly one check, `po-merge-authorization`**: it passes only while the PR carries the label
+  `po-merge-approved` on its current head (any later push removes it). Apply the label only after the PO's explicit
+  merge instruction or a mission that authorized the merge. The four gates are `workflow_dispatch` only (they can
+  never satisfy a ruleset-required check); nothing merges automatically.
+* **Deployment order follows dependencies:** a backward-compatible API before the UI that needs it, or a verified
+  atomic staged switch. Never expose a temporary 404.
+* **Guest data never enters delivery evidence** (PR bodies, commits, governance records, export packs are
+  published). Describe observations; never reproduce records. Commit messages are immutable: check before committing.
+* **Parallel agents:** one Delivery Owner per branch owns commits, pushes, PR, merge and the final report; no two
+  agents write, commit, push or `git add -A` on one branch or working tree; read-only investigation should run in
+  parallel; code-producing subagents use isolated worktrees and non-overlapping scopes and never push; parallel
+  tests use isolated databases, artifacts and ports; never competing E2E servers on one environment; never
+  concurrent deployment or live mutation.
 
-**PRODUCT OWNER GIVES THE GOAL ONCE → AGENT COMPLETES THE ENTIRE AUTHORIZED MISSION → AGENT RETURNS ONE FINAL COMPLETION REPORT**
+## 0C. OPERATIONAL VALUES ARE SETTINGS (standing PO rule, 2026-09-12)
 
-not: implement → ask again to test → ask again for a PR → ask again to merge → ask again to deploy → ask again to verify.
-
-### How this reconciles with the rest of this file
-
-Two lifecycles now coexist, chosen by what the Product Owner actually authorized:
-
-| The request | Lifecycle |
-|---|---|
-| A task with no release/deploy authorization | **REQUEST → EXECUTE → TARGETED CHECK → RESULT → STOP** (§3, §10 unchanged) |
-| An explicitly authorized end-to-end mission | **MISSION AUTHORIZATION → EXECUTE → FIX DIRECT BLOCKERS → TEST → CI → PR → MERGE → AUTHORIZED DEPLOYMENT → VERIFY → GOVERNANCE SYNC → FINAL REPORT**, with no intermediate re-authorization for steps the mission already covered |
-
-§3 and §10's STOP still describe the *default*: a routine edit ends at its targeted check. They do not truncate a mission whose goal explicitly included merge, deployment or verification — in that case the mission's own end is the stopping point.
-
-§6 still forbids *unsolicited* remote Git operations. A mission that names push, PR, merge or deployment **is** the solicitation, for that mission, and the agent should not ask again per step. §6's list continues to apply to everything the mission did not name.
-
-§5's governance restraint is unchanged for routine work. Where a mission's own governance checks require a manifest refresh, a generated-block re-render or a pack rebuild in order to merge, performing those is part of the authorized mission rather than unsolicited ceremony.
-
-## 0B. FAST DELIVERY AND PARALLEL AGENTS
-
-**The authoritative rule is [`docs/FAST_DELIVERY_AND_PARALLEL_AGENT_PROTOCOL.md`](docs/FAST_DELIVERY_AND_PARALLEL_AGENT_PROTOCOL.md).**
-It is machine-enforced by `tools/validate-delivery-protocol.py` inside the `governance` gate. What follows is
-the short form; where the two differ, that file wins.
-
-**Normal work does not run the preflight, the governance suites or the four gates** (D42). They belong to
-**FULL CHECK THE WHOLE CODE**, which runs `python tools/full-check.py --ref <branch>` (the four gates,
-dispatched) plus `bash tools/preflight.sh` and the full local suites. The measurement behind the preflight
-still stands for when a FULL CHECK is requested: across PRs #108/#109, 13 of 16 gate failures were knowable on
-a workstation in minutes.
-
-**CI hygiene.**
-
-* **Master requires exactly one check: `po-merge-authorization`.** It passes only while the PR carries the
-  label `po-merge-approved` on its current head; any later push removes the label. Apply it only after the
-  Product Owner's explicit merge instruction, or when the mission authorized the merge in advance.
-* **The four comprehensive gates are `workflow_dispatch` only**, for FULL CHECK. No pull request, push or
-  schedule runs them, and nothing merges automatically. A `workflow_dispatch` run can never satisfy a
-  ruleset-required check (measured on PR #181), which is why the gates are not required checks at all.
-
-**Deployment order follows dependencies.** Deploy a backward-compatible API before the UI that depends on it,
-or use a verified atomic staged switch. Never expose a temporary 404. (Deploying the Hotel Admin bundle
-without its `edged` half did exactly that.)
-
-**Guest data never enters delivery evidence.** PR bodies, commit messages, governance records and export packs
-are published, and an appliance under acceptance carries a real PMS guest list. Describe the observation;
-never reproduce the record. Commit messages are immutable — check before committing, not after.
-
-**Parallel agents.**
-
-* **Exactly one Delivery Owner per delivery branch**, who alone owns commits, pushes, the PR, the merge and
-  the final report.
-* No two agents write, commit, push or run `git add -A` against the same branch or working tree concurrently.
-* Read-only investigation and review **should** run in parallel — it is free elapsed time.
-* Code-producing subagents use isolated worktrees, non-overlapping scopes, and hand results back to the
-  Delivery Owner. They do not push.
-* Parallel tests use isolated databases, artifacts and ports. Never run competing E2E servers against one
-  environment. No concurrent deployment or live mutation, ever.
-
----
-
-## 0C. OPERATIONAL VALUES ARE SETTINGS, NOT CONSTANTS
-
-**Standing Product-Owner rule, 2026-09-12. It applies to all future work in this repository until the Product
-Owner changes it.** The full form, with the reasoning, the per-setting checklist and the worked example, is
-[`docs/OPERATIONAL_SETTINGS_POLICY.md`](docs/OPERATIONAL_SETTINGS_POLICY.md).
+Full form: [`docs/OPERATIONAL_SETTINGS_POLICY.md`](docs/OPERATIONAL_SETTINGS_POLICY.md).
 
 > Operational values that a hotel administrator may reasonably need to change—such as attempt thresholds,
 > waiting periods, retention periods and operational limits—must be available as persisted settings in the
@@ -157,383 +105,143 @@ Owner changes it.** The full form, with the reasoning, the per-setting checklist
 > validation and change auditing. Changing such values must not normally require editing code or redeploying.
 > Reuse the established configuration system and maintain one source of truth.
 
-This does **not** require exposing protocol constants, cryptographic parameters or internal implementation
-details as user settings, and it is **not** authorization to open a project-wide settings refactor (§0 scope
-discipline still applies). It governs work as it is done: when the thing you are building carries an
-operational number, that number ships as a setting.
+Not required for protocol constants, cryptographic parameters or internal details, and not an authorization for a
+project-wide settings refactor: it governs work as it is done.
 
----
-
-## 0D. CURRENT ENVIRONMENT, AND WHAT IS NO LONGER A TARGET
-
-**Standing record, 2026-09-12; Central corrected by the Product Owner on 2026-10-28.** Supersedes every earlier address
-list in this file.
+## 0D. CURRENT ENVIRONMENT, AND WHAT IS NO LONGER A TARGET (PO record, 2026-10-28)
 
 | Role | Host | Notes |
 |---|---|---|
-| **Central** | `41.128.240.133` (`central.onegate.getsemantics.com`) | Production Central since 2026-10-28 (Product-Owner record). Installed fresh by `central-install.sh`, so it has **its own trust universe**: appliances provisioned against the former Central do not trust it ([installation manual](docs/runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md) F, Appendix 3). Identity, activation and licensing ([`docs/CENTRAL_CONTROL_PLANE.md`](docs/CENTRAL_CONTROL_PLANE.md)): `ctrlapi` (behind Caddy on `443`; appliance mutual-TLS listener on `9443`), `cloud-admin`, Caddy, Postgres/TimescaleDB and Redis (`deploy/compose/central-infra.yml`). Installed and upgraded by `deploy/scripts/central-install.sh` ([`docs/DEPLOYMENT_CLOUD.md`](docs/DEPLOYMENT_CLOUD.md)). Central runs no message bus (§0E). Verify the actual endpoints and TLS identity before connecting; do not assume them from this table. |
-| Former Central | `172.21.96.196` (`sc-central.echofusion.com`) | **RETIRED 2026-10-28 (Product-Owner record). Not an operational target: do not contact it.** It was Central from 2026-09-27 (moved from `150.0.0.252` with every key, certificate and the licence database) and its trust universe is the one PRE-LIVE was provisioned in. What it served and proved stays as recorded. |
-| Former Central | `150.0.0.252` | **STOPPED, not an operational target.** `ctrlapi`, the console and Caddy are stopped and disabled since the move; re-enabling it would issue licence versions the new Central does not know. It still holds the encrypted Root CA key backup (`/opt/stayconnect/ca-ceremony-backup/`, [`docs/CA_CEREMONY_RUNBOOK.md`](docs/CA_CEREMONY_RUNBOOK.md)); a verified copy was taken off the host on 2026-09-27, and the host copy is shredded only after the backup is confirmed on offline media. |
-| **PRE-LIVE appliance** | `172.21.60.25` | The only appliance. **PRE-LIVE remains PRE-LIVE. Go-Live is not authorised.** It was provisioned against the former Central `172.21.96.196` (by the name `sc-central.echofusion.com` on the gateway DNS), which is now retired; serving it from the current Central would need it re-provisioned in that trust universe, a Product-Owner decision. |
-| ~~Development reference appliance~~ | *(address removed from the current tree — T0194)* | **RETIRED.** Not an operational target. Do not contact it, do not diagnose against it, do not treat it as a source of anything. |
+| **Production Central** | `41.128.240.133` (`central.onegate.getsemantics.com`; private `172.21.96.96`, same host) | Identity, activation, licensing only (§0E): `ctrlapi` behind Caddy `443`, appliance mutual TLS `9443`, `cloud-admin`, Postgres/TimescaleDB, Redis; `central-install.sh` / `central-deploy.sh` ([`docs/DEPLOYMENT_CLOUD.md`](docs/DEPLOYMENT_CLOUD.md)). Appliances dial the name in `deploy/config/central-endpoint.env`. **Production: tests and drills never default to it.** |
+| **Test appliance** | `172.21.96.97` | Activated on the production Central; [installation manual](docs/runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md) Appendix 3. Standing deployment authorization: §0F. **Go-Live is not authorised.** |
 
-**Retiring a target does not falsify its records.** What the retired development reference appliance proved keeps
-its meaning and its outcome, in `governance/` and in the accepted documents that cite it: a record of what was true
-then is not a claim about what is true now, and no historical fact or result may be changed.
+**Retired targets.** One register: `governance/project-state.json` → `current_state_facts.retired_hosts`, enforced
+by `tools/validate-standing-records.py`. It holds the retired former Central `172.21.96.196` (`sc-central.echofusion.com`)
+and the retired former PRE-LIVE appliance `172.21.60.25` (both permanently retired 2026-10-28); the first Central
+`150.0.0.252`, stopped and retired as a target since 2026-09-27; and the retired development reference appliance
+(octets only, T0194). **Never contact, deploy to, test against or restore from them**, and never replace a retired
+address with the production Central's: name the environment under test explicitly. Retiring a target does not
+falsify its records: what it served and proved stays as recorded; Git history is never rewritten.
 
-**Its literal address is no longer written anywhere in the current tree** (Product-Owner direction, T0194). Records
-name it as *the retired development reference appliance*; the original wording remains in Git history, which is
-never rewritten. Do not reintroduce the literal. Guards that must still refuse it assemble the address from its
-octets (`current_state_facts.retired_hosts.*.address_octets`).
+**PMS.** Preserve local-first behaviour: the appliance authorises guests from its last-good mirrored roster and
+must keep doing so when the feed drops. A `DISCONNECTED` transport is a feed-health fact, not an authentication
+outage; eligibility is still decided per stay by the mirror-trust and freshness rules; not every offline condition
+has been tested.
 
-**PMS.** Protel FIAS is connected. Keep the configured connection operational, and preserve local-first
-behaviour for future intentional disconnections: the appliance authorises guests from its last-good mirrored
-roster and must go on doing so when the feed drops.
+## 0E. CENTRAL SERVES AN APPLIANCE FOR LICENSING ONLY (standing PO decision, 2026-09-13)
 
-**A correction of record, because the wrong version was stated and acted on.** *An intentionally disconnected
-PMS does not by itself prevent guest authentication.* The appliance authorises from the mirror; a
-`DISCONNECTED` transport is a feed-health fact, not a guest-authentication outage, and both successful
-sign-ins and credential-failure counting have been observed live while the feed was down. What must **not** be
-inferred from that is the opposite error: eligibility is still decided per stay by the mirror-trust and
-freshness rules, not every mirrored stay is eligible, and not all offline conditions have been tested.
+Guests, sessions, PMS, accounting and reports belong on the hotel's appliance; no guest data goes to Central. True
+by construction: the appliance has no telemetry outbox, producer, NATS client, remote command/PMS channel, update
+agent or cloud-mode setting. Everything it sends Central is HTTPS to `ctrlapi`: `/v1/appliances/register`
+(token-less self-registration) · `/v1/appliance/csr`, `/certificate` · `/v1/appliance/license`,
+`/offline-reconcile` · `/v1/appliance/hello` (licence enforcement: a deleted appliance stops admitting new guests) ·
+`/v1/appliance/assignment`, `/assignment-registry`, `/assignment/ack` (signed tenant/site binding, mutual TLS) ·
+`/v1/appliance/portal-tls/sync`, `/portal-tls/orders` (portal hostname and certificate lifecycle, placed with
+Central 2026-10-13; no guest data; mutual TLS; [contract](docs/architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md)
+§7). **A new kind of appliance→Central message is a product decision**; never reclassify one as licensing because it
+shares an endpoint, service or name. (History: telemetry was built and verified, switched off 2026-09-13; Central
+migration 0045 and appliance migration 0093 removed it.)
 
----
+## 0F. PO-LED DELIVERY (D42) AND STANDING DEPLOYMENT AUTHORIZATION
 
-## 0E. CENTRAL SERVES THIS APPLIANCE FOR LICENSING ONLY
-
-**Standing Product-Owner decision, 2026-09-13.** OneGate Central serves an appliance for identity, activation
-and licensing only. The hotel's operations — guests, sessions, PMS, accounting, reports — belong on the
-hotel's appliance, and no guest data goes to Central.
-
-**This is now true by construction.** The appliance has no telemetry outbox, no producer, no NATS client, no
-remote command or PMS channel, no software-update agent and no cloud-mode setting: there is nothing to switch
-on. Everything the appliance says to Central is HTTPS to `ctrlapi`:
-
-| Endpoint | Why it is licensing |
-|---|---|
-| `/v1/appliances/register` | appliance identity: token-less self-registration with the locally generated identity key; the appliance then waits for an operator to activate it |
-| `/v1/appliance/csr`, `/certificate` | the certificate that authenticates the rest |
-| `/v1/appliance/license`, `/offline-reconcile` | the licence itself, and accounting for a consumed offline package |
-| `/v1/appliance/hello` | licence **enforcement**: how a deleted appliance discovers it has been removed and stops admitting new guests |
-| `/v1/appliance/assignment`, `/assignment-registry`, `/assignment/ack` | the signed tenant/site binding the licence is scoped to (mutual TLS only) |
-| `/v1/appliance/portal-tls/sync`, `/portal-tls/orders` | the Client Portal's hostname and certificate lifecycle, which the Product Owner placed with Central on 2026-10-13 (hostname, portal address, hotel domain, CSR, certificate status; no guest data; mutual TLS only; [contract](docs/architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md) §7) |
-
-**Adding a new kind of message from the appliance to Central is a product decision, not an implementation
-detail.** Do not reclassify a message as licensing because it shares an endpoint, a service or a name with one.
-
-**History.** The telemetry link was built, completed and verified (87,000 records delivered, both sides
-reconciled), then switched off by the 2026-09-13 decision. Central's telemetry tables were dropped by Central
-migration 0045. On 2026-09-27 the dormant appliance subsystem was removed by Product-Owner direction: the scd
-NATS transport, outbox, producers, command channel and update agent, edged's cloud-sync resources and
-service-health producer, and appliance migration 0093, which dropped the cloud-mode and cloud-sync settings
-and the outbox, checkpoint, executed-command and installed-update tables with their rows.
-
----
-
-## 0F. PRODUCT-OWNER-LED DELIVERY (D42), AND THE STANDING PRE-LIVE DEPLOYMENT DECISION
-
-**Product-Owner governance decision D42, 2026-09-26 (T0196). It supersedes the Nightly Authoritative Delivery
-model of 2026-09-24 (T0182–T0195) wherever they conflict. The full form is
-[`docs/PO_LED_DELIVERY_MODEL.md`](docs/PO_LED_DELIVERY_MODEL.md); where the two differ, that file wins.**
-
-### Normal delivery
+Full form: [`docs/PO_LED_DELIVERY_MODEL.md`](docs/PO_LED_DELIVERY_MODEL.md) (that file wins).
 
 ```
 REQUEST → SCOPE → IMPLEMENT → FOCUSED SELF-REVIEW → TARGETED TESTS → FIX RELATED ISSUES → BUILD IF NEEDED
-→ DEPLOY TO PRE-LIVE WHEN AUTHORIZED → SMOKE / HEALTH CHECK → STOP: READY FOR PRODUCT OWNER TESTING
+→ DEPLOY TO THE TEST APPLIANCE WHEN AUTHORIZED → SMOKE / HEALTH CHECK → STOP: READY FOR PRODUCT OWNER TESTING
 → PRODUCT OWNER ACCEPTANCE → PROTECTED MERGE TO MASTER → DONE
 ```
 
-Unrelated findings are FOLLOW-UP, not scope. Review is focused on what the mission touched. Tests are targeted.
-After the PRE-LIVE smoke check, **stop** and report `READY FOR PRODUCT OWNER TESTING`; corrections continue on
-the same branch and PR with no new governance cycle.
+Unrelated findings are follow-up. Review is focused, tests targeted; corrections continue on the same branch and PR
+with no new governance cycle. **NO PO ACCEPTANCE = NO MERGE:** merge only on an explicit instruction (*Approved*,
+*Merge it*, *Approved, merge*) or a mission that said "implement and merge"; completion or deployment never
+authorizes a merge. GitHub enforces it (`po-merge-authorization` + `po-merge-approved`,
+`tools/po_merge_authorization.py`); direct push, force push, deletion and bypass are prohibited; merge commits only;
+required approvals 0. **FULL CHECK THE WHOLE CODE** is opt-in only (full review, suites and browser suites,
+governance and stale-state validation, packs/manifests/evidence, the four gates, provenance, live verification where
+deployment is authorized, a comprehensive report); it authorizes no merge, Go-Live, destructive DB change,
+PMS/financial traffic, networking change or unnamed environment. Nothing runs unattended: no schedule, no automatic
+merge, no session-start check.
 
-### NO PRODUCT OWNER ACCEPTANCE = NO MERGE
+**Standing authorization (PO, 2026-10-28, D79): routine software deployments to the test appliance `172.21.96.97`
+within approved work, without separate deployment approval each time.** It covers build and package, install,
+service restart, deployment verification, retry and rollback, and recording exact deployed-source provenance. It
+authorizes **none** of: the production Central · a new product/architecture/security decision · destructive or
+historical data mutation · a new migration/schema decision · networking or topology changes · PMS configuration,
+posting or traffic · financial or payment-provider activity · Guest activation or Go-Live · Root-CA or trust
+changes. The test appliance will often be ahead of master: always record the **exact deployed commit SHA**, read back
+from the installed artifact, and never treat deployed provenance as master state. (The 2026-09-24 standing decision
+for the retired PRE-LIVE appliance is superseded by D79; its text is kept in the decision register.)
 
-Merge only after an explicit instruction — *Approved*, *Merge it*, *Approved, merge* — or a mission that said
-"implement and merge" in advance. Implementation completion and PRE-LIVE deployment never authorize a merge.
-GitHub enforces it: the ruleset's one required context is `po-merge-authorization`, which passes only while the
-PR carries `po-merge-approved` on its current head (tools/po_merge_authorization.py). Direct push, force push,
-deletion and bypass stay prohibited; merge commits only; required approvals 0.
+## 0G. PO-REQUESTED TEST MISSIONS RUN END TO END (D67)
 
-### FULL CHECK THE WHOLE CODE — opt-in only
+Full form: [`docs/PO_LED_DELIVERY_MODEL.md`](docs/PO_LED_DELIVERY_MODEL.md) §9. A test (formerly PRE-LIVE) mission
+the PO requests is the full end-to-end authorization for it in **the environment the PO names** (never the
+production Central by default): deployments, migrations, test-database reset or reconstruction, test-account resets,
+test-licence reissuance, directly related repairs, verification, documentation, and Git delivery including push, PR
+and the protected merge. Test data is disposable (never a reason to stop; never touch a real person's account — use a
+test operator). Do not stop for routine decisions, migration or deployment approval, test-data loss or recoverable
+failures; return one final report, never `READY FOR APPROVAL` for something already authorized. Unchanged:
+protected-master safeguards, tests, CI, security and validation; no real production users, external financial
+systems, live PMS posting, Root CA/trust roots or networking outside the test environment; **Go-Live stays
+unauthorized**; new product/architecture/security decisions stay the PO's. D67 does not turn a routine FAST change
+into a Central deployment.
 
-Only when the Product Owner says exactly that: full review, full suites and browser suites, complete governance
-and stale-state validation, packs/manifests/evidence, the four gates via `python tools/full-check.py --ref
-<branch>`, provenance, live verification where deployment is authorized, and a comprehensive report. It does
-not authorize a merge, Go-Live, destructive DB changes, PMS/financial traffic, networking changes or an
-unnamed environment.
-
-**Nothing runs unattended.** There is no schedule and no workflow merges. The nightly orchestrator and
-`tools/nightly-status.py` were removed by T0196; there is no session-start nightly check any more.
-
-### The standing PRE-LIVE deployment authorization
-
-> **Until explicitly revoked or changed by the Product Owner, every completed application/code change may be
-> deployed promptly to the PRE-LIVE appliance at `172.21.60.25` for Product Owner testing, before it is
-> merged.**
-
-**This is continuing. Do not ask for it again.** Asking again is a defect in reading this section. It covers the
-directly required parts of deploying: build and package, install, service restart, deployment verification,
-retry and rollback, and recording exact deployed-source provenance.
-
-It authorizes **none** of the following, which remain separate Product-Owner decisions: a new
-product/architecture/security decision · destructive or historical data mutation · a new database
-migration/schema decision · networking or topology changes · PMS configuration, posting or traffic ·
-financial or payment-provider activity · Guest activation or Guest Go-Live · Root-CA or trust changes ·
-Go-Live.
-
-**PRE-LIVE will often be AHEAD of master, and that is intended.** Always record the **exact deployed commit
-SHA**, read back from the installed artifact rather than the build host; and **never** treat deployed PRE-LIVE
-provenance as authoritative master state.
-
-The exclusions above bound the *standing* per-change authorization. A **user-requested PRE-LIVE mission** is
-wider: see §0G (D67).
+**Report format:** `STATUS: READY FOR PRODUCT OWNER TESTING / MERGED / BLOCKED` · Changed · Targeted verification ·
+Deployment (deployed commit / not applicable, smoke result) · PO action (Test now / Approve merge / Decision
+required) · Blocker (NONE / exact). No chronological diaries unless asked.
 
 ---
 
-## 0G. PRE-LIVE MISSIONS RUN END TO END, APPLIANCE AND CENTRAL (D67)
-
-**Permanent Product-Owner decision D67, 2026-10-24 (T0243). The full form is
-[`docs/PO_LED_DELIVERY_MODEL.md`](docs/PO_LED_DELIVERY_MODEL.md) §9; where the two differ, that file wins.**
-
-> When the Product Owner requests a PRE-LIVE mission, that request is the full end-to-end authorization for it,
-> across the PRE-LIVE appliance (`172.21.60.25`) and Central (`172.21.96.196`): deployments, database
-> migrations, test-database reset or reconstruction, test-account resets, test-licence reissuance, directly
-> related repairs, verification, documentation, and Git delivery including push, PR and the protected merge.
-
-*Note, 2026-10-28:* the Central named in the decision, `172.21.96.196`, is retired (§0D). The decision text is kept as
-recorded; which Central a PRE-LIVE mission covers now is the Product Owner's to state.
-
-* **PRE-LIVE data is disposable.** Preserving test accounts, historical test records or test licences is never a
-  reason to stop. Recreate what the mission needs. Do not touch a real person's account to do it: use or create
-  a test operator.
-* **Do not stop** for routine technical decisions, migration or deployment approval, test-data loss, or a
-  recoverable failure inside PRE-LIVE. Investigate, fix, retry, complete, and return one final report. Never
-  return `READY FOR APPROVAL` for something the mission already authorized.
-* **What does NOT change.** GitHub's protected-master safeguards (the `po-merge-authorization` check and its
-  label), tests, CI, security and validation are not weakened. The mission must still not reach real production
-  users, external financial systems, live PMS posting, Root CA or trust roots, or networking/topology outside
-  PRE-LIVE. **Go-Live stays unauthorized.** A new product, architecture or security decision is still the
-  Product Owner's.
-* **Scope.** D67 governs PRE-LIVE missions the Product Owner requests. It does not turn a routine FAST change into
-  a Central deployment, and it does not make Central part of the standing per-change deployment in §0F.
-
-### Normal report format
-
-`STATUS: READY FOR PRODUCT OWNER TESTING / MERGED / BLOCKED` · Changed · Targeted verification · PRE-LIVE
-(deployed commit / not applicable, smoke result) · Product Owner action (Test now / Approve merge / Decision
-required) · Blocker (NONE / exact blocker). No chronological diaries unless asked.
-
----
-
-### 1. Execute, do not review
-
-When the user requests a code change, configuration change, database change, deployment action, production action, file edit, deletion, migration, commit, push, or other repository operation:
-
-* EXECUTE THE REQUEST DIRECTLY.
-* Do not perform a preliminary review.
-* Do not perform an architectural review.
-* Do not perform a governance review.
-* Do not perform a safety-of-the-project review.
-* Do not inspect unrelated files looking for consequences.
-* Do not expand the scope.
-* Do not search for additional problems.
-* Do not start a hardening sweep.
-* Do not start a cleanup sweep.
-* Do not start an acceptance sweep.
-* Do not reinterpret the request as an opportunity to improve adjacent systems.
-
-The requested change is the scope.
-
-This removes the agent's own *self-imposed* review, not the safeguards a CONTROLLED action carries. Where §0 classifies the work as CONTROLLED — a migration, a deployment, PMS or financial traffic, and the rest of that list — execute it with the verification and authorization that action requires. Everywhere else, execute directly.
-
-### 2. No automatic PROJECT-WIDE checks
-
-**Targeted verification of the change you just made is expected** — §0 asks for the *relevant* build/tests, and a functional change carries the regression coverage it needs. What is forbidden is turning that into a project-wide validation run.
-
-NEVER automatically run any of the following unless the user explicitly requests that specific check, or the work is CONTROLLED (§0) and the check belongs to that action:
-
-* the full unit/integration/E2E suite for the whole project (as opposed to the affected package or area)
-* project-wide TypeScript typecheck, lint, formatting checks, static analysis or security scans
-* governance validators
-* project-state validators
-* generated-block checks
-* stale-state checks
-* parity checks
-* transition-time checks
-* manifests
-* acceptance packs
-* inventory regeneration
-* CI status checks
-* GitHub Actions polling
-* git diff review
-* code review
-* repository-wide searches for related issues
-
-A routine edit is complete when the requested edit has been made and the **relevant targeted** check passes. Do not extend that into a project-wide verification phase, and do not invent one where nothing was asked.
-
-Post-deployment verification, smoke tests and full regression runs belong to CONTROLLED work (§0), where they remain required.
-
-### 3. Show the result immediately
-
-After making the requested change:
-
-1. Show what was changed.
-2. Show the directly relevant result/output.
-3. Stop.
-
-Do not continue into review, validation, cleanup, documentation, governance synchronization, CI monitoring, or further investigation unless explicitly requested.
-
-### 4. Production means execute
-
-If the user explicitly requests an operation against Production, deployment, live infrastructure, a live database, or another explicitly named environment:
-
-* Treat the named environment as intentional.
-* Do not replace execution with a review.
-* Do not initiate an approval workflow of your own.
-* Do not demand an additional confirmation merely because the word Production/live/deploy appears.
-* Do not redirect the task to Development.
-* Execute exactly the requested scope.
-
-The user accepts responsibility for deciding when an operation should target Production.
-
-Tool-enforced or platform-enforced permission prompts may still occur and must not be bypassed, but the agent must not add its own extra approval ceremony.
-
-### 5. No governance ceremony
-
-Do not automatically modify, regenerate, inspect, reconcile, or validate:
-
-* `governance/project-state.json`
-* project state/generated state blocks
-* transition records
-* decision records
-* acceptance records
-* manifests
-* inventory heads
-* acceptance candidate heads
-* generated packs
-* handoff documents
-* maturity fields
-* project phase status
-* historical evidence
-
-Only touch these when the user's current request explicitly asks for them, or when §0 makes this a governance-synchronization moment: an approved milestone, a verified live acceptance, a controlled deployment, a product/architecture decision, or an explicit release closure.
-
-A normal product/code change does NOT require governance synchronization.
-
-Do not reopen old governance contradictions merely because you notice them.
-
-### 6. No unsolicited REMOTE Git operations
-
-A **local commit** is allowed whenever it is useful to checkpoint work (§0), and Git remains mandatory.
-
-Everything that leaves this machine or rewrites history is not automatic. Do not, unless asked:
-
-* amend
-* rebase
-* merge
-* tag
-* push
-* open a PR
-* wait for CI
-* poll GitHub Actions
-
-Only perform those when the user requests them, or when they are part of a CONTROLLED delivery the user has authorized (§0, §12).
-
-If the user says `commit`, commit.
-
-If the user says `push`, push.
-
-If the user says `commit and push`, do both and stop after reporting the result.
-
-Do not automatically wait for CI afterward.
-
-### 7. Do not resurrect finished topics
-
-Once the user has moved on from a topic:
-
-* Do not reopen it.
-* Do not re-audit it.
-* Do not re-check it because another change touched a nearby area.
-* Do not bring back previously discussed legacy/governance/architecture concerns unless the user explicitly asks about them again.
-
-Previous findings are not standing work items.
-
-### 8. Failure handling
-
-If the requested operation itself fails because of an immediate technical error:
-
-* Diagnose only the error blocking that requested operation.
-* Fix only what is necessary to complete the requested operation.
-* Retry it.
-* Stop once it works.
-
-Do not turn a local failure into a repository-wide investigation.
-
-### 9. User commands beat workflow conventions
-
-Explicit user instructions such as:
-
-* "نفذ"
-* "عدل"
-* "امسح"
-* "اعمل deploy"
-* "production"
-* "commit"
-* "push"
-* "طبق ده"
-
-are execution instructions, not requests for analysis or review.
-
-Do not respond to an execution request with a plan for future checks.
-
-### 10. Default response behavior
-
-Default lifecycle for every requested change:
-
-**REQUEST → EXECUTE → SHOW RESULT → STOP**
-
-Not:
-
-**REQUEST → INVESTIGATE → REVIEW → EXPAND SCOPE → VALIDATE EVERYTHING → GOVERNANCE → COMMIT → CI → MORE REVIEW**
-
-The second workflow is explicitly prohibited unless the user asks for those individual steps.
-
-### 11. Persistence
-
-These rules are intentional and persistent. §0 is the current operating model: FAST DEVELOPMENT by default, CONTROLLED only for what it lists, governance synchronized at milestones rather than after every edit. Do not silently drift back to running governance, packs, manifests or full CI after routine work.
-
-Do not ask the user in future sessions whether they still want Direct Execution Mode.
-
-Do not gradually reintroduce automatic reviews or checks.
-
-Do not interpret silence as permission to restore previous workflows.
-
-Remain in Direct Execution Mode until the user explicitly edits or revokes this policy.
-
-### 12. Authorization-bound actions (refines §4)
-
-§4 removes the agent's *own* approval ceremony; it does not remove the Product Owner's.
-These still require explicit Product-Owner authorization before execution:
-
-* git operations (commit, push, tag, PR, merge)
-* merges to master
-* deployment to any environment
-* database migrations
-* Production changes
-* PMS, payment-provider or financial traffic
-
-Everything else: implement directly, fix routine blockers without asking, and continue.
-
-**"Explicit Product-Owner authorization" may be supplied ONCE, by the mission prompt itself.** Where a mission explicitly authorizes a commit, push, PR, merge or a deployment to a named environment, that authorization is already given for that mission: the agent must **not** request duplicate authorization for the same action at each intermediate step, and must not treat its own progress report as a point where the authorization lapses.
-
-This does **not** extend the authorization beyond that mission. An action authorized for one mission is unauthorized for the next one unless that next mission names it again. Anything the mission did not name — a different environment, a migration it never mentioned, PMS or financial traffic, Go-Live — still requires its own decision (§0A.5, §0A.7).
-
-### 13. Review happens after delivery
-
-The Product Owner normally reviews and tests changes live after delivery and sends
-follow-up corrections. The agent does not pre-empt that with its own verification phase.
-
-Reports stay short: what changed, where, and anything that prevents the requested result
-from working. Then stop.
+## 1–13. DIRECT EXECUTION RULES
+
+1. **Execute, do not review.** A requested code, configuration, database, deployment, production, file, deletion,
+   migration, commit or push operation is executed directly. No preliminary, architectural, governance or
+   project-safety review; no inspecting unrelated files for consequences; no scope expansion, problem hunting,
+   hardening, clean-up or acceptance sweeps; no reinterpreting the request as a chance to improve adjacent systems.
+   The requested change is the scope. This removes self-imposed review only: CONTROLLED work keeps the verification
+   and authorization its action requires.
+2. **No automatic project-wide checks.** Targeted verification of the change is expected, and a functional change
+   carries the regression coverage it needs. Never automatically run, unless the user asks for that check or it
+   belongs to a CONTROLLED action: the whole-project unit/integration/E2E suite, project-wide typecheck, lint,
+   formatting, static analysis or security scans, governance, project-state, generated-block, stale-state, parity
+   or transition-time validators, manifests, acceptance packs, inventory regeneration, CI status checks or Actions
+   polling, git diff review, code review, repository-wide searches for related issues. A routine edit is complete when
+   the edit is made and the relevant targeted check passes. Post-deployment verification, smoke tests and full
+   regression belong to CONTROLLED work, where they stay required.
+3. **Show the result immediately:** what changed, the directly relevant output, then stop — no review, validation,
+   clean-up, documentation, governance sync, CI monitoring or further investigation unless asked.
+4. **Production means execute.** An explicitly requested operation against production, deployment, live
+   infrastructure, a live database or another named environment is intentional: no substitute review, no own
+   approval workflow, no extra confirmation because the word production/live/deploy appears, no redirect to
+   development; execute exactly the requested scope (the user owns that decision). Tool- or platform-enforced
+   permission prompts may occur and are never bypassed.
+5. **No governance ceremony.** Do not automatically modify, regenerate, inspect, reconcile or validate
+   `governance/project-state.json`, generated state blocks, transition, decision or acceptance records, manifests,
+   inventory or acceptance-candidate heads, generated packs, handoff documents, maturity fields, phase status or
+   historical evidence — only when the request asks, or at a §0 governance-sync moment. A normal change needs no
+   governance sync. Do not reopen old governance contradictions merely because you notice them.
+6. **No unsolicited remote Git operations.** A local commit is allowed whenever useful. Never, unless asked or part of
+   an authorized CONTROLLED delivery (§0, §12): amend, rebase, merge, tag, push, open a PR, wait for CI, poll
+   Actions. `commit` → commit; `push` → push; `commit and push` → both, report, stop. Never wait for CI afterwards.
+7. **Do not resurrect finished topics:** once the user moves on, do not reopen, re-audit or re-check them, nor bring
+   back earlier legacy/governance/architecture concerns unless asked. Previous findings are not standing work items.
+8. **Failure handling:** diagnose only the error blocking the requested operation, fix only what completes it, retry,
+   stop once it works. No repository-wide investigation.
+9. **User commands beat workflow conventions.** "نفذ", "عدل", "امسح", "اعمل deploy", "production", "commit", "push",
+   "طبق ده" are execution instructions, not requests for analysis; never answer one with a plan for future checks.
+10. **Default lifecycle: REQUEST → EXECUTE → SHOW RESULT → STOP.** Never, unless each step is asked for: REQUEST →
+    INVESTIGATE → REVIEW → EXPAND SCOPE → VALIDATE EVERYTHING → GOVERNANCE → COMMIT → CI → MORE REVIEW.
+11. **Persistence.** These rules are intentional and permanent. Do not drift back to governance, packs, manifests or
+    full CI after routine work; do not ask in future sessions whether Direct Execution Mode still applies; do not
+    reintroduce automatic reviews or checks; silence is not permission to restore earlier workflows. Stay in this
+    mode until the user edits or revokes it.
+12. **Authorization-bound actions** (§4 removes the agent's own ceremony, not the PO's) need explicit PO
+    authorization: git operations (commit, push, tag, PR, merge), merges to master, deployment to any environment
+    (the standing authorization in §0F counts for the test appliance), database migrations, production changes, PMS,
+    payment-provider or financial traffic. Everything else: implement, fix routine blockers, continue. The
+    authorization may be given **once, by the mission prompt**; do not re-request it per step or treat a progress
+    report as its lapse. It never extends beyond that mission: anything it did not name (another environment, an
+    unmentioned migration, PMS or financial traffic, Go-Live) needs its own decision (§0A).
+13. **Review happens after delivery.** The PO reviews and tests live and sends corrections; do not pre-empt that with
+    an own verification phase. Reports stay short: what changed, where, and anything preventing the result. Then stop.

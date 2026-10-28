@@ -29,7 +29,8 @@ ARTIFACTS = os.path.join(GOV, "artifact-registry.json")
 TRANSITIONS = os.path.join(GOV, "transitions")
 PACK = os.path.join(ROOT, "exports/chatgpt/stayconnectenterprise")
 EVID = os.path.join(ROOT, "exports/chatgpt/phase-evidence")
-PLAN_PACK = os.path.join(ROOT, "exports/chatgpt/phase1b-planning")
+# The Phase-1B Planning Pack was retired on 2026-10-28 (T0265): it was a HISTORICAL subset of the Project Pack.
+RETIRED_PLAN_PACK = os.path.join(ROOT, "exports/chatgpt/phase1b-planning")
 
 BEGIN = "<!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->"
 END = "<!-- END GENERATED PROJECT STATE -->"
@@ -843,11 +844,13 @@ def cmd_validate(deep=True, manifest_equality=True):
     built_manifest = os.path.join(ROOT, "exports/chatgpt/stayconnectenterprise/MANIFEST.md")
     if os.path.isfile(built_manifest) and "StayConnect-IAM-Phase2-Final-Report.md" in open(built_manifest, encoding="utf-8").read() and not os.path.isfile(built_report):
         fail("Project Pack MANIFEST lists the Phase-2 Final Report but the file is not in the pack")
-    # 7. the Phase-1B Planning Pack MANIFEST generator must mark the pack HISTORICAL (checking the generator
-    #    source, not the extracted file, so it holds at the delivery-wrapper HEAD and never deadlocks a rebuild).
-    self_src = _read("tools/project-state.py") or ""
-    if not re.search(r"PLANNING_PACK_STATUS:\s+HISTORICAL", self_src):
-        fail("Phase-1B Planning Pack MANIFEST generator does not mark the pack HISTORICAL (sentinel missing)")
+    # 7. the Phase-1B Planning Pack is RETIRED (T0265): it may not come back, neither as a directory nor as a zip,
+    #    nor be listed as a generated artifact. It was a HISTORICAL duplicate of the Project Pack's Phase-1B files.
+    if os.path.isdir(RETIRED_PLAN_PACK) or os.path.isfile(os.path.join(ROOT, "exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip")):
+        fail("the retired Phase-1B Planning Pack is present again under exports/chatgpt (retired by T0265)")
+    for a in (art.get("artifacts") or []):
+        if a.get("id") == "planning-pack" and a.get("status") != "HISTORICAL_ONLY":
+            fail("artifact-registry lists the retired Phase-1B Planning Pack as %s (retired by T0265)" % a.get("status"))
     # 8. two named public-column fingerprints must carry a reconciliation note (never conflicting unnamed values)
     dss = st.get("database_schema_state", {}) or {}
     if dss.get("public_columns_sha256_current") and dss.get("public_columns_phase2_livedark_sha256"):
@@ -1089,22 +1092,6 @@ def _build_evidence_pack(src_commit):
     _w(os.path.join(EVID,"REPOSITORY_ARTIFACT_SHA256SUMS.txt"),f"# repo artifacts referenced, not packaged. Verify at SOURCE_COMMIT {src_commit}.\n"+"".join(f"{sha256_file(os.path.join(ROOT,a))}  {a}\n" for a in repo_art))
     _pack_sums(EVID)
 
-def _build_planning_pack(src_commit):
-    def flat_copy(rel,dst):
-        t=open(os.path.join(ROOT,rel),encoding="utf-8").read()
-        t=re.sub(r"\[([^\]]+)\]\(([^)#][^)]*)\)",lambda m:(m.group(0) if m.group(2).startswith(("http","mailto")) else m.group(1)),t)
-        _w(os.path.join(PLAN_PACK,dst),t)
-    flat_copy("docs/architecture/StayConnect-IAM-Phase1B-Plan.md","StayConnect-IAM-Phase1B-Plan.md")
-    flat_copy("docs/architecture/Phase1B-Privilege-Matrix.md","Phase1B-Privilege-Matrix.md")
-    _w(os.path.join(PLAN_PACK,"MANIFEST.md"),f"# Phase 1B Plan Evidence Pack — MANIFEST  (HISTORICAL)\n\n<!-- PLANNING_PACK_STATUS: HISTORICAL -->\n\n> **HISTORICAL — Phase-1B planning artifact.** Phase 1B was **ACCEPTED_AND_CLOSED at DARK maturity** via decision **D11** / transition **T0011**, and **PR #2 was merged**. This pack is retained for provenance of the Phase-1B planning stage only; it is **not** a current status/evidence pack. For current state see the Project Pack (`00-START-HERE.md`, Phase-2 Plan, Phase-2 Final Report, Phase-2 acceptance candidate) and the Phase Evidence Pack.\n\n- SOURCE_COMMIT: `{src_commit}`\n- HISTORICAL status at the time this planning pack was authored: Phase 1B planning (the earlier D10/IN_PROGRESS wording is superseded — Phase 1B is now accepted/closed via D11/T0011 and PR #2 merged; current phase is Phase 2, live-dark deployed and pending one Product-Owner acceptance decision).\n- Contents: Phase 1B plan (matrices+blueprint), privilege matrix, three code inventories, blueprint extract, README, two checksum lists.\n- Current next authorized action (see project-state): one Product-Owner Phase-2 acceptance decision.\n")
-    cited=["docs/architecture/StayConnect-IAM-Phase1B-Plan.md","docs/architecture/Phase1B-Privilege-Matrix.md","data-plane/internal/pmsguard/guard.go",
-      "data-plane/cmd/scd/main.go","data-plane/cmd/acctd/main.go","data-plane/cmd/edged/main.go","data-plane/cmd/netd/main.go","data-plane/cmd/portald/main.go",
-      "data-plane/internal/session/session.go","data-plane/internal/voucher/voucher.go","data-plane/internal/otp/otp.go",
-      "data-plane/cmd/scd/credentials_handlers.go","data-plane/cmd/scd/otp_handlers.go","data-plane/cmd/scd/social_handlers.go","data-plane/cmd/scd/pms_handlers.go",
-      "iam_v2_scratch/roles.sql"]+["iam_v2_scratch/migrations/"+f for f in sorted(os.listdir(os.path.join(ROOT,"iam_v2_scratch/migrations")))]
-    _w(os.path.join(PLAN_PACK,"REPOSITORY_ARTIFACT_SHA256SUMS.txt"),f"# cited committed source, not packaged. Verify at SOURCE_COMMIT {src_commit}.\n"+"".join((f"{sha256_file(os.path.join(ROOT,a))}  {a}\n" if os.path.isfile(os.path.join(ROOT,a)) else f"MISSING  {a}\n") for a in cited))
-    _pack_sums(PLAN_PACK)
-
 def _pack_sums(base):
     files=[]
     for dp,_,fs in os.walk(base):
@@ -1189,11 +1176,9 @@ def cmd_build_packs(allow_dirty=False):
     ts=datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     _build_project_pack(block,src_commit,st["latest_transition_id"],st["schema_version"],ts)
     _build_evidence_pack(src_commit)
-    _build_planning_pack(src_commit)
     base=os.path.join(ROOT,"exports/chatgpt")
     _zip(PACK,os.path.join(base,"StayConnectEnterprise-ChatGPT-Project-Pack.zip"))
     _zip(EVID,os.path.join(base,"StayConnectEnterprise-Phase-Evidence-Pack.zip"))
-    _zip(PLAN_PACK,os.path.join(base,"StayConnectEnterprise-Phase1B-Planning-Pack.zip"))
     # extract + re-validate the extracted packs (Python-native; environment-robust).
     # NOTE: the bash keyword validator (tools/validate-project-state.sh) is ALSO run in extracted-pack
     # mode as an explicit runbook step (Git Bash) — build-packs performs the deterministic structural
@@ -1220,9 +1205,9 @@ def check_closure_coherence(st):
     no service restart" while the same file recorded the Product Owner's end-to-end authorisation for exactly
     those steps. That was reconciled forward. The mirror image then survived every gate: after the closure
     had actually completed, `next_authorized_action` still said "Execute to DONE the ... FUNCTIONAL-
-    COMPLETENESS CLOSURE ... including the controlled PRE-LIVE work on 172.21.60.25 the mission names",
+    COMPLETENESS CLOSURE ... including the controlled PRE-LIVE work on <the PRE-LIVE appliance> the mission names",
     `blockers` still said "THE CURRENT WORK IS THE FUNCTIONAL-COMPLETENESS CLOSURE", `allowed_actions` still
-    authorised "controlled work on PRE-LIVE 172.21.60.25", and functional_completeness_remaining still
+    authorised "controlled work on PRE-LIVE <the PRE-LIVE appliance>", and functional_completeness_remaining still
     carried a key literally named `known_gap_not_closed` -- all while `_state` in the same object declared
     every gap closed.
 

@@ -330,7 +330,7 @@
   ],
   "allowed_actions": [
     "Develop normally: scope, implement, focused self-review, targeted tests and builds, commit and push to the delivery branch and its pull request. The four comprehensive gates do not run on pull requests (D42).",
-    "Deploy any completed application/code change promptly to PRE-LIVE 172.21.60.25 for Product Owner testing, before merge, under the standing Product-Owner deployment decision of 2026-09-24 (kept by D42), including build, install, service restart, deployment verification, retry, rollback and recording the exact deployed commit sha. No further approval is needed and none may be requested again.",
+    "Deploy completed software changes to the test appliance 172.21.96.97 under the standing Product-Owner authorization of 2026-10-28 (D79): build, install, service restart, deployment verification, retry, rollback and recording the exact deployed commit sha. It does not cover the production Central, migrations, destructive data changes, networking, PMS or financial traffic, Root-CA or trust changes, or Go-Live. Never deploy to or test against a retired host (current_state_facts.retired_hosts), and never default a test or drill to the production Central.",
     "Maintain project governance, current-state parity, decisions, receipts, manifests, export packs and documentation.",
     "Open and update the single delivery pull request, stop at READY FOR PRODUCT OWNER TESTING, and merge with a merge commit only after explicit Product Owner acceptance recorded as the po-merge-approved label (or a mission that authorized the merge in advance). Run the comprehensive validation only on 'FULL CHECK THE WHOLE CODE'. Repository-only engineering that touches no live environment is unrestricted.",
     "NOT ALLOWED WITHOUT A NEW PRODUCT-OWNER DECISION: a new product, architecture or security decision; destructive or historical data mutation; a new database migration or schema decision; networking or topology changes; PMS configuration, posting or traffic; financial or payment-provider activity; Guest activation or Guest Go-Live; Root-CA or trust-root changes; and Go-Live."
@@ -341,10 +341,10 @@
     "Any Production contact or mutation.",
     "Re-executing, reopening or extending Phase 7, which is ACCEPTED_AND_CLOSED, and implementing any numbered development phase: none is open or authorized, and no Phase 8 exists."
   ],
-  "next_authorized_action": "Work normal missions under the PRODUCT-OWNER-LED DELIVERY model D42 (2026-09-26): implement, target-test, deploy completed changes to PRE-LIVE 172.21.60.25 under the standing deployment decision, stop at READY FOR PRODUCT OWNER TESTING, and merge only after explicit Product Owner acceptance (po-merge-approved). The comprehensive validation runs only on 'FULL CHECK THE WHOLE CODE'. No agent requests PRE-LIVE deployment approval again.",
+  "next_authorized_action": "Work normal missions under the PRODUCT-OWNER-LED DELIVERY model D42 (2026-09-26): implement, target-test, deploy routine software to the test appliance 172.21.96.97 under the standing authorization D79 (the production Central only when a mission names it), stop at READY FOR PRODUCT OWNER TESTING, and merge only after explicit Product Owner acceptance (po-merge-approved). The comprehensive validation runs only on 'FULL CHECK THE WHOLE CODE'. Retired hosts (current_state_facts.retired_hosts) are never contacted.",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase7-Plan.md",
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
-  "latest_accepted_po_decision": "D77",
+  "latest_accepted_po_decision": "D79",
   "current_state_facts": {
     "_note": "MACHINE-READABLE CURRENT STATE. Every current-state surface in this repository is validated against these fields by tools/validate-current-state-parity.py, which runs in the Project Governance gate. They exist because prose alone let a contradiction survive a green gate: current_maturity still said an authorization was awaited and iam_v2 was 49/0 while this file already recorded 63 tables and an executed Live Increment 9. A fact that is only asserted in sentences cannot be diffed; a fact recorded here can be.",
     "phase": "7",
@@ -462,7 +462,7 @@
     "rollback_rehearsal_occurred": true,
     "corrected_software_deployed": true,
     "deployed_head_on_appliance": "MIXED -- see deployed_runtime_services; there is no single deployed head",
-    "deployed_head_note": "PRE-LIVE 172.21.60.25, re-read live on 2026-10-26 (T0257). THE APPLIANCE RUNS BINARIES FROM SEVERAL COMMITS and this field names none. Per binary: edged 16231943 (PR #254 code head); pmsd 735efe77; scd 3db9ed56; netd and portald 4a192268; acctd 9394eb5f; keybootstrap fa32e3df. All read out of the INSTALLED bytes with vcs.modified=false and -tags=stayconnect_production; sha256sum -c DEPLOYED_BINARIES.sha256 on the appliance is all OK (7 of 7). The installed code is identical to master's code (the merge of PR #254 added only governance records), and this note is not authoritative master state.",
+    "deployed_head_note": "RETIRED 2026-10-28 (Product-Owner record, D78/T0264): this appliance no longer exists as an active environment and may not be contacted. HISTORICAL from here on: PRE-LIVE 172.21.60.25, re-read live on 2026-10-26 (T0257). THE APPLIANCE RUNS BINARIES FROM SEVERAL COMMITS and this field names none. Per binary: edged 16231943 (PR #254 code head); pmsd 735efe77; scd 3db9ed56; netd and portald 4a192268; acctd 9394eb5f; keybootstrap fa32e3df. All read out of the INSTALLED bytes with vcs.modified=false and -tags=stayconnect_production; sha256sum -c DEPLOYED_BINARIES.sha256 on the appliance is all OK (7 of 7). The installed code is identical to master's code (the merge of PR #254 added only governance records), and this note is not authoritative master state.",
     "live_increment9_revalidated": true,
     "live_increment9_revalidated_on": "2026-08-11",
     "live_increment9_revalidation_verdicts": {
@@ -799,7 +799,7 @@
     "guest_traffic_carried_ever": true,
     "guest_traffic_carried_ever_note": "YES -- and the figures below are HISTORICAL. accounting_records=1037 across two sessions (1036 for session 64e5f11c, 11.4 MB up / 58.6 MB down, and 1 for session 8b5758bf, 690 bytes down), with the tc classes on br-g-00d1fa1a and ifb-g-00d1fa1a carrying matching counts, so metering and durable accounting agreed at that moment. They are not today's totals: live_counters records 14 310 accounting records at 2026-09-22T11:26:28Z. The answer to 'has guest traffic ever been carried' is still yes; the number is read from live_counters.",
     "live_counters": {
-      "_note": "CURRENT, read live from PRE-LIVE 172.21.60.25 on 2026-09-22T11:26:28Z by the functional-completeness closure, which IS authorised to read the appliance. The previous value was an honestly-labelled HISTORICAL snapshot from 2026-09-06T01:50Z that said its successor totals were 'DELIBERATELY NOT STATED' because 'they cannot be derived from committed evidence without a new appliance read, and this closure is not authorized to make one'. That was correct then; the read is now taken and recorded, and the superseded snapshot is kept below as live_counters_historical_20260906 rather than deleted. Read-only: SELECT count(*) per table plus netd's shaping epochs and the nft set listing. Nothing was written.",
+      "_note": "RETIRED 2026-10-28 (Product-Owner record, D78/T0264): this appliance no longer exists as an active environment and may not be contacted. HISTORICAL from here on: CURRENT, read live from PRE-LIVE 172.21.60.25 on 2026-09-22T11:26:28Z by the functional-completeness closure, which IS authorised to read the appliance. The previous value was an honestly-labelled HISTORICAL snapshot from 2026-09-06T01:50Z that said its successor totals were 'DELIBERATELY NOT STATED' because 'they cannot be derived from committed evidence without a new appliance read, and this closure is not authorized to make one'. That was correct then; the read is now taken and recorded, and the superseded snapshot is kept below as live_counters_historical_20260906 rather than deleted. Read-only: SELECT count(*) per table plus netd's shaping epochs and the nft set listing. Nothing was written.",
       "as_at": "2026-09-22T11:26:28Z",
       "purchases": 28,
       "entitlements": 28,
@@ -925,7 +925,7 @@
     "pms_published_generation_note": "THREE DIFFERENT COUNTERS HAVE ALL BEEN ABBREVIATED 'gen' AND MUST NOT BE CONFLATED. pms_interface_runtime.published_resync_generation is the RESYNC generation, bumped once per resync cycle: 300, read passively 2026-09-16 after the T0149 deployment. pms_interface_runtime.runtime_generation is a monotonic runtime-row counter bumped on every state write, which is why it is orders of magnitude larger: 74452. pms_interface_revisions.revision_no is the pinned Interface REVISION: 3, unchanged. The move followed the pmsd restart the T0149 deployment caused: the connector reconnected and requested its own resync, publishing generation 299 over 464 records at 2026-09-16T14:04:36Z and reaching 300 on the next cycle. No operator command and no configuration change; resync_command_id is NULL. HISTORICAL (do not read as current): 282 belongs to the 2026-09-15 restart, 209 to the migration-0065 closure, and 206-208 to the 2026-09-08T11:45Z restart sequence.",
     "deployed_runtime_head": "MIXED -- see deployed_runtime_services; there is no single deployed head",
     "deployed_runtime_services": {
-      "_note": "Per service: sha256 of the installed binary, the commit its own bytes name, and the build tag. Read back from /opt/stayconnect/bin on PRE-LIVE 172.21.60.25 on 2026-10-26 after the deployment of edged 16231943 (T0257). pmsd remains 735efe77 and scd 3db9ed56 (this delivery changes neither), netd and portald 4a192268, acctd and the helpers on earlier commits.",
+      "_note": "RETIRED 2026-10-28 (Product-Owner record, D78/T0264): this appliance no longer exists as an active environment and may not be contacted. HISTORICAL from here on: Per service: sha256 of the installed binary, the commit its own bytes name, and the build tag. Read back from /opt/stayconnect/bin on PRE-LIVE 172.21.60.25 on 2026-10-26 after the deployment of edged 16231943 (T0257). pmsd remains 735efe77 and scd 3db9ed56 (this delivery changes neither), netd and portald 4a192268, acctd and the helpers on earlier commits.",
       "netd": "9ddcf3ecc99eb0cfe8a70fcb7fddf00c419891ae1161177438205aade83bb52f  (4a1922685531, tags=stayconnect_production, vcs.modified=false)",
       "scd": "d53f91eb82883e976b3e38ebbfee2c2fcc9f8160e20c5919b0590415adb6a6e3  (3db9ed56504f, tags=stayconnect_production, vcs.modified=false)",
       "edged": "e8f7a8cd3543e96ca98bf8ebf8beb8631ee79f0eade5f1f1a44e1439d7952771  (1623194378b9, tags=stayconnect_production, vcs.modified=false)",
@@ -1099,7 +1099,7 @@
       "not_performed": "No sync, resync or routing control was activated: each would generate PMS traffic or change PMS configuration, which this mission explicitly excludes. Their presence, labelling and authorization were verified without invoking them. No .23 access, no financial traffic, no migration, no topology change, no Root-CA change, no Go-Live."
     },
     "deployed_runtime_provenance_verified_at": "2026-10-24",
-    "deployed_runtime_provenance_verification": "Verified live on PRE-LIVE 172.21.60.25 on 2026-10-26 (UTC), after edged 16231943 was deployed. For each service binary: sha256 of the installed file, and vcs.revision, -tags and vcs.modified read out of the installed bytes with grep. /opt/stayconnect/DEPLOYED_BINARIES.{sha256,txt} were rewritten from the installed bytes and sha256sum -c reports every line OK.",
+    "deployed_runtime_provenance_verification": "RETIRED 2026-10-28 (Product-Owner record, D78/T0264): this appliance no longer exists as an active environment and may not be contacted. HISTORICAL from here on: Verified live on PRE-LIVE 172.21.60.25 on 2026-10-26 (UTC), after edged 16231943 was deployed. For each service binary: sha256 of the installed file, and vcs.revision, -tags and vcs.modified read out of the installed bytes with grep. /opt/stayconnect/DEPLOYED_BINARIES.{sha256,txt} were rewritten from the installed bytes and sha256sum -c reports every line OK.",
     "rollback_artifact_provenance": {
       "audited_at": "2026-09-21",
       "finding": "17 of the 36 retained rollback artifacts in /opt/stayconnect/bin were built WITHOUT -tags stayconnect_production and so carry the development build profile; most carry no vcs stamp either. Four were produced by the guest-pilot mission (the *.bak-untagged files and portald.bak-landingerror) and thirteen predate it, from before scripts/build-appliance-binaries.sh existed. Until this closure every one of them was selectable by an operator typing a suffix, and binary-rollback.sh would have installed it, verified the digest and reported success -- truthfully about identity, and silent about profile.",
@@ -1147,6 +1147,52 @@
         "rule": "Not an operational target. Do not contact it, do not diagnose against it, do not treat it as a source of anything.",
         "historical_evidence": "PRESERVED IN MEANING. Everything this appliance proved stands as recorded in governance/ and in the accepted documents that cite it; no historical fact or outcome is changed. Retiring a target does not falsify its records: a record of what was true then is not a claim about what is true now. At Product-Owner direction (T0194) the current tree names it as 'the retired development reference appliance' instead of by its literal address; the original wording remains in Git history, which is not rewritten.",
         "why_recorded_here": "The ban existed only in prose, so there was nothing for a validator to diff against -- and three harnesses still DEFAULTED to this address, one of which issues a real reboot. Recorded as a fact, it is checkable."
+      },
+      "central-retired-2026-10-28": {
+        "address_octets": [
+          172,
+          21,
+          96,
+          196
+        ],
+        "hostname_labels": [
+          [
+            "sc-central",
+            "echofusion",
+            "com"
+          ]
+        ],
+        "role_when_active": "Central (identity, activation, licensing) from 2026-09-27 to 2026-10-28; the trust universe the former PRE-LIVE appliance was provisioned in",
+        "status": "RETIRED",
+        "retired_by": "Product-Owner record, 2026-10-28 (T0264): permanently retired; it does not exist as an active environment and may not be contacted",
+        "rule": "Not an operational target. Do not contact it, deploy to it, diagnose against it or restore from it. Never replace it blindly with the current production Central: name the environment under test explicitly.",
+        "historical_evidence": "PRESERVED UNCHANGED. Every record of what this host served, deployed and proved stands as written in governance/, the delivery manifests and the accepted evidence: a record of what was true then is not a claim about what is true now."
+      },
+      "pre-live-appliance-retired-2026-10-28": {
+        "address_octets": [
+          172,
+          21,
+          60,
+          25
+        ],
+        "role_when_active": "PRE-LIVE appliance (hostname sce), the only appliance until 2026-10-28",
+        "status": "RETIRED",
+        "retired_by": "Product-Owner record, 2026-10-28 (T0264): permanently retired; it does not exist as an active environment and may not be contacted",
+        "rule": "Not an operational target. Do not contact it, deploy to it or test against it. The standing PRE-LIVE deployment authorisation (D42, 2026-09-24) named this host and has no target now.",
+        "historical_evidence": "PRESERVED UNCHANGED. Every record of what this host served, deployed and proved stands as written in governance/, the delivery manifests and the accepted evidence: a record of what was true then is not a claim about what is true now."
+      },
+      "central-stopped-2026-09-27": {
+        "address_octets": [
+          150,
+          0,
+          0,
+          252
+        ],
+        "role_when_active": "Central until 2026-09-27; it still holds the encrypted Root CA key backup (docs/CA_CEREMONY_RUNBOOK.md)",
+        "status": "STOPPED; RETIRED AS A TARGET",
+        "retired_by": "Stopped and disabled when Central moved on 2026-09-27; recorded as retired by the Product-Owner record of 2026-10-28 (T0264)",
+        "rule": "Not an operational target: never re-enable it (it would issue licence versions no current Central knows). The legacy Root CA backup it still holds is not disposed (current_state_facts.legacy_pki_custody); disposal is a console shred and VM decommission, out of band.",
+        "historical_evidence": "PRESERVED UNCHANGED. Every record of what this host served, deployed and proved stands as written in governance/, the delivery manifests and the accepted evidence: a record of what was true then is not a claim about what is true now."
       }
     },
     "central_scope": "LICENSING_ONLY",
@@ -1211,7 +1257,7 @@
     "functional_completeness_closure_note": "FUNCTIONAL COMPLETENESS: PASS. Known required development gaps: NONE. Known required PRE-LIVE operational gaps: NONE. The Product-Owner closure mission authorised at T0175 ran to completion across five increments (T0175, T0177, T0178, T0179, T0180) and is CLOSED; the last two technical items closed at T0180, merged to master as 1898c127.\n\nTHE AUTHORISATION IS SPENT, NOT STANDING. T0175 authorised controlled PRE-LIVE work -- deployment, service restarts, migrations, VLAN networking, DHCP, backup/restore and rollback drills, security and failure drills -- and at T0180 one controlled Guest Device Self-Service acceptance run. That mission has completed, so NO FURTHER PRE-LIVE MUTATION IS AUTHORISED BY IT. Any future change to 172.21.60.25 needs its own Product-Owner decision. A spent authorisation left in this register would be indistinguishable, to the next reader, from a live one -- which is precisely the field an agent consults before touching a PRE-LIVE appliance -- so it is retired here rather than left lying about.\n\nGuest activation: STILL DEFERRED BY D41. Go-Live: NOT AUTHORISED. Remaining mission blocker: NONE.\n\nWHAT IS LEFT IS NOT TECHNICAL. HA architecture, payment-provider selection, the C35 external archival receipt authority and the master approving-review policy are PRODUCT-OWNER DECISIONS, recorded in functional_completeness_remaining.product_owner_decisions_not_gaps. They are not gaps, they are not blockers on this mission, and closing them is not engineering work.",
     "delivery_model": "PO_LED_DELIVERY",
     "delivery_model_note": "ACTIVE since D42 (2026-09-26, T0196). Normal work: scope, implement, focused self-review, targeted tests, build if needed, deploy to PRE-LIVE when authorized, smoke check, then STOP for Product Owner testing. NO PRODUCT OWNER ACCEPTANCE = NO MERGE: the single required status context is po-merge-authorization, which passes only while the pull request carries the label po-merge-approved on its current head (a later push removes it). The four comprehensive gates are workflow_dispatch only and run solely for 'FULL CHECK THE WHOLE CODE' (tools/full-check.py). No workflow has a schedule and no workflow merges. tools/validate-delivery-protocol.py enforces this from the tree; docs/PO_LED_DELIVERY_MODEL.md is the authoritative text.\n\nHISTORY: NIGHTLY_AUTHORITATIVE_VALIDATION (T0182-T0195) is retired and its value is refused by the validator.",
-    "standing_pre_live_deployment_authorization": "STANDING PRODUCT-OWNER DECISION, 2026-09-24, CONTINUING UNTIL EXPLICITLY REVOKED OR CHANGED. Every completed application/code change may be deployed promptly to the PRE-LIVE appliance 172.21.60.25 for Product Owner testing, BEFORE it is merged (D42 keeps this decision; the merge itself waits for Product Owner acceptance). An agent session must NOT request this approval again; asking again is a defect in reading the record.\n\nCOVERED, as directly required parts of deploying: build and package, install, service restart, deployment verification, retry and rollback, and recording exact deployed-source provenance.\n\nNOT AUTHORISED BY THIS, each remaining a separate Product-Owner decision: a new product, architecture or security decision; destructive or historical data mutation; a new database migration or schema decision; networking or topology changes; PMS configuration, posting or traffic; financial or payment-provider activity; Guest activation or Guest Go-Live; Root-CA or trust-root changes; Go-Live.\n\nA CONSEQUENCE THAT IS INTENDED RATHER THAN DRIFT: the deployed PRE-LIVE source will often be AHEAD of master during the working day, because it carries changes the nightly validation has not yet judged. Two rules keep that readable. Always record the EXACT deployed commit sha, read back from the installed artifact rather than from the build host, in deployed_runtime_services -- that field has been wrong immediately after three consecutive deployments, so it is updated as PART OF deploying. And never treat deployed PRE-LIVE provenance as authoritative master state: only master records that a change passed the gates.\n\nRecorded in CLAUDE.md 0F and docs/NIGHTLY_AUTHORITATIVE_DELIVERY.md.",
+    "standing_pre_live_deployment_authorization": "SUPERSEDED BY D79 (2026-10-28): see standing_test_appliance_deployment_authorization. Kept as recorded:\n\nNO TARGET SINCE 2026-10-28 (D78/T0264). The decision below named the PRE-LIVE appliance, which the Product Owner permanently retired on 2026-10-28; it does not pass to the test appliance 172.21.96.97 by inference, and deploying there needs a mission that names it or a new standing decision. The decision text is preserved as recorded:\n\nSTANDING PRODUCT-OWNER DECISION, 2026-09-24, CONTINUING UNTIL EXPLICITLY REVOKED OR CHANGED. Every completed application/code change may be deployed promptly to the PRE-LIVE appliance 172.21.60.25 for Product Owner testing, BEFORE it is merged (D42 keeps this decision; the merge itself waits for Product Owner acceptance). An agent session must NOT request this approval again; asking again is a defect in reading the record.\n\nCOVERED, as directly required parts of deploying: build and package, install, service restart, deployment verification, retry and rollback, and recording exact deployed-source provenance.\n\nNOT AUTHORISED BY THIS, each remaining a separate Product-Owner decision: a new product, architecture or security decision; destructive or historical data mutation; a new database migration or schema decision; networking or topology changes; PMS configuration, posting or traffic; financial or payment-provider activity; Guest activation or Guest Go-Live; Root-CA or trust-root changes; Go-Live.\n\nA CONSEQUENCE THAT IS INTENDED RATHER THAN DRIFT: the deployed PRE-LIVE source will often be AHEAD of master during the working day, because it carries changes the nightly validation has not yet judged. Two rules keep that readable. Always record the EXACT deployed commit sha, read back from the installed artifact rather than from the build host, in deployed_runtime_services -- that field has been wrong immediately after three consecutive deployments, so it is updated as PART OF deploying. And never treat deployed PRE-LIVE provenance as authoritative master state: only master records that a change passed the gates.\n\nRecorded in CLAUDE.md 0F and docs/NIGHTLY_AUTHORITATIVE_DELIVERY.md.",
     "nightly_authoritative_validation": "RETIRED by D42 (2026-09-26, T0196). From T0182 to T0195 the four gates ran a failing sentinel on every pull_request and a 06:00 Africa/Cairo orchestrator re-ran them for the single delivery candidate and merged an all-green head unattended. On 2026-09-26 the orchestrator workflow was first disabled in GitHub (disabled_manually) and PR #190 labelled nightly-hold, so no scheduled run could merge anything; T0196 then removed the workflow, tools/nightly_delivery.py, tools/nightly-status.py and scripts/ci/nightly-orchestrate.py. The first 06:00 scheduled run was therefore never observed. The record of the model is docs/NIGHTLY_AUTHORITATIVE_DELIVERY.md (superseded) and T0182-T0195.",
     "session_start_check": "None owed by the delivery model. Nothing runs unattended under D42, so there is no nightly verdict to read at session start (tools/nightly-status.py was removed by T0196). A session starts from the state of its own delivery branch and pull request.",
     "central_console_runtime_identity": {
@@ -1225,7 +1271,7 @@
       "verified": "central-deploy.sh smoke PASS 9/9; DEPLOYED.json reads back b5775652 for ctrlapi and console; browser: the two-step cycle and 11 console screens render with no page errors and none of the retired phrases.",
       "release": "/opt/stayconnect/releases/cloud-admin/20261024T170939Z"
     },
-    "prelive_guest_access_testing": "ENABLED on PRE-LIVE 172.21.60.25 for Product Owner testing (D43, T0197, 2026-09-26). STAYCONNECT_PHASE2_MASTER=1 and STAYCONNECT_PHASE2_PORTAL=1 in /etc/stayconnect/scd.env and portald.env; rollback copies *.bak-pre-guest-activation-20260926T193029Z (the portald.env copy removed by the retention sweep was reconstructed exactly as *-reconstructed). Live proof 2026-09-26: scripts/guest-access-e2e-test.sh 53/53 -- captive before sign-in, enforced (nft phase3_auth_ipv4) and online (generate_204 = 204, ICMP 1.1.1.1) after activation for all three methods, device limits, joining, reconnect, termination and backend-enforced method switches, with pms_postings, posting_outbox and payment_transactions unchanged. Test state reset afterwards.",
+    "prelive_guest_access_testing": "RETIRED 2026-10-28 (Product-Owner record, D78/T0264): this appliance no longer exists as an active environment and may not be contacted. HISTORICAL from here on: ENABLED on PRE-LIVE 172.21.60.25 for Product Owner testing (D43, T0197, 2026-09-26). STAYCONNECT_PHASE2_MASTER=1 and STAYCONNECT_PHASE2_PORTAL=1 in /etc/stayconnect/scd.env and portald.env; rollback copies *.bak-pre-guest-activation-20260926T193029Z (the portald.env copy removed by the retention sweep was reconstructed exactly as *-reconstructed). Live proof 2026-09-26: scripts/guest-access-e2e-test.sh 53/53 -- captive before sign-in, enforced (nft phase3_auth_ipv4) and online (generate_204 = 204, ICMP 1.1.1.1) after activation for all three methods, device limits, joining, reconnect, termination and backend-enforced method switches, with pms_postings, posting_outbox and payment_transactions unchanged. Test state reset afterwards.",
     "central_ctrlapi_runtime_identity": {
       "_note": "HISTORICAL: the retired Central 172.21.96.196 (retired 2026-10-28), as last read back. The Central API binary on 172.21.96.196, read back from the host.",
       "sha256": "1bbe9fc6b2dac97914c7689a4763b781c528d23fe9373099f6511db42ae0ef00",
@@ -1248,11 +1294,11 @@
       "retired_host": {
         "address": "172.21.96.196",
         "name": "sc-central.echofusion.com",
-        "status": "RETIRED 2026-10-28 (Product-Owner record). Not an operational target.",
+        "status": "RETIRED 2026-10-28 (Product-Owner record; registered in current_state_facts.retired_hosts). Not an operational target.",
         "history": "Central from 2026-09-27 to 2026-10-28. Central moved to 172.21.96.196 on 2026-09-27 (central-export.sh --final on 150.0.0.252, central-install.sh --mode restore on the new host, release onegate-central-abda23d1f3a3). Every key, certificate and the licence database were carried over; the identity is unchanged: vendor 2fbdfcbde209ebb5, assignment 027a2c97f6c8fcdb, registry root 84655767f9834fa2, appliance Root CA D2:60:C6:EE:21:EB:D7:79:… .",
         "name_resolution_then": "sc-central.echofusion.com is published on the gateway DNS (FortiGate 172.21.60.1) and points at 172.21.96.196 since 2026-09-27. PRE-LIVE's interim /etc/hosts line was removed after the switch; a restarted scd then reconnected over DNS alone (mTLS transport verified, assignment served, licence refreshed)."
       },
-      "former_host": "150.0.0.252: ctrlapi, the console and Caddy stopped and disabled since the move, nothing listening on 443/9443/8080/3000. Not an operational target; not to be re-enabled (the new Central has since issued licence version 3). It still holds the encrypted Root CA backup; a checksum-verified copy (sha256 a5aa19446fb20294fb3ea1d22d42bb6668a75b39d3900a6763bf715c35bd504c) was taken off the host on 2026-09-27 for offline custody. Shred the host copy, then decommission, once the backup is confirmed on offline media."
+      "former_host": "STOPPED, RETIRED AS A TARGET (current_state_facts.retired_hosts). 150.0.0.252: ctrlapi, the console and Caddy stopped and disabled since the move, nothing listening on 443/9443/8080/3000. Not an operational target; not to be re-enabled (the new Central has since issued licence version 3). Legacy Root CA custody reconciled 2026-10-28: see current_state_facts.legacy_pki_custody."
     },
     "product_terminology": {
       "_note": "Product-Owner decisions of 2026-09-27, recorded where the current product state is read. The binding reference is docs/PRODUCT_TERMINOLOGY.md.",
@@ -1284,10 +1330,27 @@
       "social_provider_validation": "PENDING -- real Google/Facebook/Apple/Microsoft validation awaits the Product Owner's future public Client Portal domain and publicly trusted certificate decision (deferred 2026-09-29) and the provider credentials; NOT a blocker for PR #202. Portal hostname, Root CA and certificate architecture unchanged."
     },
     "room_charge_transport": "D45 with D46, live on PRE-LIVE under D47: the existing single FIAS connection owned by pmsd. The scd posting worker (svc_posting) locks the stay, refreshes RN from the reservation (G#) and records each attempt with sha256 of the exact PS; pmsd (svc_pmsd) re-authorises the command against the database and, inside its single writer before the first byte, against the room its own link last read for that G#; a stale command is NOT_SENT. UNKNOWN is never resent. Transmission needs STAYCONNECT_PHASE4_PMS_TRANSMIT with master and outbox on BOTH scd and pmsd; on PRE-LIVE both are on since 2026-09-30 (D47) and the relay listens on /run/stayconnect-pmsd/pmsd-posting.sock. One controlled real posting has been made (T0204). Financial freshness (D48): feed health plus a successful complete resync within the interface's financial mirror maximum age (PRE-LIVE: 4 hours); pmsd refreshes it at half the bound; a quiet feed is not stale.",
-    "prelive_phase4_flag_posture": "PRE-LIVE 172.21.60.25 since 2026-09-30 (D47): scd runs STAYCONNECT_PHASE4_MASTER, _PAYMENT, _PAYMENT_PROVIDER, _POSTING, _FINANCIAL_REVIEW, _OUTBOX_WORKER and _PMS_TRANSMIT; pmsd runs _MASTER, _OUTBOX_WORKER and _PMS_TRANSMIT; edged runs _MASTER, _POSTING and _FINANCIAL_REVIEW. STAYCONNECT_PAYMENT_LIVE_ALLOWED is set nowhere. Real PMS postings ever: one (T0204, USD 1.00, PA OK). Payment-provider traffic ever: none.",
-    "phase4_flags_off_scope": "phase4_flags_off records the DELIVERED REPOSITORY configuration (no file in the tree enables a Phase-4 flag; scripts/ci/phase4-dark-check.sh asserts it). It is not a statement about the PRE-LIVE environment, whose posture is recorded in prelive_phase4_flag_posture."
+    "prelive_phase4_flag_posture": "RETIRED 2026-10-28 (Product-Owner record, D78/T0264): this appliance no longer exists as an active environment and may not be contacted. HISTORICAL from here on: PRE-LIVE 172.21.60.25 since 2026-09-30 (D47): scd runs STAYCONNECT_PHASE4_MASTER, _PAYMENT, _PAYMENT_PROVIDER, _POSTING, _FINANCIAL_REVIEW, _OUTBOX_WORKER and _PMS_TRANSMIT; pmsd runs _MASTER, _OUTBOX_WORKER and _PMS_TRANSMIT; edged runs _MASTER, _POSTING and _FINANCIAL_REVIEW. STAYCONNECT_PAYMENT_LIVE_ALLOWED is set nowhere. Real PMS postings ever: one (T0204, USD 1.00, PA OK). Payment-provider traffic ever: none.",
+    "phase4_flags_off_scope": "phase4_flags_off records the DELIVERED REPOSITORY configuration (no file in the tree enables a Phase-4 flag; scripts/ci/phase4-dark-check.sh asserts it). It is not a statement about the PRE-LIVE environment, whose posture is recorded in prelive_phase4_flag_posture.",
+    "test_appliance": {
+      "_note": "The current test appliance (Product-Owner record, 2026-10-28, D78/T0264). Activated on the production Central, in its trust universe.",
+      "host": "172.21.96.97",
+      "central": "central.onegate.getsemantics.com (41.128.240.133)",
+      "release": "onegate-appliance-d25999781b1a (master code of PR #261), as recorded in CONTINUATION.md and the installation manual Appendix 3; not re-read in this delivery",
+      "status": "TEST. Go-Live not authorised. Routine software deployments are covered by the standing authorization D79."
+    },
+    "standing_test_appliance_deployment_authorization": "STANDING PRODUCT-OWNER AUTHORIZATION, 2026-10-28 (D79/T0265), CONTINUING UNTIL REVOKED OR CHANGED: routine software deployments to the test appliance 172.21.96.97 within approved work, without separate deployment approval each time. COVERED: build and package, install, service restart, deployment verification, retry and rollback, and recording the exact deployed commit read back from the installed artifact. NOT COVERED, each a separate Product-Owner decision: the production Central; a new product, architecture or security decision; destructive or historical data mutation; a new migration or schema decision; networking or topology changes; PMS configuration, posting or traffic; financial or payment-provider activity; Guest activation or Go-Live; Root-CA or trust changes. The deployed source may run ahead of master; it is never master state.",
+    "legacy_pki_custody": {
+      "_note": "Reconciliation of the legacy (pre-2026-10-28) trust universe, D79/T0265. Truthful status only; nothing here claims a destruction that was not observed.",
+      "current_trust_dependency": "NONE. The production Central and the test appliance are a fresh trust universe (installation manual F, Appendix 3). The repository holds no private key material and no compiled-in trust anchor; every anchor is read at run time from per-installation files under /etc/stayconnect (checked 2026-10-28).",
+      "workstation_custody_copy": "NO LONGER HELD (Product-Owner confirmation, 2026-10-28). No destruction record exists and none is written.",
+      "host_backup_150_0_0_252": "NOT DISPOSED. root-ca.key.enc, its .sha256 and CEREMONY_PASSPHRASE.txt under /opt/stayconnect/ca-ceremony-backup/ on the stopped first Central, last verified present 2026-09-27. The delivery environment holds no credentials for the host and its egress proxy refuses the project's hosts. Disposal: shred -u on the console, then decommission the VM and disks, out of band.",
+      "runtime_keys_on_retired_central": "NOT DISPOSED. Legacy Intermediate CA, vendor licence, assignment, registry-root and internal TLS CA private keys under /etc/stayconnect on the retired Central 172.21.96.196 (carried over by the 2026-09-27 restore) and on 150.0.0.252. 172.21.96.196 may not be contacted (D78); disposal is a VM wipe or decommission by its infrastructure owner, out of band.",
+      "production_root_key_cold_storage": "NOT RECORDED: whether installation manual F step 2 (moving the production Central's Root key offline) has been done could not be checked from the repository.",
+      "record": "docs/CA_CEREMONY_RUNBOOK.md"
+    }
   },
-  "latest_transition_id": "T0263",
+  "latest_transition_id": "T0265",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1342,7 +1405,7 @@
       "mutation": "the appliance was provisioned by this work; the DEVELOPMENT appliance was not contacted and nothing was copied from it",
       "legacy_iam": "ABSENT from the Fresh Production baseline: the superseded guest-IAM runtime and schema are not part of the product a new appliance is built from. It is NOT the configured authority for Fresh Production and cannot become it. Untouched on the DEVELOPMENT appliance; historical migrations and evidence preserved.",
       "transition_strategy": "FRESH PRODUCTION APPLIANCE DEPLOYMENT, ZERO-LEGACY (D35; T0080-T0082). A newly provisioned server is built factory-clean from the current-only repository baseline, enrolled and claimed, assigned by signed assignment and configured through Hotel Admin, with IAM-v2 as the sole guest-IAM authority from first operation. There is no IAM transition to perform on it, because there is nothing to transition FROM: the superseded guest-IAM runtime and schema are absent from the product. This supersedes the earlier in-place cutover assumption and the earlier OPEN status. Actual deployment awaits the Product-Owner-provided server and a separate Go-Live decision.",
-      "appliance": "DEPLOYED AND ONBOARDED: 172.21.60.25 (hostname sce), factory-clean from the Zero-Legacy baseline, PRE-LIVE. Enrollment, claim and the signed assignment are COMPLETE and the assignment is pinned; the licence is valid. This field said 'awaiting enrollment/claim/signed assignment' until 2026-09-22 -- three milestones D37/T0087 had already reconciled as done. The sibling routing field was corrected at T0174 and this one was missed, which is the case for checking these words against the recorded booleans rather than leaving the agreement to prose. What keeps it PRE-LIVE is authorisation, not onboarding."
+      "appliance": "RETIRED 2026-10-28 (Product-Owner record, D78/T0264): this appliance no longer exists as an active environment and may not be contacted. HISTORICAL from here on: DEPLOYED AND ONBOARDED: 172.21.60.25 (hostname sce), factory-clean from the Zero-Legacy baseline, PRE-LIVE. Enrollment, claim and the signed assignment are COMPLETE and the assignment is pinned; the licence is valid. This field said 'awaiting enrollment/claim/signed assignment' until 2026-09-22 -- three milestones D37/T0087 had already reconciled as done. The sibling routing field was corrected at T0174 and this one was missed, which is the case for checking these words against the recorded booleans rather than leaving the agreement to prose. What keeps it PRE-LIVE is authorisation, not onboarding."
     },
     "development_appliance": {
       "host": "the retired development reference appliance",
@@ -1504,7 +1567,7 @@
   },
   "fresh_production_baseline": {
     "_note": "The repository baseline a Production appliance is built from, AND the record of the appliance now built from it. This is NOT a cutover of the DEVELOPMENT appliance or of any legacy Production installation. Read development_reference_appliance for the other scope; neither describes the other.",
-    "appliance": "DEPLOYED. 172.21.60.25 (hostname sce) was provisioned factory-clean from this baseline and is running. It is PRE-LIVE and ONBOARDED -- enrolled, claimed, licensed and under a pinned signed assignment. This field said 'awaiting onboarding' until 2026-09-22; it was the third surviving copy of a fact D37/T0087 had retired, and the third is why the onboarding-vocabulary rule now checks every current surface against the appliance_* booleans.",
+    "appliance": "RETIRED 2026-10-28 (Product-Owner record, D78/T0264): this appliance no longer exists as an active environment and may not be contacted. HISTORICAL from here on: DEPLOYED. 172.21.60.25 (hostname sce) was provisioned factory-clean from this baseline and is running. It is PRE-LIVE and ONBOARDED -- enrolled, claimed, licensed and under a pinned signed assignment. This field said 'awaiting onboarding' until 2026-09-22; it was the third surviving copy of a fact D37/T0087 had retired, and the third is why the onboarding-vocabulary rule now checks every current surface against the appliance_* booleans.",
     "install_path": "FACTORY-CLEAN, CURRENT-ONLY: data-plane/migrations/baseline/0000_production_baseline.sql. The superseded guest-IAM tables are never constructed, not even transiently, which is asserted by a DDL event trigger armed on the empty database before the first object exists.",
     "iam_v2_tables": 74,
     "public_tables": 37,
@@ -1526,7 +1589,7 @@
     "cutover_performed": false,
     "status": "RETIRED",
     "retired_on": "2026-09-12",
-    "operational_targets_note": "The current operational targets are Central 172.21.96.196 (sc-central.echofusion.com; moved from 150.0.0.252 on 2026-09-27) and the PRE-LIVE appliance 172.21.60.25. This host is neither."
+    "operational_targets_note": "The current targets are the production Central 41.128.240.133 (central.onegate.getsemantics.com) and the test appliance 172.21.96.97 (D78/T0264). Every other host this project used is retired (current_state_facts.retired_hosts). This host is neither."
   },
   "production_appliance": {
     "_note": "THE FRESH PRODUCTION APPLIANCE, AS DEPLOYED. UPDATED FORWARD as the appliance changed. This dict is a SOURCE for the generated current-state blocks, so leaving it frozen makes every rendered doc contradict the register: it sat at its T0083 values through enrollment (D37), licensing, guest-network configuration, PMS commissioning and the live fresh sync (T0097/T0098), which is exactly the drift ZERO_STALE exists to prevent.",
@@ -1555,7 +1618,8 @@
     "pms_traffic": "READ-ONLY PMS FEED, CONNECTED AND HEALTHY. PMS IS CONNECTED AND HEALTHY. Transport CONNECTED, sync IN_SYNC, stage COMPLETE, continuity CONTINUOUS, at published resync generation 300, read passively 2026-09-16. The pinned Interface revision is unchanged at 3 and no PMS configuration has been changed. resync_command_id is NULL and NO manual Full Resync has ever been issued. THE MOVE WAS CAUSED BY THE T0149 DELIVERY AND IS REPORTED RATHER THAN HIDDEN: restarting pmsd to install its new binary necessarily dropped the link, it reconnected at 2026-09-16T14:03:59Z and the connector requested its own resync -- its normal recovery behaviour, not an operator action. It settled on the CURRENT generation 300, which enumerated all 587 rooms against 587 expected over 460 records and reconciled the roster with stays_closed 0, absent_from_roster 0 and protected 0. Financial traffic remains ZERO: pms_postings 0, posting_attempts 0, posting_outbox 0, settlements 0. HISTORICAL (do not read as current): the intermediate generation 299 published over 464 records at 2026-09-16T14:04:36Z by the first cycle after the restart and superseded by 300, generation 282 and its 2026-09-15T07:29:54Z publication, the 2026-09-08T11:45:19Z staged pmsd restart and its two AUTOMATIC resyncs, and, earlier still, the period from the D40/T0120 closure to 2026-09-08 during which the Product Owner had intentionally stopped the feed from the Protel side so that it read DISCONNECTED / RESYNC_REQUIRED / DIAL_FAILED -- the expected state for that review and never a defect. No PMS posting, payment, reversal or FX traffic has ever been generated.",
     "payment_or_financial_traffic": "NONE",
     "go_live": "NOT PERFORMED and NOT authorized",
-    "development_appliance_contact": "NONE. Nothing was copied from or sent to the retired development reference appliance."
+    "development_appliance_contact": "NONE. Nothing was copied from or sent to the retired development reference appliance.",
+    "_status": "RETIRED 2026-10-28 (Product-Owner record, D78/T0264): this appliance no longer exists as an active environment and may not be contacted. HISTORICAL from here on. Every field below records the appliance as it was."
   },
   "post_closure_corrections": [
     {
@@ -1782,20 +1846,16 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "REPOSITORY_CLEANUP",
-    "decision": "None new. A housekeeping request of the Product Owner under the decisions in force (D77 the latest).",
-    "decision_note": "Documentation and repository housekeeping only: no product code, no deployment. Branches deleted; no document deleted (the first pass's deletions were restored in review).",
-    "manifest": "docs/manifests/RepositoryCleanup-change-manifest.md",
-    "base": "d6647840580c363eeadc508a4a099bf3d8fe9769",
-    "base_note": "Master after the merge of PR #261 (d6647840).",
-    "head": "19be3661",
-    "head_note": "The last documentation commit of branch docs/cleanup. Governance commits follow it.",
-    "transition": "T0263",
-    "previous_delivery": "T0262",
-    "pr": 262,
-    "pr_state": "PR #262; merge awaits the Product Owner's approval",
-    "note": "T0263. Go-Live not authorised.",
-    "branch": "docs/cleanup"
+    "kind": "INTEGRATED_CLEANUP",
+    "decision": "D78 (environments; retired targets) and D79 (integrated cleanup; standing test-appliance deployment authorization; legacy PKI custody), both Product-Owner records of 2026-10-28.",
+    "decision_note": "Retired-target safeguard and dependency removal (T0264); repository cleanup and documentation consolidation, audits consolidated into docs/AUDIT_BACKLOG.md, removed files indexed in docs/ARCHIVE.md, CLAUDE.md compacted without rule changes, the Phase-1B Planning Pack retired, legacy Root CA custody reconciled (T0265). No deployment and no live contact.",
+    "manifest": "docs/manifests/RetiredTargetsCleanup-change-manifest.md",
+    "base": "3679e67455c5cc1adff57ed65a20873c4b66bfff",
+    "transition": "T0265",
+    "previous_delivery": "T0263",
+    "branch": "claude/vigilant-keller-sag14r",
+    "note": "T0264 and T0265, one PR (#263). Go-Live not authorised.",
+    "pr": 263
   },
   "onboarding_reconciliation": {
     "decision": "D37",

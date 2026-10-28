@@ -65,7 +65,7 @@ clock is rolled back >48h (LICENSING_AND_ENTITLEMENTS.md §7).
 
 Run on a non-production appliance. Expected total time ≈ 20 minutes.
 
-1. **Baseline**: `bash scripts/phase1-test-client.sh` green; Admin Console →
+1. **Baseline**: `bash scripts/client-journey-netns-test.sh` passes (the pre-split `phase1-test-client.sh` was removed 2026-10-28); Admin Console →
    **Appliance & licence** shows OneGate Central *Connected*.
 2. **Sever the cloud**: drop it at the appliance's firewall —
    `nft add rule inet filter output ip daddr <central-ip> drop`.
@@ -90,7 +90,7 @@ Run on a non-production appliance. Expected total time ≈ 20 minutes.
 
 Failure of step 3 or 4 is a release blocker: it means a client-path component
 still has a hidden cloud dependency (compare
-CURRENT_STATE_ASSESSMENT.md §3 — the exact
+CURRENT_STATE_ASSESSMENT.md (retired; see the archive) §3 — the exact
 defect this refactor removes).
 
 ## 5. Reboot-while-offline

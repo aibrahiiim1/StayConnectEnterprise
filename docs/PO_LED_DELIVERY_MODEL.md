@@ -11,7 +11,7 @@ Every normal feature, UI change, bug fix, refactor or code change follows:
 
 ```
 REQUEST → SCOPE → IMPLEMENT → FOCUSED SELF-REVIEW → TARGETED TESTS → FIX RELATED ISSUES
-→ BUILD IF NEEDED → DEPLOY TO PRE-LIVE WHEN AUTHORIZED → SMOKE / HEALTH CHECK
+→ BUILD IF NEEDED → DEPLOY TO THE TEST APPLIANCE WHEN AUTHORIZED → SMOKE / HEALTH CHECK
 → PRODUCT OWNER TESTING → PRODUCT OWNER ACCEPTANCE → PROTECTED MERGE TO MASTER → DONE
 ```
 
@@ -24,8 +24,8 @@ REQUEST → SCOPE → IMPLEMENT → FOCUSED SELF-REVIEW → TARGETED TESTS → F
 * **Testing.** Targeted tests for the changed components and the build of anything being deployed. Not the
   whole test matrix, not every browser suite, not the governance suites, not preflight stages 1/9, not the
   four comprehensive gates.
-* **PRE-LIVE.** When the mission or the standing PRE-LIVE authorization covers it: deploy the exact tested
-  commit to PRE-LIVE `172.21.60.25`, keep rollback, run a practical smoke/health check, confirm the change is
+* **PRE-LIVE.** When the mission or a standing deployment authorization covers it: deploy the exact tested
+  commit to the named test appliance, keep rollback, run a practical smoke/health check, confirm the change is
   there to test, and report the exact deployed source. **Deploying before the merge is intended.** No Central,
   Production or other environment unless that target is explicitly authorized; a PRE-LIVE mission the Product
   Owner requests authorizes Central as part of PRE-LIVE (§9, D67).
@@ -120,8 +120,9 @@ Blocker:                 - NONE / exact blocker
 **Permanent Product-Owner decision D67, 2026-10-24, recorded by T0243.**
 
 When the Product Owner requests a PRE-LIVE mission, that request is the full authorization for executing it
-end to end across the PRE-LIVE appliance (`172.21.60.25`) and Central (`172.21.96.196`; retired 2026-10-28 — the
-decision text is kept as recorded, and which Central a PRE-LIVE mission covers now is the Product Owner's to state):
+end to end across the PRE-LIVE appliance (`172.21.60.25`) and Central (`172.21.96.196`) — both permanently retired
+on 2026-10-28 (Product-Owner record, T0264); the decision text is kept as recorded, and a mission now covers the
+environment the Product Owner names in it, never the production Central by default:
 
 * deployments to either host, including Central releases built from master or from the mission's branch;
 * database migrations on either host;
@@ -145,5 +146,14 @@ security and validation stay as they are. A PRE-LIVE mission must not affect rea
 financial systems, live PMS posting, Root CA or trust roots, or networking/topology outside PRE-LIVE, and it
 does not authorize Go-Live. New product, architecture or security decisions still return to the Product Owner.
 
-**Scope.** D67 applies to PRE-LIVE missions the Product Owner requests. A routine FAST change still deploys
-only to the appliance under the standing authorization, and Central is not part of that per-change deployment.
+**Scope.** D67 applies to PRE-LIVE missions the Product Owner requests. A routine FAST change deploys only to an
+appliance a standing authorization names, and Central is not part of that per-change deployment.
+
+**Standing deployment authorization, 2026-10-28 (D79).** The Product Owner granted standing authorization for
+routine software deployments to the test appliance `172.21.96.97` within approved work, without separate deployment
+approval each time. It covers build and package, install, service restart, deployment verification, retry and
+rollback, and recording the exact deployed commit read back from the installed artifact. It does not cover the
+production Central, migrations or schema decisions, destructive or historical data changes, networking or topology,
+PMS configuration, posting or traffic, financial or payment-provider activity, Guest activation, Root-CA or trust
+changes, or Go-Live. It supersedes the standing per-change PRE-LIVE decision of 2026-09-24, whose appliance is
+retired. In §1 and §9, "PRE-LIVE" now means the test environment the Product Owner names.

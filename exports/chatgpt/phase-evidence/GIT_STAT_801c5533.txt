@@ -1,0 +1,4 @@
+commit 801c55331566f9f3014d5dd7cd809cfb74c1c19b
+Date:   Wed Oct 28 13:18:17 2026 +0000
+
+    Governance: T0265 change manifest for PR #263

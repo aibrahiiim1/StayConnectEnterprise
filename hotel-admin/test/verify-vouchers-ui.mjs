@@ -6,7 +6,9 @@
 // form control.
 import { chromium } from "playwright";
 
-const BASE = process.env.SC_BASE || "https://172.21.60.25";
+// No default target: name the appliance under test explicitly.
+const BASE = process.env.SC_BASE;
+if (!BASE) { console.error("SC_BASE is required (e.g. https://<test-appliance>)"); process.exit(2); }
 const ok = [];
 const bad = [];
 function check(name, cond, detail) {

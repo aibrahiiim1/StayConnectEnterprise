@@ -110,7 +110,7 @@ OneGate's design rule is **two NICs and no more**. The installer counts physical
    * **Access / untagged:** portgroup VLAN ID = the Client VLAN (or 0 for an untagged LAN). On the appliance the *prepared* untagged Client network (`10.20.0.0/20`) uses this. One Client network per NIC.
    * **Trunk:** portgroup VLAN ID **4095** (all VLANs) so the VM sees tagged frames; netd then creates `ens192.<vid>` sub-interfaces and a bridge per VLAN. Use this for several Client VLANs. *PRE-LIVE runs VLAN 90 this way (`ens192.90` → `br-g90-a811`).* Tagged-VLAN delivery on the switch/ESXi side is **recorded as unverified** by the project itself.
    * Both can coexist: an untagged network enslaves the parent NIC to its bridge while tagged VLANs ride sub-interfaces of the same parent.
-4. Wi-Fi access points / switches: map each SSID to its VLAN, and **turn on AP/switch client isolation** — Clients on the same bridge exchange frames at layer 2 without passing through the appliance's firewall, so isolation *between two Clients on one segment* is the access layer's job (Handbook §10.4; `docs/ARUBA_SSID_VLAN_MAPPING.md`).
+4. Wi-Fi access points / switches: map each SSID to its VLAN, and **turn on AP/switch client isolation** — Clients on the same bridge exchange frames at layer 2 without passing through the appliance's firewall, so isolation *between two Clients on one segment* is the access layer's job (Handbook §10.4; `docs/networking/CLIENT_VLANS_AND_SSIDS.md`).
 5. Do **not** run another DHCP server on a Client VLAN that OneGate serves with Kea (unless you configure the network as *external DHCP*).
 
 ### A.4 Addressing, DNS, NTP, firewall
@@ -118,7 +118,7 @@ OneGate's design rule is **two NICs and no more**. The installer counts physical
 | Need | Detail | Label |
 |---|---|---|
 | WAN IP/prefix/gateway | Static is recommended: the Admin Console certificate, the nft `443` pin and the Central link follow this address. Changing it later is a staged change with a confirm window (Part C.5). | **[CODE]** |
-| DNS on the WAN NIC | Resolvers that **resolve your Central's name** (`sc-central.echofusion.com` for the production Central). The provisioner queries every upstream resolver and **stops if they disagree** about the name (set `ALLOW_SPLIT_DNS=1` only knowingly). | **[CODE][VM]** |
+| DNS on the WAN NIC | Resolvers that **resolve your Central's name** (`central.onegate.getsemantics.com` for the production Central). The provisioner queries every upstream resolver and **stops if they disagree** about the name (set `ALLOW_SPLIT_DNS=1` only knowingly). | **[CODE][VM]** |
 | Central reachability | Outbound **TCP 443** to Central for register/CSR/licence/assignment/hello/portal-TLS, and **TCP 9443** (mutual TLS) once a certificate exists. The name must be a **hostname, not an IP**. Central never connects inbound to the appliance. **If Central sits behind NAT, both 443 and 9443 must be forwarded to the Central host** (the validation found 443 forwarded to the wrong host once — check, do not assume). An appliance outside Central's network needs the name in **public DNS** (an A record to Central's public address); one on Central's own LAN reaches the public address only if the router does hairpin NAT, or by internal DNS. Proven from outside for the test Central (A3.8). | **[CODE][VM]** |
 | Package/image sources | Outbound HTTPS to the Ubuntu mirrors, `download.docker.com`, `dl.cloudsmith.io` (Caddy), `deb.nodesource.com`, and Docker Hub (images `timescale/timescaledb:2.16.1-pg16`, `redis:7-alpine`). **No offline install path exists. [PO] if the site is air-gapped.** | **[CODE][VM]** |
 | NTP | Outbound UDP 123 to the site's/clock source | — |
@@ -138,7 +138,7 @@ OneGate's design rule is **two NICs and no more**. The installer counts physical
 
 ### A.6 Things you must **not** do
 
-* Do not run `scripts/phase1-bootstrap.sh` or `scripts/phase3-bootstrap.sh` (dev-only; seed a dev tenant and default-password admin).
+* The dev-only bootstrap scripts (`scripts/phase1-bootstrap.sh`, `scripts/phase3-bootstrap.sh`, which seeded a dev tenant and a default-password admin) were removed on 2026-10-28; never recreate them on a real appliance.
 * Do not apply `deploy/nftables/stayconnect.nft`, `deploy/netplan/02-lan-bridge.yaml`, `deploy/kea/kea-dhcp4.conf` or `deploy/unbound/unbound-stayconnect.conf` — they are legacy skeletons that would overwrite what `netd` renders and wipe every Client network.
 * Do not copy any file from, or point the new appliance at, the retired development reference appliance or the former Central `150.0.0.252`.
 * Do not use PRE-LIVE `172.21.60.25` as a donor of identity, keys, database or configuration.
@@ -370,7 +370,7 @@ Open *Network → Client networks* (`/network`). A fresh appliance offers one **
 
 What the apply does (so you know what to verify): creates the bridge (and VLAN sub-interface), assigns the gateway address, converges the nftables table, pushes the Kea config (and **starts Kea for the first time**, writing `/etc/kea/kea-dhcp4.conf`), writes Unbound fragments (and restarts it), creates `ogportal0` with the portal address, and runs health checks (`mgmt_reachable`, `gateway_up`, `kea_running`, `portal_listen`, `portal_address`). **Any failing check rolls the whole change back** and the revision is marked `rolled_back` with the reason — read *Config history* (`/network/revisions`).
 
-Choices per network (see `docs/CLIENT_NETWORKING.md`, `EXTERNAL_DHCP_MODE.md`): **DHCP mode** `local` (Kea) / `external` (the hotel's server — then *you* must hand out option 114 and the gateway) / `relay` (**no data path implemented**) / `disabled`; **DNS mode** appliance or custom; **NAT**; **client isolation**; **captive portal**; internet on/off; lease timers; reservations; per-network portal profile and sign-in methods.
+Choices per network (see `docs/CLIENT_NETWORKING.md`, `docs/networking/DHCP.md` Part C): **DHCP mode** `local` (Kea) / `external` (the hotel's server — then *you* must hand out option 114 and the gateway) / `relay` (**no data path implemented**) / `disabled`; **DNS mode** appliance or custom; **NAT**; **client isolation**; **captive portal**; internet on/off; lease timers; reservations; per-network portal profile and sign-in methods.
 
 ### C.7 Gateway, DHCP, DNS, NAT and captive-portal expectations
 
@@ -733,7 +733,7 @@ unchanged. `apply-pending-migrations.sh --list` prints the pending set without c
 | Item | Requirement | Label |
 |---|---|---|
 | Host | Ubuntu **22.04** (validated on 22.04.5) — the installer also lists 24.04 and Debian 12; one NIC; root access. Validated lab Central: 2 vCPU, 5.9 GiB RAM, 18 GB root LV (39 % used after install). Production Central: 1 vCPU, 7.8 GiB, 18 GB | **[VM][LIVE-REF]**; no official sizing — **[PO]** |
-| Addressing | One static IPv4; DNS **A record** for the Central name (e.g. `sc-central.echofusion.com`) that every appliance's resolvers can resolve. The name is the only thing appliances pin — if the host moves, change the DNS, not the appliances | **[CODE]** |
+| Addressing | One static IPv4; DNS **A record** for the Central name (e.g. `central.onegate.getsemantics.com`) that every appliance's resolvers can resolve. The name is the only thing appliances pin — if the host moves, change the DNS, not the appliances | **[CODE]** |
 | Endpoint config | The Central name is read from the release's `deploy/config/central-endpoint.env` (`CENTRAL_BASE`, `CENTRAL_MTLS_BASE`, `CTRLAPI_APPLIANCE_BASE`); a new environment needs its own value — for a lab, `--endpoint-config <file>` (the validation used one naming the lab Central), and on the appliance side `appliance-install.sh --central-base`. Must be https + FQDN, no IP, no path | **[CODE][VM]** |
 | Console name | e.g. `central.onegate.getsemantics.com` (documented as **not configured yet**; needs DNS + certificate + redeploy) — pass with `--admin-name` | **[DOC]** |
 | TLS for `:443` | `--tls internal` (default; Central's own CA, which appliances install) or `--tls acme` (public certificate; needs public DNS and `:80/:443`) | **[CODE]** |
@@ -786,7 +786,7 @@ Failure modes: wrong `--mode`; a repository checkout instead of a release; check
 7. Portal certificates (optional): *System → Portal certificates* — Cloudflare API token, ACME contact, staging first, then production and CAA. **[PO]** for the token and zone.
 8. Off-host copy of `/opt/stayconnect/backups/db` and the export bundle **[PO]**.
 
-### F.5 Verify Central (software) — **[LIVE-REF] on 172.21.96.196**
+### F.5 Verify Central (software) — **[LIVE-REF] on 172.21.96.196** (the Central of the time, retired 2026-10-28)
 
 | ID | Check | Expected |
 |---|---|---|
@@ -893,7 +893,7 @@ DSNs are `postgres://<svc_role>:<password>@127.0.0.1:5432/stayconnect_site?sslmo
 ## Appendix 3 — Validation performed for this manual
 
 **2026-10-27**, on an **isolated test environment** built for this purpose and never connected to PRE-LIVE `172.21.60.25` or the production
-Central `172.21.96.196`: a **new Central** (`central.onegate.getsemantics.com`, its own trust universe, VMware ESXi, Ubuntu 22.04.5, 2 vCPU /
+Central `172.21.96.196` (both since retired, 2026-10-28): a **new Central** (`central.onegate.getsemantics.com`, its own trust universe, VMware ESXi, Ubuntu 22.04.5, 2 vCPU /
 5.9 GiB / 18 GB) and two **new appliances** in turn (VMware ESXi, Ubuntu 22.04.5, two NICs each): appliance 1 (4 vCPU / 12 GB / 48 GB, behind
 NAT, reaching Central by its public name) and appliance 2 (1 vCPU / 7.8 GiB / 97 GB, on Central's subnet, reaching it through hairpin NAT). Test
 data only (customer "OneGate Test Lab", site "Test Site"); no PMS, no payment provider, no real Client.

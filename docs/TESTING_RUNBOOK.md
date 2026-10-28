@@ -1,12 +1,13 @@
 # StayConnect — Testing Runbook (Control Plane + Appliance Edge)
 
 Step‑by‑step checks for both planes and the link between them. Run everything from
-a workstation that can SSH to both hosts.
+a workstation that can SSH to both hosts. **Central here is production:** the checks below are read-only on
+it; anything that changes Central state needs the Product Owner's authorization for that environment.
 
 ```bash
 # Set once per shell
-C=root@172.21.96.96    # Central control plane: central.onegate.getsemantics.com, public 41.128.240.133, since 2026-10-28 (172.21.96.196 is retired)
-A=root@172.21.60.25    # PRE-LIVE appliance (the only appliance — CLAUDE.md §0D)
+C=root@172.21.96.96    # PRODUCTION Central: central.onegate.getsemantics.com, public 41.128.240.133 (CLAUDE.md §0D)
+A=root@172.21.96.97    # test appliance (CLAUDE.md §0D)
 ```
 
 Host / service map:
@@ -14,7 +15,7 @@ Host / service map:
 | Plane | Host | Key services | Ingress |
 |---|---|---|---|
 | Central control plane | `41.128.240.133` (private `172.21.96.96`) | `stayconnect-ctrlapi` (:8080; appliance mutual TLS :9443), `cloud-admin` (:3000), Caddy, Postgres `sc-central-pg`, Redis `sc-central-redis`. No NATS (CLAUDE.md §0E) | `central.onegate.getsemantics.com` → Caddy (`/v1`, `/cloud` → :8080, the rest → :3000) |
-| Appliance edge | `172.21.60.25` | `stayconnect-scd`, `edged` (:8090), `netd`, `portald` (:8380), `caddy` (:80/:443), `hotel-admin` (:3100), `acctd`, site Postgres `stayconnect-pg` | `portal.stayconnect.local` (Client Portal) · `hotel.stayconnect.local` (Admin Console) |
+| Appliance edge (test appliance) | `172.21.96.97` | `stayconnect-scd`, `edged` (:8090), `netd`, `portald` (:8380), `caddy` (:80/:443), `hotel-admin` (:3100), `acctd`, site Postgres `stayconnect-pg` | `portal.stayconnect.local` (Client Portal) · `hotel.stayconnect.local` (Admin Console) |
 
 > **UI note:** the admin UIs redirect unauthenticated requests, so a protected
 > route returns **307 → /login**, and **/login returns 200**. A `500` on a

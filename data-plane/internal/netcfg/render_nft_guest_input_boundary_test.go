@@ -137,14 +137,14 @@ func TestTheGuestInputBoundaryIsStatedAsARule(t *testing.T) {
 // The two-NIC management path and the forward-chain protections must be unchanged.
 func TestTheManagementAndForwardProtectionsAreUnchanged(t *testing.T) {
 	topo := topoT()
-	topo.MgmtAddr = "172.21.60.25"
-	topo.MgmtCIDRs = []string{"172.21.60.0/24"}
+	topo.MgmtAddr = "192.168.60.25"
+	topo.MgmtCIDRs = []string{"192.168.60.0/24"}
 	out := string(RenderNftables(twoNetworks(), topo))
 
 	for _, want := range []string{
 		"iifname \"ens160\" tcp dport 22 accept",
-		"iifname \"ens160\" ip daddr 172.21.60.25 tcp dport 443 accept",
-		"iifname @guest_interfaces ip daddr 172.21.60.0/24 drop comment \"guest -> mgmt blocked\"",
+		"iifname \"ens160\" ip daddr 192.168.60.25 tcp dport 443 accept",
+		"iifname @guest_interfaces ip daddr 192.168.60.0/24 drop comment \"guest -> mgmt blocked\"",
 		"iifname @guest_interfaces ip daddr @guest_subnets drop comment \"inter-guest isolation\"",
 		"iifname @guest_interfaces meta nfproto ipv6 counter name \"guest_ipv6_dropped\" drop comment \"IPv6 guest bypass guard\"",
 		"oifname @guest_interfaces meta nfproto ipv6 counter name \"guest_ipv6_dropped\" drop comment \"IPv6 guest bypass guard (return path)\"",

@@ -299,7 +299,7 @@ GRANT SELECT  ON iam_v2.voucher_code_settings_changes                           
 -- ---------------------------------------------------------------------------------------------------------
 -- Same mechanism as the four screens above: gatep-grants.sql revokes ALL privileges from the service roles
 -- and runs AFTER the numbered migrations, so a privilege that exists only in a migration is revoked moments
--- after it is granted. Twenty-one of these are VERIFIED PRESENT on PRE-LIVE 172.21.60.25 -- so mirroring
+-- after it is granted. Twenty-one of these are VERIFIED PRESENT on the PRE-LIVE appliance of the time (since retired) -- so mirroring
 -- them here reproduces the live appliance rather than guessing at it -- and two are verified ABSENT with
 -- their objects present, which means they are broken live today.
 --

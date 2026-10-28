@@ -1160,6 +1160,34 @@
       "does_not_authorize": "Any payment-provider call (test or live), LIVE payments, PMS posting, financial transactions, PMS configuration, enabling any execution switch (STAYCONNECT_PHASE4_PAYMENT_PROVIDER, _OUTBOX_WORKER, _PMS_TRANSMIT, _FINANCIAL_REVIEW, STAYCONNECT_PAYMENT_LIVE_ALLOWED), PRE-LIVE or Central deployment, Go-Live.",
       "implementation": "Branch fix/financial-modules-configurable, PR #261, recorded by T0262. data-plane/internal/deployment ceiling (CapCardPayment = payment domain, new CapCardProviderCalls, ha/white_label never deployed); cmd/scd card_checkout (key loaded for configuration, no engine without provider calls, PROVIDER_CALLS_NOT_AUTHORISED, connection test 409, garden gated); deploy/scripts/apply-product-profile.sh (Phase-4 domains, execution-switch guard); hotel-admin modules and payment-methods wording, no readiness for an unavailable module. Tests: deployment ceiling (3), scd TestConnectionTestRefusedWithoutProviderCalls, hotel-admin modules-page and payment-methods-page. No migration. Review fix d2599978: a financial domain is never added under its own execution switches.",
       "supersedes_in_part": "D76's statement that card payment and room charge remain uninstalled: they are now installed for configuration only; execution remains unauthorised."
+    },
+    {
+      "id": "D78",
+      "decided_on": "2026-10-28",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-10-28",
+      "status": "ACTIVE",
+      "title": "CURRENT ENVIRONMENTS AND PERMANENTLY RETIRED TARGETS (2026-10-28). Production Central: 41.128.240.133 (central.onegate.getsemantics.com). Test appliance: 172.21.96.97. Permanently retired: 172.21.96.196 (the former Central, sc-central.echofusion.com) and 172.21.60.25 (the former PRE-LIVE appliance); neither exists as an active environment or may be contacted. Retired-server dependencies are removed from active configuration, scripts, tests, operational documentation and current-state records; historical decisions, delivery records and verified evidence are preserved unchanged; one authoritative retired-target safeguard prevents accidental future use; a retired address is never replaced blindly with the production Central's, and tests never target production by accident.",
+      "authorization_evidence": "The Product Owner's mission of 2026-10-28: clean up the repository's documents (remove what is closed or done and no longer needed, as they cost AI tokens) and permanently remove all operational dependencies and misleading current-state references to retired servers, with the environment record above; complete the authorised mission end to end.",
+      "does_not_authorize": "Contact with, deployment to or diagnosis against any retired host; any deployment to the test appliance or the production Central; a standing deployment authorisation for the test appliance (the 2026-09-24 standing PRE-LIVE decision named the retired appliance and has no target); re-provisioning any appliance; Root-CA or trust changes, including the custody of the former trust universe's Root CA backup; PMS, financial or payment-provider traffic; Go-Live.",
+      "implementation": "Branch claude/vigilant-keller-sag14r, recorded by T0264. current_state_facts.retired_hosts extended (former Central, former PRE-LIVE appliance, stopped first Central) and enforced by tools/validate-standing-records.py; deploy/config/central-endpoint.env and the ctrlapi example name the production Central's verified appliance-facing name; scripts and harnesses lose their retired defaults; unit-test fixtures use reserved example names and a neutral private subnet; current documents and CLAUDE.md 0D/0F/0G corrected; an unexecuted preparation runbook for the retired appliance removed; records and cited evidence kept.",
+      "supersedes_in_part": "The standing PRE-LIVE deployment decision of 2026-09-24 (kept by D42) and D67 as to their targets only: both named hosts that are now retired. Their text stands as recorded."
+    },
+    {
+      "id": "D79",
+      "decided_on": "2026-10-28",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-10-28",
+      "status": "ACTIVE",
+      "title": "INTEGRATED CLEANUP, STANDING TEST-APPLIANCE DEPLOYMENT AUTHORIZATION, LEGACY PKI CUSTODY (2026-10-28). (1) Standing authorization for routine software deployments to the test appliance 172.21.96.97 within approved work, without separate deployment approval each time; it supersedes the 2026-09-24 standing PRE-LIVE decision, whose appliance is retired. (2) The repository is cleaned of obsolete, redundant and unnecessary files while Git history, mandatory governance and unique verified evidence are preserved; overlapping documents are consolidated; CLAUDE.md is compacted without changing its rules; open audit findings become one traceable backlog without falsely closing anything; necessary ChatGPT packs are kept and duplication removed. (3) Legacy Root CA custody is reconciled with the Product Owner's confirmation that no old backup remains in their possession, current production trust dependencies are verified, and genuinely obsolete private-key copies are disposed of where authorized access exists, with truthful evidence.",
+      "authorization_evidence": "The Product Owner's 'FINAL INTEGRATED CLEANUP MISSION' of 2026-10-28, which also re-confirmed D78 (production Central 41.128.240.133, test appliance 172.21.96.97, 172.21.96.196 and 172.21.60.25 permanently retired) and explicitly authorized completing and protected-merging the mission (continuing PR #263).",
+      "does_not_authorize": "Contacting retired infrastructure; altering the production Central, its PKI/trust or networking; PMS posting, LIVE payments or Go-Live; destructive database operations; rewriting Git history; deployments outside the standing authorization's exclusions.",
+      "implementation": "Branch claude/vigilant-keller-sag14r, PR #263, recorded by T0265. Removed and indexed in docs/ARCHIVE.md: 43 historical delivery manifests, the backend and performance audit folders and SECURITY_HARDENING.md (consolidated into docs/AUDIT_BACKLOG.md), superseded working documents, 10 obsolete pre-split test scripts, the Phase-1B Planning Pack (and its builder; a validator now refuses its return). Consolidated: docs/networking/ (DHCP, client VLANs and SSIDs, moved network documents), user-guide/central-roles.md. CLAUDE.md compacted. Legacy PKI: no current trust dependency; workstation copy no longer held (PO); the host copies on retired or stopped hosts are not disposed because no authorized access exists from the delivery environment (current_state_facts.legacy_pki_custody).",
+      "supersedes_in_part": "The standing PRE-LIVE deployment decision of 2026-09-24 (kept by D42) and D78's statement that no standing authorization exists for the test appliance."
     }
   ]
 }

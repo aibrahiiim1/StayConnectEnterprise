@@ -89,7 +89,7 @@ function healthy(): any {
     appliance: {
       version: "0.1.0-edge",
       license: { available: true, state: "active", installed: true, valid_until: "2027-01-01T00:00:00Z" },
-      network: { available: true, wan_address: "172.21.60.25/24", wan_mode: "static", lan_address: "10.10.0.1/24", internet_reachable: true },
+      network: { available: true, wan_address: "192.168.60.25/24", wan_mode: "static", lan_address: "10.10.0.1/24", internet_reachable: true },
       revisions: { available: true, latest_active: { seq: 12, state: "active", confirmed_at: "2026-09-20T10:00:00Z" } },
       resources: {
         available: true, uptime_seconds: 90000,

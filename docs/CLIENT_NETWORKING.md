@@ -3,9 +3,9 @@
 How a client network is prepared, switched on, changed, recovered and given its own portal and sign-in. It describes what is implemented
 and tested; **PRE-LIVE acceptance on real Kea and a real switch has not been performed** (see §12).
 
-Related: [NETWORK_APPLY_AND_ROLLBACK.md](NETWORK_APPLY_AND_ROLLBACK.md) (the apply/confirm/rollback engine),
-[DHCP_MANAGEMENT.md](DHCP_MANAGEMENT.md), [EDGE_NETWORKING.md](EDGE_NETWORKING.md) (the original model),
-[NETWORK_TROUBLESHOOTING.md](NETWORK_TROUBLESHOOTING.md).
+Related: [NETWORK_APPLY_AND_ROLLBACK.md](networking/NETWORK_APPLY_AND_ROLLBACK.md) (the apply/confirm/rollback engine),
+[DHCP.md, Part A](networking/DHCP.md), [EDGE_NETWORKING.md](networking/EDGE_NETWORKING.md) (the original model),
+[NETWORK_TROUBLESHOOTING.md](networking/NETWORK_TROUBLESHOOTING.md).
 
 ## 1. The prepared Access network
 
@@ -183,7 +183,7 @@ network.
 counter and nothing more: it does not show where frames were lost. The switch port, the virtual-switch port group, the access point or controller mapping, VLAN
 tagging on the virtual NIC and the appliance itself have all been left unexamined, and no cause has been established. Do not read this document as locating it.
 
-## 13. PRE-LIVE deployment record (2026-10-25, appliance `172.21.60.25`)
+## 13. PRE-LIVE deployment record (2026-10-25, appliance `172.21.60.25`, retired 2026-10-28)
 
 Measured, not claimed. The appliance was inspected first and re-inspected after every step.
 
@@ -241,7 +241,7 @@ revision 98) and at 14:59:06 it was confirmed (`network.revision.confirmed`); re
 * Only *Client Wi-Fi* is enabled: untagged on `ens192`, `10.20.0.0/20`, gateway `10.20.0.1`, local DHCP pool `10.20.0.10`–`10.20.15.254`. The bridge `br-g-52fd7a28`
   is up with `10.20.0.1/20`; `br-g60` and `br-g90` are gone.
 * Kea's live configuration has exactly one subnet, `10.20.0.0/20`, and the Kea file on disk holds the confirmed configuration (`kea_disk.holds_confirmed_configuration`
-  is true). netd is healthy. The WAN/management address `172.21.60.25/24` and the default route are unchanged.
+  is true). netd is healthy. The WAN/management address `172.21.60.25/24` (historical) and the default route are unchanged.
 * Kea reports one active lease in `10.20.x.x`: a client obtained an address from the new network's DHCP. That is Kea's own record, counted once; this document does
   not claim a client test beyond it. No guest session was active.
 * The three old networks are all switched off and still listed: *PRELIVE Test Guest* (untagged), *PRELIVE Test Guest* (VLAN 90) and *VLAN 60*. No review item exists;
@@ -401,7 +401,7 @@ cap. Console: 1019 unit tests and browser tests at 1280 px and 390 px.
 the strict contract's price and the readiness assessment says so. Real-client sign-in on a shared network, real Protel behaviour for two interfaces on one network, and any switch
 or hypervisor configuration are **not verified** and need the Product Owner's manual acceptance on PRE-LIVE.
 
-## 17. PRE-LIVE deployment record, third deployment (2026-10-25, appliance `172.21.60.25`)
+## 17. PRE-LIVE deployment record, third deployment (2026-10-25, appliance `172.21.60.25`, retired 2026-10-28)
 
 Measured, not claimed. A read-only snapshot was taken before and after (networks, active revision, archive and routing rows, Kea file hash, addresses, routes, services,
 binaries, console release); only the intended objects differ.
@@ -466,7 +466,7 @@ identical apart from one `backup.created` by `admin`).
 * Revisions: 100 active (applied 20:17:07, confirmed 20:17:15 by `admin`), 99 and 98 superseded (98 is your Full Reset, 14:58:53 / 14:59:06). Nothing staged or in flight.
 * Client port `ens192` is a trunk: *Client Wi-Fi* untagged (native, `10.20.0.0/20`), *VLAN 60* (`10.60.0.0/24`) and *VLAN 90* (`10.90.0.0/24`) tagged, all enabled and
   confirmed running; the VLAN devices and bridges are up with their gateway addresses and routes; Kea's file lists exactly those three subnets, written at the revision-100
-  confirmation; the management address `172.21.60.25/24` and the default route are unchanged; no service is in error.
+  confirmation; the management address `172.21.60.25/24` (historical) and the default route are unchanged; no service is in error.
 * Archive: two (*PRELIVE Test Guest* untagged and the earlier *VLAN 60*); the other *PRELIVE Test Guest* (VLAN 90) was restored from the archive by you and is switched off. Nothing
   archived is enabled. VLAN 60 and VLAN 90 were created by the Access-to-Trunk changes.
 * Room sign-in: *VLAN 90* is dedicated to Protel and ready (set at 20:18:25); *VLAN 60* (set, then returned to not decided) and *Client Wi-Fi* are undecided and each raises one

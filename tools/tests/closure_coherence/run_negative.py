@@ -77,7 +77,7 @@ print("== a retained authorisation for the CLOSED mission is refused ==")
 for field, value in (
     ("next_authorized_action",
      "Execute to DONE the Product-Owner-authorised FUNCTIONAL-COMPLETENESS CLOSURE that D41 asks for, "
-     "including the controlled PRE-LIVE work on 172.21.60.25 the mission names."),
+     "including the controlled PRE-LIVE work on the PRE-LIVE appliance the mission names."),
 ):
     st = copy.deepcopy(base)
     st[field] = value
@@ -90,7 +90,7 @@ check("blockers presenting the closure as current work is refused", st, "caught"
 
 st = copy.deepcopy(base)
 st["allowed_actions"] = ["Execute the authorised functional-completeness closure to DONE, including "
-                        "controlled work on PRE-LIVE 172.21.60.25."]
+                        "controlled work on PRE-LIVE."]
 check("allowed_actions authorising controlled PRE-LIVE work is refused", st, "caught", "allowed_actions[0]")
 
 print()

@@ -41,7 +41,7 @@ func startFakeNetd(t *testing.T, f *apiFixture) *fakeNetd {
 	if err != nil {
 		t.Skipf("unix sockets are not available here: %v", err)
 	}
-	fn := &fakeNetd{t: t, f: f, applyAs: "pending_confirmation", wanIP: "172.21.60.25", wanBits: 24, lan: "ens192"}
+	fn := &fakeNetd{t: t, f: f, applyAs: "pending_confirmation", wanIP: "192.168.60.25", wanBits: 24, lan: "ens192"}
 	mux := http.NewServeMux()
 	reply := func(w http.ResponseWriter, code int, v any) {
 		w.Header().Set("Content-Type", "application/json")

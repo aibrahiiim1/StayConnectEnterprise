@@ -198,7 +198,7 @@ normally and a genuine failure is reported as a failure. Nothing starts Kea earl
 
 ## How the appliance reaches Central
 
-**`https://sc-central.echofusion.com` — a name, not an address.** It is defined once, in
+**`https://central.onegate.getsemantics.com` — a name, not an address.** It is defined once, in
 `deploy/config/central-endpoint.env`, which both appliance provisioning and Central read. Moving Central is
 then a DNS change and nothing else: no appliance is edited, because no appliance ever learned an IP. Only if
 the *name* changes does anything else happen, and that is a deliberate fleet migration.

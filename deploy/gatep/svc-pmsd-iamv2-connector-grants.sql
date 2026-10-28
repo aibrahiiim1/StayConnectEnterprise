@@ -266,7 +266,7 @@ END $$;
 -- coverage, cannot read the room inventory, and cannot run the reconcile at all -- so the same feature would
 -- be dead again, this time for a privilege reason rather than an evidence one.
 --
--- VERIFIED PRESENT ON PRE-LIVE 172.21.60.25 for all eight, which is why mirroring them here is provably
+-- VERIFIED PRESENT ON THE PRE-LIVE APPLIANCE OF THE TIME (since retired) for all eight, which is why mirroring them here is provably
 -- correct rather than a guess: this file now reproduces the live appliance's privilege state instead of
 -- diverging from it.
 --

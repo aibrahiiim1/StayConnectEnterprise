@@ -1,0 +1,33 @@
+{
+  "transition_id": "T0264",
+  "seq": 264,
+  "timestamp": "2026-10-28T09:55:39Z",
+  "timestamp_derivation": "Computed from the session clock after the changes were made and validated, and before the commit that introduces this receipt.",
+  "record_type": "RETIRED_TARGETS_AND_DOCS_CLEANUP",
+  "authorisation": "The Product Owner's mission of 2026-10-28 (D78): clean up the documents that are closed, done and no longer needed, and permanently remove all operational dependencies and misleading current-state references to retired servers. Production Central 41.128.240.133 (central.onegate.getsemantics.com); test appliance 172.21.96.97; 172.21.96.196 and 172.21.60.25 permanently retired. Preserve historical decisions, delivery records and verified evidence; keep one authoritative retired-target safeguard; never replace a retired address blindly with the production Central's; tests must not target production.",
+  "safeguard": "current_state_facts.retired_hosts is the one register: the retired development reference appliance (unchanged), the former Central (172.21.96.196, sc-central.echofusion.com), the former PRE-LIVE appliance (172.21.60.25) and the stopped first Central (150.0.0.252), each as octets and DNS labels. tools/validate-standing-records.py rule 1 now refuses a retired address or name anywhere in code, scripts, configuration or tests (applied migrations exempt), and in a current-state document on a line that does not say it is retired; historical trees, delivery manifests and generated exports are not judged.",
+  "changes": "Configuration: deploy/config/central-endpoint.env and deploy/env/ctrlapi.env.example name central.onegate.getsemantics.com, the name the production Central was installed to serve and its test appliance dials (installation manual A3.2, A3.8), not an address. Scripts: phase6-controlled-validation.sh's enabling allow-list no longer admits the retired PRE-LIVE appliance (empty: every host refused); central-outage-local-first-test.sh, hotel-admin/test/verify-vouchers-ui.mjs and scripts/acceptance/08-console-sweep.js have no default target. Tests: fixtures use central.example.com, 203.0.113.x and the neutral private subnet 192.168.60.0/24. Comments in deploy/gatep and tools no longer name the retired appliance. Documents: CLAUDE.md 0D/0F/0G, CONTINUATION.md, the deployment, onboarding, activation, testing, CA ceremony and privacy documents, the handbook and the installation manual corrected; the standing PRE-LIVE deployment decision recorded as having no target. Removed: docs/runbooks/Guest-Access-End-To-End-Acceptance.md (an unexecuted preparation runbook for the retired appliance, cited by no record). docs/SYSTEM_OVERVIEW.md was removed and then restored byte for byte in the same delivery, because transitions T0027/T0028 cite it as evidence. A .rgignore keeps generated and record trees out of default searches.",
+  "kept_on_purpose": "Every decision, transition, delivery manifest, report, acceptance and evidence document, and the documents PR #262 classified as records (DEPLOYED_STATE, CONTROL_PLANE_MIGRATION, COMMERCIAL_ONBOARDING_EXECUTION_STATUS, NIGHTLY_AUTHORITATIVE_DELIVERY among them); applied migrations; the backend and performance audits (open backlogs); documents wired into the governance tooling, and every document a transition cites as evidence (SYSTEM_OVERVIEW among them).",
+  "verification": "Targeted: control-plane internal/http; data-plane cmd/edged, cmd/netd, internal/conntrack, internal/netcfg; hotel-admin dashboard-overview and networking-pages (27 tests); check-hotel-admin-cert-selftest (10 cases); standing-records validator and its negative tests; governance validators as recorded in the delivery.",
+  "no_live_contact": "Nothing was deployed and no host was contacted.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0263."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change. The activity label is historical: the appliance it names is retired."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "3679e67455c5cc1adff57ed65a20873c4b66bfff",
+  "base_note": "Master after the merge of PR #262.",
+  "previous_delivery": "T0263",
+  "decision": "D78",
+  "go_live": "NOT authorised."
+}

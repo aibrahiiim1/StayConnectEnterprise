@@ -40,10 +40,10 @@ The role-based guides below are shorter, task-oriented walkthroughs for each rol
 
 | Role | Read this | In one sentence |
 |---|---|---|
-| **Platform admin** (and read-only **Support**) | [platform-admin.md](platform-admin.md) | You run OneGate Central for all customers: you create customers, activate appliances and manage licences. |
-| **Customer admin / Customer owner** (tenant admin) | [tenant-admin.md](tenant-admin.md) | You manage one customer's sites and Central users, and see its appliances and licences. |
-| **Viewer / Auditor** | [viewer-and-billing.md](viewer-and-billing.md#viewer) | You can look at everything for your customer but not change anything. |
-| **Customer operator**, **Billing** (retired) | [tenant-operator.md](tenant-operator.md) · [viewer-and-billing.md](viewer-and-billing.md#billing) | These roles grant nothing in Central any more; day-to-day site work is in the Admin Console. |
+| **Platform admin** (and read-only **Support**) | [central-roles.md § Platform admin](central-roles.md#platform-admin) | You run OneGate Central for all customers: you create customers, activate appliances and manage licences. |
+| **Customer admin / Customer owner** (tenant admin) | [central-roles.md § Customer admin](central-roles.md#customer-admin-tenant-admin) | You manage one customer's sites and Central users, and see its appliances and licences. |
+| **Viewer / Auditor** | [central-roles.md § Viewer](central-roles.md#viewer-auditor-and-billing) | You can look at everything for your customer but not change anything. |
+| **Customer operator**, **Billing** (retired) | [central-roles.md § Customer operator](central-roles.md#customer-operator-tenant-operator) · [§ Billing](central-roles.md#viewer-auditor-and-billing) | These roles grant nothing in Central any more; day-to-day site work is in the Admin Console. |
 
 **OneGate Admin Console** (site staff) has seven roles of its own — Site admin, Site IT manager, Client
 services operator, Client relations operator, Voucher operator, Payments operator and Site viewer. Which pages each can

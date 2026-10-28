@@ -1,138 +1,89 @@
 # OneGate — Documentation Index
 
-Start here. This index is organized by what you're trying to do. If you're new to
-OneGate, start with the two current references:
+**Two current references win over every other document** (and where a document and the code disagree, the code wins):
 
-- the [system handbook](architecture/ONEGATE_SYSTEM_HANDBOOK.md) — the system as built, compared with the code (where a
-  document and the code disagree, the code wins);
-- the [Fresh VM Installation Manual](runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md) — building, installing and
-  verifying an appliance and a Central; its Appendix 3 records what was validated on the test pair.
+- the [system handbook](architecture/ONEGATE_SYSTEM_HANDBOOK.md) — the system as built, each fact labelled with how it
+  was verified;
+- the [Fresh VM Installation Manual](runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md) — building, installing,
+  verifying, upgrading and recovering an appliance and a Central (Appendix 3: what was validated on the test pair).
 
-Where another document here disagrees with those two, they win. The other manuals and guides were written for earlier
-states and have not been re-verified against the current release.
-The product words used throughout (Client, Admin Console, Client Portal, Site) are defined in
-[PRODUCT_TERMINOLOGY.md](PRODUCT_TERMINOLOGY.md).
+Product words (Client, Admin Console, Client Portal, Site) are defined in [PRODUCT_TERMINOLOGY.md](PRODUCT_TERMINOLOGY.md).
+Current environments and retired targets: [`CLAUDE.md`](../CLAUDE.md) §0D. Removed documents, and the commit to read
+each from: [ARCHIVE.md](ARCHIVE.md). Open findings of the backend and performance audits:
+[AUDIT_BACKLOG.md](AUDIT_BACKLOG.md).
 
-> **Current production model (read this first):** onboarding is **zero-touch** —
-> a factory-clean appliance with internet registers itself with Central (no token)
-> and appears under **Appliances** as **Waiting for activation**, where one
-> **Activate** step picks the customer, site and licence terms. A site without
-> internet uses **offline activation** (one file each way). The entitlement is a
-> **signed appliance licence** (max concurrent online clients + validity + grace).
-> **Plans, subscriptions and enrollment tokens no longer exist.** Central is
-> licensing, activation and fleet status only — the binding description is
-> [CENTRAL_CONTROL_PLANE.md](CENTRAL_CONTROL_PLANE.md).
+> **Production model.** Onboarding is zero-touch: a factory-clean appliance registers itself with Central (no token)
+> and waits for **Activate** (customer, site, licence terms); a site without internet uses offline activation. The
+> entitlement is a signed appliance licence. Central is licensing, activation and fleet status only
+> ([CENTRAL_CONTROL_PLANE.md](CENTRAL_CONTROL_PLANE.md)).
 
----
+## Install and operate
 
-## 1. Quick start — new site installation
+| Need | Document |
+|---|---|
+| Install a new appliance or Central | [runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md](runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md) |
+| Shortest UI path to bring a site online | [APPLIANCE_ONBOARDING_MANUAL.md](APPLIANCE_ONBOARDING_MANUAL.md) |
+| Central: deploy, upgrade, move | [DEPLOYMENT_CLOUD.md](DEPLOYMENT_CLOUD.md) · [ROLLBACK_POLICY.md](ROLLBACK_POLICY.md) |
+| Appliance: services, ports, security notes | [DEPLOYMENT_APPLIANCE.md](DEPLOYMENT_APPLIANCE.md) |
+| Activation, licensing, entitlements | [APPLIANCE_ACTIVATION_AND_LICENSING.md](APPLIANCE_ACTIVATION_AND_LICENSING.md) · [LICENSING_AND_ENTITLEMENTS.md](LICENSING_AND_ENTITLEMENTS.md) |
+| Backup, restore, disaster recovery | [BACKUP_AND_RESTORE.md](BACKUP_AND_RESTORE.md) · [BACKUP_RETENTION.md](BACKUP_RETENTION.md) · [DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md](DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md) |
+| Migrations and the Central-outage behaviour | [MIGRATION_RUNBOOK.md](MIGRATION_RUNBOOK.md) · [OFFLINE_OPERATION.md](OFFLINE_OPERATION.md) |
+| PMS interface commissioning | [runbooks/PMS-Interface-Commissioning.md](runbooks/PMS-Interface-Commissioning.md) (FIAS reference: [FIAS_2.20.24.pdf](FIAS_2.20.24.pdf)) |
+| Portal domain DNS and certificates | [runbooks/ONEGATE_WORK_DNS_AND_CERTIFICATES.md](runbooks/ONEGATE_WORK_DNS_AND_CERTIFICATES.md) |
+| Testing both planes | [TESTING_RUNBOOK.md](TESTING_RUNBOOK.md) |
+| API deprecations | [API_DEPRECATIONS.md](API_DEPRECATIONS.md) |
+| Background (not re-verified against the current release) | [STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md](STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md) |
 
-- [runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md](runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md) — **building a new
-  appliance (and a separate Central) from a blank VM**: planning, build, install, initial configuration, an executable
-  verification checklist, recovery/upgrade/rollback, and what a licence, the installation and the site each decide about a
-  module (C.12). Its Appendix 3 records what was validated on the test pair. Read this before any fresh install.
-- [APPLIANCE_ONBOARDING_MANUAL.md](APPLIANCE_ONBOARDING_MANUAL.md) — the shortest
-  UI-only path to bring one site online (zero-touch, two consoles).
+## Networking
 
-## 2. Complete Operations Manual — **not re-verified against the current release**
+[CLIENT_NETWORKING.md](CLIENT_NETWORKING.md) (current behaviour) · [networking/EDGE_NETWORKING.md](networking/EDGE_NETWORKING.md)
+(the model) · [networking/CLIENT_VLANS_AND_SSIDS.md](networking/CLIENT_VLANS_AND_SSIDS.md) ·
+[networking/DHCP.md](networking/DHCP.md) · [networking/NETWORK_APPLY_AND_ROLLBACK.md](networking/NETWORK_APPLY_AND_ROLLBACK.md) ·
+[networking/NETWORK_TROUBLESHOOTING.md](networking/NETWORK_TROUBLESHOOTING.md) ·
+[networking/ADMIN_CONSOLE_IP_ALIAS.md](networking/ADMIN_CONSOLE_IP_ALIAS.md)
 
-- [STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md](STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md)
-  — background reading only; for installation and current behaviour use the system handbook and the installation manual
-  above. It covers, end to end: architecture, install, WAN/LAN, registration, activation,
-  convergence, the license model & states, concurrent capacity, client networks / VLANs (with
-  worked VLAN 100 / VLAN 200 examples), DHCP/DNS/NAT/portal, auth methods, access
-  plans & vouchers, integrations, renewal & anti-replay, recovery, Central-outage
-  behavior, replacement & rebind, factory reset, move/retire/delete,
-  safe-deletion order, security/certs, backup, audit, troubleshooting, and
-  go-live / day-2 checklists.
+## Consoles (user guides)
 
-## 3. Control Panel (Central) — configuration manual
+[user-guide/](user-guide/README.md): Central configuration and page reference, the Central role guides
+([central-roles.md](user-guide/central-roles.md)), the Admin Console configuration manual and page reference, common
+tasks, and what Clients see in the Client Portal.
 
-- [CENTRAL_CONTROL_PLANE.md](CENTRAL_CONTROL_PLANE.md) — **authoritative**: what
-  Central is, the console structure, appliance states, lifecycle, API contract and
-  roles.
-- [user-guide/control-panel-config-manual.md](user-guide/control-panel-config-manual.md)
-  — how to create a **Customer → Site**, activate an **Appliance**, set its
-  **Licence**, and run day-2 operations from the Central console.
-
-## 4. Control Panel (Central) — page reference
-
-- [user-guide/control-panel-reference.md](user-guide/control-panel-reference.md) —
-  every Central console page: Overview, Customers (and the customer page), Appliances
-  (and the appliance page), Licenses, and System (Security alerts, Trust & keys,
-  Audit log, Team, Backup health).
-
-## 5. Admin Console (Appliance) — configuration manual
-
-- [user-guide/hotel-admin-config-manual.md](user-guide/hotel-admin-config-manual.md)
-  — activate (Appliance & licence page), then fully configure the appliance: WAN/LAN, client networks / VLANs,
-  auth methods (including Hotel → Room sign-in), vouchers, integrations, branding, operators, TLS, diagnostics.
-
-## 6. Admin Console (Appliance) — page reference
-
-- [user-guide/hotel-admin-reference.md](user-guide/hotel-admin-reference.md) — every
-  Admin Console (formerly Hotel Admin) page and what each option does.
-
-## 7. Troubleshooting & recovery
-
-- [NETWORK_TROUBLESHOOTING.md](NETWORK_TROUBLESHOOTING.md)
-- [NETWORK_APPLY_AND_ROLLBACK.md](NETWORK_APPLY_AND_ROLLBACK.md) ·
-  [ROLLBACK_POLICY.md](ROLLBACK_POLICY.md)
-- [OFFLINE_OPERATION.md](OFFLINE_OPERATION.md) — behavior when Central is unreachable
-- [BACKUP_AND_RESTORE.md](BACKUP_AND_RESTORE.md) ·
-  [BACKUP_RETENTION.md](BACKUP_RETENTION.md)
-- [MIGRATION_RUNBOOK.md](MIGRATION_RUNBOOK.md)
-- Complete Operations Manual → **Troubleshooting** and **Reboot & service recovery**.
-
-## 8. Security & PKI runbooks
-
-- [SECURITY_HARDENING.md](SECURITY_HARDENING.md)
-- [CA_CEREMONY_RUNBOOK.md](CA_CEREMONY_RUNBOOK.md)
-- [ASSIGNMENT_KEY_CUSTODY_RUNBOOK.md](ASSIGNMENT_KEY_CUSTODY_RUNBOOK.md)
-- [VENDOR_BREAKGLASS_RUNBOOK.md](VENDOR_BREAKGLASS_RUNBOOK.md)
-- [HOTEL_ADMIN_CERT_LIFECYCLE.md](HOTEL_ADMIN_CERT_LIFECYCLE.md)
-- [LICENSING_AND_ENTITLEMENTS.md](LICENSING_AND_ENTITLEMENTS.md)
-- [TERMINAL_DELIVERY_SECURITY_EVIDENCE.md](TERMINAL_DELIVERY_SECURITY_EVIDENCE.md)
-
-## 9. Governance & delivery (permanent rules)
-
-- [PO_LED_DELIVERY_MODEL.md](PO_LED_DELIVERY_MODEL.md) — **how work is delivered now** (D42, with D67 for PRE-LIVE missions):
-  implement → targeted tests → PRE-LIVE when authorised → *ready for Product Owner testing* → merge only with the Product Owner's
-  approval (the `po-merge-approved` label on the exact head).
-- [FAST_DELIVERY_AND_PARALLEL_AGENT_PROTOCOL.md](FAST_DELIVERY_AND_PARALLEL_AGENT_PROTOCOL.md) — fast development by default,
-  controlled work only for the listed triggers, one delivery owner per branch.
-- [OPERATIONAL_SETTINGS_POLICY.md](OPERATIONAL_SETTINGS_POLICY.md) — values an administrator may change ship as settings.
-- [GITHUB_EXECUTION_AND_DELIVERY_RULE.md](GITHUB_EXECUTION_AND_DELIVERY_RULE.md) — the GitHub repo
-  `aibrahiiim1/StayConnectEnterprise` is the only authoritative source. Its changed-file manifest
-  (`tools/generate-change-manifest.py`, kept in [`manifests/`](manifests/)) is produced for a controlled delivery or a
-  milestone closure, not for routine work (§4, and `CLAUDE.md` §0). Its one-Phase-per-PR cadence and the 20-section
-  [final-report template](templates/PHASE_FINAL_REPORT_TEMPLATE.md) belong to Phases 1–7 and are kept as records.
-- [ZERO_STALE_LEFTOVERS_RULE.md](ZERO_STALE_LEFTOVERS_RULE.md) — no stale or contradictory artifact survives a completed task.
-- Machine-readable current state: `governance/project-state.json` (validate with `python tools/project-state.py validate`);
-  decisions in `governance/decision-register.json`, one receipt per transition in `governance/transitions/`.
-- Superseded, kept as a record: the nightly model [NIGHTLY_AUTHORITATIVE_DELIVERY.md](NIGHTLY_AUTHORITATIVE_DELIVERY.md)
-  (replaced by D42).
-
----
-
-## Architecture & deep-dive references
+## Architecture and product contracts
 
 | Topic | Document |
 |---|---|
-| Product terminology — *Client*, *Admin Console*, *Client Portal*, *Site* (binding for product-facing text) | [PRODUCT_TERMINOLOGY.md](PRODUCT_TERMINOLOGY.md) |
-| **Complete technical architecture and system handbook** (every component, versions, data flows, failure-impact matrix, verification status of each fact) — current | [architecture/ONEGATE_SYSTEM_HANDBOOK.md](architecture/ONEGATE_SYSTEM_HANDBOOK.md) |
-| Machine-readable component / dependency inventory | [inventory/onegate-components.json](inventory/onegate-components.json) |
-| Earlier full system reference (historical snapshot, 2026-07-10 — superseded by the handbook above) | [SYSTEM_OVERVIEW.md](SYSTEM_OVERVIEW.md) |
-| Central (licensing, activation, fleet status) — authoritative | [CENTRAL_CONTROL_PLANE.md](CENTRAL_CONTROL_PLANE.md) |
-| Cloud / control-plane architecture | [CLOUD_ARCHITECTURE.md](CLOUD_ARCHITECTURE.md) · [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md) |
-| Edge / appliance architecture | [EDGE_ARCHITECTURE.md](EDGE_ARCHITECTURE.md) · [EDGE_NETWORKING.md](EDGE_NETWORKING.md) · [CLIENT_NETWORKING.md](CLIENT_NETWORKING.md) |
-| Client networks / VLANs | [GUEST_VLAN_CONFIGURATION.md](GUEST_VLAN_CONFIGURATION.md) · [ARUBA_SSID_VLAN_MAPPING.md](ARUBA_SSID_VLAN_MAPPING.md) |
-| DHCP | [DHCP_MANAGEMENT.md](DHCP_MANAGEMENT.md) · [DHCP_OPTION_114.md](DHCP_OPTION_114.md) · [EXTERNAL_DHCP_MODE.md](EXTERNAL_DHCP_MODE.md) |
-| Sync protocol (historical — the appliance's telemetry subsystem was removed, CLAUDE.md §0E) | [SYNC_PROTOCOL.md](SYNC_PROTOCOL.md) |
-| Deployment | [DEPLOYMENT_CLOUD.md](DEPLOYMENT_CLOUD.md) · [DEPLOYMENT_APPLIANCE.md](DEPLOYMENT_APPLIANCE.md) |
-| Roles & scope | [ROLE_AND_SCOPE_MATRIX.md](ROLE_AND_SCOPE_MATRIX.md) |
-| Data ownership | [DATA_OWNERSHIP.md](DATA_OWNERSHIP.md) |
-| Testing | [TESTING_RUNBOOK.md](TESTING_RUNBOOK.md) |
+| Central (authoritative) | [CENTRAL_CONTROL_PLANE.md](CENTRAL_CONTROL_PLANE.md) · [CLOUD_ARCHITECTURE.md](CLOUD_ARCHITECTURE.md) |
+| Appliance | [EDGE_ARCHITECTURE.md](EDGE_ARCHITECTURE.md) · [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md) |
+| Client identity and access | [architecture/ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md](architecture/ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md) |
+| Devices, email accounts, HTTPS portal and social login, modules | [ONEGATE_DEVICE_MANAGEMENT.md](architecture/ONEGATE_DEVICE_MANAGEMENT.md) · [ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE.md](architecture/ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE.md) · [ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md](architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md) · [ONEGATE_MODULES_AND_ACQUISITION.md](architecture/ONEGATE_MODULES_AND_ACQUISITION.md) |
+| Roles, data ownership, settings | [ROLE_AND_SCOPE_MATRIX.md](ROLE_AND_SCOPE_MATRIX.md) · [DATA_OWNERSHIP.md](DATA_OWNERSHIP.md) · [OPERATIONAL_SETTINGS_POLICY.md](OPERATIONAL_SETTINGS_POLICY.md) |
+| Admin UI design system | [ui/DESIGN_SYSTEM.md](ui/DESIGN_SYSTEM.md) |
+| Component inventory (machine-readable) | [inventory/onegate-components.json](inventory/onegate-components.json) |
+| IAM contract and phase plans (Phases 0–7, closed) | [architecture/StayConnect-IAM-Phase0-Contract.md](architecture/StayConnect-IAM-Phase0-Contract.md) and the `architecture/StayConnect-IAM-Phase*-Plan.md` files, the privilege matrices and [adr/](architecture/adr/) |
+| Earlier whole-system snapshot (2026-07-10, kept as cited evidence) | [SYSTEM_OVERVIEW.md](SYSTEM_OVERVIEW.md) |
 
-The role-based, task-oriented user guides live under
-[user-guide/](user-guide/README.md).
+## Security, PKI and privacy
+
+[CA_CEREMONY_RUNBOOK.md](CA_CEREMONY_RUNBOOK.md) (current trust universe and the legacy Root CA custody record) ·
+[ASSIGNMENT_KEY_CUSTODY_RUNBOOK.md](ASSIGNMENT_KEY_CUSTODY_RUNBOOK.md) · [VENDOR_BREAKGLASS_RUNBOOK.md](VENDOR_BREAKGLASS_RUNBOOK.md) ·
+[HOTEL_ADMIN_CERT_LIFECYCLE.md](HOTEL_ADMIN_CERT_LIFECYCLE.md) · [privacy/](privacy/README.md) (GDPR programme, DPA, breach and
+erasure runbooks).
+
+## Governance and delivery
+
+- [PO_LED_DELIVERY_MODEL.md](PO_LED_DELIVERY_MODEL.md) — how work is delivered (D42; D67; D79 standing deployment to the
+  test appliance); merge only with the Product Owner's `po-merge-approved` label on the exact head.
+- [FAST_DELIVERY_AND_PARALLEL_AGENT_PROTOCOL.md](FAST_DELIVERY_AND_PARALLEL_AGENT_PROTOCOL.md) ·
+  [GITHUB_EXECUTION_AND_DELIVERY_RULE.md](GITHUB_EXECUTION_AND_DELIVERY_RULE.md) · [ZERO_STALE_LEFTOVERS_RULE.md](ZERO_STALE_LEFTOVERS_RULE.md).
+- Machine-readable state: `governance/project-state.json` (`python tools/project-state.py validate`), decisions in
+  `governance/decision-register.json`, one receipt per transition in `governance/transitions/`.
+
+## Records (kept as evidence; not current guidance)
+
+Phase reports ([reports/](reports/)), acceptance records ([acceptance/](acceptance/)), evidence ([evidence/](evidence/)),
+the delivery manifests still used or cited ([manifests/](manifests/)), the Protel spike ([spikes/](spikes/)), the
+handoff ([context/](context/)), [templates/](templates/), [design/](design/), the security delivery evidence
+([TERMINAL_DELIVERY_SECURITY_EVIDENCE.md](TERMINAL_DELIVERY_SECURITY_EVIDENCE.md)), the Phase-3/4 runbook and triage
+([PHASE3_DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md](PHASE3_DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md),
+[PHASE3_SCOPE_AMENDMENT_PROPOSAL.md](PHASE3_SCOPE_AMENDMENT_PROPOSAL.md), [PHASE4_DEPENDENCY_TRIAGE.md](PHASE4_DEPENDENCY_TRIAGE.md)),
+and the superseded nightly model ([NIGHTLY_AUTHORITATIVE_DELIVERY.md](NIGHTLY_AUTHORITATIVE_DELIVERY.md)).

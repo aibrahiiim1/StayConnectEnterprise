@@ -189,8 +189,9 @@
     {
       "id": "planning-pack",
       "path": "exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip",
-      "status": "GENERATED",
-      "note": "Deterministically built."
+      "status": "HISTORICAL_ONLY",
+      "runtime_active": false,
+      "note": "RETIRED 2026-10-28 (T0265): a HISTORICAL subset of the Project Pack (Phase-1B plan and privilege matrix), no longer built; its last build is in Git history at the T0264 export commit."
     },
     {
       "id": "iam_v2-migrations",

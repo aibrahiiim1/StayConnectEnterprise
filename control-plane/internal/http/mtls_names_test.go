@@ -15,21 +15,21 @@ func TestMTLSServerNamesComeFromConfiguration(t *testing.T) {
 	}{
 		{
 			name:    "the configured appliance endpoint, plus loopback",
-			base:    "https://sc-central.echofusion.com",
-			want:    []string{"sc-central.echofusion.com", "127.0.0.1"},
-			wantNot: []string{"150.0.0.252"},
+			base:    "https://central.example.com",
+			want:    []string{"central.example.com", "127.0.0.1"},
+			wantNot: []string{"203.0.113.252"},
 		},
 		{
 			name:    "a port on the endpoint is not part of the name",
-			base:    "https://sc-central.echofusion.com:8443",
-			want:    []string{"sc-central.echofusion.com"},
-			wantNot: []string{"sc-central.echofusion.com:8443"},
+			base:    "https://central.example.com:8443",
+			want:    []string{"central.example.com"},
+			wantNot: []string{"central.example.com:8443"},
 		},
 		{
 			name:  "a transition keeps the old address valid alongside the new name",
-			base:  "https://sc-central.echofusion.com",
-			extra: "150.0.0.252, old-central.example.com",
-			want:  []string{"sc-central.echofusion.com", "150.0.0.252", "old-central.example.com", "127.0.0.1"},
+			base:  "https://central.example.com",
+			extra: "203.0.113.252, old-central.example.com",
+			want:  []string{"central.example.com", "203.0.113.252", "old-central.example.com", "127.0.0.1"},
 		},
 		{
 			name: "no endpoint configured at all still yields loopback",

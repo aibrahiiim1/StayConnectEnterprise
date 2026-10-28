@@ -56,8 +56,8 @@ func errMsg(seq uint32, code int32) []byte {
 
 func TestDumpParseSelectsOnlyTheGuestsFlows(t *testing.T) {
 	var dgram []byte
-	dgram = append(dgram, ctMsg(1, "10.20.0.50", "93.184.216.34", "93.184.216.34", "172.21.60.25", false)...)
-	dgram = append(dgram, ctMsg(1, "10.20.0.51", "93.184.216.34", "93.184.216.34", "172.21.60.25", true)...)
+	dgram = append(dgram, ctMsg(1, "10.20.0.50", "93.184.216.34", "93.184.216.34", "192.168.60.25", false)...)
+	dgram = append(dgram, ctMsg(1, "10.20.0.51", "93.184.216.34", "93.184.216.34", "192.168.60.25", true)...)
 	dgram = append(dgram, ctMsg(1, "10.20.0.50", "1.2.3.4", "10.20.0.1", "10.20.0.50", false)...)
 	dgram = append(dgram, doneMsg(1)...)
 
@@ -84,7 +84,7 @@ func TestDumpParseSelectsOnlyTheGuestsFlows(t *testing.T) {
 }
 
 func TestDeleteRequestCarriesTheOriginalTupleAndZone(t *testing.T) {
-	r := parseMessages(ctMsg(1, "10.20.0.51", "8.8.8.8", "8.8.8.8", "172.21.60.25", true))
+	r := parseMessages(ctMsg(1, "10.20.0.51", "8.8.8.8", "8.8.8.8", "192.168.60.25", true))
 	if len(r.entries) != 1 {
 		t.Fatalf("parse: %+v", r)
 	}

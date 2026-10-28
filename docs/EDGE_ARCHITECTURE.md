@@ -91,7 +91,7 @@ sets, drop-by-default input/forward). Refactor tightening: the dev-era WAN
 accepts for :8080/:3000 are removed, and — because the DNAT captive redirect is
 **IPv4-only** while the inet table would otherwise forward authenticated v6 —
 **IPv6 is dropped on the client LAN** until v6 capture is implemented
-([SECURITY_HARDENING.md](SECURITY_HARDENING.md)).
+([AUDIT_BACKLOG.md (security hardening)](AUDIT_BACKLOG.md#security-hardening-list-of-2026-07-11-folded-in)).
 
 ## 5. Caddy exposure rules
 
@@ -231,7 +231,7 @@ appliance-initiated HTTPS, signed with the appliance's Ed25519 identity key
 There is nothing else: no telemetry outbox or producer, no remote command
 channel, no software-update agent and no cloud-mode setting. That subsystem was
 removed on 2026-09-27 (appliance migration 0093); its historical design is in
-[SYNC_PROTOCOL.md](SYNC_PROTOCOL.md).
+[SYNC_PROTOCOL.md (retired; see the archive)](ARCHIVE.md).
 
 ## 7. HA pair specifics
 
@@ -248,7 +248,7 @@ current single-appliance behaviour.
 
 Phase 19 makes the site DB the source of truth for the appliance's client
 networks and VLANs; the OS files become rendered artifacts. Full suite:
-[EDGE_NETWORKING.md](EDGE_NETWORKING.md).
+[EDGE_NETWORKING.md](networking/EDGE_NETWORKING.md).
 
 ### `netd` — the privileged network daemon
 

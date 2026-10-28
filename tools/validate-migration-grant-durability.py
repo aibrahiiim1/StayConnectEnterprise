@@ -105,7 +105,7 @@ SERVICE_ROLE_RE = re.compile(r"^svc_[a-z0-9_]+$", re.I)
 # It held forty entries: service-role grants made by migrations that deploy/gatep/ never re-granted, so they
 # did not survive a factory-clean install. All forty are resolved:
 #
-#   38 MIRRORED into the per-service Gate-P files, each verified against PRE-LIVE 172.21.60.25 before being
+#   38 MIRRORED into the per-service Gate-P files, each verified against the PRE-LIVE appliance of the time before being
 #      written -- 29 were present there and 9 were ABSENT WITH THEIR OBJECTS PRESENT, which means those nine
 #      were broken on the live appliance and not merely on a rebuild. Verifying first is what made this a
 #      reproduction of the appliance's real privilege state rather than a bulk guess.

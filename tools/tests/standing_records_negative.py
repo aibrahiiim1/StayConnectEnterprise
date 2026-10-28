@@ -10,6 +10,11 @@ The four defects, as they were found:
 
   retired-host-default       deploy/scripts/phase7-final-reboot.sh defaulted PHASE7_APPLIANCE to the RETIRED
                              development reference appliance, and that script issues a real reboot.
+  retired-host-operational   deploy/config/central-endpoint.env kept pointing every appliance at the retired
+                             Central's name, and test fixtures and harnesses named the retired PRE-LIVE
+                             appliance (T0264).
+  retired-host-current-state CLAUDE.md and the runbooks went on naming the retired PRE-LIVE appliance as the
+                             deployment target after it was retired (T0264).
   onboarding-milestone       environment_scoped_iam_state.production.lifecycle read "PRE-LIVE, deployed,
                              awaiting onboarding" while appliance_enrolled/claimed/assigned/licensed were all
                              recorded true in the same file.
@@ -103,6 +108,23 @@ def plant_retired_host_default(p):
     p.write('#!/usr/bin/env bash\nAPPL="${PHASE7_APPLIANCE:-%s}"\nssh "root@$APPL" reboot\n' % addr)
 
 
+def plant_retired_host_operational(p):
+    # The retired Central's NAME, as configuration: not a shell default, so only check (b) can catch it.
+    name = ".".join(("sc-central", "echofusion", "com"))
+    p.write("CENTRAL_BASE=https://%s\n" % name)
+
+
+def plant_retired_host_in_test(p):
+    # The retired PRE-LIVE appliance as a test fixture address.
+    addr = ".".join(str(o) for o in (172, 21, 60, 25))
+    p.write('package x\n\nconst mgmt = "%s/24"\n' % addr)
+
+
+def plant_retired_host_current_state(p):
+    addr = ".".join(str(o) for o in (172, 21, 96, 196))
+    p.write("# Planted runbook\n\nC=root@%s    # Central control plane\n" % addr)
+
+
 def plant_onboarding_relapse(p):
     with open(STATE, encoding="utf-8") as fh:
         d = json.load(fh)
@@ -129,6 +151,12 @@ def main():
 
     expect_fail("retired host as default", "retired-host-default",
                 "deploy/scripts/planted-retired-default.sh", plant_retired_host_default)
+    expect_fail("retired name in configuration", "retired-host-operational",
+                "deploy/config/planted-retired.env", plant_retired_host_operational)
+    expect_fail("retired address in a test", "retired-host-operational",
+                "data-plane/internal/planted_retired_test.go", plant_retired_host_in_test)
+    expect_fail("retired host as a target", "retired-host-current-state",
+                "docs/PLANTED_TARGET.md", plant_retired_host_current_state)
     expect_fail("onboarding relapse", "onboarding-milestone-parity",
                 "governance/project-state.json", plant_onboarding_relapse)
     expect_fail("telemetry as a repair", "central-telemetry-as-repair",

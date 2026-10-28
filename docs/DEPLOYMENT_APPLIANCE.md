@@ -18,8 +18,8 @@
 > PMS is on the WAN-side site network); **LAN** carries client connectivity and client
 > VLAN/trunk behavior. There is **no separate physical management NIC** and **no approved
 > third HA-sync NIC.** The historical "separate `mgmt` at `172.21.15.30`" and "optional
-> `hasync` third NIC" wording below is **superseded** — see `SYSTEM_OVERVIEW.md` (WAN=`ens160`,
-> LAN=`ens192`) and `STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md` (WAN/LAN). Where this file
+> `hasync` third NIC" wording below is **superseded** — see the [installation manual](runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md)
+> A.2–A.3 (WAN = management, LAN = Clients) and `STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md` (WAN/LAN). Where this file
 > still says "mgmt", read it as **"the WAN/management interface"**.
 
 ## 1. Interfaces & addressing (approved two-NIC model)
@@ -30,7 +30,7 @@
 | **LAN = client** (`ens192`, over `br-lan` / per-VLAN bridges) | `10.20.0.1/24` (and per-VLAN gateways) | client gateway: DHCP/DNS/captive portal/shaping + 802.1Q client VLAN trunk; option 114 → `http://10.20.0.1:8380/` (**keep the RFC 8910 stanza in the repo Kea config — it was VM-only drift once already**) |
 
 Client traffic masquerades out the **WAN** interface, never onto the client LAN. ESXi installs:
-the LAN portgroup needs Promiscuous/MAC-changes/Forged-transmits = Accept (SYSTEM_OVERVIEW §3).
+the LAN portgroup needs Promiscuous/MAC-changes/Forged-transmits = Accept (installation manual A.3).
 
 **Superseded:** a third **`hasync`** NIC (e.g. `ens224`) for VRRP/conntrackd/Postgres
 replication is **no longer part of the approved topology**. Under the two-NIC rule the HA
@@ -71,11 +71,11 @@ revoked.json), env files, and the Postgres data dir.
   the WAN NIC carries. There is no separate management VLAN to restrict to: who can reach the WAN
   address is decided by the hotel's upstream network. Client networks allow DHCP/DNS/8380/8343/ICMP
   to their own gateway only. **No 8080/3000 accepts anywhere**
-  ([SECURITY_HARDENING.md](SECURITY_HARDENING.md) §2).
+  ([AUDIT_BACKLOG.md (security hardening)](AUDIT_BACKLOG.md#security-hardening-list-of-2026-07-11-folded-in) §2).
 - forward: client→uplink iff `saddr @auth_ipv4` or `daddr @walled_garden_ip`;
   client→mgmt VLAN explicitly dropped.
 - **IPv6: dropped on the client LAN** (no RAs, no v6 forwarding from br-lan)
-  until dual-stack capture exists ([SECURITY_HARDENING.md](SECURITY_HARDENING.md) §4).
+  until dual-stack capture exists ([AUDIT_BACKLOG.md (security hardening)](AUDIT_BACKLOG.md#security-hardening-list-of-2026-07-11-folded-in) §4).
 - prerouting DNAT :80→10.20.0.1:8380, :443→10.20.0.1:8343 for unauthenticated
   clients; masquerade client subnet out the uplink.
 
@@ -92,8 +92,8 @@ once, or the site installs a real cert.
 
 | Destination | Protocol | Purpose |
 |---|---|---|
-| `sc-central.echofusion.com:443` | HTTPS | token-less registration, and all appliance calls before a certificate exists |
-| `sc-central.echofusion.com:9443` | HTTPS, mutual TLS | assignment, licence, certificate renewal, hello once a certificate is issued |
+| `central.onegate.getsemantics.com:443` (the `CENTRAL_BASE` name) | HTTPS | token-less registration, and all appliance calls before a certificate exists |
+| `central.onegate.getsemantics.com:9443` (`CENTRAL_MTLS_BASE`) | HTTPS, mutual TLS | assignment, licence, certificate renewal, hello once a certificate is issued |
 | Twilio / SendGrid / Google / Stripe / Mews / Apaleo | HTTPS | only if the respective feature is enabled |
 | hotel PMS (FIAS) | TCP on the site LAN | local — not internet |
 
@@ -158,7 +158,7 @@ backups (scheduled, if switched on, and the ones taken before a restore, a migra
 ## 9. Phase 19 — Networking
 
 Client networks/VLANs/DHCP are now DB-driven and applied by `netd`. Full suite:
-[EDGE_NETWORKING.md](EDGE_NETWORKING.md).
+[EDGE_NETWORKING.md](networking/EDGE_NETWORKING.md).
 
 ### `netd` systemd unit
 
@@ -173,7 +173,7 @@ role (*Client trunk*) carries **tagged** 802.1Q client VLANs from the WLAN contr
 as a trunk; VLAN 20 → `ens192.20` → `br-g20` → `10.20.0.1/22`). The trunk parent
 is address-less (an L2 trunk); StayConnect owns the per-VLAN gateway. A plain
 untagged client port uses role `guest_access` (*Client access*) instead. See
-[ARUBA_SSID_VLAN_MAPPING.md](ARUBA_SSID_VLAN_MAPPING.md).
+[CLIENT_VLANS_AND_SSIDS.md, Part B](networking/CLIENT_VLANS_AND_SSIDS.md).
 
 ### Generated config directory
 
@@ -190,8 +190,48 @@ directory must survive reinstalls along with `/etc/stayconnect/identity` and
 drives DHCP online via `config-test` → `config-set` → `config-write` (persists to
 `/etc/kea/kea-dhcp4.conf`) and reads leases via `lease4-get-all` — **Kea is never
 restarted** to change DHCP, and leases are never read from the memfile CSV
-([DHCP_MANAGEMENT.md](DHCP_MANAGEMENT.md)).
+([DHCP.md, Part A](networking/DHCP.md)).
 
 Bring-up (§6) is unchanged except that after the base netplan/Kea/nftables/Unbound
 skeletons, netd imports the legacy `br-lan` as the first client network (marked
 already-active, zero disruption) and thereafter owns client-network changes.
+
+## Security notes (moved from the retired `SECURITY_HARDENING.md`, 2026-10-28)
+
+Open hardening items are tracked in [AUDIT_BACKLOG.md](AUDIT_BACKLOG.md#security-hardening-list-of-2026-07-11-folded-in).
+
+### Database superuser password (appliance, audit N-10)
+
+A **fresh** provision now generates a random superuser password, keeps it in
+`/etc/stayconnect/secrets/pg-superuser.env` (0600) and hands it to compose; the service roles already
+had generated passwords (`gatep-set-passwords.sh`). An appliance whose database volume existed before
+keeps the password it was initialised with: `POSTGRES_PASSWORD` acts only at `initdb`, and provisioning
+never changes a running cluster.
+
+Migrating an existing appliance (a deliberate operation, not done by any deploy):
+
+1. Generate a password and write `STAYCONNECT_PG_PASSWORD=<value>` to `/etc/stayconnect/secrets/pg-superuser.env` (0600 root).
+2. `docker exec -i stayconnect-pg psql -U stayconnect -c "ALTER ROLE stayconnect PASSWORD '<value>'"` (local socket, no password needed).
+3. Anything that connects as the superuser over TCP must use it: on the appliance that is only `keybootstrap` at provisioning; service DSNs in `/etc/stayconnect/*.env` use their own roles. Check `grep -l 'stayconnect:stayconnect@' /etc/stayconnect/*.env` returns nothing.
+4. Export the file before any later `docker compose -f infra.yml up` so a recreated container is initialised consistently.
+
+Until it is done, Hotel Admin's Overview warns "The database still has its default password" to roles that can
+read diagnostics (GDPR audit 2026-10-19, C5). edged tries the default login once every six hours and clears the
+warning when it is refused (`cmd/edged/db_default_password.go`). Nothing changes the password automatically
+(Product-Owner decision, 2026-10-19).
+
+### Caddy admin API (appliance, audit N-10)
+
+The Edge Caddyfile serves the admin API on `unix//run/caddy/admin.sock`, inside `/run/caddy` (0700
+`caddy`), instead of `127.0.0.1:2019`: no other local account can rewrite routing. `systemctl reload`
+still works (`caddy reload` runs as `caddy`). edged's Caddy health check probes TLS on 443 instead.
+
+### The portal holds no group that opens credentials (appliance, audit N-26)
+
+scd's socket is `root:stayconnect-scd 0660`, a group that opens that socket and nothing else. edged and
+portald receive it through `SupplementaryGroups=` in their units; nobody is a persistent member. portald
+used to hold `stayconnect` instead -- edged's primary group -- which also opened edged's, netd's and acctd's
+env files (database credentials), the 0640 database dumps and netd's socket, so a compromised portal could
+have read the credentials of more privileged services. portald's unit also makes `/opt/stayconnect/backups`
+and `/var/backups/stayconnect` inaccessible. Provisioning creates the group; an appliance upgraded before it
+exists keeps the legacy group on the socket, logged, until it is created (`groupadd --system stayconnect-scd`).

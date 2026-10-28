@@ -515,8 +515,9 @@ MUTATIONS = [
                  "e25126737341d8f248ae3a4589ba3a72778705a00f25b8caf6312c64a723999d")])),
  ("M41 Phase-3 plan drops the no-financial-posting sentinel", "docs/architecture/StayConnect-IAM-Phase3-Plan.md",
    ("replace", [("PHASE_3_NO_FINANCIAL_POSTING: TRUE", "PHASE_3_NO_FINANCIAL_POSTING: FALSE")])),
- ("M42 phase1b planning pack generator drops the HISTORICAL marker", "tools/project-state.py",
-   ("replace", [("PLANNING_PACK_STATUS: HISTORICAL", "PLANNING_PACK_STATUS: CURRENT")])),
+ ("M42 the retired phase1b planning pack is listed as generated again", "governance/artifact-registry.json",
+   ("replace", [('"status": "HISTORICAL_ONLY",\n      "runtime_active": false,\n      "note": "RETIRED 2026-10-28 (T0265)',
+                 '"status": "GENERATED",\n      "runtime_active": false,\n      "note": "RETIRED 2026-10-28 (T0265)')])),
  ("M43 public fingerprint reconciliation note removed (conflicting unnamed values)", "governance/project-state.json",
    ("replace", [('"public_columns_fingerprint_reconciliation"', '"public_columns_fingerprint_reconciliation_DISABLED"')])),
  ("M44 project pack source list drops the Phase-2 final report", "tools/project-state.py",
@@ -677,7 +678,7 @@ MUTATIONS = [
   "governance/project-state.json",
    ("json_set", [(["next_authorized_action"],
                   "Execute to DONE the Product-Owner-authorised FUNCTIONAL-COMPLETENESS CLOSURE that D41 "
-                  "asks for, including the controlled PRE-LIVE work on 172.21.60.25 the mission names.")])),
+                  "asks for, including the controlled PRE-LIVE work on the PRE-LIVE appliance the mission names.")])),
  ("M67 closure declared while blockers still present it as the current work",
   "governance/project-state.json",
    ("json_set", [(["blockers"],
@@ -687,7 +688,7 @@ MUTATIONS = [
   "governance/project-state.json",
    ("json_set", [(["allowed_actions"],
                   ["Execute the authorised functional-completeness closure to DONE, including controlled "
-                   "work on PRE-LIVE 172.21.60.25 as the mission authorises it."])])),
+                   "work on PRE-LIVE as the mission authorises it."])])),
  # The whole list is replaced rather than one element's status, because json_set's drift message joins the
  # path with "/" and an integer index would raise a TypeError there instead of reporting drift.
  ("M69 closure declared while an activity is still AUTHORIZED_IN_PROGRESS",

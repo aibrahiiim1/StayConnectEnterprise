@@ -61,7 +61,10 @@ set -uo pipefail
 # PRE-LIVE IS ADMITTED BY EXPLICIT PRODUCT-OWNER AUTHORISATION, for ONE controlled acceptance run of Guest
 # Device Self-Service, after which the capability returns to its approved default-OFF state. That is
 # controlled acceptance, not Guest activation and not a Guest pilot: D41 remains in force.
-readonly AUTHORIZED_HOSTS="sce"
+# EMPTY ON PURPOSE. The only appliance this run was ever authorised for (PRE-LIVE, hostname `sce`) is
+# permanently retired (Product-Owner record, 2026-10-28), so every host is refused until the Product Owner
+# authorises a run on a named appliance and its entry is added below.
+readonly AUTHORIZED_HOSTS=""
 readonly AUTHORIZED_DB="stayconnect_site"
 
 # authorized_appliance_for <hostname> -> "<appliance_id> <serial>", or non-zero when the host has no entry.
@@ -70,12 +73,9 @@ readonly AUTHORIZED_DB="stayconnect_site"
 # exactly which physical appliance may be enabled, not merely which name may be.
 authorized_appliance_for() {
   case "$1" in
-    # PRE-LIVE 172.21.60.25 -- the only appliance (CLAUDE.md 0D). Authorised for the controlled Guest Device
-    # Self-Service acceptance run.
-    sce) printf '%s %s' 'c6faf4eb-33e4-41b3-9fcb-d902568cc1c9' 'SC-7A8M-WM9R-KMAZ' ;;
-    # `radius` is deliberately ABSENT. It was the only entry here and it is retired; leaving a retired host in
-    # an enabling allow-list is a standing permission to enable a guest capability on a machine nobody is
-    # supposed to touch.
+    # `radius` and `sce` (the former PRE-LIVE appliance) are deliberately ABSENT: both are retired, and leaving
+    # a retired host in an enabling allow-list is a standing permission to enable a guest capability on a
+    # machine nobody is supposed to touch.
     *) return 1 ;;
   esac
 }

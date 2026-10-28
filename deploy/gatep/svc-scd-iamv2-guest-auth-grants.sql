@@ -245,7 +245,7 @@ GRANT EXECUTE ON FUNCTION iam_v2.guest_signin_note_success(uuid,uuid,macaddr)   
 -- gatep-grants.sql revokes ALL privileges from the service roles and runs AFTER the numbered migrations, so
 -- a privilege that lives only in a migration does not survive a reconcile.
 --
--- VERIFIED ABSENT ON PRE-LIVE 172.21.60.25, with the objects present: has_function_privilege(svc_scd,
+-- VERIFIED ABSENT ON THE PRE-LIVE APPLIANCE OF THE TIME (since retired), with the objects present: has_function_privilege(svc_scd,
 -- p6_guest_release_device_policy, EXECUTE) = false and has_table_privilege(svc_scd,
 -- appliance_product_settings, SELECT) = false. So Guest Device Self-Service is unprivileged on the live
 -- appliance TODAY -- a guest release would fail at the database, not at the policy -- and the reconcile

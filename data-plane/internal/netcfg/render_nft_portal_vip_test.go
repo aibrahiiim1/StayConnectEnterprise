@@ -159,7 +159,7 @@ func TestPortalVIP_WANAndManagementCannotReachIt(t *testing.T) {
 		}
 	}
 	topo := DefaultTopology()
-	topo.PortalVIP, topo.MgmtAddr = testVIP, "172.21.60.25"
+	topo.PortalVIP, topo.MgmtAddr = testVIP, "192.168.60.25"
 	pinned := chainOf(t, string(RenderNftables(vipNets(), topo)), "input")
 	if idx(t, pinned, vipNonGuest) > idx(t, pinned, `iifname "ens160" tcp dport 22 accept`) {
 		t.Fatal("with a pinned management address the portal-address drop no longer precedes SSH")
