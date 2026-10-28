@@ -365,6 +365,9 @@ func (r *pgRepo) PublishResyncGeneration(ctx context.Context, req ResyncScope, g
 	return nil
 }
 
+// lockHousekeepingTimeout bounds the lock watcher's ping and the unlock on Close.
+const lockHousekeepingTimeout = 2 * time.Second
+
 // pgLocker holds a session-level advisory lock on a dedicated pooled connection; Close releases both.
 type pgLocker struct {
 	conn *pgxpool.Conn
@@ -404,7 +407,11 @@ func (l *pgLocker) watch() {
 		case <-l.stop:
 			return
 		case <-t.C:
-			if err := l.conn.Ping(context.Background()); err != nil {
+			// Bounded, so a half-open connection reads as a lost lock instead of hanging the watcher (audit P7 L11).
+			pctx, cancel := context.WithTimeout(context.Background(), lockHousekeepingTimeout)
+			err := l.conn.Ping(pctx)
+			cancel()
+			if err != nil {
 				l.once.Do(func() { close(l.lost) })
 				return
 			}
@@ -420,7 +427,13 @@ func (l *pgLocker) Close() error {
 	}
 	close(l.stop)
 	if l.held {
-		_, _ = l.conn.Exec(context.Background(), `SELECT pg_advisory_unlock($1)`, l.key)
+		// Bounded (audit P7 L11). A session lock dies with its session, so when the unlock does not complete the
+		// connection is closed rather than returned to the pool still holding the lock.
+		uctx, cancel := context.WithTimeout(context.Background(), lockHousekeepingTimeout)
+		if _, err := l.conn.Exec(uctx, `SELECT pg_advisory_unlock($1)`, l.key); err != nil {
+			_ = l.conn.Conn().Close(uctx)
+		}
+		cancel()
 		l.held = false
 	}
 	l.once.Do(func() { close(l.lost) })

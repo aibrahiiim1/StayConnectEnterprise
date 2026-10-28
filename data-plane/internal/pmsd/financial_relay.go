@@ -57,6 +57,8 @@ type FinancialRelay struct {
 	mu      sync.Mutex
 	ports   map[string]*relayPort
 	carried map[string]map[int64]struct{} // interface -> P#s this process has handed to a writer
+	// carriedOrder is interface -> the same P#s in insertion order, for oldest-first eviction.
+	carriedOrder map[string][]int64
 	// seen is interface -> G# -> latest room or departed, fed by the read loop before the database applies the
 	// record, so the pre-write guard sees a room move the moment it is on the link.
 	seen map[string]map[string]linkReservation
@@ -193,7 +195,12 @@ func (r *FinancialRelay) portFor(iface string) *relayPort {
 	return r.ports[iface]
 }
 
-// markCarried records a P# handed to a writer and reports whether it already was; bounded to 4096 per interface.
+// maxCarriedPerLink bounds the set of P#s remembered per interface.
+const maxCarriedPerLink = 4096
+
+// markCarried records a P# handed to a writer and reports whether it already was; bounded per interface, evicting the
+// oldest entry first so the most recent P#s are always remembered (audit P7 L14). The database authoriser remains the
+// real guard.
 func (r *FinancialRelay) markCarried(iface string, pn int64) (already bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -205,13 +212,16 @@ func (r *FinancialRelay) markCarried(iface string, pn int64) (already bool) {
 	if _, ok := set[pn]; ok {
 		return true
 	}
-	if len(set) >= 4096 {
-		for k := range set {
-			delete(set, k)
-			break
-		}
+	if r.carriedOrder == nil {
+		r.carriedOrder = map[string][]int64{}
+	}
+	order := r.carriedOrder[iface]
+	for len(set) >= maxCarriedPerLink && len(order) > 0 {
+		delete(set, order[0])
+		order = order[1:]
 	}
 	set[pn] = struct{}{}
+	r.carriedOrder[iface] = append(order, pn)
 	return false
 }
 

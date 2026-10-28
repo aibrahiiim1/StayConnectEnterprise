@@ -9,6 +9,8 @@ import (
 	"errors"
 	"log/slog"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // StayApplier applies one pending inbox event for a scope; the engine owns the transaction, barrier and Checkout conversion.
@@ -58,9 +60,11 @@ func runApplierScope(ctx context.Context, ap StayApplier, sc applierScope, cfg a
 				if ctx.Err() != nil {
 					return // shutting down: not an error worth reporting
 				}
-				// Log the cause, not just the code. The text comes from the database and engine, never PMS payload, so no guest value passes through it.
+				// The engine's own errors are fixed sentinels and are logged as text; a database error is logged
+				// as its SQLSTATE and type chain only, because its message and detail can carry a constraint's
+				// key values (audit P7 L12).
 				log.Warn("pmsd: stay-event application failed; event stays PENDING for retry",
-					"code", Classify(err).String(), "interface", sc.Interface, "cause", err.Error())
+					append(safeErrAttrs(err), "interface", sc.Interface, "cause", applierCause(err))...)
 				sleepCtx(ctx, cfg.ErrorPause)
 				break
 			}
@@ -73,6 +77,15 @@ func runApplierScope(ctx context.Context, ap StayApplier, sc applierScope, cfg a
 			sleepCtx(ctx, cfg.IdlePause)
 		}
 	}
+}
+
+// applierCause is the error text unless a database error is in the chain, whose text may carry row values.
+func applierCause(err error) string {
+	var pg *pgconn.PgError
+	if errors.As(err, &pg) {
+		return "database error (see sqlstate)"
+	}
+	return err.Error()
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) {
