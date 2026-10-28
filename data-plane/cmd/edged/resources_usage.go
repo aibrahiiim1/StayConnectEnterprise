@@ -89,16 +89,16 @@ func (s *server) listUsageStays(w http.ResponseWriter, r *http.Request) {
 	from, to := parseWindow(r)
 	limit := queryLimit(r, 50, 200)
 
-	// The room/reservation filter is one UI field. The search travels in X-Usage-Search; ?q= is still read for an older console.
+	// The room/reservation filter is one UI field. The search travels only in X-Usage-Search: a ?q= would put
+	// guest search text in URLs and proxy logs (audit P9 L11).
 	q, ok := readSearch(w, r, usageSearchHeader)
 	if !ok {
 		return
 	}
-	if q == "" {
-		q = strings.TrimSpace(r.URL.Query().Get("q"))
-	}
 
-	rows, err := s.db.Query(r.Context(), `
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+	rows, err := s.db.Query(ctx, `
 		WITH stay_usage AS (
 		  SELECT e.stay_id,
 		         COALESCE(SUM(se.bytes_down), 0) AS down,
@@ -445,7 +445,9 @@ const sessionSamplesMax = 2000
 // listSessionSamples returns the durable samples a session total was summed from.
 func (s *server) listSessionSamples(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "session_id")
-	rows, err := s.db.Query(r.Context(), `
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+	rows, err := s.db.Query(ctx, `
 		SELECT sampled_at, bytes_down, bytes_up
 		  FROM iam_v2.accounting_records
 		 WHERE session_id = $1 AND tenant_id = $2 AND site_id = $3
@@ -613,13 +615,11 @@ func (s *server) listUsageSources(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// The search text travels in X-Usage-Search (a username or room number; edged logs request lines). ?q= is still read for an older console.
+	// The search text travels only in X-Usage-Search (a username or room number; edged logs request lines), and
+	// readSearch bounds its length (audit P9 L11).
 	raw, ok := readSearch(w, r, usageSearchHeader)
 	if !ok {
 		return
-	}
-	if raw == "" {
-		raw = r.URL.Query().Get("q")
 	}
 	q := likeEscape(normaliseSourceQuery(raw))
 

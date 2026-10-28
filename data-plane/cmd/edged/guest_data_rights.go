@@ -45,9 +45,6 @@ func (s *server) searchGuestData(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if q == "" {
-		q = strings.TrimSpace(r.URL.Query().Get("q"))
-	}
 	if len(q) < 2 || len(q) > 200 {
 		jsonErr(w, http.StatusBadRequest, "invalid_search", "enter 2 to 200 characters")
 		return

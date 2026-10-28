@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"testing"
 	"time"
 
@@ -16,6 +17,12 @@ import (
 
 // The server pages over every row (?page / ?page_size, meta.has_more, totals over every match, search in a
 // header), and pages neither repeat nor skip a row.
+
+// searchGuestData searches the way the console does: the term in X-Guest-Data-Search, never in the URL.
+func (f *apiFixture) searchGuestData(t *testing.T, term string) (int, map[string]any) {
+	t.Helper()
+	return f.getWithHeader(t, "/guest-data-rights/search", map[string]string{guestDataSearchHeader: url.PathEscape(term)})
+}
 
 func (f *apiFixture) getWithHeader(t *testing.T, path string, headers map[string]string) (int, map[string]any) {
 	t.Helper()
