@@ -442,7 +442,9 @@ module can move money or reach a PMS: execution is separate, and it shows as **R
 
 Switching execution on is a Product-Owner authorisation **[PO]**, and this manual has no step for it. The product profile never writes an execution
 switch. On an appliance where one is already on, the profile reports it and leaves it alone. If it finds one sitting without its master (inert
-today), it **refuses** rather than add the master and switch execution on. Real payments additionally need `STAYCONNECT_PAYMENT_LIVE_ALLOWED`;
+today), it **refuses** rather than add the master and switch execution on. Likewise it never adds a domain whose execution switches are already on
+(the payment domain under an existing provider flag; the posting domain under an existing outbox, transmit or review flag): it reports
+"NOT added" and leaves the file as it was. Real payments additionally need `STAYCONNECT_PAYMENT_LIVE_ALLOWED`;
 a LIVE-mode account cannot even be saved without it.
 
 ### C.11 Hardening you should do before handing over
@@ -878,6 +880,7 @@ DSNs are `postgres://<svc_role>:<password>@127.0.0.1:5432/stayconnect_site?sslmo
 | Social login not offered | portal HTTPS inactive or hostname not in the provider's callback hosts | *Portal HTTPS*, provider console |
 | *Modules*: licensed but **Available: No** | the installation predates the module (Hotel, card payment, room charge: upgrade, E.5), or the module is not implemented in this release (high availability, white label) | the *Modules* card's words; `grep -E 'PHASE3|PHASE4' /etc/stayconnect/scd.env /etc/stayconnect/edged.env` |
 | Card payment / room charge **Available: Yes, Ready: No** | by design: configurable, not executable (C.12) | the readiness words; execution is a **[PO]** authorisation |
+| Upgrade log: "STAYCONNECT_PHASE4_PAYMENT/POSTING NOT added: … is already on" | an execution switch was set before its domain existed; adding the domain would have switched execution on | by design; remove the switch, or get the authorisation and add the domain by hand |
 | Upgrade stops: "sets STAYCONNECT_PHASE4_… with no STAYCONNECT_PHASE4_MASTER" | a financial execution switch left in `scd.env` without its master; adding the master would have switched execution on | remove the switch, or get the authorisation and set the master by hand; re-run `--upgrade` |
 | *Client networks* asks to configure room sign-in on a site without the Hotel module | releases before the module fix | upgrade; room sign-in is shown only with the Hotel module in use |
 | Room sign-in always "not verified" | by design uniform; check mirror freshness, routing policy (`NONE`/undecided), licence `hospitality`, interface not `ACTIVE`, ambiguity | `/pms-routing/readiness`; `iam_v2.pms_interface_runtime`; scd log |

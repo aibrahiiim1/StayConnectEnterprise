@@ -78,9 +78,24 @@ if [ -z "$(val_in scd.env STAYCONNECT_PHASE4_MASTER)" ]; then
   done
 fi
 ensure_kv scd.env STAYCONNECT_PHASE4_MASTER true
+# A domain is added only where none of ITS execution switches is already on: each such switch is inert while its domain is
+# absent (a provider flag without the payment domain, transmit/outbox/review without the posting domain), and adding the
+# domain would make it effective. Such a file keeps its domain absent and is reported; the operator resolves it (C.12).
+add_domain() { # <domain-key> <execution switches...>
+  local key="$1"; shift
+  if [ -z "$(val_in scd.env "$key")" ]; then
+    for k in "$@"; do
+      if truthy "$(val_in scd.env "$k")"; then
+        echo "[product-profile] scd.env: $key NOT added: $k is already on, and adding the domain would switch execution on (resolve by hand, C.12)"
+        return 0
+      fi
+    done
+  fi
+  ensure_kv scd.env "$key" true
+}
 if truthy "$(val_in scd.env STAYCONNECT_PHASE4_MASTER)"; then
-  ensure_kv scd.env STAYCONNECT_PHASE4_PAYMENT true
-  ensure_kv scd.env STAYCONNECT_PHASE4_POSTING true
+  add_domain STAYCONNECT_PHASE4_PAYMENT STAYCONNECT_PHASE4_PAYMENT_PROVIDER
+  add_domain STAYCONNECT_PHASE4_POSTING STAYCONNECT_PHASE4_OUTBOX_WORKER STAYCONNECT_PHASE4_PMS_TRANSMIT STAYCONNECT_PHASE4_FINANCIAL_REVIEW
 else
   echo "[product-profile] scd.env: STAYCONNECT_PHASE4_MASTER is off here by choice; card payment and room charge not added"
 fi
