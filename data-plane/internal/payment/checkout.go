@@ -490,16 +490,27 @@ func (e *CheckoutEngine) recordReversals(ctx context.Context, t txnRow, events [
 		amount := ev.AmountMinor
 		if ev.Cumulative {
 			var recorded int64
-			_ = e.Runtime.QueryRow(ctx, `SELECT COALESCE(sum(amount_minor),0) FROM iam_v2.payment_transactions
-				WHERE parent_transaction_id=$1 AND transaction_type=$2 AND status='CAPTURED'`, t.id, ev.Kind).Scan(&recorded)
+			if err := e.Runtime.QueryRow(ctx, `SELECT COALESCE(sum(amount_minor),0) FROM iam_v2.payment_transactions
+				WHERE parent_transaction_id=$1 AND transaction_type=$2 AND status='CAPTURED'`, t.id, ev.Kind).Scan(&recorded); err != nil {
+				// Audit P6 M3: subtracting from an unread total would record the whole running total again.
+				// Record nothing; the next sweep retries.
+				slog.Warn("card reversal not recorded: the amount already recorded could not be read",
+					"kind", ev.Kind, "err", err)
+				continue
+			}
 			amount = ev.AmountMinor - recorded
 			if amount <= 0 {
 				continue
 			}
 		}
 		var r string
-		_ = e.Outcome.QueryRow(ctx, `SELECT iam_v2.p4_record_provider_reversal($1,$2,$3,$4,$5,$6,$7)`,
-			t.tenant, t.site, t.id, ev.Kind, amount, ev.EventID, nullIfEmpty(ev.ProviderRef)).Scan(&r)
+		if err := e.Outcome.QueryRow(ctx, `SELECT iam_v2.p4_record_provider_reversal($1,$2,$3,$4,$5,$6,$7)`,
+			t.tenant, t.site, t.id, ev.Kind, amount, ev.EventID, nullIfEmpty(ev.ProviderRef)).Scan(&r); err != nil {
+			// Audit P6 M3: a reversal the ledger refuses (for example a chargeback that would exceed the charge
+			// after a partial refund) must never vanish silently. Nothing is recorded; finance must review it.
+			slog.Error("card reversal reported by the provider was NOT recorded; finance review required",
+				"kind", ev.Kind, "transaction", t.id, "err", err)
+		}
 	}
 	if !touched {
 		return
@@ -525,6 +536,7 @@ func (e *CheckoutEngine) SweepReversals(ctx context.Context, tenantID, siteID st
 		   AND pc.created_at > now() - make_interval(secs => $3)
 		 ORDER BY pc.last_status_at NULLS FIRST LIMIT $4`, tenantID, siteID, since.Seconds(), limit)
 	if err != nil {
+		slog.Warn("card reversal sweep could not list captured charges", "err", err)
 		return
 	}
 	var ids []string
@@ -535,6 +547,10 @@ func (e *CheckoutEngine) SweepReversals(ctx context.Context, tenantID, siteID st
 		}
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		// Audit P6 M3 / CC3: a truncated list is reported; the charges that were read are still swept.
+		slog.Warn("card reversal sweep list ended early", "err", err)
+	}
 	for _, id := range ids {
 		t, err := e.loadTxn(ctx, tenantID, siteID, id)
 		if err != nil {
