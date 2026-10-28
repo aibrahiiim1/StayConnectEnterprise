@@ -607,21 +607,6 @@ func (m *sysNetMgr) verify(w sysnet.WANConfig, l sysnet.LANConfig) map[string]bo
 	return v
 }
 
-func (m *sysNetMgr) audit(ctx context.Context, actor, actorID, srcIP, action, target string, prev any, val sysnet.ValidationResult, apply, confirm, rollback, failure, bk string) {
-	if m.st == nil {
-		return
-	}
-	pv, _ := json.Marshal(prev)
-	vv, _ := json.Marshal(val)
-	_, _ = m.st.db.Exec(ctx, `
-        INSERT INTO system_network_audit
-          (actor, actor_id, source_ip, action, target, requested_config, validation_result,
-           apply_result, confirm_result, rollback_result, failure_reason, backup_path)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-		actor, uuidOrNil(actorID), srcIP, action, target, pv, vv,
-		nullStr(apply), nullStr(confirm), nullStr(rollback), nullStr(failure), nullStr(bk))
-}
-
 func (m *sysNetMgr) history(ctx context.Context, limit int) []map[string]any {
 	out := []map[string]any{}
 	if m.st == nil {
@@ -655,7 +640,7 @@ func (m *sysNetMgr) diagnostics() map[string]string {
 	d["ip_route"] = cmdOut("ip", "route")
 	d["ip_rule"] = cmdOut("ip", "rule")
 	d["bridge_link"] = cmdOut("bridge", "link")
-	d["resolvectl"] = sanitize(cmdOut("resolvectl", "status"))
+	d["resolvectl"] = cmdOut("resolvectl", "status")
 	d["networkctl"] = cmdOut("networkctl", "status", "--no-pager")
 	d["netplan_get"] = cmdOut("netplan", "get")
 	return d
@@ -732,10 +717,6 @@ func changeTarget(p sysnet.Proposal) string {
 	default:
 		return "wan"
 	}
-}
-
-func cfgJSON(w sysnet.WANConfig, l sysnet.LANConfig) map[string]any {
-	return map[string]any{"wan": w, "lan": l}
 }
 
 func nullStr(s string) any {
@@ -910,10 +891,6 @@ func tcpProbe(hostport string) bool {
 	}
 	_ = c.Close()
 	return true
-}
-
-func sanitize(s string) string {
-	return s
 }
 
 // sysnetPaths is a field so tests can point the manager at a temporary directory.

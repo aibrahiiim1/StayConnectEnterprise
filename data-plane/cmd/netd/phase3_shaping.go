@@ -173,6 +173,9 @@ func (p *phase3Shaping) Epochs() map[string]int64 {
 	return out
 }
 
+// phase3PassTimeout bounds one plan pass, which runs detached from the submitting request.
+const phase3PassTimeout = 2 * time.Minute
+
 type errPlanRefused struct{ reason string }
 
 func (e errPlanRefused) Error() string { return "plan refused: " + e.reason }
@@ -549,7 +552,11 @@ func (s *server) phase3ShapingHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := s.phase3.submit(r.Context(), env, time.Now())
+	// The pass outlives the request (audit Phase 8 L9): acctd's client gives up after 10 s, and a cancelled context
+	// would stop a revocation half way, including the deny calls that fail closed. Its own deadline bounds it instead.
+	passCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), phase3PassTimeout)
+	defer cancel()
+	res, err := s.phase3.submit(passCtx, env, time.Now())
 	if err != nil {
 		var refused errPlanRefused
 		code := http.StatusConflict
@@ -576,17 +583,6 @@ const (
 )
 
 // ACTIVE_FRESH_CONVERGED requires both halves verified; a session metered but not authorized (or vice versa) leaves res.Failed non-zero.
-
-// enforcementStage is per-session progress, so an operator can tell which half has not converged.
-const (
-	stageRequested    = "REQUESTED"
-	stageTCPrepared   = "TC_PREPARED"
-	stageOriginPinned = "ORIGIN_PINNED"
-	stageTCActive     = "TC_ACTIVE"
-	stageAuthorized   = "NFT_AUTHORIZED"
-	stageEnforced     = "ENFORCED"
-	stageDeniedFailed = "DENIED_FAILED"
-)
 
 func (p *phase3Shaping) shapingState(now time.Time) (string, bool) {
 	if !p.mode.Active {

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
 )
@@ -26,6 +27,43 @@ func TestPeriodicReassertionRebuildsAFlushedTable(t *testing.T) {
 	}
 	if _, ok := k.sets["phase3_auth_ipv4"]; !ok {
 		t.Fatal("the rebuilt table has no Phase-3 set for netd to write into")
+	}
+}
+
+// Audit Phase 8 L13: a re-assertion that keeps failing is reported in health and backed off; success clears it.
+func TestPeriodicReassertionFailuresAreReportedAndBackedOff(t *testing.T) {
+	k := newFakeKernel(t)
+	a := newTestApplier(t, k)
+	a.setInForce(testIntent(), "")
+	converge(t, a, "boot_reconcile")
+	k.tableExists, k.fp, k.sets = false, "", map[string][]string{}
+	k.failNftF = true
+
+	for i := 0; i < nftReassertReportAfter; i++ {
+		a.reassertNftStructure(context.Background(), "periodic")
+		a.nftWatch.mu.Lock()
+		a.nftWatch.nextTry = time.Time{} // the back-off is proven below; here each tick is made due
+		a.nftWatch.mu.Unlock()
+	}
+	st := a.nftWatch.status()
+	if st["failing"] != true || st["consecutive_failures"] != nftReassertReportAfter || st["last_error"] == "" {
+		t.Fatalf("a re-assertion failing every tick is not reported: %+v", st)
+	}
+
+	a.reassertNftStructure(context.Background(), "periodic")
+	k.reset()
+	a.reassertNftStructure(context.Background(), "periodic") // inside the back-off: not attempted
+	if len(k.cmds) != 0 {
+		t.Fatalf("the re-assertion was retried inside its back-off: %v", k.cmds)
+	}
+
+	k.failNftF = false
+	a.nftWatch.mu.Lock()
+	a.nftWatch.nextTry = time.Time{}
+	a.nftWatch.mu.Unlock()
+	a.reassertNftStructure(context.Background(), "periodic")
+	if !k.tableExists || a.nftWatch.status()["failing"] != false {
+		t.Fatalf("a successful re-assertion did not clear the report: %+v", a.nftWatch.status())
 	}
 }
 

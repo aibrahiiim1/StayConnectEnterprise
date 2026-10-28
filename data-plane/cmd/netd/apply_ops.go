@@ -927,9 +927,23 @@ func ifaceExists(name string) bool {
 	return err == nil
 }
 
+// ifaceQueryBin and ifaceQueryTimeout are fields of the interface queries below so a test can prove the bound.
+var (
+	ifaceQueryBin     = "ip"
+	ifaceQueryTimeout = 10 * time.Second
+)
+
+// ipv4AddrShow runs `ip -o -4 addr show dev NAME` with a deadline, so a hung `ip` cannot hold an apply, a
+// verification or the lock it runs under (audit Phase 8 L11).
+func ipv4AddrShow(name string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), ifaceQueryTimeout)
+	defer cancel()
+	return exec.CommandContext(ctx, ifaceQueryBin, "-o", "-4", "addr", "show", "dev", name).Output()
+}
+
 // ifaceAddrs lists the IPv4 CIDRs configured on an interface ("10.20.0.1/24"), newest kernel order.
 func ifaceAddrs(name string) []string {
-	out, err := exec.Command("ip", "-o", "-4", "addr", "show", "dev", name).Output()
+	out, err := ipv4AddrShow(name)
 	if err != nil {
 		return nil
 	}
@@ -946,7 +960,7 @@ func ifaceAddrs(name string) []string {
 }
 
 func ifaceHasIP(name, ip string) bool {
-	out, err := exec.Command("ip", "-o", "-4", "addr", "show", "dev", name).Output()
+	out, err := ipv4AddrShow(name)
 	if err != nil {
 		return false
 	}
@@ -954,7 +968,7 @@ func ifaceHasIP(name, ip string) bool {
 }
 
 func ifaceHasAnyIP(name string) bool {
-	out, err := exec.Command("ip", "-o", "-4", "addr", "show", "dev", name).Output()
+	out, err := ipv4AddrShow(name)
 	if err != nil {
 		return false
 	}

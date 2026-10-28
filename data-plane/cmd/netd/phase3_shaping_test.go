@@ -864,6 +864,41 @@ func TestConcurrentSubmissionsDoNotInterleave(t *testing.T) {
 	}
 }
 
+type ctxRecordingTC struct {
+	*fakeTC
+	sawCancelled bool
+}
+
+func (c *ctxRecordingTC) PrepareSessionIn(ctx context.Context, bridge string, ip net.IP, down, up int, groupCid string) error {
+	if ctx.Err() != nil {
+		c.sawCancelled = true
+		return ctx.Err()
+	}
+	return c.fakeTC.PrepareSessionIn(ctx, bridge, ip, down, up, groupCid)
+}
+
+// Audit Phase 8 L9: the pass runs detached from the request, so a producer that gives up (acctd's 10 s client timeout)
+// does not cancel a revocation or provisioning half way.
+func TestShapingPassIsNotCancelledWithTheRequest(t *testing.T) {
+	tc := &ctxRecordingTC{fakeTC: newFakeTC()}
+	srv := &server{phase3: liveWriter(tc)}
+	raw, _ := json.Marshal(standardPlan(1))
+	gone, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest(http.MethodPost, "/v1/phase3/shaping", bytes.NewReader(raw))
+	req = req.WithContext(context.WithValue(gone, peerConnKey{}, producerIdentity{UID: testUID}))
+	rec := httptest.NewRecorder()
+	http.HandlerFunc(srv.phase3ShapingHandler).ServeHTTP(rec, req)
+	if tc.sawCancelled {
+		t.Fatal("the plan pass ran under the request's cancelled context")
+	}
+	var res shapingPlanResponse
+	_ = json.Unmarshal(rec.Body.Bytes(), &res)
+	if res.Shaped != 2 {
+		t.Fatalf("the pass did not complete: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 // The endpoint accepts only a complete envelope so the sides cannot drift into exchanging deltas.
 func TestShapingEndpointContract(t *testing.T) {
 	tc := newFakeTC()

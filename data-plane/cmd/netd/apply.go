@@ -20,6 +20,8 @@ import (
 // never touching management/WAN/legacy interfaces), netplan written only for reboot persistence, nftables + Kea + Unbound rendered
 // from the DB and swapped atomically; a watchdog rolls back if not confirmed within confirmWindow.
 type applier struct {
+	// nftWatch records consecutive failures of the periodic firewall re-assertion (audit Phase 8 L13).
+	nftWatch      nftWatchState
 	st            revisionStore
 	kea           *keaClient
 	topo          netcfg.Topology

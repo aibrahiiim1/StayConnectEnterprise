@@ -327,6 +327,24 @@ func TestSysnetNetplanFileIsReplacedAtomically(t *testing.T) {
 	}
 }
 
+// Audit Phase 8 L11: the interface queries are bounded; a hung `ip` answers "unknown" instead of holding the caller.
+func TestInterfaceQueriesAreBounded(t *testing.T) {
+	hung := filepath.Join(t.TempDir(), "ip")
+	if err := os.WriteFile(hung, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oldBin, oldTimeout := ifaceQueryBin, ifaceQueryTimeout
+	ifaceQueryBin, ifaceQueryTimeout = hung, 200*time.Millisecond
+	defer func() { ifaceQueryBin, ifaceQueryTimeout = oldBin, oldTimeout }()
+	start := time.Now()
+	if ifaceHasIP("br-g20", "10.20.0.1") || ifaceHasAnyIP("br-g20") || len(ifaceAddrs("br-g20")) != 0 {
+		t.Fatal("a hung query reported an address")
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Fatalf("three hung queries took %v: they are not bounded", d)
+	}
+}
+
 // The same on the apply path (verification failed, revert failed) and at boot.
 func TestSysnetFailedRevertOnApplyAndBootIsRetried(t *testing.T) {
 	m, ps, _ := testSysnet(t)
