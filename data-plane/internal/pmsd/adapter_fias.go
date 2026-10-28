@@ -103,7 +103,11 @@ func NewFIASDialWithRelay(dialer Dialer, keys AdapterKeys, now func() time.Time,
 		if len(keys.EvidenceKey) == 0 || keys.EvidenceKeyVersion <= 0 {
 			return nil, coded(CodeConfigInvalid, errors.New("missing evidence key"))
 		}
-		conn, err := dialer(ctx, "tcp", p.Rev.Endpoint)
+		// The TCP connect is bounded by the revision's dial timeout, like the TLS handshake after it, so a black-holed
+		// PMS host cannot hold shutdown or a revision change for the OS connect timeout (audit P7 L2).
+		dctx, dcancel := context.WithTimeout(ctx, dialTimeoutOf(p.Rev))
+		conn, err := dialer(dctx, "tcp", p.Rev.Endpoint)
+		dcancel()
 		if err != nil {
 			return nil, coded(CodeDialFailed, err)
 		}
@@ -135,8 +139,17 @@ func (a *fiasAdapter) Close() error {
 }
 
 // Serve runs the verified read-only protocol (LS/LD/LR handshake, read loop, DS..DE resync) and sends LE on cancel. It
-// never emits PS/PA (guarded at writeFrame).
+// never emits PS/PA (guarded at writeFrame). A cycle that ends on a link fault is reported to the sink, as the REST
+// adapter does, so a roster cut off mid-window reads INTERRUPTED rather than RECEIVING (audit P7 L9).
 func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
+	err := a.serve(ctx, sink)
+	if err != nil && ctx.Err() == nil && !errors.Is(err, context.Canceled) {
+		_ = sink.OnDisconnected(a.now(), Classify(err))
+	}
+	return err
+}
+
+func (a *fiasAdapter) serve(ctx context.Context, sink AxisSink) error {
 	// A single serialized writer owns every outbound frame; the read loop only submits requests. wctx cancellation
 	// emits a controlled LE and stops; the deferred drain prevents goroutine leaks.
 	wctx, wcancel := context.WithCancel(ctx)
@@ -205,6 +218,10 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
+			if errors.Is(err, pms.ErrFrameTooLong) {
+				// An unterminated or oversized frame: the stream is no longer framed. No payload is logged.
+				return failedAt(stepRead, coded(CodeProtocolFraming, err))
+			}
 			// a writer failure closes the transport to unblock this read; surface the writer's cause if any
 			select {
 			case <-w.done:
@@ -229,7 +246,7 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 		if perr != nil {
 			if intendedDomain(body) {
 				// Malformed domain record, a recoverable feed fault: atomic gap/resync, zero admission, DR while owned,
-				// barrier stays active; no idle reset, heartbeat or ack.
+				// and the sink raises the LIVE barrier until the resync publishes; no idle reset, heartbeat or ack.
 				if a.log != nil {
 					a.log.Error("pmsd: unparseable domain record — continuity fault",
 						"interface", a.iface.ID, "reason", "strict_parse")

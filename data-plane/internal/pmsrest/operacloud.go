@@ -154,20 +154,25 @@ func (c *operaClient) list(ctx context.Context, q url.Values, max int) ([]operaR
 		if resp.Reservations == nil {
 			return nil, perr(KindInvalidResponse, "rsv/reservations", status, nil)
 		}
+		added := 0
 		for _, r := range resp.Reservations.ReservationInfo {
 			id := r.id()
 			if id != "" && !seen[id] {
 				seen[id] = true
 				out = append(out, r)
+				added++
 			}
 		}
 		n := len(resp.Reservations.ReservationInfo)
 		if max > 0 || !resp.Reservations.HasMore || n == 0 {
 			return out, nil
 		}
+		if added == 0 {
+			return nil, errPagingStuck("rsv/reservations")
+		}
 		offset += n
 	}
-	return out, nil
+	return nil, errPagingStuck("rsv/reservations")
 }
 
 func (c *operaClient) normalise(raw []operaReservation) []Reservation {

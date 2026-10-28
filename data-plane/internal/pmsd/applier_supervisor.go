@@ -94,7 +94,7 @@ func runApplierSupervisorObserved(ctx context.Context, a Assignment, repo Repo, 
 					close(l.done)
 				}()
 				runApplierScope(lctx, ap, applierScope{Tenant: a.TenantID, Site: a.SiteID, Interface: id},
-					applierConfig{}, deps.log())
+					applierConfig{wake: deps.wake}, deps.log())
 			}(id, l)
 		}
 	}

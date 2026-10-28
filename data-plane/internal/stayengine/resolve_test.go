@@ -73,9 +73,12 @@ func TestResolve_Idempotent(t *testing.T) {
 
 func TestResolve_Deterministic(t *testing.T) {
 	gi := InboxEvent{EventIdentity: "e", EventType: EvGuestIn, Reservation: "R1", Room: "202"}
-	cur := stay("IN_HOUSE", "101", 1)
-	if Resolve(gi, cur) != Resolve(gi, cur) {
-		t.Fatal("Resolve must be deterministic for the same (event, state)")
+	// Compared with the expected decision over separately built inputs, so the test can fail (audit P4 CC2).
+	want := Decision{Op: OpRoomMove, RoomMove: true}
+	for i := 0; i < 3; i++ {
+		if got := Resolve(gi, stay("IN_HOUSE", "101", 1)); got != want {
+			t.Fatalf("run %d: Resolve = %+v, want %+v", i, got, want)
+		}
 	}
 }
 

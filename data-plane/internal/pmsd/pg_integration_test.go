@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/stayengine"
@@ -88,19 +87,21 @@ func TestIntegration_LiveRetransmissionIsIdempotent(t *testing.T) {
 		t.Fatalf("a repeat left something to apply: ok=%v err=%v", ok, err)
 	}
 
-	// RESYNC staging is unchanged: a repeat inside one generation is still refused by se_resync_identity.
+	// RESYNC staging (audit P7 M2): a repeat inside one generation inserts nothing (se_resync_identity) and is
+	// reported as a typed duplicate, not a statement failure that would end every resync.
 	r := row(gi)
 	r.ResyncGeneration = 1
 	if _, err := repo.StageResyncEvent(ctx, r); err != nil {
 		t.Fatalf("stage: %v", err)
 	}
 	_, err = repo.StageResyncEvent(ctx, r)
-	var pg *pgconn.PgError
-	if !errors.As(err, &pg) || pg.Code != "23505" || pg.ConstraintName != "se_resync_identity" {
-		t.Fatalf("resync repeat = %v, want 23505 on se_resync_identity", err)
+	if !errors.Is(err, ErrDuplicateResyncEvent) {
+		t.Fatalf("resync repeat = %v, want ErrDuplicateResyncEvent", err)
 	}
-	if Classify(err) != CodeDBStatementFailed {
-		t.Fatalf("Classify = %q", Classify(err))
+	if n := scalarInt(t, pool, `SELECT count(*) FROM iam_v2.stay_events
+		WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3 AND admission_kind='RESYNC' AND resync_generation=1`,
+		s.tenant, s.site, s.iface); n != 1 {
+		t.Fatalf("resync rows = %d after the repeat, want 1", n)
 	}
 }
 
@@ -495,8 +496,8 @@ func TestIntegration_LiveVsResyncIdempotency(t *testing.T) {
 		t.Fatalf("RESYNC with same identity as LIVE must be allowed: %v", err)
 	}
 	// duplicate within the same resync generation → rejected
-	if _, err := repo.StageResyncEvent(context.Background(), r1); err == nil {
-		t.Fatal("duplicate identity within one resync generation must be rejected")
+	if _, err := repo.StageResyncEvent(context.Background(), r1); !errors.Is(err, ErrDuplicateResyncEvent) {
+		t.Fatalf("duplicate identity within one resync generation must insert nothing and be reported, got %v", err)
 	}
 	// same identity in a different resync generation → allowed
 	r2 := inbox(s, gen, "id-A", "GI")
@@ -574,15 +575,17 @@ func TestIntegration_SinkResyncLifecycle(t *testing.T) {
 	if err := sink.OnDomainEvent(ctx, mkEvent(hex(0x22))); err != nil {
 		t.Fatal(err)
 	}
-	if n := scalarInt(t, pool, `SELECT count(*) FROM iam_v2.stay_events WHERE pms_interface_id=$1 AND admission_kind='RESYNC'`, s.iface); n != 1 {
-		t.Fatalf("staged RESYNC row count = %d, want 1", n)
-	}
+	// Roster rows are written in batches (performance audit D6-M2): before DE the row is buffered or staged, and
+	// in either case never consumable.
 	if consumableCount(t, pool, s, hex(0x22)) != 0 {
 		t.Fatal("staged row must be invisible before DE")
 	}
-	// DE → publish; the staged row becomes consumable
+	// DE → every buffered row is written, then the generation is published and the row becomes consumable
 	if err := sink.OnResyncComplete(time.Now(), ""); err != nil {
 		t.Fatal(err)
+	}
+	if n := scalarInt(t, pool, `SELECT count(*) FROM iam_v2.stay_events WHERE pms_interface_id=$1 AND admission_kind='RESYNC'`, s.iface); n != 1 {
+		t.Fatalf("staged RESYNC row count = %d, want 1", n)
 	}
 	if consumableCount(t, pool, s, hex(0x22)) != 1 {
 		t.Fatal("published staged row must be consumable")

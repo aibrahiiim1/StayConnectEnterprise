@@ -369,6 +369,14 @@ func (p *ProtelFIAS) writeRecord(c net.Conn, body string) error {
 	return err
 }
 
+// MaxFrameBytes bounds one FIAS frame body (STX..ETX exclusive). Real records are a few hundred bytes at most; the cap
+// only stops an unterminated frame from growing memory at line rate until the read deadline (audit P7 M1).
+const MaxFrameBytes = 16 << 10
+
+// ErrFrameTooLong is returned when a frame body exceeds MaxFrameBytes without an ETX; the stream is no longer framed
+// and the caller must end the link.
+var ErrFrameTooLong = errors.New("fias: frame exceeds maximum length")
+
 // Bytes outside the frame are ignored (the stream may carry handshake noise).
 func readFramedRecord(br *bufio.Reader) (string, error) {
 	for {
@@ -379,14 +387,25 @@ func readFramedRecord(br *bufio.Reader) (string, error) {
 		if b != stx {
 			continue
 		}
-		body, err := br.ReadString(etx)
-		if err != nil {
-			return "", err
+		var body []byte
+		for {
+			chunk, err := br.ReadSlice(etx)
+			if len(body)+len(chunk) > MaxFrameBytes+1 { // +1: the ETX itself
+				return "", ErrFrameTooLong
+			}
+			body = append(body, chunk...)
+			if err == bufio.ErrBufferFull {
+				continue
+			}
+			if err != nil {
+				return "", err
+			}
+			break
 		}
 		if n := len(body); n > 0 && body[n-1] == etx {
 			body = body[:n-1]
 		}
-		return body, nil
+		return string(body), nil
 	}
 }
 
