@@ -200,12 +200,21 @@ func (b *backoff) next() time.Duration {
 	if b.rnd == nil {
 		return b.cur
 	}
+	// Equal jitter: at least half the current step, so a retry never follows at once and interfaces that failed
+	// together spread out (audit P7 L10).
+	half := int64(b.cur) / 2
+	span := int64(b.cur) - half
 	j := b.rnd(int64(b.cur))
 	if j < 0 {
 		j = -j
 	}
-	if int64(b.cur) > 0 {
-		j = j % int64(b.cur)
+	if j < 0 { // math.MinInt64
+		j = 0
 	}
-	return time.Duration(j)
+	if span > 0 {
+		j = j % span
+	} else {
+		j = 0
+	}
+	return time.Duration(half + j)
 }

@@ -103,7 +103,11 @@ func NewFIASDialWithRelay(dialer Dialer, keys AdapterKeys, now func() time.Time,
 		if len(keys.EvidenceKey) == 0 || keys.EvidenceKeyVersion <= 0 {
 			return nil, coded(CodeConfigInvalid, errors.New("missing evidence key"))
 		}
-		conn, err := dialer(ctx, "tcp", p.Rev.Endpoint)
+		// The TCP connect is bounded by the revision's dial timeout, like the TLS handshake after it, so a black-holed
+		// PMS host cannot hold shutdown or a revision change for the OS connect timeout (audit P7 L2).
+		dctx, dcancel := context.WithTimeout(ctx, dialTimeoutOf(p.Rev))
+		conn, err := dialer(dctx, "tcp", p.Rev.Endpoint)
+		dcancel()
 		if err != nil {
 			return nil, coded(CodeDialFailed, err)
 		}
