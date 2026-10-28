@@ -413,6 +413,7 @@ NETD_LAN_PHYS=${LAN_IFACE}
 EOF
 # An env file that already existed (an older install) gets a missing *_DB_URL added; a present one is never changed.
 bash "$DEPLOY/scripts/backfill-db-urls.sh" "$ETC" || die "could not check the services' database URLs (above)"
+bash "$DEPLOY/scripts/backfill-db-urls.sh" --verify "$ETC" || die "a service database URL is missing (above); the services would refuse to start (AD-64)"
 # THE ADMIN CONSOLE'S PORT 443 IS PINNED TO THE WAN ADDRESS (docs/networking/ADMIN_CONSOLE_IP_ALIAS.md). The WAN is also the
 # management interface (two-NIC topology, docs/DEPLOYMENT_APPLIANCE.md), so without a pin 443 was accepted on
 # EVERY address the WAN NIC carries. "auto" pins it to the WAN's current primary IPv4 and follows a change made

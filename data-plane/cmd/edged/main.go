@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -41,10 +42,20 @@ type cfg struct {
 	CookieSecure bool
 }
 
+// requireDBURL refuses to start without EDGED_DB_URL (audit AD-64, P6 L14): the built-in fallback carried a published
+// password and turned TLS off. The installer and the upgrade add a missing value (deploy/scripts/backfill-db-urls.sh)
+// and read it back before any service is restarted.
+func requireDBURL(c cfg) error {
+	if strings.TrimSpace(c.DBURL) == "" {
+		return errors.New("EDGED_DB_URL is not set; edged has no built-in database URL. Run deploy/scripts/backfill-db-urls.sh or set it in /etc/stayconnect/edged.env")
+	}
+	return nil
+}
+
 func loadCfg() cfg {
 	return cfg{
 		Addr:        envOr("EDGED_ADDR", "127.0.0.1:8090"),
-		DBURL:       envOr("EDGED_DB_URL", "postgres://stayconnect:stayconnect@127.0.0.1:5432/stayconnect_site?sslmode=disable"),
+		DBURL:       os.Getenv("EDGED_DB_URL"),
 		SCDSocket:   envOr("EDGED_SCD_SOCKET", "/run/stayconnect/scd.sock"),
 		IdentityDir: envOr("EDGED_IDENTITY_DIR", "/etc/stayconnect/identity"),
 		// Secure unless explicitly switched off: browsers treat http://localhost as secure, so only a deliberate
@@ -137,6 +148,10 @@ func main() {
 	startupbackoff.Guard("edged")
 
 	c := loadCfg()
+	if err := requireDBURL(c); err != nil {
+		slog.Error("configuration", "err", err)
+		os.Exit(1)
+	}
 	rootCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
