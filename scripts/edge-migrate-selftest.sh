@@ -29,13 +29,13 @@ WORK="$(mktemp -d)"
 pass=0; fail=0
 ok(){ echo "  ok: $1"; pass=$((pass+1)); }
 no(){ echo "  *** FAIL: $1"; [ -n "${2:-}" ] && printf '%s\n' "$2" | sed 's/^/        /' | head -6; fail=1; }
-cleanup(){ docker rm -f "$C" >/dev/null 2>&1 || true; rm -rf "$WORK"; }
+cleanup(){ docker rm -f -v "$C" >/dev/null 2>&1 || true; rm -rf "$WORK"; }
 trap cleanup EXIT
 
 # ---------------------------------------------------------------------------------------------------------
 # disposable database
 # ---------------------------------------------------------------------------------------------------------
-docker rm -f "$C" >/dev/null 2>&1 || true
+docker rm -f -v "$C" >/dev/null 2>&1 || true
 docker run -d --name "$C" -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB="$DB" \
   -p 127.0.0.1:$PORT:5432 "${EDGE_SELFTEST_IMAGE:-postgres:16-alpine}" >/dev/null 2>&1 || { echo "INFRA: container"; exit 2; }
 ready=0
