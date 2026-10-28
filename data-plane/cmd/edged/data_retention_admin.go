@@ -173,8 +173,17 @@ func (s *server) setDataRetention(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
-	old, _ := scanRetention(s.db.QueryRow(ctx, `SELECT `+dataRetentionCols+` FROM iam_v2.data_retention_get($1::uuid,$2::uuid)`,
+	// The periods being replaced go into the audit; an unreadable "old" must not be recorded as null (audit P9 L14).
+	old, err := scanRetention(s.db.QueryRow(ctx, `SELECT `+dataRetentionCols+` FROM iam_v2.data_retention_get($1::uuid,$2::uuid)`,
 		s.tenantID, s.siteID))
+	if err != nil && !isNoRows(err) {
+		if isUndefinedObject(err) {
+			jsonErr(w, http.StatusServiceUnavailable, "not_available", "this appliance's database does not have data retention yet")
+			return
+		}
+		jsonErr(w, http.StatusServiceUnavailable, "read_failed", "the current retention periods could not be read, so nothing was changed")
+		return
+	}
 	args := append([]any{s.tenantID, s.siteID}, values...)
 	args = append(args, actor, reason)
 	var version int64
