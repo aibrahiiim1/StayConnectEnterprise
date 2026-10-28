@@ -788,6 +788,7 @@ func main() {
 	// refusal is still logged, recovered and bounded.
 	r.Use(s.peerGate)
 	r.Use(guestCapacity(maxGuestInFlight))
+	r.Use(bodyLimit)
 	r.Get("/v1/health", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
 	r.Method("GET", "/metrics", s.met.Handler())
 	// The voucher surface lives here because the DEK does: scd is root and unix-socket only. Reveal and export recover a code in

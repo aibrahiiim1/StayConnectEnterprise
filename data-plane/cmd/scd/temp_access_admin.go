@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -153,7 +154,7 @@ func (s *server) listCodeRequests(w http.ResponseWriter, r *http.Request) {
 }
 
 func decodeJSONBody(r *http.Request, dst any) error {
-	return json.NewDecoder(http.MaxBytesReader(nil, r.Body, 8<<10)).Decode(dst)
+	return json.NewDecoder(io.LimitReader(r.Body, 8<<10)).Decode(dst)
 }
 
 // POST /v1/admin/otp/{id}/reveal {operator}
