@@ -74,6 +74,9 @@ type jwksCache struct {
 	mu        sync.Mutex
 	keys      map[string]*rsa.PublicKey
 	fetchedAt time.Time
+	// inflight is closed when the fetch in progress ends; the fetch runs without the lock, so a slow key endpoint
+	// never stalls a sign-in whose key is already cached.
+	inflight chan struct{}
 }
 
 func newJWKSCache(url string, client func() *http.Client) *jwksCache {
@@ -81,27 +84,57 @@ func newJWKSCache(url string, client func() *http.Client) *jwksCache {
 }
 
 func (j *jwksCache) key(ctx context.Context, kid string) (*rsa.PublicKey, error) {
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	now := time.Now()
-	if k, ok := j.keys[kid]; ok && now.Sub(j.fetchedAt) < jwksTTL {
-		return k, nil
-	}
-	if j.keys == nil || now.Sub(j.fetchedAt) >= jwksMinRefetch {
+	for {
+		j.mu.Lock()
+		now := time.Now()
+		if k, ok := j.keys[kid]; ok && now.Sub(j.fetchedAt) < jwksTTL {
+			j.mu.Unlock()
+			return k, nil
+		}
+		if j.keys != nil && now.Sub(j.fetchedAt) < jwksMinRefetch {
+			k, ok := j.keys[kid]
+			j.mu.Unlock()
+			if ok {
+				return k, nil
+			}
+			return nil, fmt.Errorf("%w: signing key %q is not in the issuer's key set", errIDToken, kid)
+		}
+		if wait := j.inflight; wait != nil {
+			// Another caller is fetching: wait for it (single flight), then decide again from the cache.
+			j.mu.Unlock()
+			select {
+			case <-wait:
+				continue
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		done := make(chan struct{})
+		j.inflight = done
+		j.mu.Unlock()
+
 		keys, err := fetchJWKS(ctx, j.client(), j.url)
+
+		j.mu.Lock()
+		j.inflight = nil
+		close(done)
 		if err != nil {
 			// A failed refresh keeps serving the last good set so a transient key-endpoint outage does not reject known keys.
-			if k, ok := j.keys[kid]; ok {
+			k, ok := j.keys[kid]
+			j.mu.Unlock()
+			if ok {
 				return k, nil
 			}
 			return nil, err
 		}
 		j.keys, j.fetchedAt = keys, now
+		k, ok := keys[kid]
+		j.mu.Unlock()
+		if ok {
+			return k, nil
+		}
+		return nil, fmt.Errorf("%w: signing key %q is not in the issuer's key set", errIDToken, kid)
 	}
-	if k, ok := j.keys[kid]; ok {
-		return k, nil
-	}
-	return nil, fmt.Errorf("%w: signing key %q is not in the issuer's key set", errIDToken, kid)
 }
 
 func fetchJWKS(ctx context.Context, hc *http.Client, url string) (map[string]*rsa.PublicKey, error) {
