@@ -8,71 +8,56 @@
 > It went stale once, badly: it announced PR #120 as the master head for nine days and 52 merges, and
 > carried an "OPEN DEFECT" that four later PRs had closed. Nothing read it, because it was in no validator's
 > surface list. It now is — `tools/validate-standing-records.py` checks any stated master head here against
-> `current_state_facts.master_head_at_delivery_base` and live master.
+> `current_state_facts.master_head_at_delivery_base` and live master. It names no master head; read
+> `latest_transition_id` and `current_delivery` in the register.
 
-## Where the tree is
+## Where the work is (2026-10-28)
 
-Delivery base: master `44077fb8` — the merge of PR #172, D41/T0174, which deferred all real Guest
-activation until StayConnect is functionally complete. Current work is the functional-completeness closure
-that deferral asks for.
+The latest deliveries, all merged to master under the Product Owner's approval:
 
-## PRE-LIVE 172.21.60.25, as read on 2026-09-22
+| PR | What | Record |
+|---|---|---|
+| #256 | the fresh-VM installer: one release, one command (install, re-run, resume, `--upgrade`) | manual Appendix 3 |
+| #257 | enrollment F1: a reinstall before activation can no longer bind an obsolete certificate | D75 / T0259 |
+| #258 | installer acceptance: Central survives a reboot (Redis auth file out of `/tmp`), a refused first administrator stops the install, the manual executed end to end | T0260 |
+| #259 | Central's `:9443` verified from outside as the mutual-TLS listener | manual A3.8 |
+| #260 | modules follow the licence: the Hotel module installed; room sign-in only where it is in use | D76 / T0261 |
+| #261 | card payment and room charge configurable, never executable; high availability and white label never shown available | D77 / T0262 |
 
-The only appliance. Onboarded, enrolled, claimed, licensed, under a pinned signed assignment. the retired development reference appliance
-is RETIRED and must not be contacted.
+On 2026-10-28 every merged branch was deleted (GitHub and local: only `master` remains), and finished working documents
+were removed: 44 per-delivery change manifests and five superseded status reports (all in git history).
 
-* Schema head `0083`. All eight StayConnect units active; `kea-dhcp4-server` enabled; containers
-  `stayconnect-pg` (timescaledb 2.16.1-pg16), `-redis`, `-nats` (as read that day; the NATS container is
-  obsolete since the 2026-09-27 removal of the appliance's message-bus client — `deploy/compose/infra.yml` no
-  longer declares it).
-* **The database superuser role is `stayconnect`, not `postgres`.** `su - postgres` and `psql -U postgres`
-  both fail on this appliance; every query goes through
-  `docker exec stayconnect-pg psql -U stayconnect -d stayconnect_site`.
-* Networking: `ens160` WAN/management `172.21.60.25/24`; `ens192` is a member of `br-g-00d1fa1a`
-  (`192.168.77.1/24`), so the single guest network is **untagged**. There is no `ens192.<vid>` and **no
-  `br-lan`** — an assertion about a legacy bridge will fail here, and that is the appliance, not the test.
-* Counters (live read, recorded in `current_state_facts.live_counters`): 28 purchases, 28 entitlements,
-  4 active, 17 sessions, 0 live, 14 310 accounting records, 8 vouchers (all REVOKED).
-* **Financial traffic is ZERO** on all five counters and has never been anything else.
-* Deployed runtime is MIXED, per service, and is recorded that way: `scd` 759286af,
-  `edged`/`portald`/`netd` a4124ce5, `pmsd`/`acctd` 305587b6, `keybootstrap` d4e1dc76,
-  `sitemigrate`/`svc-run` 29a6b21f. All five are ancestors of master. A service this delivery does not
-  change is not rebuilt merely to make the record uniform.
+## Environments
 
-## Verified complete in the closure so far
+| Role | Host | State |
+|---|---|---|
+| Production Central | `172.21.96.196` (`sc-central.echofusion.com`) | **not updated** by #256–#261 |
+| PRE-LIVE appliance | `172.21.60.25` | **not updated** by #256–#261; Go-Live not authorised |
+| Test Central (lab) | `central.onegate.getsemantics.com` — public `41.128.240.133`, private `172.21.96.96` | release `onegate-central-05481cb57334` |
+| Test appliance (lab) | `172.21.96.97` | release `onegate-appliance-d25999781b1a` (master code of #261) |
 
-* **Three migrations the runner could not see.** 0081–0083 were in a root `migrations/` directory; every
-  tool reads `data-plane/migrations`. A rebuild from the repository would have stopped at 0080 and called
-  itself complete, three least-privilege grants short of the appliance.
-  `tools/validate-migration-location.py` now refuses it, proven bidirectionally.
-* **A voucher could not be redeemed once.** The single-use burn was a direct `UPDATE iam_v2.vouchers` by
-  `svc_scd`, which holds no UPDATE on that table, in the same transaction as the grant — so the grant rolled
-  back. Migration 0084 moves the burn into the SECURITY DEFINER grant kernel; `svc_scd` gains no privilege.
-* **Voucher code format is a setting** (0085): digits-only or mixed, 6–8 characters, audited, with the
-  issuance path wired to `internal/codegen` instead of its own hardcoded alphabet.
-* **Guest-network update** refused topology changes silently and overwrote `dns_servers` with JSON `null`
-  on any PUT that omitted it. Both fixed.
-* **Operator rollback of a confirmed revision** took the whole guest network down and reported success. It
-  now refuses with 409.
-* Four harnesses that defaulted to or asserted the retired appliance, one of which reboots it.
+The test pair has its own trust universe; never point it at PRE-LIVE or the production Central, or the reverse.
 
 ## Open, and known
 
-* The functional-completeness gap inventory is wider than what is closed above — guest networking
-  multi-VLAN proof on the current architecture, the voucher admin surface (issuance has no caller at all),
-  reveal/export, and the live recovery drills. See the delivery's own report for the current list.
-* One Product-Owner decision remains open and is unchanged: whether master protection should additionally
-  require an approving review. It needs a second reviewing account, because GitHub will not let a PR author
-  approve their own PR.
+* **The production Central will not come back from a reboot** until it applies the current `central-infra.yml`
+  (finding R1; the procedure is the installation manual F.6). A Product-Owner decision.
+* PRE-LIVE and the production Central do not yet run F1, the installer fixes or the module changes.
+* Card payment and room charge execute only with their execution switches (provider calls, LIVE, PMS transmit),
+  each a separate Product-Owner authorisation (manual C.12).
+* A blank-VM install of the current release was not repeated after #256 (it needs the test VM reset).
+* Rebuilding an appliance with the same identity (manual E.4 Case 2) is self-tested but not run on a VM.
+* The backend audit (`docs/audit/`) and the performance audit (`docs/performance-audit/`) are open backlogs of findings.
+* High availability and white label are licence keys with no implementation.
+* Product-Owner decisions still open: the off-host backup destination, Root CA custody, HA, Ubuntu 24.04 support.
 
 ## Build environment
 
-Designated workstation, Docker 29.5.2, data disk on C: (F: is NOT achievable — Docker Desktop 4.76 on the
-WSL2 backend ignores `DataFolder` and reverts a supported WSL distro move). Go builds need `-p 2` /
-`GOMAXPROCS=2`; Node needs `--no-file-parallelism`. Do NOT set `MSYS_NO_PATHCONV=1` for
-`clean-install-reconstruction.sh` or `generate-production-baseline.sh` — they manage path conversion
-themselves and the override breaks them.
+Docker Desktop on the workstation; releases build in pinned containers (`golang:1.25.12`, `node:20.18.0`) from a fresh
+clone of one commit, so the working tree must be clean for `central-build.sh`. A build needs about 500 MB free on D:.
+Run the Go suites in the `golang:1.25.12` container (`MSYS_NO_PATHCONV=1` for `docker run -v` from Git Bash; do NOT set
+it for `clean-install-reconstruction.sh` or `generate-production-baseline.sh`, which manage path conversion themselves).
 
-`iam_v2_scratch/run.sh` refuses `stayconnect_site`, `stayconnect` and `stayconnect_site_b` as scratch
-database names — a live-database guard. Use a name like `iam_scratch`. The `timescale/timescaledb` image
-initialises, shuts down and restarts, so wait on `pg_isready` rather than on a first successful query.
+`iam_v2_scratch/run.sh` refuses `stayconnect_site`, `stayconnect` and `stayconnect_site_b` as scratch database names — a
+live-database guard. The `timescale/timescaledb` image initialises, shuts down and restarts, so wait on `pg_isready`
+rather than on a first successful query.

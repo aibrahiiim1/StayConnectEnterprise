@@ -231,7 +231,7 @@ appliance-initiated HTTPS, signed with the appliance's Ed25519 identity key
 There is nothing else: no telemetry outbox or producer, no remote command
 channel, no software-update agent and no cloud-mode setting. That subsystem was
 removed on 2026-09-27 (appliance migration 0093); its historical design is in
-[SYNC_PROTOCOL.md](SYNC_PROTOCOL.md).
+`SYNC_PROTOCOL.md` (removed 2026-10-28; in git history).
 
 ## 7. HA pair specifics
 

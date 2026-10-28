@@ -3,7 +3,7 @@
 > Where the WLAN controller's job ends and StayConnect's begins. StayConnect does
 > **not** configure your wireless controller — it consumes the VLANs the
 > controller trunks to it. Overview: [EDGE_NETWORKING.md](EDGE_NETWORKING.md).
-> Boundary rationale: [PHASE19_ASSESSMENT.md](PHASE19_ASSESSMENT.md) §4.
+> Boundary rationale: `PHASE19_ASSESSMENT.md` (removed 2026-10-28; in git history) §4.
 
 ## 1. The responsibility boundary
 
