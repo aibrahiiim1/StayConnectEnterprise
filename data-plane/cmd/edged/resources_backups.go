@@ -17,6 +17,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -222,8 +224,9 @@ type verifiedRecord struct {
 }
 
 // readVerification returns the marker only when the archive on disk is byte for byte the one verified. It
-// re-reads and digests the file: size/mtime can be set back, so they are not an integrity check (do not cache on them).
-// A marker with no digest is not verified.
+// digests the file: size/mtime can be set back, so they alone are not an integrity check. The digest is reused
+// only while the file's identity (device, inode, size, mtime AND ctime, which no write can set back) is unchanged,
+// so refreshing the list no longer re-reads every dump (audit P9 L8). A marker with no digest is not verified.
 func readVerification(dir, name string) (*verifiedRecord, bool) {
 	b, err := os.ReadFile(filepath.Join(dir, name+".verified"))
 	if err != nil {
@@ -238,19 +241,61 @@ func readVerification(dir, name string) (*verifiedRecord, bool) {
 	if err != nil || fi.Size() != rec.SizeBytes || !fi.ModTime().UTC().Equal(rec.ModTime) {
 		return nil, false
 	}
-	f, err := os.Open(full)
-	if err != nil {
+	sum, ok := backupDigests.digest(full, fi)
+	if !ok || sum != rec.SHA256 {
 		return nil, false
+	}
+	return &rec, true
+}
+
+// digestCache remembers each archive's SHA-256 against the identity of the file it was computed from.
+type digestCache struct {
+	mu sync.Mutex
+	m  map[string]digestEntry
+}
+
+type digestEntry struct {
+	id  fileIdentity
+	sum string
+}
+
+var backupDigests = &digestCache{m: map[string]digestEntry{}}
+
+// digestFiles counts full digests computed; tests read it.
+var digestFiles atomic.Int64
+
+func (c *digestCache) digest(path string, fi os.FileInfo) (string, bool) {
+	id, known := identityOf(fi)
+	if known {
+		c.mu.Lock()
+		e, hit := c.m[path]
+		c.mu.Unlock()
+		if hit && e.id == id {
+			return e.sum, true
+		}
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return "", false
 	}
 	defer f.Close()
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
-		return nil, false
+		return "", false
 	}
-	if hex.EncodeToString(h.Sum(nil)) != rec.SHA256 {
-		return nil, false
+	digestFiles.Add(1)
+	sum := hex.EncodeToString(h.Sum(nil))
+	if known {
+		// Re-check after reading: a file changed while it was read is not cached.
+		if after, err := os.Stat(path); err == nil {
+			if id2, ok := identityOf(after); ok && id2 == id {
+				c.mu.Lock()
+				c.m[path] = digestEntry{id: id, sum: sum}
+				c.mu.Unlock()
+			}
+		}
 	}
-	return &rec, true
+	return sum, true
 }
 
 func artifactKind(name string, dir bool) string {
@@ -329,7 +374,8 @@ func resolveArtifact(name string) (string, bool) {
 		if err != nil || !strings.HasPrefix(abs, backupRoot+string(os.PathSeparator)) {
 			continue
 		}
-		if fi, err := os.Stat(abs); err == nil && fi.Mode().IsRegular() {
+		// Lstat, not Stat: a symlink in the backup tree must not serve whatever it points at (audit P9 L7).
+		if fi, err := os.Lstat(abs); err == nil && fi.Mode().IsRegular() {
 			return abs, true
 		}
 	}
