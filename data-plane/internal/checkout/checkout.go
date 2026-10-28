@@ -137,19 +137,21 @@ func (c *Converter) convertTx(ctx context.Context, tx pgx.Tx, tenant, site, ifac
 		res.BoundaryReason = reason
 		if suspect {
 			if err := tx.QueryRow(ctx, `UPDATE iam_v2.stays SET status='CHECKED_OUT', posting_allowed=false, effective_checkout_at=now()
-				WHERE id=$1 AND status='IN_HOUSE' RETURNING effective_checkout_at`, stayID).Scan(&boundary); err != nil {
+				WHERE id=$1 AND tenant_id=$2 AND site_id=$3 AND status='IN_HOUSE' RETURNING effective_checkout_at`,
+				stayID, tenant, site).Scan(&boundary); err != nil {
 				return Result{}, err
 			}
 		} else {
-			if err := tx.QueryRow(ctx, `UPDATE iam_v2.stays SET status='CHECKED_OUT', posting_allowed=false, effective_checkout_at=$2
-				WHERE id=$1 AND status='IN_HOUSE' RETURNING effective_checkout_at`, stayID, b).Scan(&boundary); err != nil {
+			if err := tx.QueryRow(ctx, `UPDATE iam_v2.stays SET status='CHECKED_OUT', posting_allowed=false, effective_checkout_at=$4
+				WHERE id=$1 AND tenant_id=$2 AND site_id=$3 AND status='IN_HOUSE' RETURNING effective_checkout_at`,
+				stayID, tenant, site, b).Scan(&boundary); err != nil {
 				return Result{}, err
 			}
 		}
 		res.CheckedOut = true
 	case "CHECKED_OUT":
 		if err := tx.QueryRow(ctx, `UPDATE iam_v2.stays SET posting_allowed=false, effective_checkout_at=COALESCE(effective_checkout_at, now())
-			WHERE id=$1 RETURNING effective_checkout_at`, stayID).Scan(&boundary); err != nil {
+			WHERE id=$1 AND tenant_id=$2 AND site_id=$3 RETURNING effective_checkout_at`, stayID, tenant, site).Scan(&boundary); err != nil {
 			return Result{}, err
 		}
 		res.BoundaryClockSuspect = !effcoSet
