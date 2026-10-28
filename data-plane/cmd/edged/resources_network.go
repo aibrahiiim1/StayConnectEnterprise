@@ -823,6 +823,20 @@ func (s *server) createReservation(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
+	var subnet string
+	if err := s.db.QueryRow(ctx, `SELECT text(subnet_cidr) FROM guest_networks WHERE id::text=$1`, in.GuestNetworkID).
+		Scan(&subnet); err != nil {
+		if isNoRows(err) {
+			jsonErr(w, http.StatusBadRequest, "bad_request", "guest_network_id does not name a client network")
+			return
+		}
+		jsonErr(w, http.StatusInternalServerError, "internal", "the client network could not be read")
+		return
+	}
+	if code, msg := reservedIPRefusal(in.ReservedIP, subnet); code != "" {
+		jsonErr(w, http.StatusBadRequest, code, msg)
+		return
+	}
 	var id string
 	err := s.db.QueryRow(ctx, `
         INSERT INTO dhcp_reservations (guest_network_id, mac, reserved_ip, hostname, enabled)
@@ -852,6 +866,22 @@ func (s *server) updateReservation(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
+	if strings.TrimSpace(in.ReservedIP) != "" {
+		var subnet string
+		if err := s.db.QueryRow(ctx, `SELECT text(gn.subnet_cidr) FROM dhcp_reservations d
+		     JOIN guest_networks gn ON gn.id = d.guest_network_id WHERE d.id::text=$1`, id).Scan(&subnet); err != nil {
+			if isNoRows(err) {
+				jsonErr(w, http.StatusNotFound, "not_found", "reservation not found")
+				return
+			}
+			jsonErr(w, http.StatusInternalServerError, "internal", "the reservation could not be read")
+			return
+		}
+		if code, msg := reservedIPRefusal(in.ReservedIP, subnet); code != "" {
+			jsonErr(w, http.StatusBadRequest, code, msg)
+			return
+		}
+	}
 	tag, err := s.db.Exec(ctx, `
         UPDATE dhcp_reservations SET
           reserved_ip=COALESCE(NULLIF($2,'')::inet, reserved_ip),
