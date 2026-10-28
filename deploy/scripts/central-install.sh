@@ -451,7 +451,13 @@ else
   [ -z "$TLS_MODE" ] && TLS_MODE=internal
   if [ "$TLS_MODE" = internal ]; then run bash "$T/central-mint-tls.sh" --init-ca; fi
   if [ "$n" = 3 ]; then say "appliance CA exists — kept (root $(cert_fpr "$PKI_ROOT_CRT" | cut -c1-23)…)"
-  else say "the appliance Root/Intermediate CA is created by ctrlapi on its first start (step 11)"; fi
+  else
+    # ctrlapi serve never creates CA material (audit Phase 1 H1): a brand-new Central gets its appliance CA here,
+    # once. The root key is written straight to the offline directory; the first serve records the CA.
+    run env CTRLAPI_ROOT_CA_KEY="$SC_ETC/pki/root-ca.key" CTRLAPI_INTERMEDIATE_CA_KEY="$PKI_INT_KEY" \
+      CTRLAPI_ROOT_CA_OFFLINE_DIR="$SC_ETC/pki-offline" "$CTRLAPI_BIN_PATH" init-ca --no-db
+    say "appliance Root/Intermediate CA created (root key in $SC_ETC/pki-offline: move it to cold storage)"
+  fi
 fi
 # The same helper central-deploy.sh uses (central-lib.sh): created when absent, never replaced, 0600 root.
 had_mfa_key=0; [ -s "$KEY_MFA" ] && had_mfa_key=1
@@ -584,7 +590,7 @@ if [ "$DRY_RUN" = 1 ]; then
 else
   PRE_ROOT=""; PRE_INT=""
   if [ "$MODE" = restore ]; then
-    # The last line of defence against a silent new CA: ctrlapi only mints one when these are missing.
+    # The last line of defence against a missing CA: ctrlapi refuses to serve the appliance CA without these.
     for f in "$PKI_ROOT_CRT" "$PKI_INT_CRT" "$PKI_INT_KEY" "$KEY_VENDOR" "$KEY_ASSIGN" "$KEY_REG"; do
       [ -s "$f" ] || die "$f is missing — refusing to start ctrlapi (it would create a NEW identity)"
     done
@@ -603,7 +609,7 @@ else
     db_trust_crosscheck || die "after start, the database no longer matches the carried CA"
     say "appliance CA unchanged by start-up"
   else
-    for f in "$PKI_ROOT_CRT" "$PKI_INT_CRT" "$PKI_INT_KEY"; do [ -s "$f" ] || die "ctrlapi started but did not create $f"; done
+    for f in "$PKI_ROOT_CRT" "$PKI_INT_CRT" "$PKI_INT_KEY"; do [ -s "$f" ] || die "the appliance CA file $f is missing (init-ca above should have created it)"; done
     say "appliance CA present: root $(cert_fpr "$PKI_ROOT_CRT" | cut -c1-23)…"
   fi
   if [ ! -s "$CENTRAL_CA_BUNDLE" ]; then
