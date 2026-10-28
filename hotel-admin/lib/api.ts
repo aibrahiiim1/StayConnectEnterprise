@@ -70,8 +70,10 @@ async function request<T>(
 
 export const api = {
   // headers: for values that must not travel in the URL (edged logs request lines), e.g. a stay search.
-  get:   <T>(path: string, headers?: Record<string, string>) =>
-    request<T>("GET", path, undefined, headers ? { headers } : undefined),
+  // signal: lets a superseded read be cancelled (useServerPage) instead of running to the end (perf audit D8-L1).
+  get:   <T>(path: string, headers?: Record<string, string>, opts?: { signal?: AbortSignal }) =>
+    request<T>("GET", path, undefined,
+      headers || opts?.signal ? { ...(headers ? { headers } : {}), ...(opts?.signal ? { signal: opts.signal } : {}) } : undefined),
   post:  <T>(path: string, body?: any)    => request<T>("POST", path, body),
   put:   <T>(path: string, body?: any)    => request<T>("PUT", path, body),
   patch: <T>(path: string, body?: any)    => request<T>("PATCH", path, body),
