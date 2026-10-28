@@ -32,15 +32,19 @@ func RedisRateCounter(rdb *redis.Client) RateCounter { return redisCounter{rdb} 
 
 type redisCounter struct{ rdb *redis.Client }
 
+// Incr runs INCR and EXPIRE NX in one MULTI: the key can never be left without a time-to-live, which would
+// block that address until someone deleted it by hand (audit Phase 1 M1). Redis 7 is required for NX.
 func (c redisCounter) Incr(ctx context.Context, key string, window time.Duration) (int64, error) {
-	n, err := c.rdb.Incr(ctx, key).Result()
+	var incr *redis.IntCmd
+	_, err := c.rdb.TxPipelined(ctx, func(p redis.Pipeliner) error {
+		incr = p.Incr(ctx, key)
+		p.ExpireNX(ctx, key, window)
+		return nil
+	})
 	if err != nil {
 		return 0, err
 	}
-	if n == 1 {
-		_ = c.rdb.Expire(ctx, key, window).Err()
-	}
-	return n, nil
+	return incr.Val(), nil
 }
 
 func rateLimitKey(prefix string, r *http.Request) string {

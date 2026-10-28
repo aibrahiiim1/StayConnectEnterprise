@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stayconnect/enterprise/control-plane/internal/pki"
@@ -32,22 +33,12 @@ func StartMTLS(ctx context.Context, db *pgxpool.Pool, ca *pki.CA, addr string, a
 	caPool := x509.NewCertPool()
 	caPool.AppendCertsFromPEM(ca.CertPEM())
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) })
-	if applianceAPI != nil {
-		mux.Handle("/v1/appliance/", applianceAPI)
-	}
-
-	srv := &http.Server{
-		Addr:    addr,
-		Handler: mux,
-		TLSConfig: &tls.Config{
-			GetCertificate: stls.getCertificate,
-			ClientAuth:     tls.RequireAndVerifyClientCert,
-			ClientCAs:      caPool,
-			MinVersion:     tls.VersionTLS12,
-		},
-		ReadHeaderTimeout: 10 * time.Second,
+	srv := newMTLSServer(addr, applianceAPI)
+	srv.TLSConfig = &tls.Config{
+		GetCertificate: stls.getCertificate,
+		ClientAuth:     tls.RequireAndVerifyClientCert,
+		ClientCAs:      caPool,
+		MinVersion:     tls.VersionTLS12,
 	}
 	go func() {
 		<-ctx.Done()
@@ -57,6 +48,36 @@ func StartMTLS(ctx context.Context, db *pgxpool.Pool, ca *pki.CA, addr string, a
 	}()
 	slog.Info("mTLS appliance listener starting", "addr", addr, "ca_version", ca.Version)
 	return srv.ListenAndServeTLS("", "")
+}
+
+// Server limits shared by both listeners: slow bodies, slow handshakes and idle connections are bounded
+// (audit Phase 1 M10). Handlers themselves stop at the 15 s request timeout.
+const (
+	ServerReadHeaderTimeout = 10 * time.Second
+	ServerReadTimeout       = 30 * time.Second
+	ServerWriteTimeout      = 60 * time.Second
+	ServerIdleTimeout       = 120 * time.Second
+	mtlsMaxHeaderBytes      = 64 << 10
+	mtlsRequestTimeout      = 15 * time.Second
+)
+
+// newMTLSServer is the internet-facing :9443 server without its TLS configuration: timeouts, a header cap,
+// panic recovery and a per-request deadline around the appliance routes.
+func newMTLSServer(addr string, applianceAPI http.Handler) *http.Server {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) })
+	if applianceAPI != nil {
+		mux.Handle("/v1/appliance/", middleware.Recoverer(middleware.Timeout(mtlsRequestTimeout)(applianceAPI)))
+	}
+	return &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: ServerReadHeaderTimeout,
+		ReadTimeout:       ServerReadTimeout,
+		WriteTimeout:      ServerWriteTimeout,
+		IdleTimeout:       ServerIdleTimeout,
+		MaxHeaderBytes:    mtlsMaxHeaderBytes,
+	}
 }
 
 // serverTLS manages Central's mTLS server certificate: persistent, hot-swapped on rotation after verification.

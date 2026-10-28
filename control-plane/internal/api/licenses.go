@@ -87,7 +87,7 @@ func (b *Base) setLicense(w http.ResponseWriter, r *http.Request) {
 		Reason string `json:"reason"`
 	}
 	if err := DecodeJSON(r, &in); err != nil {
-		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "bad body")
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, badBody(err))
 		return
 	}
 	row, ok := b.loadOne(w, r, Scope{All: true}, id)
@@ -160,7 +160,9 @@ func (b *Base) licenseAction(action string) http.HandlerFunc {
 		var in struct {
 			Reason string `json:"reason"`
 		}
-		_ = DecodeJSON(r, &in)
+		if limitExceeded(w, r, DecodeJSON(r, &in)) {
+			return
+		}
 		if strings.TrimSpace(in.Reason) == "" {
 			Fail(w, r, http.StatusBadRequest, CodeBadRequest, "reason is required")
 			return

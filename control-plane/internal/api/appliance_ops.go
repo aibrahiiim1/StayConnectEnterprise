@@ -62,7 +62,7 @@ func (b *Base) activate(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var in activateReq
 	if err := DecodeJSON(r, &in); err != nil {
-		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "bad body: "+err.Error())
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, badBody(err))
 		return
 	}
 	if (in.CustomerID == "") == (in.NewCustomer == nil) {
@@ -403,7 +403,7 @@ func (b *Base) retire(w http.ResponseWriter, r *http.Request) {
 		ConfirmSerial string `json:"confirm_serial"`
 	}
 	if err := DecodeJSON(r, &in); err != nil {
-		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "bad body")
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, badBody(err))
 		return
 	}
 	if !requireReason(w, r, in.Reason) {
@@ -491,7 +491,7 @@ func (b *Base) replace(w http.ResponseWriter, r *http.Request) {
 		Reason string `json:"reason"`
 	}
 	if err := DecodeJSON(r, &in); err != nil {
-		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "bad body")
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, badBody(err))
 		return
 	}
 	if !requireReason(w, r, in.Reason) {
@@ -536,7 +536,7 @@ func (b *Base) rebindWANMAC(w http.ResponseWriter, r *http.Request) {
 		NewMAC string `json:"new_mac"`
 	}
 	if err := DecodeJSON(r, &in); err != nil {
-		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "bad body")
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, badBody(err))
 		return
 	}
 	if !requireReason(w, r, in.Reason) {
@@ -609,7 +609,7 @@ func (b *Base) reissueCertificate(w http.ResponseWriter, r *http.Request) {
 		Reason string `json:"reason"`
 	}
 	if err := DecodeJSON(r, &in); err != nil {
-		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "bad body")
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, badBody(err))
 		return
 	}
 	if !requireReason(w, r, in.Reason) {
@@ -681,7 +681,9 @@ func (b *Base) deleteAppliance(w http.ResponseWriter, r *http.Request) {
 		ConfirmSerial string `json:"confirm_serial"`
 		Reason        string `json:"reason"`
 	}
-	_ = DecodeJSON(r, &in)
+	if limitExceeded(w, r, DecodeJSON(r, &in)) {
+		return
+	}
 	if !requireReason(w, r, in.Reason) {
 		return
 	}

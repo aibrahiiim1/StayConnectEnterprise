@@ -290,6 +290,9 @@ func serve() {
 		Addr:              cfg.Addr,
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       apihttp.ServerReadTimeout, // audit Phase 1 M10
+		WriteTimeout:      apihttp.ServerWriteTimeout,
+		IdleTimeout:       apihttp.ServerIdleTimeout,
 	}
 
 	errCh := make(chan error, 1)
