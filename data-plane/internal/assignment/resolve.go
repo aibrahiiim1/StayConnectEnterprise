@@ -99,6 +99,13 @@ func TrustedRegistry(p Paths, log *slog.Logger) (*Registry, string) {
 			return nil, "none"
 		}
 	}
+	// Once a signed registry was ever adopted, a missing registry file or root key never re-enables the unsigned file.
+	if (&RegistryStore{Path: p.RegistryPath}).EverAdopted() {
+		if log != nil {
+			log.Error("assignment: a signed registry was adopted on this appliance but is not usable now — refusing the unsigned trust file")
+		}
+		return nil, "none"
+	}
 	// Pre-rollout only: no signed registry has ever been persisted on this appliance.
 	reg, err := LoadRegistry(p.TrustPath)
 	if err != nil {
@@ -128,6 +135,13 @@ func Resolve(p Paths, ident ApplianceBinding, now time.Time, log *slog.Logger) R
 		return Resolution{Outcome: OutcomeAbsent}
 	}
 	d := rec.Current
+	if hv := store.HighestAdopted(d.ApplianceID); d.Version < hv {
+		if log != nil {
+			log.Error("assignment: persisted assignment is older than one already adopted — refusing it",
+				"version", d.Version, "highest_adopted", hv)
+		}
+		return Resolution{Outcome: OutcomeUnverifiable}
+	}
 
 	reg, src := TrustedRegistry(p, log)
 	if reg == nil {

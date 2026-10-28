@@ -187,8 +187,6 @@ func firstProblem(s string) string {
 	return tailLine(s)
 }
 
-func shq(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
-
 func tailLine(s string) string {
 	last := ""
 	for _, l := range strings.Split(s, "\n") {

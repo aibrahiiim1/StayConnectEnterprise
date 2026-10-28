@@ -339,12 +339,6 @@ type authorizeReq struct {
 	MAC     string `json:"mac"`
 	Voucher string `json:"voucher"`
 }
-type authorizeResp struct {
-	SessionID       string `json:"session_id"`
-	GuestID         string `json:"guest_id"`
-	DurationSeconds int    `json:"duration_seconds"`
-	ExpiresAt       string `json:"expires_at,omitempty"`
-}
 
 func (s *server) authorize(w http.ResponseWriter, r *http.Request) {
 	var req authorizeReq
@@ -551,11 +545,19 @@ func main() {
 		return heldCustomerID(ctx, pool, heldAssignmentDir)
 	}}
 	ident, err := idStore.LoadBound()
+	identityDamaged := errors.Is(err, identity.ErrIdentityDamaged)
+	if identityDamaged {
+		// Never re-register under a new key: that would turn this activated appliance into an unknown one. scd keeps serving
+		// the Admin Console so an operator can see and repair it.
+		slog.Error("identity: identity.json exists but its key is missing or does not match; registration stopped until it is repaired",
+			"err", err)
+		ident, err = nil, nil
+	}
 	if err != nil {
 		slog.Error("identity: load failed", "err", err)
 		os.Exit(1)
 	}
-	if ident == nil && mayRegister(c.AutoRegister, c.CtrlAPIBase, removedRec) {
+	if ident == nil && !identityDamaged && mayRegister(c.AutoRegister, c.CtrlAPIBase, removedRec) {
 		rctx, rcancel := context.WithTimeout(rootCtx, 10*time.Second)
 		ident, err = idStore.Register(rctx, c.CtrlAPIBase, nil)
 		rcancel()
@@ -691,7 +693,7 @@ func main() {
 		if raw, err := base64.RawStdEncoding.DecodeString(ident.PublicKeyB64); err == nil && len(raw) == ed25519.PublicKeySize {
 			s.identityKeyFpr = applianceauth.KeyID(ed25519.PublicKey(raw))
 		}
-	} else if mayRegister(c.AutoRegister, c.CtrlAPIBase, removedRec) {
+	} else if !identityDamaged && mayRegister(c.AutoRegister, c.CtrlAPIBase, removedRec) {
 		// Keep trying while unregistered; on success scd re-executes so every Central agent starts with the new identity (registration.go).
 		s.reg = newRegistrar(
 			func(ctx context.Context) (*identity.Identity, error) {
@@ -785,6 +787,8 @@ func main() {
 	// voucher codes) by the caller's identity; see admin_surface.go. After Recoverer and Timeout and before every route, so a
 	// refusal is still logged, recovered and bounded.
 	r.Use(s.peerGate)
+	r.Use(guestCapacity(maxGuestInFlight))
+	r.Use(bodyLimit)
 	r.Get("/v1/health", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
 	r.Method("GET", "/metrics", s.met.Handler())
 	// The voucher surface lives here because the DEK does: scd is root and unix-socket only. Reveal and export recover a code in
@@ -971,7 +975,7 @@ func main() {
 		slog.Warn("scd socket: no socket group resolves; the socket is root-only", "err", err)
 	}
 
-	// ConnContext reads peer credentials once at accept time so code-recovery routes can refuse a non-edged caller. portald shares edged's uid, so this stops a mistake, not a compromise (peer_identity_linux.go).
+	// ConnContext reads peer credentials once at accept time; admin routes require edged's uid and exact binary, and portald has its own account (admin_surface.go, peer_identity_linux.go).
 	srv := &http.Server{Handler: r, ReadHeaderTimeout: 5 * time.Second, ConnContext: withPeerCred}
 	go func() {
 		slog.Info("scd listening", "socket", c.SocketPath)

@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -25,7 +26,7 @@ import (
 )
 
 func decodeSelfServiceBody(r *http.Request, dst any) error {
-	return json.NewDecoder(http.MaxBytesReader(nil, r.Body, 8<<10)).Decode(dst)
+	return json.NewDecoder(io.LimitReader(r.Body, 8<<10)).Decode(dst)
 }
 
 func ssErr(w http.ResponseWriter, code int, errCode string) {

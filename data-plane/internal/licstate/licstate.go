@@ -6,6 +6,8 @@ package licstate
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -56,6 +58,14 @@ type Manager struct {
 	mu      sync.RWMutex
 	current lic.Evaluation
 	loaded  bool
+
+	// loadMu serialises Load so two evaluations never interleave their state updates and limit syncs.
+	// lastSynced is the licence whose limits were last written successfully, lastLogged the last logged evaluation;
+	// an unchanged evaluation neither rewrites the limit rows nor logs again.
+	loadMu       sync.Mutex
+	lastSynced   string
+	lastLogged   string
+	syncLimitsFn func(context.Context, *lic.Document) error
 
 	// mTLS transport: once a client cert exists, fetches use the mutual-TLS listener; nil means ctrlBase.
 	mtlsClient *http.Client
@@ -137,14 +147,19 @@ func (m *Manager) Load(ctx context.Context) {
 	if m.store == nil {
 		return
 	}
+	m.loadMu.Lock()
+	defer m.loadMu.Unlock()
 	ev, err := m.store.Evaluate(time.Now().UTC())
 	m.mu.Lock()
 	if err != nil {
-		if !errors.Is(err, lic.ErrNoLicense) {
+		if errors.Is(err, lic.ErrStateDamaged) {
+			slog.Error("licstate: licence state damaged — treating the appliance as unlicensed", "err", err)
+		} else if !errors.Is(err, lic.ErrNoLicense) {
 			slog.Warn("licstate: evaluate failed", "err", err)
 		}
 		m.loaded = false
 		m.wrongDevice, m.hwMismatch = "", ""
+		m.lastSynced, m.lastLogged = "", ""
 		m.mu.Unlock()
 		return
 	}
@@ -175,14 +190,38 @@ func (m *Manager) Load(ctx context.Context) {
 		return // never bridge the limits of a licence this appliance does not hold
 	}
 
-	slog.Info("licstate: license evaluated",
-		"state", ev.State, "license_id", ev.Doc.LicenseID,
-		"plan", ev.Doc.CommercialPlanCode, "valid_until", ev.Doc.ValidUntil,
-		"cloud_stale", ev.CloudStale, "clock_rollback", ev.ClockRollback)
-
-	if err := m.syncLimits(ctx, ev.Doc); err != nil {
-		slog.Warn("licstate: limit bridge sync failed", "err", err)
+	docKey := documentKey(ev.Doc)
+	evKey := fmt.Sprintf("%s|%s|%t|%t", docKey, ev.State, ev.CloudStale, ev.ClockRollback)
+	if evKey != m.lastLogged {
+		slog.Info("licstate: license evaluated",
+			"state", ev.State, "license_id", ev.Doc.LicenseID,
+			"plan", ev.Doc.CommercialPlanCode, "valid_until", ev.Doc.ValidUntil,
+			"cloud_stale", ev.CloudStale, "clock_rollback", ev.ClockRollback)
+		m.lastLogged = evKey
 	}
+	if docKey == m.lastSynced {
+		return
+	}
+	syncFn := m.syncLimits
+	if m.syncLimitsFn != nil {
+		syncFn = m.syncLimitsFn
+	}
+	if err := syncFn(ctx, ev.Doc); err != nil {
+		slog.Warn("licstate: limit bridge sync failed", "err", err)
+		return
+	}
+	m.lastSynced = docKey
+}
+
+// documentKey identifies a licence document by its signed content; the limits bridged into the database depend on
+// nothing else.
+func documentKey(d *lic.Document) string {
+	raw, err := d.Marshal()
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
 }
 
 func (m *Manager) Evaluation() (lic.Evaluation, bool) {
@@ -282,12 +321,15 @@ func (m *Manager) Install(ctx context.Context, raw []byte) (*lic.Document, error
 	if err != nil {
 		return nil, err
 	}
-	res, reason := pre.CheckBinding(m.local)
+	m.mu.RLock()
+	local, applianceID := m.local, m.applianceID
+	m.mu.RUnlock()
+	res, reason := pre.CheckBinding(local)
 	if res == lic.BindingWrongDevice {
 		slog.Warn("licstate: license REJECTED — bound to a different appliance",
 			"reason", reason, "license_id", pre.LicenseID,
-			"doc_serial", pre.ApplianceSerial, "local_serial", m.local.Serial,
-			"doc_idfpr", pre.IdentityKeyFingerprint, "local_idfpr", m.local.IdentityKeyFingerprint)
+			"doc_serial", pre.ApplianceSerial, "local_serial", local.Serial,
+			"doc_idfpr", pre.IdentityKeyFingerprint, "local_idfpr", local.IdentityKeyFingerprint)
 		return nil, fmt.Errorf("license rejected: %s — this license is bound to a different appliance", reason)
 	}
 
@@ -299,11 +341,11 @@ func (m *Manager) Install(ctx context.Context, raw []byte) (*lic.Document, error
 	// on every evaluation.
 	if res == lic.BindingWANMismatch {
 		slog.Warn("licstate: hardware binding mismatch", "reason", reason,
-			"license_id", doc.LicenseID, "doc_wan_mac", doc.WANMAC, "local_wan_mac", m.local.WANMAC)
+			"license_id", doc.LicenseID, "doc_wan_mac", doc.WANMAC, "local_wan_mac", local.WANMAC)
 	}
-	if m.applianceID != "" && len(doc.ApplianceIDs) > 0 && !applianceBound(doc, m.applianceID) {
+	if applianceID != "" && len(doc.ApplianceIDs) > 0 && !applianceBound(doc, applianceID) {
 		slog.Warn("licstate: appliance not listed in license binding",
-			"appliance_id", m.applianceID, "license_id", doc.LicenseID, "bound_count", len(doc.ApplianceIDs))
+			"appliance_id", applianceID, "license_id", doc.LicenseID, "bound_count", len(doc.ApplianceIDs))
 	}
 	m.Load(ctx)
 	return doc, nil
@@ -414,7 +456,9 @@ func (m *Manager) FetchFromCloud(ctx context.Context, ctrlBase, applianceID stri
 	if m.store == nil {
 		return errors.New("vendor public key not installed")
 	}
+	m.mu.Lock()
 	m.applianceID = applianceID
+	m.mu.Unlock()
 	tok, err := applianceauth.SignRequest(priv, applianceID, http.MethodGet, "/v1/appliance/license", nil)
 	if err != nil {
 		return fmt.Errorf("sign: %w", err)
@@ -422,7 +466,8 @@ func (m *Manager) FetchFromCloud(ctx context.Context, ctrlBase, applianceID stri
 	// Prefer the mTLS transport once a client cert is installed (signed-JWT still applies on top).
 	base := ctrlBase
 	client := &http.Client{Timeout: 10 * time.Second}
-	if mc, mb, ok := m.transport(); ok {
+	mc, mb, viaMTLS := m.transport()
+	if viaMTLS {
 		base, client = mb, mc
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/v1/appliance/license", nil)
@@ -450,13 +495,19 @@ func (m *Manager) FetchFromCloud(ctx context.Context, ctrlBase, applianceID stri
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&out); err != nil {
 		return err
 	}
+	// A revocation that cannot be stored stops the fetch, so it is retried on the next one instead of being lost.
 	for _, id := range out.Revoked {
-		_ = m.store.AddRevocation(id)
+		if err := m.store.AddRevocation(id); err != nil {
+			return fmt.Errorf("store revocation: %w", err)
+		}
 	}
-	// A revocation-only response carries a null envelope: apply revocations and keep the installed doc.
+	// A revocation-only response carries a null envelope: apply revocations and keep the installed doc. Nothing in it
+	// is signed, so it counts as cloud validation only when it came over the mutual-TLS channel.
 	if len(out.Envelope) == 0 || string(out.Envelope) == "null" {
-		if err := m.store.MarkCloudValidated(time.Now().UTC()); err != nil {
-			slog.Warn("licstate: mark cloud validated failed", "err", err)
+		if viaMTLS {
+			if err := m.store.MarkCloudValidated(time.Now().UTC()); err != nil {
+				slog.Warn("licstate: mark cloud validated failed", "err", err)
+			}
 		}
 		m.Load(ctx)
 		slog.Info("licstate: revocation-only response applied", "revoked", len(out.Revoked))

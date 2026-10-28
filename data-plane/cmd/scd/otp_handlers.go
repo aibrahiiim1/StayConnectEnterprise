@@ -104,9 +104,8 @@ type otpIssueReq struct {
 	// MAC is the requesting device's hardware address as portald resolved it from the kernel; the challenge is bound to it
 	// (migration 0110), so the code and its SMS link verify from this device only.
 	MAC string `json:"mac"`
-	// PortalBase is still accepted but never used for the link: it is a guest-supplied Host header. The link origin is the
-	// canonical HTTPS hostname scd established (otpLinkBase). Kept so an older portald's request decodes.
-	PortalBase string `json:"portal_base,omitempty"`
+	// An older portald also sends portal_base (a guest-supplied Host header); unknown fields are ignored, and the link origin is
+	// always the canonical HTTPS hostname scd established (otpLinkBase).
 }
 
 // otpLinkBase is https://<canonical hostname> while the portal is on HTTPS and "" (code alone) on the HTTP fallback: a

@@ -474,6 +474,87 @@ func verifyStoredBackups() []backupProblem {
 	return out
 }
 
+// hashedFile is what a file looked like when its contents last matched its note.
+type hashedFile struct {
+	size  int64
+	mtime time.Time
+	at    time.Time
+}
+
+// rotatingCheck remembers each stored file's last full verification, so a pass re-reads one file in full instead of
+// every backup: about 5 GB of disk reads every 15 minutes, through the page cache Postgres relies on, became one file.
+var rotatingCheck struct {
+	mu     sync.Mutex
+	hashed map[string]hashedFile
+}
+
+// verifyStoredBackupsRotating checks every stored file exists with its recorded size and the size and modification
+// time it had when last fully verified, and re-hashes in full every file never verified in this process, every file
+// whose size or time changed, and the one verified longest ago. With the default ten backups and a 15-minute pass each
+// file is re-read in full every few hours, well inside a day. A restore and the earlier-backup check still hash in full.
+func verifyStoredBackupsRotating(now time.Time) []backupProblem {
+	rotatingCheck.mu.Lock()
+	defer rotatingCheck.mu.Unlock()
+	if rotatingCheck.hashed == nil {
+		rotatingCheck.hashed = map[string]hashedFile{}
+	}
+	type target struct {
+		file, want string
+		size       int64
+	}
+	var files []target
+	for _, m := range listBackupMetas() {
+		files = append(files, target{m.Name, m.SHA256, m.SizeBytes})
+		if m.EtcName != "" {
+			files = append(files, target{m.EtcName, m.EtcSHA256, m.EtcBytes})
+		}
+	}
+	oldest := ""
+	var oldestAt time.Time
+	for _, f := range files {
+		if h, ok := rotatingCheck.hashed[f.file]; ok && (oldest == "" || h.at.Before(oldestAt)) {
+			oldest, oldestAt = f.file, h.at
+		}
+	}
+	var out []backupProblem
+	seen := map[string]bool{}
+	for _, f := range files {
+		seen[f.file] = true
+		full := filepath.Join(scdBackupDir, f.file)
+		fi, err := os.Stat(full)
+		if err != nil {
+			delete(rotatingCheck.hashed, f.file)
+			out = append(out, backupProblem{f.file, "the file is missing"})
+			continue
+		}
+		if f.size > 0 && fi.Size() != f.size {
+			delete(rotatingCheck.hashed, f.file)
+			out = append(out, backupProblem{f.file, "its size changed"})
+			continue
+		}
+		h, ok := rotatingCheck.hashed[f.file]
+		if ok && f.file != oldest && h.size == fi.Size() && h.mtime.Equal(fi.ModTime()) {
+			continue
+		}
+		sum, err := rotatingDigest(full)
+		if err != nil || sum != f.want {
+			delete(rotatingCheck.hashed, f.file)
+			out = append(out, backupProblem{f.file, "its contents changed since it was verified"})
+			continue
+		}
+		rotatingCheck.hashed[f.file] = hashedFile{size: fi.Size(), mtime: fi.ModTime(), at: now}
+	}
+	for name := range rotatingCheck.hashed {
+		if !seen[name] {
+			delete(rotatingCheck.hashed, name)
+		}
+	}
+	return out
+}
+
+// rotatingDigest is the full re-read; tests count calls through it.
+var rotatingDigest = fileDigest
+
 // storedCheck caches the last full re-read of stored backups (at most storedCheckAge old); only the loop and changes to the stored set force a fresh one.
 var storedCheck struct {
 	mu    sync.Mutex
@@ -489,7 +570,7 @@ func storedBackupProblems(maxAge time.Duration) []backupProblem {
 	if maxAge > 0 && !storedCheck.at.IsZero() && time.Since(storedCheck.at) < maxAge {
 		return append([]backupProblem(nil), storedCheck.probs...)
 	}
-	storedCheck.probs = verifyStoredBackups()
+	storedCheck.probs = verifyStoredBackupsRotating(time.Now())
 	storedCheck.at = time.Now()
 	return append([]backupProblem(nil), storedCheck.probs...)
 }

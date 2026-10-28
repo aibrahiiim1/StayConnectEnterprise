@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -126,10 +127,12 @@ func (s *Store) normalizeRules(rules []Rule) ([]chargeable, error) {
 		if !validMethod(method) {
 			return nil, fmt.Errorf("throttle: invalid method %q", method)
 		}
-		if r.Value == "" && r.Kind != ScopeEndpoint {
-			continue
-		}
+		// A limit of zero or less is a configuration error, never "no limit": refusing it keeps a typo from silently
+		// switching a rule off. An empty value is an identity the caller does not have (no device, no account) and is skipped.
 		if r.Limit <= 0 {
+			return nil, fmt.Errorf("throttle: rule %s/%s has no positive limit", r.Kind, method)
+		}
+		if r.Value == "" && r.Kind != ScopeEndpoint {
 			continue
 		}
 		sk := s.scopeKey(r.Kind, r.Value)
@@ -204,9 +207,8 @@ func (s *Store) Allow(ctx context.Context, rules ...Rule) (Decision, error) {
 		}
 		if maxBlock != nil && maxBlock.After(now) {
 			allowed = false
-			reason = r.kind
-			if d := maxBlock.Sub(now); d > worstRetry {
-				worstRetry = d
+			if d := maxBlock.Sub(now); d > worstRetry || reason == "" {
+				worstRetry, reason = max(d, worstRetry), r.kind
 			}
 			continue
 		}
@@ -226,7 +228,6 @@ func (s *Store) Allow(ctx context.Context, rules ...Rule) (Decision, error) {
 
 		if count > r.limit {
 			allowed = false
-			reason = r.kind
 			retry := ws.Add(s.window).Sub(now)
 			if r.block > 0 {
 				bu := now.Add(r.block)
@@ -238,8 +239,9 @@ func (s *Store) Allow(ctx context.Context, rules ...Rule) (Decision, error) {
 				}
 				retry = r.block
 			}
-			if retry > worstRetry {
-				worstRetry = retry
+			// The reported reason is the rule with the longest wait, so it matches Retry-After.
+			if retry > worstRetry || reason == "" {
+				worstRetry, reason = max(retry, worstRetry), r.kind
 			}
 		}
 	}
@@ -279,7 +281,9 @@ func (s *Store) RunCleanup(ctx context.Context, every, grace time.Duration) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			_, _ = s.Cleanup(ctx, grace)
+			if _, err := s.Cleanup(ctx, grace); err != nil && ctx.Err() == nil {
+				slog.Warn("throttle: cleanup failed", "err", err)
+			}
 		}
 	}
 }

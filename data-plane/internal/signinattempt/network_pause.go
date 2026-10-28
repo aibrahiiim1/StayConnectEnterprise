@@ -55,7 +55,7 @@ func (p NetworkPolicy) Validate() error {
 // paused. As with Check, an error is not an allow: the caller refuses with a service failure.
 func (s *ProtectionStore) CheckNetwork(ctx context.Context, tenantID, siteID, networkID string, mac net.HardwareAddr) (Gate, error) {
 	var g Gate
-	if s == nil || s.pool == nil || networkID == "" || len(mac) == 0 {
+	if s.disabled() || networkID == "" || len(mac) == 0 {
 		return g, nil
 	}
 	var remaining *int
@@ -75,7 +75,7 @@ func (s *ProtectionStore) CheckNetwork(ctx context.Context, tenantID, siteID, ne
 }
 
 func (s *ProtectionStore) NoteNetworkFailure(ctx context.Context, tenantID, siteID, networkID, networkName string) (pausedNow bool, expiresAt *time.Time, count int, err error) {
-	if s == nil || s.pool == nil || networkID == "" {
+	if s.disabled() || networkID == "" {
 		return false, nil, 0, nil
 	}
 	err = s.pool.QueryRow(ctx, `

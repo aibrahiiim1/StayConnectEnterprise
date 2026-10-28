@@ -63,11 +63,6 @@ func verifiedAssignment(_ *assignment.Store, ident *identity.Identity) assignmen
 	}, time.Now(), slog.Default())
 }
 
-// cloudHTTPClient is the plain-HTTPS client used before an mTLS client cert exists.
-func (s *server) cloudHTTPClient() *http.Client {
-	return &http.Client{Timeout: 10 * time.Second}
-}
-
 // startAssignmentAgent is the ONLY channel by which an appliance adopts a tenant/site; it re-execs scd when the operational identity changes.
 func (s *server) startAssignmentAgent(ctx context.Context, ctrlBase string) {
 	// The registry holds ONLY assignment keys, so a document signed by any other key is rejected; re-read every poll.

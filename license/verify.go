@@ -20,15 +20,25 @@ type Verifier struct {
 	keys map[string]ed25519.PublicKey
 }
 
+// NewVerifier ignores keys that are not ed25519.PublicKeySize bytes, so a wrong key never panics in Verify; such a
+// key verifies nothing.
 func NewVerifier(pubs ...ed25519.PublicKey) *Verifier {
 	v := &Verifier{keys: map[string]ed25519.PublicKey{}}
 	for _, p := range pubs {
-		v.keys[KeyIDFor(p)] = p
+		_ = v.AddKey(p)
 	}
 	return v
 }
 
-func (v *Verifier) AddKey(pub ed25519.PublicKey) { v.keys[KeyIDFor(pub)] = pub }
+var ErrBadKey = errors.New("license vendor public key must be 32 bytes")
+
+func (v *Verifier) AddKey(pub ed25519.PublicKey) error {
+	if len(pub) != ed25519.PublicKeySize {
+		return ErrBadKey
+	}
+	v.keys[KeyIDFor(pub)] = pub
+	return nil
+}
 
 func (v *Verifier) Verify(e *Envelope) (*Document, error) {
 	pub, ok := v.keys[e.KeyID]

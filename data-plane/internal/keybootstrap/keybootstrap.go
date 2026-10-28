@@ -18,17 +18,6 @@ import (
 // OTPPrefix is the generation-key file prefix (files are "<prefix>_<gen>.key").
 const OTPPrefix = "otp_hmac"
 
-// VoucherHMACKeyFile is the appliance-local blind-index key for iam_v2.vouchers (code_hmac). scd refuses to
-// start without it, so it is minted here, never overwritten and never by the daemon.
-const VoucherHMACKeyFile = "voucher_hmac.key"
-
-// BootstrapVoucherHMACKey creates the voucher key file if absent. It never overwrites: that would orphan every
-// indexed voucher.
-func BootstrapVoucherHMACKey(path string) error {
-	_, err := localkeys.CreateKeyIfAbsent(path)
-	return err
-}
-
 type DB interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row

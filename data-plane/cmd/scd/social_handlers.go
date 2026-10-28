@@ -48,6 +48,16 @@ func (s *server) socialStart(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, "provider required")
 		return
 	}
+	// The state row binds the callback to the device that started (anti-CSRF). portald always sends both from the
+	// kernel; scd refuses a start without them itself, rather than storing an unbound state.
+	if ip := net.ParseIP(strings.TrimSpace(req.IP)); ip == nil || ip.To4() == nil {
+		httpErr(w, http.StatusBadRequest, "bad ip")
+		return
+	}
+	if _, err := net.ParseMAC(strings.TrimSpace(req.MAC)); err != nil {
+		httpErr(w, http.StatusBadRequest, "bad mac")
+		return
+	}
 
 	load := s.methodSwitches
 	if load == nil {
@@ -165,7 +175,9 @@ func (s *server) authorizeSocial(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Look up and consume state atomically: UPDATE ... RETURNING, so a second call sees it consumed.
+	// The state is checked and claimed (consumed_at set) in one short transaction, and the provider is called with no
+	// transaction open: a slow provider must not hold one of scd's few database connections and a row lock. A second call
+	// sees the claim. A failed exchange releases the claim, so a state is used up only by a successful sign-in, as before.
 	var (
 		stTenant, stProvider, stRedirect string
 		stVerifier, stNonce              string
@@ -233,6 +245,24 @@ func (s *server) authorizeSocial(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, "unknown provider")
 		return
 	}
+	var claimedAt time.Time
+	if err := tx.QueryRow(r.Context(),
+		`UPDATE social_oauth_states SET consumed_at = clock_timestamp() WHERE state = $1 AND consumed_at IS NULL RETURNING consumed_at`,
+		req.State).Scan(&claimedAt); err != nil {
+		httpErr(w, http.StatusInternalServerError, "state consume")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		httpErr(w, http.StatusInternalServerError, "state commit")
+		return
+	}
+	release := func() {
+		// Only this call's own claim is released.
+		if _, err := s.db.Exec(context.WithoutCancel(r.Context()),
+			`UPDATE social_oauth_states SET consumed_at = NULL WHERE state = $1 AND consumed_at = $2`, req.State, claimedAt); err != nil {
+			slog.Warn("social: could not release the sign-in state after a failed exchange", "err", err)
+		}
+	}
 	// The exchange uses the attempt's OWN redirect URI, verifier and nonce, never anything the callback carries; the provider refuses a missing
 	// binding or an id_token whose nonce is not this attempt's.
 	exchStart := time.Now()
@@ -241,6 +271,7 @@ func (s *server) authorizeSocial(w http.ResponseWriter, r *http.Request) {
 	s.met.SocialLoginDuration.WithLabelValues(req.Provider).Observe(time.Since(exchStart).Seconds())
 	if err != nil {
 		// ErrEmailUnverified is returned WITH a populated UserInfo (for a friendlier prompt); every other error is a hard failure.
+		release()
 		if errors.Is(err, social.ErrEmailUnverified) {
 			s.met.SocialLoginTotal.WithLabelValues(req.Provider, "email_unverified").Inc()
 			httpErr(w, http.StatusForbidden, "email not verified by provider")
@@ -252,21 +283,12 @@ func (s *server) authorizeSocial(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !info.EmailVerified || info.Email == "" {
+		release()
 		s.met.SocialLoginTotal.WithLabelValues(req.Provider, "email_unverified").Inc()
 		httpErr(w, http.StatusForbidden, "email not verified by provider")
 		return
 	}
 	s.met.SocialLoginTotal.WithLabelValues(req.Provider, "ok").Inc()
-
-	if _, err := tx.Exec(r.Context(),
-		`UPDATE social_oauth_states SET consumed_at = now() WHERE state = $1`, req.State); err != nil {
-		httpErr(w, http.StatusInternalServerError, "state consume")
-		return
-	}
-	if err := tx.Commit(r.Context()); err != nil {
-		httpErr(w, http.StatusInternalServerError, "state commit")
-		return
-	}
 
 	// The provider verifies the identity; the principal is IAM-v2. social_oauth_states is only the handshake nonce store: just the verified,
 	// issuer-scoped subject crosses into iam_v2 (authSocialIdentity). The provider sub is the identity factor, so an email change at the provider

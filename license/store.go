@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -14,11 +16,24 @@ import (
 type Store struct {
 	dir      string
 	verifier *Verifier
+	// mu makes each read-modify-write of state.json and revoked.json atomic within the process.
+	mu sync.Mutex
 }
 
 var ErrRollback = errors.New("LICENSE_ROLLBACK_REJECTED: license rollback rejected")
 
+// ErrStateDamaged means a licence state file exists but cannot be read or parsed. It is never read as "empty",
+// which would silently switch off version, clock and revocation protection.
+var ErrStateDamaged = errors.New("LICENSE_STATE_DAMAGED: licence state file unreadable")
+
 const clockRollbackTolerance = 48 * time.Hour
+
+const (
+	stateFile   = "state.json"
+	currentFile = "current.json"
+	revokedFile = "revoked.json"
+	prevSuffix  = ".prev"
+)
 
 type storeState struct {
 	InstalledIssuedAt time.Time `json:"installed_issued_at"`
@@ -35,36 +50,125 @@ func NewStore(dir string, v *Verifier) *Store { return &Store{dir: dir, verifier
 
 func (s *Store) path(name string) string { return filepath.Join(s.dir, name) }
 
-func (s *Store) readState() storeState {
-	var st storeState
-	raw, err := os.ReadFile(s.path("state.json"))
+// readFileOrPrev reads name, falling back to its .prev copy when the current file is damaged. A missing file (and
+// no .prev) reports os.ErrNotExist; anything else unreadable or unparsable is ErrStateDamaged.
+func (s *Store) readFileOrPrev(name string, parse func([]byte) error) error {
+	raw, err := os.ReadFile(s.path(name))
 	if err == nil {
-		_ = json.Unmarshal(raw, &st)
+		if err = parse(raw); err == nil {
+			return nil
+		}
+	} else if errors.Is(err, os.ErrNotExist) {
+		if _, perr := os.Stat(s.path(name + prevSuffix)); errors.Is(perr, os.ErrNotExist) {
+			return os.ErrNotExist
+		}
 	}
-	return st
+	prev, perr := os.ReadFile(s.path(name + prevSuffix))
+	if perr == nil && parse(prev) == nil {
+		slog.Warn("license: state file damaged, using previous copy", "file", name, "err", err)
+		return nil
+	}
+	return fmt.Errorf("%w: %s: %v", ErrStateDamaged, name, err)
+}
+
+func (s *Store) readState() (storeState, error) {
+	var st storeState
+	err := s.readFileOrPrev(stateFile, func(raw []byte) error {
+		var tmp storeState
+		if err := json.Unmarshal(raw, &tmp); err != nil {
+			return err
+		}
+		st = tmp
+		return nil
+	})
+	if errors.Is(err, os.ErrNotExist) {
+		return storeState{}, nil
+	}
+	return st, err
 }
 
 func (s *Store) writeState(st storeState) error {
-	raw, _ := json.Marshal(st)
-	tmp := s.path("state.json.tmp")
-	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
+	raw, err := json.Marshal(st)
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, s.path("state.json"))
+	return s.writeDurable(stateFile, raw)
 }
 
-func (s *Store) readRevoked() map[string]bool {
+func (s *Store) readRevoked() (map[string]bool, error) {
 	out := map[string]bool{}
-	raw, err := os.ReadFile(s.path("revoked.json"))
-	if err == nil {
+	err := s.readFileOrPrev(revokedFile, func(raw []byte) error {
 		var ids []string
-		if json.Unmarshal(raw, &ids) == nil {
-			for _, id := range ids {
-				out[id] = true
-			}
+		if err := json.Unmarshal(raw, &ids); err != nil {
+			return err
+		}
+		out = map[string]bool{}
+		for _, id := range ids {
+			out[id] = true
+		}
+		return nil
+	})
+	if errors.Is(err, os.ErrNotExist) {
+		return map[string]bool{}, nil
+	}
+	return out, err
+}
+
+// writeDurable replaces name crash-safely: the current file is kept as .prev, the new content goes to a unique temp
+// file that is synced before the rename, and the directory is synced after it.
+func (s *Store) writeDurable(name string, raw []byte) error {
+	if err := os.MkdirAll(s.dir, 0o700); err != nil {
+		return err
+	}
+	dst := s.path(name)
+	// Only a well-formed current file becomes .prev, so a damaged file never replaces the good fallback.
+	if cur, err := os.ReadFile(dst); err == nil && json.Valid(cur) {
+		if err := writeSynced(s.dir, dst+prevSuffix, cur); err != nil {
+			return err
 		}
 	}
-	return out
+	return writeSynced(s.dir, dst, raw)
+}
+
+func writeSynced(dir, dst string, raw []byte) error {
+	f, err := os.CreateTemp(dir, filepath.Base(dst)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	defer os.Remove(tmp)
+	if err := f.Chmod(0o600); err != nil {
+		f.Close()
+		return err
+	}
+	if _, err := f.Write(raw); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, dst); err != nil {
+		return err
+	}
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
+}
+
+func advanceHighWater(st *storeState, now time.Time) bool {
+	if !now.After(st.HighWater) {
+		return false
+	}
+	st.HighWater = now
+	return true
 }
 
 // Verify leaves storage untouched so binding checks can reject a license before installation.
@@ -85,11 +189,20 @@ func (s *Store) Install(raw []byte, now time.Time) (*Document, error) {
 	if err != nil {
 		return nil, err
 	}
-	st := s.readState()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, err := s.readState()
+	if err != nil {
+		return nil, err
+	}
+	revoked, err := s.readRevoked()
+	if err != nil {
+		return nil, err
+	}
 	fpr := fmt.Sprintf("%x", sha256.Sum256([]byte(env.PayloadB64)))
 
 	// Revocation overrides a valid signature and future expiry.
-	if s.readRevoked()[doc.LicenseID] {
+	if revoked[doc.LicenseID] {
 		return nil, fmt.Errorf("%w: license %s was revoked", ErrRollback, doc.LicenseID)
 	}
 	// Only an identical re-import may reuse a version; unversioned licenses cannot replace versioned ones.
@@ -104,18 +217,14 @@ func (s *Store) Install(raw []byte, now time.Time) (*Document, error) {
 				ErrRollback, doc.LicenseVersion)
 		}
 	}
-	if !st.InstalledIssuedAt.IsZero() && doc.IssuedAt.Before(st.InstalledIssuedAt) {
+	// license_version is the rollback guard for versioned licences, so a newer version is never refused because an
+	// earlier licence carried a later issued_at (vendor clock ahead). Unversioned licences keep the issued_at guard.
+	newerVersion := doc.LicenseVersion > 0 && doc.LicenseVersion > st.HighestVersion
+	if !newerVersion && !st.InstalledIssuedAt.IsZero() && doc.IssuedAt.Before(st.InstalledIssuedAt) {
 		return nil, fmt.Errorf("%w: incoming issued_at %s older than installed %s",
 			ErrRollback, doc.IssuedAt.Format(time.RFC3339), st.InstalledIssuedAt.Format(time.RFC3339))
 	}
-	if err := os.MkdirAll(s.dir, 0o700); err != nil {
-		return nil, err
-	}
-	tmp := s.path("current.json.tmp")
-	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
-		return nil, err
-	}
-	if err := os.Rename(tmp, s.path("current.json")); err != nil {
+	if err := s.writeDurable(currentFile, raw); err != nil {
 		return nil, err
 	}
 	st.InstalledIssuedAt = doc.IssuedAt
@@ -124,9 +233,7 @@ func (s *Store) Install(raw []byte, now time.Time) (*Document, error) {
 		st.AcceptedLicenseID = doc.LicenseID
 		st.AcceptedFingerprint = fpr
 	}
-	if now.After(st.HighWater) {
-		st.HighWater = now
-	}
+	advanceHighWater(&st, now)
 	if err := s.writeState(st); err != nil {
 		return nil, err
 	}
@@ -134,41 +241,63 @@ func (s *Store) Install(raw []byte, now time.Time) (*Document, error) {
 }
 
 func (s *Store) MarkCloudValidated(now time.Time) error {
-	st := s.readState()
-	st.LastCloudValidation = now
-	if now.After(st.HighWater) {
-		st.HighWater = now
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, err := s.readState()
+	if err != nil {
+		return err
 	}
+	st.LastCloudValidation = now
+	advanceHighWater(&st, now)
 	return s.writeState(st)
 }
 
 // The caller must authenticate the revocation notice before storing its license ID.
 func (s *Store) AddRevocation(licenseID string) error {
-	rev := s.readRevoked()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rev, err := s.readRevoked()
+	if err != nil {
+		return err
+	}
+	if rev[licenseID] {
+		return nil
+	}
 	rev[licenseID] = true
 	ids := make([]string, 0, len(rev))
 	for id := range rev {
 		ids = append(ids, id)
 	}
-	raw, _ := json.Marshal(ids)
-	if err := os.MkdirAll(s.dir, 0o700); err != nil {
+	raw, err := json.Marshal(ids)
+	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.path("revoked.json"), raw, 0o600)
+	return s.writeDurable(revokedFile, raw)
 }
 
 var ErrNoLicense = errors.New("no license installed")
 
 func (s *Store) Load() (*Document, error) {
-	raw, err := os.ReadFile(s.path("current.json"))
-	if err != nil {
+	var doc *Document
+	err := s.readFileOrPrev(currentFile, func(raw []byte) error {
+		env, err := DecodeEnvelope(raw)
+		if err != nil {
+			return err
+		}
+		d, err := s.verifier.Verify(env)
+		if err != nil {
+			return err
+		}
+		doc = d
+		return nil
+	})
+	if errors.Is(err, os.ErrNotExist) {
 		return nil, ErrNoLicense
 	}
-	env, err := DecodeEnvelope(raw)
 	if err != nil {
 		return nil, err
 	}
-	return s.verifier.Verify(env)
+	return doc, nil
 }
 
 // Evaluation uses the high-water mark if the system clock moves back beyond tolerance.
@@ -177,18 +306,28 @@ func (s *Store) Evaluate(now time.Time) (Evaluation, error) {
 	if err != nil {
 		return Evaluation{State: StateExpired}, err
 	}
-	st := s.readState()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, err := s.readState()
+	if err != nil {
+		return Evaluation{State: StateExpired}, err
+	}
+	revoked, err := s.readRevoked()
+	if err != nil {
+		return Evaluation{State: StateExpired}, err
+	}
 	effective := now
 	rollback := false
 	if st.HighWater.Sub(now) > clockRollbackTolerance {
 		effective = st.HighWater
 		rollback = true
 	}
-	if now.After(st.HighWater) {
-		st.HighWater = now
-		_ = s.writeState(st)
+	if advanceHighWater(&st, now) {
+		if err := s.writeState(st); err != nil {
+			slog.Warn("license: high-water write failed", "err", err)
+		}
 	}
-	ev := Evaluate(doc, effective, st.LastCloudValidation, s.readRevoked()[doc.LicenseID])
+	ev := Evaluate(doc, effective, st.LastCloudValidation, revoked[doc.LicenseID])
 	ev.ClockRollback = rollback
 	return ev, nil
 }

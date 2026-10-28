@@ -46,61 +46,30 @@ func main() {
 	}
 	log.Printf("keybootstrap: throttle key ready at %s", throttlePath)
 
-	// 2) Voucher code-encryption key (DEK). Production locks IAM-v2 VOUCHER on, so scd refuses to start without it and names this tool.
-	// Runtime is load-only; creation belongs to deployment.
-	dekPath := filepath.Join(secretsDir, "voucher_dek.key")
-	if _, err := localkeys.CreateKeyIfAbsent(dekPath); err != nil {
-		log.Fatalf("keybootstrap: voucher DEK: %v", err)
+	// 2) Sealing and HMAC keys. Each is created once here and is load-only at runtime: a runtime-minted key would orphan
+	// what the previous one sealed or indexed.
+	for _, k := range []struct{ file, label, ready string }{
+		// Voucher code-encryption key: production locks IAM-v2 VOUCHER on, so scd refuses to start without it.
+		{"voucher_dek.key", "voucher DEK", "voucher code-encryption key"},
+		// Seals the credential half of iam_v2.sign_in_attempts; without it attempts are recorded with those columns NULL.
+		{"signin_attempts_dek.key", "sign-in attempt DEK", "sign-in attempt sealing key"},
+		// Seals card provider credentials; without it card payment is "not ready".
+		{"payment_dek.key", "payment key", "card payment sealing key"},
+		// Keys the resume-token and recovery-code HMACs of open selection; without it open selection is unavailable.
+		{"anonymous_access.key", "anonymous-access key", "anonymous-access key"},
+		// Seals email, SMS and WhatsApp sender secrets; without it a sealed sender cannot send.
+		{"notify_dek.key", "notification-secret key", "notification-secret sealing key"},
+		// Seals social app client secrets; without it no social provider is built (never a plaintext fallback).
+		{"social_dek.key", "social sign-in key", "social sign-in sealing key"},
+		// Seals operators' TOTP secrets and MACs recovery codes; without it edged refuses Admin Console sign-in.
+		{"operator_totp_dek.key", "admin console authenticator key", "admin console authenticator sealing key"},
+	} {
+		path := filepath.Join(secretsDir, k.file)
+		if _, err := localkeys.CreateKeyIfAbsent(path); err != nil {
+			log.Fatalf("keybootstrap: %s: %v", k.label, err)
+		}
+		log.Printf("keybootstrap: %s ready at %s", k.ready, path)
 	}
-	log.Printf("keybootstrap: voucher code-encryption key ready at %s", dekPath)
-
-	// 2b) Guest sign-in attempt DEK: seals the credential half of iam_v2.sign_in_attempts. Its absence must not cost a guest their internet:
-	// scd records attempts with those columns NULL, logs loudly and keeps authenticating. Creation stays here because a runtime-minted key would orphan sealed rows.
-	attemptsDEKPath := filepath.Join(secretsDir, "signin_attempts_dek.key")
-	if _, err := localkeys.CreateKeyIfAbsent(attemptsDEKPath); err != nil {
-		log.Fatalf("keybootstrap: sign-in attempt DEK: %v", err)
-	}
-	log.Printf("keybootstrap: sign-in attempt sealing key ready at %s", attemptsDEKPath)
-
-	// 2c) Card payment key: seals provider credentials in iam_v2.payment_provider_secret_generations. Absence only makes card payment "not ready";
-	// load-only at runtime (a runtime-minted key would orphan sealed rows).
-	paymentKeyPath := filepath.Join(secretsDir, "payment_dek.key")
-	if _, err := localkeys.CreateKeyIfAbsent(paymentKeyPath); err != nil {
-		log.Fatalf("keybootstrap: payment key: %v", err)
-	}
-	log.Printf("keybootstrap: card payment sealing key ready at %s", paymentKeyPath)
-
-	// 2d) Anonymous-access key: keys the HMACs of the resume tokens and recovery codes of clients who choose a
-	// package without signing in. Without it open selection is unavailable; nothing else is affected.
-	anonPath := filepath.Join(secretsDir, "anonymous_access.key")
-	if _, err := localkeys.CreateKeyIfAbsent(anonPath); err != nil {
-		log.Fatalf("keybootstrap: anonymous-access key: %v", err)
-	}
-	log.Printf("keybootstrap: anonymous-access key ready at %s", anonPath)
-
-	// 2e) Notification-secret key: seals SMTP passwords, API keys and access tokens of email, SMS and WhatsApp senders.
-	// Without it a sealed sender cannot send; load-only at runtime.
-	notifyPath := filepath.Join(secretsDir, "notify_dek.key")
-	if _, err := localkeys.CreateKeyIfAbsent(notifyPath); err != nil {
-		log.Fatalf("keybootstrap: notification-secret key: %v", err)
-	}
-	log.Printf("keybootstrap: notification-secret sealing key ready at %s", notifyPath)
-
-	// 2f) Social sign-in key: seals client secrets (and Apple .p8 keys) of the hotel's social apps. Without it scd builds no social provider
-	// and never falls back to a plaintext column; load-only at runtime.
-	socialPath := filepath.Join(secretsDir, "social_dek.key")
-	if _, err := localkeys.CreateKeyIfAbsent(socialPath); err != nil {
-		log.Fatalf("keybootstrap: social sign-in key: %v", err)
-	}
-	log.Printf("keybootstrap: social sign-in sealing key ready at %s", socialPath)
-
-	// 2g) Admin Console authenticator key: seals each operator's TOTP secret and MACs recovery codes (public.operator_mfa*).
-	// Without it scd checks no code and edged refuses Admin Console sign-in; replacing it forces every operator to re-enrol.
-	mfaPath := filepath.Join(secretsDir, "operator_totp_dek.key")
-	if _, err := localkeys.CreateKeyIfAbsent(mfaPath); err != nil {
-		log.Fatalf("keybootstrap: admin console authenticator key: %v", err)
-	}
-	log.Printf("keybootstrap: admin console authenticator sealing key ready at %s", mfaPath)
 
 	// 3) OTP generation-1 key + DB lifecycle metadata, validated together.
 	pool, err := pgxpool.New(ctx, dsn)
