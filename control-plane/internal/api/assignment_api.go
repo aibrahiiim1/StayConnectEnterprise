@@ -105,8 +105,12 @@ func (b *AssignmentBase) IssueTx(ctx context.Context, tx pgx.Tx, applianceID, st
 		return nil, errors.New("refusing to sign an assignment with no customer or site")
 	}
 
+	// Only "no assignment yet" is version 0; any other error stops issuance rather than restart at 1 (audit Phase 1 L3).
 	var prevVersion int64
-	_ = tx.QueryRow(ctx, `SELECT version FROM appliance_signed_assignments WHERE appliance_id=$1 FOR UPDATE`, applianceID).Scan(&prevVersion)
+	if err := tx.QueryRow(ctx, `SELECT version FROM appliance_signed_assignments WHERE appliance_id=$1 FOR UPDATE`, applianceID).
+		Scan(&prevVersion); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("previous assignment version: %w", err)
+	}
 	now := time.Now().UTC().Truncate(time.Second)
 
 	// expires_at is a refresh horizon, not a kill switch: past it the appliance marks the assignment stale but keeps

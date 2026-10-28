@@ -146,32 +146,39 @@ func serve() {
 	// trust registry. Absent: activation, moves and retirement refuse.
 	assignKeyPath := envOrDefault("CTRLAPI_ASSIGN_KEY", "/etc/stayconnect/assignment-signing.key")
 	var assignKey ed25519.PrivateKey
-	if raw, err := os.ReadFile(assignKeyPath); err == nil && len(raw) == ed25519.PrivateKeySize {
-		assignKey = ed25519.PrivateKey(raw)
-		assignPub := assignKey.Public().(ed25519.PublicKey)
-		if vraw, verr := os.ReadFile(vendorKeyPath); verr == nil && len(vraw) == ed25519.PrivateKeySize &&
-			string(vraw) == string(raw) {
-			slog.Error("assignment signing key MUST NOT be the vendor license key — refusing to sign assignments",
-				"path", assignKeyPath)
-			assignKey = nil
-		} else {
-			slog.Info("dedicated assignment signing key loaded",
-				"key_id", assignment.KeyID(assignPub), "path", assignKeyPath)
-			if err := api.RegisterActiveKey(rootCtx, &api.Base{DB: pool}, assignPub, "ctrlapi boot"); err != nil {
-				slog.Warn("assignment signing key registration failed", "err", err)
-			}
-		}
+	if k, err := loadEd25519File(assignKeyPath); err == nil {
+		assignKey = k
 	} else {
 		slog.Warn("dedicated assignment signing key unavailable — activation disabled",
-			"path", assignKeyPath, "hint", "run: ctrlapi gen-assignment-key --out "+assignKeyPath)
+			"path", assignKeyPath, "err", err, "hint", "run: ctrlapi gen-assignment-key --out "+assignKeyPath)
 	}
 
 	// Registry ROOT-OF-TRUST key: signs the versioned trust registry the appliance verifies.
 	regRoot := loadRegistryRoot()
+
+	// No two signing roles may share a key (audit Phase 1 M17): with a shared key the assignment signer and
+	// the registry root are both refused, so nothing is signed under a key that has two meanings.
+	var vendorRaw ed25519.PrivateKey
+	if raw, err := os.ReadFile(vendorKeyPath); err == nil && len(raw) == ed25519.PrivateKeySize {
+		vendorRaw = ed25519.PrivateKey(raw)
+	}
+	if err := distinctKeys(map[string]ed25519.PrivateKey{"vendor licence": vendorRaw, "assignment signing": assignKey,
+		"registry root": regRoot}); err != nil {
+		slog.Error("refusing to sign assignments or the trust registry", "err", err)
+		assignKey, regRoot = nil, nil
+	}
+	if assignKey != nil {
+		assignPub := assignKey.Public().(ed25519.PublicKey)
+		slog.Info("dedicated assignment signing key loaded", "key_id", assignment.KeyID(assignPub), "path", assignKeyPath)
+		if err := api.RegisterActiveKey(rootCtx, &api.Base{DB: pool}, assignPub, "ctrlapi boot"); err != nil {
+			slog.Warn("assignment signing key registration failed", "err", err)
+		}
+	}
 	if regRoot != nil {
 		regBase := &api.RegistryBase{Base: &api.Base{DB: pool}, RootKey: regRoot}
+		// Every start re-signs, so a key-state change whose re-signing failed is published now (audit Phase 1 M3).
 		if sr, err := regBase.Rebuild(rootCtx, "ctrlapi boot"); err != nil {
-			slog.Warn("signed registry rebuild failed", "err", err)
+			slog.Error("signed registry rebuild failed: appliances keep the previous registry", "err", err)
 		} else if sr != nil {
 			slog.Info("signed trust registry published", "registry_version", sr.RegistryVersion, "keys", len(sr.Keys))
 		}
@@ -320,13 +327,12 @@ func serve() {
 
 func loadRegistryRoot() ed25519.PrivateKey {
 	regRootPath := envOrDefault("CTRLAPI_REGISTRY_ROOT_KEY", "/etc/stayconnect/assignment-registry-root.key")
-	raw, err := os.ReadFile(regRootPath)
-	if err != nil || len(raw) != ed25519.PrivateKeySize {
+	k, err := loadEd25519File(regRootPath)
+	if err != nil {
 		slog.Warn("assignment registry root key unavailable — signed registry disabled",
-			"path", regRootPath, "hint", "run: ctrlapi gen-registry-key --out "+regRootPath)
+			"path", regRootPath, "err", err, "hint", "run: ctrlapi gen-registry-key --out "+regRootPath)
 		return nil
 	}
-	k := ed25519.PrivateKey(raw)
 	slog.Info("assignment registry root key loaded",
 		"key_id", assignment.KeyID(k.Public().(ed25519.PublicKey)), "path", regRootPath)
 	return k
