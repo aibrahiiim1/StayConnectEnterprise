@@ -600,6 +600,18 @@ func (b *Base) rebindWANMAC(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := DBCtx(r)
 	defer cancel()
+	// Read before the transaction, so it never waits for a second pool connection while holding the row lock;
+	// ReissueTx re-reads the licence under the per-appliance lock.
+	operatorID, _ := actorOf(r)
+	lid, err := b.Lic.CurrentLicenseID(ctx, id)
+	if errors.Is(err, licensing.ErrNoLicense) {
+		Fail(w, r, http.StatusConflict, "no_license", "The appliance has no current licence to rebind; set a licence instead.")
+		return
+	}
+	if err != nil {
+		Fail(w, r, http.StatusServiceUnavailable, "licensing_unavailable", "Central could not read the appliance's licence, so nothing changed. Try again later.")
+		return
+	}
 	// The MAC change and the licence re-issue commit together, under the appliance row lock, with the state
 	// re-checked under it (audit Phase 1 M7).
 	tx, err := b.DB.Begin(ctx)
@@ -625,16 +637,6 @@ func (b *Base) rebindWANMAC(w http.ResponseWriter, r *http.Request) {
 	}
 	if newMAC == "" {
 		Fail(w, r, http.StatusConflict, CodeConflict, "Central has no WAN MAC for this appliance; pass new_mac")
-		return
-	}
-	operatorID, _ := actorOf(r)
-	lid, err := b.Lic.CurrentLicenseID(ctx, id)
-	if errors.Is(err, licensing.ErrNoLicense) {
-		Fail(w, r, http.StatusConflict, "no_license", "The appliance has no current licence to rebind; set a licence instead.")
-		return
-	}
-	if err != nil {
-		Fail(w, r, http.StatusServiceUnavailable, "licensing_unavailable", "Central could not read the appliance's licence, so nothing changed. Try again later.")
 		return
 	}
 	if _, err := tx.Exec(ctx, `UPDATE appliances SET wan_mac=$2, updated_at=now() WHERE id=$1`, id, newMAC); err != nil {

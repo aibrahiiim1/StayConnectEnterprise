@@ -112,17 +112,24 @@ func TestOfflineImportConflictAndSinglePackage(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			codes[i] = f.operatorCall(off.activationPackage, http.MethodPost, appID, map[string]any{}).Code
+			rec := f.operatorCall(off.activationPackage, http.MethodPost, appID, map[string]any{})
+			codes[i] = rec.Code
+			if rec.Code >= 500 {
+				t.Logf("package call: %d %s", rec.Code, rec.Body.String())
+			}
 		}(i)
 	}
 	wg.Wait()
-	created := 0
+	created, failed := 0, 0
 	for _, c := range codes {
 		if c == http.StatusCreated {
 			created++
 		}
+		if c >= 500 {
+			failed++
+		}
 	}
-	if created != 1 || f.count(`SELECT count(*) FROM offline_activation_packages WHERE appliance_id=$1`, appID) != 1 {
+	if created != 1 || failed != 0 || f.count(`SELECT count(*) FROM offline_activation_packages WHERE appliance_id=$1`, appID) != 1 {
 		t.Fatalf("one request must yield exactly one package: codes %v", codes)
 	}
 }

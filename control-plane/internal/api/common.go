@@ -47,15 +47,6 @@ type Base struct {
 	MFA *auth.MFA
 }
 
-func (b *Base) issueAssignment(ctx context.Context, applianceID, state string) error {
-	if b.AssignKey == nil {
-		return errors.New("assignment signing key not configured")
-	}
-	ab := &AssignmentBase{Base: b, SignKey: b.AssignKey}
-	_, err := ab.Issue(ctx, applianceID, state)
-	return err
-}
-
 type ListMeta struct {
 	HasMore bool   `json:"has_more"`
 	Cursor  string `json:"cursor,omitempty"`
@@ -81,10 +72,6 @@ func WriteList[T any](w http.ResponseWriter, rows []T, meta ListMeta) {
 }
 
 // WriteErr is for call sites without a request; prefer Fail, which includes trace_id.
-func WriteErr(w http.ResponseWriter, status int, msg string) {
-	WriteJSON(w, status, map[string]string{"error": msg})
-}
-
 // Cursor = base64url(JSON {t: RFC3339Nano, i: id})
 // Keyset is ordered by (created_at DESC, id DESC). Stable on ties.
 

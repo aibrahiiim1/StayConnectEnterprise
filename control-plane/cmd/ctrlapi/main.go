@@ -206,7 +206,7 @@ func serve() {
 	// overrides point the chain at Pebble + challtestsrv; every start says when one is on.
 	ptlsOpts, ptlsOverrides := portaltls.OptionsFromEnv()
 	var ptls *portaltls.Service
-	if err := ptlsOpts.Check(); err != nil {
+	if err := ptlsOpts.CheckEnv(cfg.Production()); err != nil {
 		slog.Error("portal TLS disabled: invalid configuration", "err", err)
 	} else {
 		ptls = portaltls.New(pool, ptlsOpts)

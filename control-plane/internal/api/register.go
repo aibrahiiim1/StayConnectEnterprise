@@ -92,7 +92,10 @@ func (b *IdentityBase) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	// A captured registration is refused when replayed.
 	if b.ReplayCache != nil {
-		if err := b.ReplayCache.Use(claims.Jti, time.Now()); err != nil {
+		if err := b.ReplayCache.Use(claims.Jti, time.Now()); errors.Is(err, applianceauth.ErrReplayCacheFull) {
+			Fail(w, r, http.StatusServiceUnavailable, "busy", "Central is busy; try again shortly")
+			return
+		} else if err != nil {
 			Fail(w, r, http.StatusUnauthorized, CodeUnauthenticated, "replay detected")
 			return
 		}

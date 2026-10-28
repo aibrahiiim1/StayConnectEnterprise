@@ -197,14 +197,6 @@ func (b *OfflineBase) activationPackage(w http.ResponseWriter, r *http.Request) 
 	ctx, cancel := DBCtx(r)
 	defer cancel()
 
-	// The request is read FOR UPDATE and consumed in the same transaction as the package is recorded, so two
-	// concurrent calls cannot mint two packages from one request (audit Phase 1 M16).
-	tx, err := b.DB.Begin(ctx)
-	if err != nil {
-		Fail(w, r, http.StatusInternalServerError, CodeInternal, "begin failed")
-		return
-	}
-	defer tx.Rollback(ctx)
 	var reqID, reqNonce, pubKey, serial string
 	q := `SELECT request_id, nonce, public_key, serial FROM offline_activation_requests
            WHERE appliance_id=$1 AND consumed_at IS NULL`
@@ -213,8 +205,8 @@ func (b *OfflineBase) activationPackage(w http.ResponseWriter, r *http.Request) 
 		q += ` AND request_id=$2`
 		args = append(args, body.RequestID)
 	}
-	q += ` ORDER BY imported_at DESC LIMIT 1 FOR UPDATE`
-	if err := tx.QueryRow(ctx, q, args...).Scan(&reqID, &reqNonce, &pubKey, &serial); err != nil {
+	q += ` ORDER BY imported_at DESC LIMIT 1`
+	if err := b.DB.QueryRow(ctx, q, args...).Scan(&reqID, &reqNonce, &pubKey, &serial); err != nil {
 		Fail(w, r, http.StatusNotFound, CodeNotFound,
 			"no outstanding activation request for this appliance — import the request file first")
 		return
@@ -270,16 +262,29 @@ func (b *OfflineBase) activationPackage(w http.ResponseWriter, r *http.Request) 
 	activation.SignPackage(b.priv, pkg)
 
 	operatorID, _ := actorOf(r)
+	// The request is consumed by a conditional update in the transaction that records the package: of two
+	// concurrent calls only one finds it unconsumed, so one request yields one package (audit Phase 1 M16).
+	tx, err := b.DB.Begin(ctx)
+	if err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "begin failed")
+		return
+	}
+	defer tx.Rollback(ctx)
+	tag, err := tx.Exec(ctx, `UPDATE offline_activation_requests SET consumed_at=now() WHERE request_id=$1 AND consumed_at IS NULL`, reqID)
+	if err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "package store failed")
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		Fail(w, r, http.StatusConflict, CodeConflict, "this activation request has already been used for a package; import a new request")
+		return
+	}
 	if _, err := tx.Exec(ctx, `
         INSERT INTO offline_activation_packages (package_id, appliance_id, serial, tenant_id, site_id,
                                                  nonce, signer_key_id, issued_by, expires_at)
         VALUES ($1,$2,$3,NULLIF($4,'')::uuid,NULLIF($5,'')::uuid,$6,$7,NULLIF($8,'')::uuid,to_timestamp($9))`,
 		pkg.PackageID, appID, serial, pkg.TenantID, pkg.SiteID, pkg.Nonce, pkg.SignerKeyID, operatorID,
 		pkg.ExpiresAt); err != nil {
-		Fail(w, r, http.StatusInternalServerError, CodeInternal, "package store failed")
-		return
-	}
-	if _, err := tx.Exec(ctx, `UPDATE offline_activation_requests SET consumed_at=now() WHERE request_id=$1`, reqID); err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "package store failed")
 		return
 	}

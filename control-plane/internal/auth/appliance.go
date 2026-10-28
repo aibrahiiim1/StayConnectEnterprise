@@ -121,6 +121,10 @@ func RequireAppliance(db *pgxpool.Pool, cache *applianceauth.ReplayCache) func(h
 				return
 			}
 			if err := cache.Use(claims.Jti, now); err != nil {
+				if errors.Is(err, applianceauth.ErrReplayCacheFull) {
+					jsonErr(w, http.StatusServiceUnavailable, "busy", "Central is busy; try again shortly", r)
+					return
+				}
 				applianceAuthFail(r.Context(), db, r, iss, "replay detected")
 				jsonErr(w, http.StatusUnauthorized, "unauthenticated", "replay detected", r)
 				return

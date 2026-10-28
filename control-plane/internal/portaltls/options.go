@@ -88,6 +88,17 @@ func (o Options) Check() error {
 	return nil
 }
 
+// CheckEnv is Check plus the rule that a production Central never uses the test DNS server (audit Phase 1 CC2).
+func (o Options) CheckEnv(production bool) error {
+	if err := o.Check(); err != nil {
+		return err
+	}
+	if production && o.DNSProvider == ProviderChalltestsrv {
+		return errors.New("CTRLAPI_PORTAL_DNS_PROVIDER=challtestsrv is a test DNS server and is refused when CTRLAPI_ENV=production")
+	}
+	return nil
+}
+
 func (o Options) dohURLs() []string {
 	if len(o.DoHURLs) > 0 {
 		return o.DoHURLs
