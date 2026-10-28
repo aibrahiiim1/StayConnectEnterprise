@@ -213,9 +213,14 @@ RETURNING id::text, amount_minor, currency, currency_exponent`,
 	switch {
 	case cerr == nil:
 		e.Health.Record(acct.ID, true)
-		if _, err := e.Runtime.Exec(ctx, `UPDATE iam_v2.payment_checkouts
+		saveRedirect := func() error {
+			_, err := e.Runtime.Exec(ctx, `UPDATE iam_v2.payment_checkouts
 			   SET provider_session_ref=$2, redirect_url=$3, creation_outcome='CREATED'
-			 WHERE transaction_id=$1`, out.TransactionID, co.ProviderSessionRef, co.RedirectURL); err != nil {
+			 WHERE transaction_id=$1`, out.TransactionID, co.ProviderSessionRef, co.RedirectURL)
+			return err
+		}
+		// Audit P6 L5: one retry, so a transient failure does not leave the guest on "pending" with no link.
+		if err := saveRedirect(); err != nil && saveRedirect() != nil {
 			// The checkout exists at the provider; the reconciler still finds it by client reference.
 			return out, ErrCheckoutAmbiguous
 		}
