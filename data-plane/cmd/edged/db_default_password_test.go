@@ -10,7 +10,10 @@ func TestTheDefaultDatabasePasswordIsWarnedAbout(t *testing.T) {
 	calls := 0
 	found, ok := true, true
 	c := &defaultDBPasswordCheck{probe: func(context.Context) (bool, bool) { calls++; return found, ok }}
-	if !c.inUse(context.Background()) || !c.inUse(context.Background()) || calls != 1 {
+	// Two checks in a row: the second must come from the cache, so only one probe runs.
+	first := c.inUse(context.Background())
+	second := c.inUse(context.Background())
+	if !first || !second || calls != 1 {
 		t.Fatalf("default accepted: inUse must be true and probed once, got %d probes", calls)
 	}
 	found = false

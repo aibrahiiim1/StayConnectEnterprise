@@ -14,17 +14,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
-
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
 
 type contextT = context.Context
-
-const iamv2MethodAccount = iamv2.MethodAccount
-
-func (s *server) iamv2AccountAuthority() bool {
-	return s.iamv2Cfg.Enabled(iamv2MethodAccount)
-}
 
 // iamv2Account is not edgeGuestAccount: absent fields are omitted, never filled with a zero time or a legacy
 // value. created_at is NULL (omitted) for accounts created before it was recorded.

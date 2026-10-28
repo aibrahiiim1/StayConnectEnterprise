@@ -427,14 +427,6 @@ func applyFIASProviderConfig(in *authorRevisionReq) *pmsprovider.ValidationError
 	return nil
 }
 
-// Not nullIfEmpty: that name belongs to a helper in the integration-tagged test files, which a plain `go build ./...` never compiles.
-func nullIfBlankText(s string) any {
-	if strings.TrimSpace(s) == "" {
-		return nil
-	}
-	return strings.TrimSpace(s)
-}
-
 // Enforces the same contract as pmsd.Revision.Validate() at connect time, so a mistake surfaces here and not as a connection problem after publishing.
 func validateRevisionConfig(in *authorRevisionReq) (map[string]any, error) {
 	host, port, err := net.SplitHostPort(strings.TrimSpace(in.Endpoint))

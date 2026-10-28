@@ -32,8 +32,10 @@ func TestHotelAdminCertRenewalRunsOnceAtATime(t *testing.T) {
 	if !s.renewHotelAdminCertOnce() {
 		t.Fatal("the first renewal must start")
 	}
-	if s.renewHotelAdminCertOnce() || s.renewHotelAdminCertOnce() {
-		t.Fatal("a second renewal must not start while one runs")
+	for i := 0; i < 2; i++ {
+		if s.renewHotelAdminCertOnce() {
+			t.Fatal("a second renewal must not start while one runs")
+		}
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for calls.Load() == 0 && time.Now().Before(deadline) {

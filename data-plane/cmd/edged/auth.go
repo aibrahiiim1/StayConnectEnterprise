@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
-	"errors"
 	"net/http"
 	"strings"
 	"sync"
@@ -81,18 +80,6 @@ func (s *sessionStore) create(sess *session) string {
 	s.m[tok] = sess
 	s.mu.Unlock()
 	return tok
-}
-
-func (s *sessionStore) get(tok string) *session {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	sess, ok := s.m[tok]
-	if !ok || time.Now().After(sess.Expires) {
-		delete(s.m, tok)
-		return nil
-	}
-	sess.Expires = time.Now().Add(s.ttl) // sliding
-	return sess
 }
 
 // active returns the session if within the idle and maxAge limits (ending it otherwise); touch says whether
@@ -475,5 +462,3 @@ func (s *server) keepalive(w http.ResponseWriter, r *http.Request) {
 		"expires_at": sessionEnds(sess, sessionPolicyFrom(r.Context())).UTC(),
 	})
 }
-
-var errNotFound = errors.New("not found")

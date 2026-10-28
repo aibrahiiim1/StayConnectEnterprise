@@ -495,8 +495,6 @@ func scdDetail(body []byte, err error) string {
 	return lastLine(string(body))
 }
 
-func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
-
 // lastLine returns the final non-empty line of command output.
 func lastLine(s string) string {
 	sc := bufio.NewScanner(strings.NewReader(s))

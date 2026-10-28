@@ -37,16 +37,6 @@ var whatsappExtraKeys = map[string]bool{"template_name": true, "language": true,
 // the sealed secret, never a column.
 var smtpExtraKeys = map[string]bool{"host": true, "port": true, "security": true, "username": true, "timeout_seconds": true}
 
-func extraKeysFor(channel, kind string) map[string]bool {
-	switch {
-	case channel == "whatsapp":
-		return whatsappExtraKeys
-	case channel == "email" && kind == "smtp":
-		return smtpExtraKeys
-	}
-	return map[string]bool{}
-}
-
 var (
 	reMetaPhoneID   = regexp.MustCompile(`^[0-9]{5,32}$`)
 	reMetaTemplate  = regexp.MustCompile(`^[a-z0-9_]{1,512}$`)

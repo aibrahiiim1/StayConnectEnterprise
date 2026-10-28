@@ -397,10 +397,3 @@ func boundedDBMessage(msg string) string {
 	return msg
 }
 
-func bodyReason(r *http.Request) string {
-	var in struct {
-		Reason string `json:"reason"`
-	}
-	_ = json.NewDecoder(r.Body).Decode(&in)
-	return strings.TrimSpace(in.Reason)
-}
