@@ -1,9 +1,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
+	"net"
 	"net/http"
+	"strings"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
@@ -19,6 +25,15 @@ type commerceQuoteReq struct {
 	PackageID      string `json:"package_id"`       // opaque guest selection
 	// Method is the chosen acquisition method; optional when exactly one applies, and re-validated by the engine.
 	Method string `json:"method,omitempty"`
+	connectionPair
+}
+
+// connectionPair is the IP and MAC portald read from the guest's connection (never from the browser). When present,
+// scd refuses a quote or confirm whose connection is not the commerce session's device, so a copied commerce cookie
+// cannot act for another guest's sign-in. Absent (an older portald) the call proceeds as before.
+type connectionPair struct {
+	IP  string `json:"ip,omitempty"`
+	MAC string `json:"mac,omitempty"`
 }
 
 type commerceConfirmReq struct {
@@ -27,6 +42,52 @@ type commerceConfirmReq struct {
 	GuestNetworkID string `json:"guest_network_id"`
 	// ReturnBase is the portal origin the provider sends the client back to; the return page proves nothing.
 	ReturnBase string `json:"return_base,omitempty"`
+	connectionPair
+}
+
+var errConnectionMismatch = errors.New("the connection is not the commerce session's device")
+
+// checkConnection verifies, when portald sent the connection's pair, that the MAC is the device's and the IP is on the
+// session's guest network. Tenant and site come from this appliance.
+func (s *server) checkConnection(ctx context.Context, c connectionPair, deviceID, guestNetworkID string) error {
+	if c.IP == "" && c.MAC == "" {
+		return nil
+	}
+	mac, err := net.ParseMAC(c.MAC)
+	ip := net.ParseIP(c.IP)
+	if err != nil || ip == nil || s.db == nil {
+		return errConnectionMismatch
+	}
+	var deviceMAC string
+	if err := s.db.QueryRow(ctx, `SELECT mac::text FROM iam_v2.devices WHERE id = $1::uuid AND tenant_id = $2 AND site_id = $3`,
+		deviceID, s.tenID, s.siteID).Scan(&deviceMAC); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errConnectionMismatch
+		}
+		return err
+	}
+	if !strings.EqualFold(deviceMAC, mac.String()) {
+		return errConnectionMismatch
+	}
+	if nc := s.resolveNetwork(ctx, ip); nc.NetworkID != guestNetworkID {
+		return errConnectionMismatch
+	}
+	return nil
+}
+
+// refuseConnection answers a failed connection check; the guest sees the same generic refusal as any other.
+func (s *server) refuseConnection(w http.ResponseWriter, err error, step string) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, errConnectionMismatch) {
+		slog.Info("commerce: connection does not match the session's device", "step", step)
+		httpErr(w, http.StatusConflict, "unavailable")
+		return true
+	}
+	slog.Error("commerce: connection check failed", "step", step, "err", err)
+	httpErr(w, http.StatusInternalServerError, "unavailable")
+	return true
 }
 
 // commercePackages lists free packages the subject is eligible for; it creates no quote or purchase and never discloses an ineligible package.
@@ -75,6 +136,9 @@ func (s *server) commerceQuote(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, "unavailable")
 		return
 	}
+	if s.refuseConnection(w, s.checkConnection(r.Context(), req.connectionPair, req.DeviceID, req.GuestNetworkID), "quote") {
+		return
+	}
 	res, err := s.commerce.CreateQuote(r.Context(), iamv2.QuoteRequest{
 		TenantID:       s.tenID, // appliance-fixed; never from the request
 		SiteID:         s.siteID,
@@ -114,6 +178,9 @@ func (s *server) commerceConfirm(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.QuoteID == "" || req.DeviceID == "" || req.GuestNetworkID == "" {
 		httpErr(w, http.StatusBadRequest, "unavailable")
+		return
+	}
+	if s.refuseConnection(w, s.checkConnection(r.Context(), req.connectionPair, req.DeviceID, req.GuestNetworkID), "confirm") {
 		return
 	}
 	res, err := s.commerce.ConfirmFreePurchase(r.Context(), iamv2.ConfirmRequest{

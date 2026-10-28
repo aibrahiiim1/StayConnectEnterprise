@@ -68,7 +68,8 @@ func TestTheSMSCodeCarriesTheHTTPSLinkOnlyWhileHTTPSIsActive(t *testing.T) {
 	s, cs := smsFixture(t)
 	issue := func() string {
 		cs.msgs = nil
-		body, _ := json.Marshal(otpIssueReq{Channel: "sms", Destination: "+201001234567", IP: "10.0.0.5", MAC: "aa:bb:cc:dd:ee:05", PortalBase: "http://192.168.77.1:8380"})
+		// An older portald's portal_base (a guest-supplied Host) still decodes and is never used for the link.
+		body, _ := json.Marshal(map[string]string{"channel": "sms", "destination": "+201001234567", "ip": "10.0.0.5", "mac": "aa:bb:cc:dd:ee:05", "portal_base": "http://192.168.77.1:8380"})
 		rec := httptest.NewRecorder()
 		s.otpIssue(rec, httptest.NewRequest(http.MethodPost, "/v1/auth/otp/issue", bytes.NewReader(body)))
 		if rec.Code != http.StatusOK || len(cs.msgs) != 1 {
