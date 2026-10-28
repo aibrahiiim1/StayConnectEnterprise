@@ -273,6 +273,20 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 			bridges[b] = true
 		}
 	}
+	// Two bridges whose upload devices share one IFB name (it is truncated to 15 characters) would meter and shape
+	// each other's guests; neither is shaped, so both fail closed (audit Phase 6 L12).
+	ifbOwner := map[string]string{}
+	ifbShared := map[string]bool{}
+	for _, b := range sortedKeys(bridges) {
+		ifb := shape.IFBName(b)
+		if other, taken := ifbOwner[ifb]; taken {
+			ifbShared[b], ifbShared[other] = true, true
+			res.Failed++
+			res.Problems = append(res.Problems, "bridges "+other+" and "+b+" share the upload device name "+ifb+"; neither is shaped")
+			continue
+		}
+		ifbOwner[ifb] = b
+	}
 	var tear []shapeplan.Session
 	// clashed remembers a class two sessions claimed: removing the first claimant from desired is not enough, or a
 	// third session with the same class would find no clash and be installed (audit Phase 8 L6).
@@ -292,6 +306,11 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 		}
 		if !s.Entitled {
 			tear = append(tear, s)
+			continue
+		}
+		if ifbShared[s.Bridge] {
+			res.Failed++
+			res.Problems = append(res.Problems, "session "+s.SessionID+": bridge "+s.Bridge+" shares its upload device; not shaped")
 			continue
 		}
 		ip := net.ParseIP(s.IP)
@@ -418,6 +437,9 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 	}
 
 	// 2b. REMOVE STRAY CLASSES — everything installed on a managed bridge that the plan does not claim.
+	// The bridge read is reused by step 3's per-pass cache (perf audit D4-L1): the sweep deletes only minors the plan
+	// does not want, and step 3 asks only about minors it does want, so the read stays exact for every question asked.
+	strayReads := map[string]map[int]shape.ClassBytes{}
 	for _, bridge := range sortedKeys(bridges) {
 		installed, err := p.shp.ReadClasses(ctx, bridge)
 		if err != nil {
@@ -426,6 +448,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 			res.Problems = append(res.Problems, "stray scan failed on "+bridge+": "+err.Error())
 			continue
 		}
+		strayReads[bridge] = installed
 		for _, minor := range sortedInts(installed) {
 			if minor < shape.GuestMinorBase || minor > shape.GuestMinorMax {
 				continue
@@ -461,7 +484,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 	}
 
 	// 3. Shape what must be forwarded, staged and fail-closed (see provisionSession); tc class inventories are read once per device per pass.
-	p.passClasses = map[string]map[int]shape.ClassBytes{}
+	p.passClasses = strayReads
 	p.passGroups = map[string]bool{}
 	for _, bridge := range sortedKeys(bridges) {
 		byMinor := desired[bridge]

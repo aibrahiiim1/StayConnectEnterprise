@@ -271,8 +271,8 @@ func (c *Client) AbortSession(ctx context.Context, bridge string, ip net.IP) err
 	// Filters first, so forwarding stops even if a class delete later fails.
 	_ = c.removeFilter(ctx, bridge, ip)
 	_ = c.removeFilter(ctx, IFBName(bridge), ip)
-	_ = c.removeClassAndFilter(ctx, bridge, cidClass(ip), ip)
-	_ = c.removeClassAndFilter(ctx, IFBName(bridge), cidClass(ip), ip)
+	_ = c.removeClassAndFilter(ctx, bridge, ClassidForIP(ip), ip)
+	_ = c.removeClassAndFilter(ctx, IFBName(bridge), ClassidForIP(ip), ip)
 	minor, ok := MinorForIP(ip)
 	if !ok {
 		return nil
@@ -339,8 +339,6 @@ func (c *Client) ReRateSessionIn(ctx context.Context, bridge string, ip net.IP, 
 	}
 	return nil
 }
-
-func cidClass(ip net.IP) string { return ClassidForIP(ip) }
 
 // SessionForwarding reports whether the forwarding filter is installed in both directions (post-activation check).
 func (c *Client) SessionForwarding(ctx context.Context, bridge string, ip net.IP) (bool, error) {

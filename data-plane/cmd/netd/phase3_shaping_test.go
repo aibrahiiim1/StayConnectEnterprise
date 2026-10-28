@@ -826,6 +826,52 @@ func TestAThirdSessionOnAContestedClassIsRefused(t *testing.T) {
 	}
 }
 
+// Audit Phase 6 L12: two bridges whose IFB names collide after truncation are not shaped (both fail closed); other
+// bridges are unaffected.
+func TestBridgesSharingAnUploadDeviceAreNotShaped(t *testing.T) {
+	tc := newFakeTC()
+	p := liveWriter(tc)
+	bridges := []string{"br-guestnetwrk1", "br-guestnetwrk2", "br-guest"}
+	res, err := p.submit(context.Background(), envelopeOn(bridges, 1,
+		shapeplan.Session{SessionID: "a", IP: "10.0.0.1", Bridge: "br-guestnetwrk1", DownKbps: 1000, UpKbps: 500, Entitled: true},
+		shapeplan.Session{SessionID: "b", IP: "10.1.0.1", Bridge: "br-guestnetwrk2", DownKbps: 1000, UpKbps: 500, Entitled: true},
+		shapeplan.Session{SessionID: "c", IP: "10.2.0.1", Bridge: "br-guest", DownKbps: 1000, UpKbps: 500, Entitled: true},
+	), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Shaped != 1 || !res.Degraded || tc.countInstalled() != 1 {
+		t.Fatalf("colliding bridges were shaped, or the healthy one was not: %+v", res)
+	}
+}
+
+type readCountingTC struct {
+	*fakeTC
+	reads map[string]int
+}
+
+func (c *readCountingTC) ReadClasses(ctx context.Context, device string) (map[int]shape.ClassBytes, error) {
+	c.reads[device]++
+	return c.fakeTC.ReadClasses(ctx, device)
+}
+
+// Perf audit D4-L1 (netd half): a renewal pass reads each bridge's classes once, sharing the stray scan's read with
+// the renewal checks.
+func TestARenewalPassReadsEachBridgeOnce(t *testing.T) {
+	tc := &readCountingTC{fakeTC: newFakeTC(), reads: map[string]int{}}
+	p := liveWriter(tc)
+	if _, err := p.submit(context.Background(), standardPlan(1), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	tc.reads = map[string]int{}
+	if res, err := p.submit(context.Background(), standardPlan(2), time.Now()); err != nil || res.Failed != 0 {
+		t.Fatalf("renewal: %+v %v", res, err)
+	}
+	if n := tc.reads["br-guest"]; n != 1 {
+		t.Fatalf("br-guest classes read %d times in one renewal pass, want 1", n)
+	}
+}
+
 // Audit Phase 8 L7: the stray sweep compares the address, not only the class number.
 func TestStrayAuthorizationWithTheSameClassNumberIsRemoved(t *testing.T) {
 	tc, g := newFakeTC(), newFakeGate()

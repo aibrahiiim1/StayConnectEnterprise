@@ -130,7 +130,28 @@ const (
 	ReasonNoManagedBridges    = "no_managed_bridges"
 	ReasonStaleGeneration     = "stale_generation"
 	ReasonGenerationConflict  = "duplicate_generation_conflict"
+	// ReasonBadBridgeName: a managed bridge name is not a plain Linux interface name. The names reach tc and ip
+	// argument lists, where one starting with '-' would be read as an option (audit Phase 6 L12).
+	ReasonBadBridgeName = "bad_bridge_name"
 )
+
+// validBridgeName is the closed interface-name set (letters, digits, '.', '_', '-'; not starting with '-' or '.';
+// at most IFNAMSIZ-1 bytes).
+func validBridgeName(s string) bool {
+	if len(s) == 0 || len(s) > 15 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case (c == '.' || c == '_' || c == '-') && i > 0:
+		default:
+			return false
+		}
+	}
+	return true
+}
 
 func Validate(env Envelope, scope Scope, last Accepted, hasLast bool, now time.Time) (string, bool) {
 	switch {
@@ -153,6 +174,13 @@ func Validate(env Envelope, scope Scope, last Accepted, hasLast bool, now time.T
 		return ReasonNoManagedBridges, false
 	case env.DesiredStateHash != HashDesiredState(env.ManagedBridges, env.Sessions):
 		return ReasonHashMismatch, false
+	}
+	for _, b := range env.ManagedBridges {
+		// An empty entry is skipped by the applier; anything else must be a plain interface name. Session bridges
+		// must be declared managed, which the applier checks per session.
+		if b != "" && !validBridgeName(b) {
+			return ReasonBadBridgeName, false
+		}
 	}
 	if hasLast {
 		if env.PlanGeneration < last.Generation {
