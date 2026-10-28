@@ -1,4 +1,0 @@
-commit 39017f86ff8791611da589ffc2ff5f510727e03c
-Date:   Wed Oct 28 09:59:27 2026 +0000
-
-    Governance: T0264 change manifest for the retired-targets cleanup
