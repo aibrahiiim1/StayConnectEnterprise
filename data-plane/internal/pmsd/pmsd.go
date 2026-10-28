@@ -358,6 +358,8 @@ type Deps struct {
 	QueueEnqueueTimeout      time.Duration
 
 	jitter func(int64) int64
+	// wake connects the workers to the applier loops in this process (set by withDefaults; nil is inert).
+	wake *applierWake
 }
 
 var (
@@ -416,6 +418,9 @@ func (d *Deps) withDefaults() {
 	}
 	if d.QueueEnqueueTimeout <= 0 {
 		d.QueueEnqueueTimeout = 2 * time.Second
+	}
+	if d.wake == nil {
+		d.wake = newApplierWake()
 	}
 }
 

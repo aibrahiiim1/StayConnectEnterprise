@@ -314,6 +314,8 @@ func (s *workerSink) OnResyncComplete(at time.Time, _ string) error {
 	s.resyncing = false
 	s.synced = true
 	s.publishedAt = time.Now()
+	// The generation is now claimable (D6-H1).
+	s.w.deps.wake.notify(s.w.iface.ID)
 	// Coverage first, then reconcile, both after the publish. Neither can fail the sync (guests already
 	// authenticate against the published roster): a problem is logged and the next complete sweep retries.
 	if s.covSeen {
@@ -328,6 +330,8 @@ func (s *workerSink) OnResyncComplete(at time.Time, _ string) error {
 		s.w.deps.log().Warn("pmsd: automatic reconciliation could not run; the next complete sweep retries",
 			append(safeErrAttrs(err), "generation", s.resyncGen)...)
 	} else {
+		// Check-outs the reconciliation queued are claimable too.
+		s.w.deps.wake.notify(s.w.iface.ID)
 		s.w.deps.log().Info("pmsd: automatic roster reconciliation",
 			"generation", s.resyncGen, "outcome", out.Outcome, "stays_closed", out.StaysClosed,
 			"absent_from_roster", out.AbsentFromRoster, "protected", out.Protected,
@@ -399,6 +403,8 @@ func (s *workerSink) OnDomainEvent(ctx context.Context, ev Event) error {
 			}
 			return failedAt(stepAdmitLive, err)
 		}
+		// The row is committed and claimable: wake the applier rather than wait for its idle poll (D6-H1).
+		s.w.deps.wake.notify(s.w.iface.ID)
 		return failedAt(stepRecordContinuity, s.w.repo.UpdateContinuity(s.ctx, ContinuityUpdate{axisBase: s.ax(), Status: ContinuityContinuous, LastValidEventAt: ptr(ev.NormalizedAt), LastEventCursor: clip(ev.Cursor, maxCursorLen)}))
 	}
 }

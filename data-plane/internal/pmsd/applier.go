@@ -29,6 +29,8 @@ type applierConfig struct {
 	ErrorPause time.Duration
 	// MaxBatch bounds events per scope before yielding so one backlog cannot starve other Interfaces.
 	MaxBatch int
+	// wake ends an idle pause early when the worker reports a claimable event; nil keeps the plain poll.
+	wake *applierWake
 }
 
 func (c *applierConfig) withDefaults() {
@@ -74,7 +76,7 @@ func runApplierScope(ctx context.Context, ap StayApplier, sc applierScope, cfg a
 			applied++
 		}
 		if applied == 0 {
-			sleepCtx(ctx, cfg.IdlePause)
+			cfg.wake.wait(ctx, sc.Interface, cfg.IdlePause)
 		}
 	}
 }
