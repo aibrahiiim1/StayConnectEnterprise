@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -61,6 +62,15 @@ func (s *server) openRegister(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "invalid_date", "received_at must be a date (YYYY-MM-DD)")
 		return
 	}
+	// Free text is bounded here as well as in the database function (audit P9 L13).
+	if n := utf8.RuneCountInString(strings.TrimSpace(in.Requester)); n < 2 || n > 120 {
+		jsonErr(w, http.StatusBadRequest, "invalid_requester", "say who is asking (2-120 characters)")
+		return
+	}
+	if utf8.RuneCountInString(in.VerificationMethod) > 64 {
+		jsonErr(w, http.StatusBadRequest, "invalid_verification_method", "verification_method is at most 64 characters")
+		return
+	}
 	actor := protectionActor(sessFrom(r.Context()))
 	if actor == "" {
 		jsonErr(w, http.StatusForbidden, "forbidden", "the request could not be attributed to an operator")
@@ -92,6 +102,10 @@ func (s *server) extendRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := decodeJSON(r, &in); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid", "malformed request")
+		return
+	}
+	if !validReason(in.Reason) {
+		jsonErr(w, http.StatusBadRequest, "invalid_reason", reasonBoundsMessage)
 		return
 	}
 	actor := protectionActor(sessFrom(r.Context()))
@@ -132,6 +146,10 @@ func (s *server) answerRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.Note = strings.TrimSpace(in.Note)
+	if utf8.RuneCountInString(in.Note) > 500 {
+		jsonErr(w, http.StatusBadRequest, "invalid_note", "the note is at most 500 characters")
+		return
+	}
 	actor := protectionActor(sessFrom(r.Context()))
 	if actor == "" {
 		jsonErr(w, http.StatusForbidden, "forbidden", "the request could not be attributed to an operator")
