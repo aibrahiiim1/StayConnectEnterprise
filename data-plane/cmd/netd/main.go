@@ -115,6 +115,9 @@ func main() {
 	// config at boot, so otherwise the auth set and any bridge netplan did not recreate would drift from the DB.
 	// A previous run that stopped mid-apply left its revision in 'applying', which holds the single in-flight slot against every later change and which
 	// nothing else would ever move. It is rolled back first, then the confirmed configuration is re-asserted over whatever that left.
+	if dbUp {
+		ap.refreshEnforcementPolicy(rootCtx)
+	}
 	ap.loadIncompleteMarker(rootCtx)
 	ap.ReclaimInterruptedOnBoot(rootCtx)
 	ap.ReconcileActiveOnBoot(rootCtx)

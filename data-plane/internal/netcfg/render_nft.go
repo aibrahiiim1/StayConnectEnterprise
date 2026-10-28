@@ -116,6 +116,18 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 		b.WriteString("\t\telements = { " + s + " }\n")
 	}
 	b.WriteString("\t}\n\n")
+	if topo.PrivateReach.Deny {
+		// AD-22: the private destinations a client network may not reach, and the hotel's exceptions. Both are interval sets so a
+		// range and a host inside it coexist; auto-merge lets two overlapping exceptions be declared without a conflict error.
+		fmt.Fprintf(&b, "\tset guest_private_ranges {\n\t\ttype ipv4_addr\n\t\tflags interval\n\t\tcomment \"RFC 1918, 100.64.0.0/10, 169.254.0.0/16: not reachable from a client network\"\n\t\telements = { %s }\n\t}\n\n",
+			strings.Join(PrivateRanges, ", "))
+		b.WriteString("\tset guest_private_allow {\n\t\ttype ipv4_addr\n\t\tflags interval\n\t\tauto-merge\n\t\tcomment \"private destinations a client network may still reach (audited setting + the appliance's own upstream)\"\n")
+		if allow := NormalizeAllow(topo.PrivateReach.Allow); len(allow) > 0 {
+			b.WriteString("\t\telements = { " + strings.Join(allow, ", ") + " }\n")
+		}
+		b.WriteString("\t}\n\n")
+		b.WriteString("\tcounter guest_private_dropped {\n\t\tcomment \"client traffic to a private network that is not allowed, refused\"\n\t}\n\n")
+	}
 
 	b.WriteString("\tchain input {\n\t\ttype filter hook input priority filter; policy drop;\n")
 	// Pre-authentication DNS is rate-limited before the established accept: a UDP socket is established at the
@@ -214,24 +226,45 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 				SafeIface(n.BridgeName), s)
 		}
 	}
-	for _, cidr := range topo.MgmtCIDRs {
-		fmt.Fprintf(&b, "\t\tiifname @guest_interfaces ip daddr %s drop comment \"guest -> mgmt blocked\"\n", cidr)
-	}
-	b.WriteString("\t\tiifname @guest_interfaces ip daddr @guest_subnets drop comment \"inter-guest isolation\"\n")
-	for _, n := range enabled {
-		if !n.InternetEnabled {
-			fmt.Fprintf(&b, "\t\tiifname \"%s\" oifname \"%s\" drop comment \"internet disabled for %s\"\n",
-				SafeIface(n.BridgeName), topo.WANInterface, SafeText(n.Name))
+	internetDisabled := func() {
+		for _, n := range enabled {
+			if !n.InternetEnabled {
+				fmt.Fprintf(&b, "\t\tiifname \"%s\" oifname \"%s\" drop comment \"internet disabled for %s\"\n",
+					SafeIface(n.BridgeName), topo.WANInterface, SafeText(n.Name))
+			}
 		}
+	}
+	gardenAccepts := func() {
+		// walled-garden pre-auth -> WAN for any guest interface: every port to an address-only element, and exactly
+		// the named port to a port-restricted one.
+		fmt.Fprintf(&b, "\t\tiifname @guest_interfaces oifname \"%s\" ip daddr @walled_garden_ip accept\n", topo.WANInterface)
+		fmt.Fprintf(&b, "\t\tiifname @guest_interfaces oifname \"%s\" ip daddr . tcp dport @walled_garden_tcp accept\n", topo.WANInterface)
+		fmt.Fprintf(&b, "\t\tiifname @guest_interfaces oifname \"%s\" ip daddr . udp dport @walled_garden_udp accept\n", topo.WANInterface)
+	}
+	if topo.PrivateReach.Deny {
+		// AD-22. The walled garden and a network's custom DNS (above) are named by the hotel to be reachable before sign-in, so
+		// they are placed ahead of the private drop; a network with internet disabled still gets no garden. The garden accepts
+		// are confined to the WAN interface, so a garden element can never open a path between client networks.
+		internetDisabled()
+		gardenAccepts()
+		for _, cidr := range topo.MgmtCIDRs {
+			fmt.Fprintf(&b, "\t\tiifname @guest_interfaces ip daddr %s ip daddr != @guest_private_allow drop comment \"guest -> mgmt blocked\"\n", cidr)
+		}
+		b.WriteString("\t\tiifname @guest_interfaces ip daddr @guest_subnets drop comment \"inter-guest isolation\"\n")
+		b.WriteString("\t\tiifname @guest_interfaces ip daddr @guest_private_ranges ip daddr != @guest_private_allow counter name \"guest_private_dropped\" drop comment \"private networks are not reachable from a client network unless allowed\"\n")
+	} else {
+		for _, cidr := range topo.MgmtCIDRs {
+			fmt.Fprintf(&b, "\t\tiifname @guest_interfaces ip daddr %s drop comment \"guest -> mgmt blocked\"\n", cidr)
+		}
+		b.WriteString("\t\tiifname @guest_interfaces ip daddr @guest_subnets drop comment \"inter-guest isolation\"\n")
+		internetDisabled()
 	}
 	fmt.Fprintf(&b, "\t\toifname \"%s\" iifname . ip saddr @auth_ipv4 accept comment \"authenticated guests\"\n", topo.WANInterface)
 	// The Phase-3 gate. While the set is empty this rule can never match, so a dark appliance is unaffected.
 	fmt.Fprintf(&b, "\t\toifname \"%s\" iifname . ip saddr @phase3_auth_ipv4 accept comment \"phase-3 authorized guests\"\n", topo.WANInterface)
-	// walled-garden pre-auth -> WAN for any guest interface: every port to an address-only element, and exactly
-	// the named port to a port-restricted one.
-	fmt.Fprintf(&b, "\t\tiifname @guest_interfaces oifname \"%s\" ip daddr @walled_garden_ip accept\n", topo.WANInterface)
-	fmt.Fprintf(&b, "\t\tiifname @guest_interfaces oifname \"%s\" ip daddr . tcp dport @walled_garden_tcp accept\n", topo.WANInterface)
-	fmt.Fprintf(&b, "\t\tiifname @guest_interfaces oifname \"%s\" ip daddr . udp dport @walled_garden_udp accept\n", topo.WANInterface)
+	if !topo.PrivateReach.Deny {
+		gardenAccepts()
+	}
 	// An unauthenticated HTTPS attempt is dropped silently, on purpose. With no TLS portal there is no redirect for
 	// HTTPS to another host (the appliance holds certificates only for its own portal names). Not `reject with tcp
 	// reset`: Chromium's captive_portal_tab_reloader starts its captive check (and opens the login tab) only when an

@@ -68,6 +68,10 @@ type Topology struct {
 	MgmtCIDRs      []string // management subnets guests must never reach
 	PortalHTTPPort int      // 8380
 
+	// PrivateReach is the AD-22 policy for private destinations a client may reach through the appliance. The zero value
+	// is the previous behaviour (only MgmtCIDRs are blocked), so a Topology built without it renders as before.
+	PrivateReach PrivateReach
+
 	// PortalTLSPort is the captive portal's HTTPS port, or zero when the appliance serves none. It stays zero: the
 	// portal's HTTPS listener is reachable only behind PortalVIP, never behind a gateway, so a guest's 443 to any other
 	// host is never redirected.
