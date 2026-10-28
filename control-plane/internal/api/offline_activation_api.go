@@ -13,6 +13,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"mime"
 	"net/http"
 	"os"
 	"time"
@@ -83,6 +84,14 @@ func (b *OfflineBase) importRequest(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "the activation request carries no serial")
 		return
 	}
+	facts, err := applianceFacts{Serial: req.Serial, Hostname: req.Hostname, Model: req.Model,
+		WANMAC: req.WANMAC, LANMAC: req.LANMAC, Fingerprint: req.HardwareFpr}.normalize()
+	if err != nil {
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "the activation request is not valid: "+err.Error())
+		return
+	}
+	req.Serial, req.Hostname, req.Model = facts.Serial, facts.Hostname, facts.Model
+	req.WANMAC, req.LANMAC, req.HardwareFpr = facts.WANMAC, facts.LANMAC, facts.Fingerprint
 	// holds_customer_id is self-signed when present and applied as in an online registration.
 	held, ok := normalizeHeldCustomer(req.HoldsCustomerID)
 	if !ok {
@@ -102,7 +111,7 @@ func (b *OfflineBase) importRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var appID, lifecycle, existingPub string
-	err := b.DB.QueryRow(ctx,
+	err = b.DB.QueryRow(ctx,
 		// Only a live row is this hardware; a retired row with the same serial is history and a new appliance is created.
 		`SELECT id::text, lifecycle_state, COALESCE(public_key,'') FROM appliances
           WHERE serial=$1 AND lifecycle_state NOT IN ('revoked','decommissioned')`, req.Serial).
@@ -148,6 +157,17 @@ func (b *OfflineBase) importRequest(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "could not record the request")
 		return
 	}
+	// A request id already recorded for another appliance is a conflict, never a silent success (audit Phase 1 M16).
+	var owner string
+	if err := b.DB.QueryRow(ctx, `SELECT appliance_id::text FROM offline_activation_requests WHERE request_id=$1`, req.RequestID).
+		Scan(&owner); err != nil {
+		failInternal(w, r, "could not record the request", err)
+		return
+	}
+	if owner != appID {
+		Fail(w, r, http.StatusConflict, CodeConflict, "this activation request id is already recorded for another appliance")
+		return
+	}
 	audit.Op(r.Context(), b.DB, r, "offline_activation.request_imported", "appliance", appID,
 		map[string]any{"serial": req.Serial, "request_id": req.RequestID, "holds_customer_id": held})
 	b.writeAppliance(w, r, http.StatusOK, appID)
@@ -177,6 +197,14 @@ func (b *OfflineBase) activationPackage(w http.ResponseWriter, r *http.Request) 
 	ctx, cancel := DBCtx(r)
 	defer cancel()
 
+	// The request is read FOR UPDATE and consumed in the same transaction as the package is recorded, so two
+	// concurrent calls cannot mint two packages from one request (audit Phase 1 M16).
+	tx, err := b.DB.Begin(ctx)
+	if err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "begin failed")
+		return
+	}
+	defer tx.Rollback(ctx)
 	var reqID, reqNonce, pubKey, serial string
 	q := `SELECT request_id, nonce, public_key, serial FROM offline_activation_requests
            WHERE appliance_id=$1 AND consumed_at IS NULL`
@@ -185,8 +213,8 @@ func (b *OfflineBase) activationPackage(w http.ResponseWriter, r *http.Request) 
 		q += ` AND request_id=$2`
 		args = append(args, body.RequestID)
 	}
-	q += ` ORDER BY imported_at DESC LIMIT 1`
-	if err := b.DB.QueryRow(ctx, q, args...).Scan(&reqID, &reqNonce, &pubKey, &serial); err != nil {
+	q += ` ORDER BY imported_at DESC LIMIT 1 FOR UPDATE`
+	if err := tx.QueryRow(ctx, q, args...).Scan(&reqID, &reqNonce, &pubKey, &serial); err != nil {
 		Fail(w, r, http.StatusNotFound, CodeNotFound,
 			"no outstanding activation request for this appliance — import the request file first")
 		return
@@ -242,7 +270,7 @@ func (b *OfflineBase) activationPackage(w http.ResponseWriter, r *http.Request) 
 	activation.SignPackage(b.priv, pkg)
 
 	operatorID, _ := actorOf(r)
-	if _, err := b.DB.Exec(ctx, `
+	if _, err := tx.Exec(ctx, `
         INSERT INTO offline_activation_packages (package_id, appliance_id, serial, tenant_id, site_id,
                                                  nonce, signer_key_id, issued_by, expires_at)
         VALUES ($1,$2,$3,NULLIF($4,'')::uuid,NULLIF($5,'')::uuid,$6,$7,NULLIF($8,'')::uuid,to_timestamp($9))`,
@@ -251,7 +279,14 @@ func (b *OfflineBase) activationPackage(w http.ResponseWriter, r *http.Request) 
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "package store failed")
 		return
 	}
-	_, _ = b.DB.Exec(ctx, `UPDATE offline_activation_requests SET consumed_at=now() WHERE request_id=$1`, reqID)
+	if _, err := tx.Exec(ctx, `UPDATE offline_activation_requests SET consumed_at=now() WHERE request_id=$1`, reqID); err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "package store failed")
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "package store failed")
+		return
+	}
 	audit.Op(r.Context(), b.DB, r, "offline_activation.package_generated", "appliance", appID, map[string]any{
 		"_tenant_id": pkg.TenantID, "package_id": pkg.PackageID, "request_id": reqID, "expires_at": pkg.ExpiresAt})
 	writeFile(w, "activation-package-"+serial+".json", map[string]any{"package_id": pkg.PackageID, "package": pkg})
@@ -327,8 +362,10 @@ func (b *OfflineBase) currentEnvelope(w http.ResponseWriter, r *http.Request, ap
 	return env, true
 }
 
+// writeFile sends v as a download. The name carries a serial, so it is encoded by mime, never pasted into the
+// header (audit Phase 1 M11).
 func writeFile(w http.ResponseWriter, name string, v any) {
-	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": name}))
 	WriteJSON(w, http.StatusCreated, v)
 }
 

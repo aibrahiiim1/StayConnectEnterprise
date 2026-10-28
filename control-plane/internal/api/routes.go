@@ -65,12 +65,12 @@ func (b *Base) CloudRoutes(off *OfflineBase) http.Handler {
 	lm.Post("/licenses/{id}/revoke", b.licenseAction("revoke"))
 
 	if off != nil {
-		r.With(perm(auth.PermAppliancesManage)).Post("/offline-activation/requests", off.importRequest)
+		am.Post("/offline-activation/requests", off.importRequest) // step-up like every appliance action (audit Phase 1 M16)
 		am.Post("/appliances/{id}/offline-activation-package", off.activationPackage)
 		lm.Post("/appliances/{id}/offline-license", off.offlineLicense)
 	} else {
 		na := unavailable("offline_unavailable", "offline files need the vendor signing key, which is not configured")
-		r.With(perm(auth.PermAppliancesManage)).Post("/offline-activation/requests", na)
+		am.Post("/offline-activation/requests", na)
 		am.Post("/appliances/{id}/offline-activation-package", na)
 		lm.Post("/appliances/{id}/offline-license", na)
 	}

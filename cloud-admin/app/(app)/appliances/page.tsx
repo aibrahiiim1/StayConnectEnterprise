@@ -4,7 +4,7 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FileUp, Server } from "lucide-react";
 import {
-  api, itemsOf, qs, type ApplianceRow, type Customer, type Items, type Overview, type RequestOptions, type Site,
+  api, itemsOf, qs, withStepUp, type ApplianceRow, type Customer, type Items, type Overview, type RequestOptions, type Site,
 } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -102,7 +102,8 @@ function Appliances() {
       } catch {
         throw new Error("That file is not an activation request. Download it again from the appliance's Admin Console.");
       }
-      const row = await api.post<ApplianceRow>("/cloud/v1/offline-activation/requests", body);
+      // Importing creates an appliance, so it needs a password step-up like every appliance action.
+      const row = await withStepUp(() => api.post<ApplianceRow>("/cloud/v1/offline-activation/requests", body));
       toast.success(`${row.serial} imported`, "Activate it, then download its activation package.");
       router.push(`/appliances/${row.id}`);
     } catch (e) {

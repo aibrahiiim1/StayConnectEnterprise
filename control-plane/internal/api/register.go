@@ -53,6 +53,14 @@ func (b *IdentityBase) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "serial and public_key required")
 		return
 	}
+	facts, err := applianceFacts{Serial: req.Serial, Hostname: req.Hostname, Model: req.Model,
+		WANMAC: req.WANMAC, LANMAC: req.LANMAC, Fingerprint: req.HardwareFingerprint}.normalize()
+	if err != nil {
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, err.Error())
+		return
+	}
+	req.Serial, req.Hostname, req.Model = facts.Serial, facts.Hostname, facts.Model
+	req.WANMAC, req.LANMAC, req.HardwareFingerprint = facts.WANMAC, facts.LANMAC, facts.Fingerprint
 	pubRaw, err := base64.RawStdEncoding.DecodeString(req.PublicKey)
 	if err != nil || len(pubRaw) != ed25519.PublicKeySize {
 		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "public_key must be base64-raw Ed25519 (32 bytes)")

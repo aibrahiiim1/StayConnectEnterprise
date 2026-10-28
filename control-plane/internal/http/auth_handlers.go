@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -200,8 +201,13 @@ func (d authDeps) reauth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.signinSucceeded(r, s.Email)
+	// The session always comes from the cookie (auth.Middleware), so there is a cookie to mark.
 	if c, err := r.Cookie(auth.SessionCookieName); err == nil {
-		api.MarkReauth(d.Store.R, c.Value)
+		if err := api.MarkReauth(r.Context(), d.Store.R, c.Value); err != nil {
+			slog.Warn("step-up could not be recorded", "err", err)
+			api.Fail(w, r, http.StatusServiceUnavailable, "unavailable", "Central could not record the password confirmation. Try again in a moment.")
+			return
+		}
 	}
 	audit.Op(r.Context(), d.DB, r, "auth.reauth_succeeded", "operator", s.OperatorID, nil)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
