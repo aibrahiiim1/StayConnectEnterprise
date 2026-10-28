@@ -48,6 +48,16 @@ func (s *server) socialStart(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, "provider required")
 		return
 	}
+	// The state row binds the callback to the device that started (anti-CSRF). portald always sends both from the
+	// kernel; scd refuses a start without them itself, rather than storing an unbound state.
+	if ip := net.ParseIP(strings.TrimSpace(req.IP)); ip == nil || ip.To4() == nil {
+		httpErr(w, http.StatusBadRequest, "bad ip")
+		return
+	}
+	if _, err := net.ParseMAC(strings.TrimSpace(req.MAC)); err != nil {
+		httpErr(w, http.StatusBadRequest, "bad mac")
+		return
+	}
 
 	load := s.methodSwitches
 	if load == nil {
