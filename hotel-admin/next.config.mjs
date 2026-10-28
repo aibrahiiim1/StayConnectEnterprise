@@ -10,6 +10,11 @@ const nextConfig = {
   // — NO npm install and NO build on the VM — which is what prevents a
   // repeat of the /root build that exhausted the pilot's memory.
   output: "standalone",
+  // The standalone tree carried the sharp image binaries and TypeScript, about 27 MB the server never loads:
+  // this app uses no next/image and its config is .mjs (performance audit D8-L4).
+  outputFileTracingExcludes: {
+    "*": ["node_modules/@img/**", "node_modules/sharp/**", "node_modules/typescript/**"],
+  },
   // Next 15.5 renders a floating Dev Tools panel in `next dev`. It is bottom-left, it is on top of the
   // page, and it swallows clicks that land under it -- which is what made the browser suite report the PMS
   // Interfaces page as unusable after the security upgrade: the page was rendering correctly the whole
