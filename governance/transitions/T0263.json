@@ -27,9 +27,10 @@
   "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
   "base": "d6647840580c363eeadc508a4a099bf3d8fe9769",
   "base_note": "Master after the merge of PR #261.",
-  "head": "1db439b4",
-  "head_note": "The last documentation commit of branch docs/cleanup (after the first-pass commit f7a12168, whose deletions e3a74272 restores). Governance commits follow it.",
+  "head": "19be3661",
+  "head_note": "The last documentation commit of branch docs/cleanup. Governance commits follow it.",
   "previous_delivery": "T0262",
   "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE.",
-  "revision": "Corrected before merge in PR #262: the first version stated 40 manifests and that removing them lost nothing; the review restored the 45 deleted files and recorded the exact counts."
+  "revision": "Corrected before merge in PR #262: the first version stated 40 manifests and that removing them lost nothing; the review restored the 45 deleted files and recorded the exact counts.",
+  "central_record": "Product-Owner record of 2026-10-28, made in PR #262: the current production Central is 41.128.240.133 (central.onegate.getsemantics.com); 172.21.96.196 is retired and must not be contacted. Current documents and current_state_facts.central_host were corrected; dated history, evidence and decision text were not changed."
 }
