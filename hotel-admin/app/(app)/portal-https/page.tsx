@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { api, ApiError, Whoami } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { canWrite } from "@/lib/roles";
 import { formatDate, formatRelative } from "@/lib/utils";
 import {
@@ -25,6 +25,7 @@ import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { HelpList, HelpSection } from "@/components/help";
 import { ShieldCheck, RefreshCw, RotateCw, Search, Globe } from "lucide-react";
+import { useOperatorRoles } from "@/lib/whoami-context";
 
 type Issue = { code: string; message: string };
 
@@ -37,7 +38,7 @@ const HISTORY_PREVIEW = 5;
 export default function PortalHTTPSPage() {
   const toast = useToast();
   const [doc, setDoc] = useState<PortalHTTPSDoc | null>(null);
-  const [roles, setRoles] = useState<string[] | null>(null);
+  const roles = useOperatorRoles();
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState<null | "check" | "renew" | "address" | "domain" | "remove">(null);
 
@@ -67,7 +68,6 @@ export default function PortalHTTPSPage() {
 
   useEffect(() => {
     load();
-    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
   }, [load]);
 
   async function checkNow() {

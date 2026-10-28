@@ -5,7 +5,7 @@
 
 import Link from "next/link";
 import { useEffect, useState, useCallback } from "react";
-import { api, ApiError, inBackground, Whoami } from "@/lib/api";
+import { api, ApiError, Whoami } from "@/lib/api";
 import { canWrite } from "@/lib/roles";
 import { cn } from "@/lib/utils";
 import { PageShell, PageHeader, StatCard, StatGrid } from "@/components/ui/page";
@@ -25,6 +25,7 @@ import { useToast } from "@/components/ui/toast";
 import { HelpList, HelpSection } from "@/components/help";
 import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
 import { FileText, CheckCircle2, XCircle, Server, Hourglass } from "lucide-react";
+import { usePoll } from "@/lib/use-poll";
 
 type ServiceHealth = {
   service: string;
@@ -130,7 +131,8 @@ export default function HealthPage() {
   }, []);
 
   useEffect(() => { api.get<Whoami>("/auth/whoami").then(setMe).catch(() => {}); }, []);
-  useEffect(() => { load(); const t = setInterval(() => void inBackground(load), POLL_SECONDS * 1000); return () => clearInterval(t); }, [load]);
+  useEffect(() => { void load(); }, [load]);
+  usePoll(() => load(), POLL_SECONDS * 1000);
 
   const [restarting, setRestarting] = useState<string | null>(null);
   const [restartErr, setRestartErr] = useState<string | null>(null);

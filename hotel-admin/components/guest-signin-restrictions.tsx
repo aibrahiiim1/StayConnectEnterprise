@@ -6,7 +6,7 @@
 import { REASON_HINT, REASON_MAX_CHARS, reasonOk } from "@/lib/reason";
 import { useCallback, useEffect, useState } from "react";
 import { ShieldCheck, Timer } from "lucide-react";
-import { api, inBackground, GuestSignInRestriction } from "@/lib/api";
+import { api, GuestSignInRestriction } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Table, TBody, THead, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,7 @@ import { KeyValueGrid } from "@/components/ui/data";
 import { LiveStatus, formatCountdown, refreshingClass } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { cn, formatDate } from "@/lib/utils";
+import { usePoll } from "@/lib/use-poll";
 
 // The server owns the wait deadline; the countdown only updates its display between reads.
 function useTicker(): number {
@@ -76,10 +77,7 @@ export function ActiveRestrictions({
   useEffect(() => { void load(); }, [load]);
 
   // Refresh periodically so expired restrictions leave the list.
-  useEffect(() => {
-    const t = setInterval(() => { void inBackground(load); }, POLL_SECONDS * 1000);
-    return () => clearInterval(t);
-  }, [load]);
+  usePoll(() => load(), POLL_SECONDS * 1000);
 
   async function release() {
     if (!target) return;

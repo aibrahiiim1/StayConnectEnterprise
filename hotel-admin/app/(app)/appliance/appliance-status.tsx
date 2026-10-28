@@ -7,9 +7,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   CheckCircle2, ChevronDown, CircleDashed, Download, Loader2, RefreshCw, ServerCog, ShieldCheck, Upload, Unplug,
-  XCircle, Cloud,
-} from "lucide-react";
-import { api, ApiError, CentralRefresh, CentralStatus, Whoami } from "@/lib/api";
+  XCircle, Cloud } from "lucide-react";
+import { api, ApiError, CentralRefresh, CentralStatus, } from "@/lib/api";
 import { Card, SectionCard } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/badge";
@@ -21,6 +20,7 @@ import { useToast } from "@/components/ui/toast";
 import { canWrite } from "@/lib/roles";
 import { usePoll } from "@/lib/use-poll";
 import { errMsg, formatRelative } from "@/lib/utils";
+import { useOperatorRoles } from "@/lib/whoami-context";
 
 type Tone = "ok" | "warn" | "err" | "default" | "info";
 
@@ -186,7 +186,7 @@ export function ApplianceStatus({ header }: { header?: (actions: React.ReactNode
   routerRef.current = router;
   const toast = useToast();
   const authGone = useRef(false);
-  const [roles, setRoles] = useState<string[] | null>(null);
+  const roles = useOperatorRoles();
   const [st, setSt] = useState<CentralStatus | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -224,7 +224,6 @@ export function ApplianceStatus({ header }: { header?: (actions: React.ReactNode
   }, []);
 
   useEffect(() => {
-    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
     void load();
   }, [load]);
 

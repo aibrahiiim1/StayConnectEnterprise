@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { api, ApiError, ListResp, Whoami, ClientGroup, ClientGroupChange, ClientGroupRule, ClientGroupRuleType } from "@/lib/api";
+import { api, ApiError, ListResp, ClientGroup, ClientGroupChange, ClientGroupRule, ClientGroupRuleType } from "@/lib/api";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { Card } from "@/components/ui/card";
@@ -28,6 +28,7 @@ import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { formatDate } from "@/lib/utils";
 import { ruleSummary } from "./rule-summary";
+import { useOperatorRoles } from "@/lib/whoami-context";
 
 const PRIORITY_DEFAULT = 100;
 const PRIORITY_MIN = 1;
@@ -108,7 +109,7 @@ function groupDiff(c: ClientGroupChange) {
 export default function ClientGroupsPage() {
   const toast = useToast();
   const [rows, setRows] = useState<ClientGroup[] | null>(null);
-  const [roles, setRoles] = useState<string[] | null>(null);
+  const roles = useOperatorRoles();
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [formErr, setFormErr] = useState<unknown>(null);
@@ -135,7 +136,6 @@ export default function ClientGroupsPage() {
   }, []);
   useEffect(() => {
     load();
-    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
   }, [load]);
 
   const loadChanges = useCallback(async () => {

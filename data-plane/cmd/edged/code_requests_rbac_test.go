@@ -83,3 +83,17 @@ func TestCodeRequests_ListIsMaskedForRolesThatCannotReveal(t *testing.T) {
 		t.Fatalf("an unparseable body must fail closed, got %s", got)
 	}
 }
+
+// P9 L10: the one-time-code reveal takes the same bounded reason as every other reveal, refused before any step-up.
+func TestCodeReveal_ReasonIsBoundedLikeOtherReveals(t *testing.T) {
+	s := &server{}
+	for _, reason := range []string{"", "ok", "abc", strings.Repeat("x", 501)} {
+		req := httptest.NewRequest(http.MethodPost, "/0123456789abcdef0123456789abcdef/reveal",
+			strings.NewReader(`{"reason":"`+reason+`","password":"pw"}`))
+		rec := httptest.NewRecorder()
+		s.revealCode(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("reason %q: status %d, want 400", reason, rec.Code)
+		}
+	}
+}

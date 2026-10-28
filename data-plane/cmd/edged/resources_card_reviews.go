@@ -52,7 +52,7 @@ func (s *server) listCardCases(w http.ResponseWriter, r *http.Request) {
 	   ORDER BY (c.resolution IS NULL) DESC, c.opened_at DESC
 	   LIMIT 200`, s.tenantID, s.siteID)
 	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "card_cases_unreadable", err.Error())
+		internalErr(w, r, http.StatusInternalServerError, "card_cases_unreadable", err)
 		return
 	}
 	defer rows.Close()
@@ -61,7 +61,7 @@ func (s *server) listCardCases(w http.ResponseWriter, r *http.Request) {
 		var c cardCaseOut
 		if err := rows.Scan(&c.ID, &c.Kind, &c.SettlementID, &c.ChargeID, &c.ProviderRef, &c.OpenedAt, &c.AmountMinor,
 			&c.Currency, &c.EntitlementState, &c.Resolution, &c.ResolvedAt, &c.ResolvedBy, &c.ResolutionReason); err != nil {
-			jsonErr(w, http.StatusInternalServerError, "card_cases_unreadable", err.Error())
+			internalErr(w, r, http.StatusInternalServerError, "card_cases_unreadable", err)
 			return
 		}
 		cases = append(cases, c)
@@ -103,7 +103,7 @@ func (s *server) resolveCardCase(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad id")
 		return
 	}
-	actor, ok := s.paymentStepUp(w, r, in.Password)
+	actor, ok := s.stepUp(w, r, in.Password)
 	if !ok {
 		return
 	}
@@ -112,7 +112,7 @@ func (s *server) resolveCardCase(w http.ResponseWriter, r *http.Request) {
 	var out string
 	if err := s.db.QueryRow(ctx, `SELECT iam_v2.p4_resolve_reversal_review($1,$2,$3::uuid,$4,$5,$6)`,
 		s.tenantID, s.siteID, id, in.Resolution, actor, reason).Scan(&out); err != nil {
-		jsonErr(w, http.StatusInternalServerError, "resolve_failed", err.Error())
+		internalErr(w, r, http.StatusInternalServerError, "resolve_failed", err)
 		return
 	}
 	switch out {

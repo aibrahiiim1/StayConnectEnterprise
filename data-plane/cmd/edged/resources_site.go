@@ -800,43 +800,6 @@ func (s *server) reportsRoutes() http.Handler {
 	return r
 }
 
-type backupRow struct {
-	ID         string     `json:"id"`
-	StartedAt  time.Time  `json:"started_at"`
-	FinishedAt *time.Time `json:"finished_at,omitempty"`
-	Status     string     `json:"status"`
-	Kind       string     `json:"kind"`
-	Path       *string    `json:"path,omitempty"`
-	SizeBytes  *int64     `json:"size_bytes,omitempty"`
-	Error      *string    `json:"error,omitempty"`
-}
-
-// listBackupRecords is the ledger of backups this appliance took, distinct from artefacts on disk.
-func (s *server) listBackupRecords(w http.ResponseWriter, req *http.Request) {
-	ctx, cancel := dbCtx(req)
-	defer cancel()
-	rows, err := s.db.Query(ctx, `
-            SELECT id, started_at, finished_at, status, kind, path, size_bytes, error
-              FROM backup_records ORDER BY started_at DESC LIMIT 50
-        `)
-	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
-		return
-	}
-	defer rows.Close()
-	var out []backupRow
-	for rows.Next() {
-		var b backupRow
-		if err := rows.Scan(&b.ID, &b.StartedAt, &b.FinishedAt, &b.Status, &b.Kind,
-			&b.Path, &b.SizeBytes, &b.Error); err != nil {
-			jsonErr(w, http.StatusInternalServerError, "internal", "scan failed")
-			return
-		}
-		out = append(out, b)
-	}
-	writeList(w, out)
-}
-
 // pokeSCD fires a best-effort admin action on scd; failures go to the audit payload but never fail the write (reconcilers converge anyway).
 func (s *server) pokeSCD(req *http.Request, path string) {
 	if s.scd == nil { // a test server with no scd: the reconcilers converge on their own

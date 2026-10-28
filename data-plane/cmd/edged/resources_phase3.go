@@ -217,8 +217,8 @@ func (s *server) listStays(w http.ResponseWriter, r *http.Request) {
 	page, size := 1, staysPageSizeDefault
 	if v := qv.Get("page"); v != "" {
 		n, err := strconv.Atoi(v)
-		if err != nil || n < 1 {
-			jsonErr(w, http.StatusBadRequest, "bad_request", "page must be a positive whole number")
+		if err != nil || n < 1 || n > pageMax {
+			jsonErr(w, http.StatusBadRequest, "bad_request", fmt.Sprintf("page must be a whole number from 1 to %d", pageMax))
 			return
 		}
 		page = n

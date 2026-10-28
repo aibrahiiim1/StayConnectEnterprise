@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { api, inBackground, CentralStatus, EdgeHealth, type ListResp, type OperationalAlert } from "@/lib/api";
+import { api, CentralStatus, EdgeHealth, type ListResp, type OperationalAlert } from "@/lib/api";
 import {
   type OverviewRange, type OverviewSnapshot, OVERVIEW_RANGES, fetchOverview, fmtInt, normalizeOverview, reasonText,
 } from "@/lib/api/dashboard";
@@ -27,6 +27,8 @@ import {
   ApplianceCard, BlockLink, ConcurrencyCard, DhcpDnsCard, NetworksCard, PackagesCard, PmsCard, ServicesGrid, SignInOutcomesCard,
   SignInPatternCard, TrafficCard,
 } from "./overview-blocks";
+import { usePoll } from "@/lib/use-poll";
+import { getSharedHealth } from "@/lib/shared-health";
 
 type AttentionRow = { text: string; detail?: string; href?: string; action?: string; tone: "warn" | "err" };
 
@@ -50,7 +52,7 @@ export default function DashboardPage() {
       // Settled independently: a hanging /health must not blank the overview, nor vice versa.
       const [o, h, a] = await Promise.allSettled([
         fetchOverview(r),
-        api.get<EdgeHealth>("/health"),
+        getSharedHealth(),
         api.get<ListResp<OperationalAlert>>("/operational-alerts"),
       ]);
       if (mine !== seq.current) return;
@@ -75,10 +77,8 @@ export default function DashboardPage() {
     void load(range, true);
   }, [range, load]);
 
-  useEffect(() => {
-    const id = setInterval(() => void inBackground(() => load(rangeRef.current)), 30_000);
-    return () => clearInterval(id);
-  }, [load]);
+  // usePoll pauses in a hidden tab: the Overview is the console's costliest read (performance audit D8-M1, D7-M3).
+  usePoll(() => load(rangeRef.current), 30_000);
 
   useEffect(() => {
     api.get<CentralStatus>("/central/status")

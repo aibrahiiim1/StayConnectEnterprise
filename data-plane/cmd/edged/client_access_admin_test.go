@@ -22,6 +22,8 @@ func TestClientGroupWritesAreValidatedWithTheEvaluatorsOwnRules(t *testing.T) {
 		"reserved rule":         {Name: &name, Rules: &[]clientGroupRule{{Type: "IDP_GROUP", Value: map[string]any{"provider": "microsoft"}}}},
 		"malformed rule":        {Name: &name, Rules: &[]clientGroupRule{{Type: "EMAIL_DOMAIN", Value: map[string]any{"domains": []any{"not a domain"}}}}},
 		"too many rules":        {Name: &name, Rules: &[]clientGroupRule{}},
+		// P9 L13: the optional change reason is bounded.
+		"over-long reason": {Name: &name, Reason: strings.Repeat("r", 501)},
 	}
 	many := make([]clientGroupRule, 21)
 	for i := range many {

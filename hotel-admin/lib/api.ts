@@ -70,8 +70,10 @@ async function request<T>(
 
 export const api = {
   // headers: for values that must not travel in the URL (edged logs request lines), e.g. a stay search.
-  get:   <T>(path: string, headers?: Record<string, string>) =>
-    request<T>("GET", path, undefined, headers ? { headers } : undefined),
+  // signal: lets a superseded read be cancelled (useServerPage) instead of running to the end (perf audit D8-L1).
+  get:   <T>(path: string, headers?: Record<string, string>, opts?: { signal?: AbortSignal }) =>
+    request<T>("GET", path, undefined,
+      headers || opts?.signal ? { ...(headers ? { headers } : {}), ...(opts?.signal ? { signal: opts.signal } : {}) } : undefined),
   post:  <T>(path: string, body?: any)    => request<T>("POST", path, body),
   put:   <T>(path: string, body?: any)    => request<T>("PUT", path, body),
   patch: <T>(path: string, body?: any)    => request<T>("PATCH", path, body),
@@ -1215,6 +1217,8 @@ export type SysNetPending = {
   deadline_unix: number;
   management_url: string;
   backup_path: string;
+  // The pending change's id, once netd reports it: confirm sends it back so a different change is not kept.
+  revision_id?: string;
 };
 
 export type SysNetState = {
@@ -1256,6 +1260,7 @@ export type SysNetApplyResp = {
   deadline_unix?: number;
   message?: string;
   verify?: Record<string, boolean>;
+  revision_id?: string;
 };
 
 export type BackupHealth = {

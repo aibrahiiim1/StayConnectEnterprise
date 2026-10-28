@@ -120,6 +120,10 @@ func TestGuestDataReadRoutesExist(t *testing.T) {
 			"usage":                 s.usageRoutes,
 			"guest-data-rights":     s.guestDataRightsRoutes,
 			"network":               s.networkRoutes,
+			// Added with the P9 M4 coverage: their detail reads are recorded too.
+			"vouchers":                  s.vouchersRoutes,
+			"guest-signin-restrictions": s.signInRestrictionsRoutes,
+			"pms-event-decisions":       s.pmsEventDecisionsRoutes,
 		} {
 			mountResource(r, s, name, routes)
 		}

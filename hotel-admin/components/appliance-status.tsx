@@ -4,11 +4,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { api, EdgeHealth } from "@/lib/api";
+import type { EdgeHealth } from "@/lib/api";
 import { Tooltip } from "@/components/ui/tooltip";
 import { StatusDot } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { usePoll } from "@/lib/use-poll";
+import { getSharedHealth } from "@/lib/shared-health";
 
 export function ApplianceStatus({ className }: { className?: string }) {
   const [health, setHealth] = useState<EdgeHealth | null>(null);
@@ -17,7 +18,7 @@ export function ApplianceStatus({ className }: { className?: string }) {
   const alive = useRef(true);
   const load = useCallback(async () => {
     try {
-      const h = await api.get<EdgeHealth>("/health");
+      const h = await getSharedHealth();
       if (alive.current) { setHealth(h); setFailed(false); }
     } catch {
       if (alive.current) setFailed(true);

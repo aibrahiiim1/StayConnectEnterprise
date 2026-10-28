@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sync/atomic"
 	"time"
 )
 
@@ -48,16 +49,58 @@ func (s *server) sysNetApply(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) sysNetConfirm(w http.ResponseWriter, r *http.Request) {
+	// The console sends the revision the operator saw, so netd can refuse to keep a different pending change
+	// (audit P8 L14, edged half). Optional while netd's system-network state does not report it yet.
+	var in struct {
+		RevisionID string `json:"revision_id"`
+	}
+	if r.ContentLength != 0 {
+		if err := decodeJSON(r, &in); err != nil {
+			jsonErr(w, http.StatusBadRequest, "bad_request", "malformed request body")
+			return
+		}
+	}
+	if in.RevisionID != "" && !uuidRe.MatchString(in.RevisionID) {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "revision_id must be the pending change's id")
+		return
+	}
 	sess := sessFrom(r.Context())
 	body := map[string]any{"Actor": sess.Email, "ActorID": sess.OperatorID, "SourceIP": clientIP(r)}
-	s.audit(r, "network.system.confirm", "system_network", "", nil)
-	// A confirmed change may have moved the management IP: trigger an idempotent Hotel Admin cert renewal, detached from the request so it outlives the response.
+	if in.RevisionID != "" {
+		// Both spellings: netd's request struct may name the field either way, and the other key is ignored.
+		body["RevisionID"], body["revision_id"] = in.RevisionID, in.RevisionID
+	}
+	s.audit(r, "network.system.confirm", "system_network", in.RevisionID, nil)
+	st, raw, err := s.netd.call(r.Context(), http.MethodPost, "/v1/system-network/confirm", body)
+	if err != nil {
+		internalErr(w, r, http.StatusBadGateway, "netd_unreachable", err)
+		return
+	}
+	// A confirmed change may have moved the management IP: renew the Hotel Admin certificate, detached from the
+	// request so it outlives the response. Only once netd has confirmed, and never two at once (audit P9 L6).
+	if st >= 200 && st < 300 {
+		s.renewHotelAdminCertOnce()
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(st)
+	_, _ = w.Write(raw)
+}
+
+// certRenewalRunning is set while a detached Hotel Admin certificate renewal runs.
+var certRenewalRunning atomic.Bool
+
+// renewHotelAdminCertOnce starts the idempotent renewal unless one is already running, and reports whether it did.
+func (s *server) renewHotelAdminCertOnce() bool {
+	if s.scd == nil || !certRenewalRunning.CompareAndSwap(false, true) {
+		return false
+	}
 	go func() {
+		defer certRenewalRunning.Store(false)
 		ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
 		defer cancel()
 		_, _, _ = s.scd.call(ctx, http.MethodPost, "/v1/hotel-admin-cert/renew", map[string]any{})
 	}()
-	s.netd.proxy(w, r, http.MethodPost, "/v1/system-network/confirm", body)
+	return true
 }
 
 func (s *server) sysNetRollback(w http.ResponseWriter, r *http.Request) {

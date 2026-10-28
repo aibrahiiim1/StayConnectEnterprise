@@ -3,9 +3,11 @@ package main
 import (
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stayconnect/enterprise/data-plane/internal/payment"
 )
 
@@ -421,10 +423,31 @@ func (s *server) stepUpActor(w http.ResponseWriter, r *http.Request, password st
 	return sess.OperatorID, true
 }
 
-// Constructed per request: the engine is stateless, and this keeps the DARK posture in one place.
+// paymentEngine builds the engine once per process and reuses it: its configuration comes from the process
+// environment, which does not change while edged runs, and each construction could open a new outcome
+// connection pool that was never closed (performance audit D1-L6). A failed construction is not kept, so the
+// next request tries again and the DARK posture is still decided in NewProductionEngine alone.
 func (s *server) paymentEngine() (*payment.Engine, error) {
-	return payment.NewProductionEngine(s.db, nil)
+	paymentEngineMu.Lock()
+	defer paymentEngineMu.Unlock()
+	if e, ok := paymentEngines[s.db]; ok {
+		return e, nil
+	}
+	e, err := newPaymentEngine(s.db)
+	if err != nil {
+		return nil, err
+	}
+	paymentEngines[s.db] = e
+	return e, nil
 }
+
+// newPaymentEngine is a variable only so a test can count constructions.
+var newPaymentEngine = func(pool *pgxpool.Pool) (*payment.Engine, error) { return payment.NewProductionEngine(pool, nil) }
+
+var (
+	paymentEngineMu sync.Mutex
+	paymentEngines  = map[*pgxpool.Pool]*payment.Engine{}
+)
 
 func financialOpErr(w http.ResponseWriter, err error) {
 	switch payment.CodeOf(err) {

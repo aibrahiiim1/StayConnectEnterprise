@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
-	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -108,9 +107,10 @@ func (s *server) revealCode(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
 		return
 	}
-	reason := strings.TrimSpace(in.Reason)
-	if reason == "" || len(reason) > 500 {
-		jsonErr(w, http.StatusBadRequest, "bad_request", "a reason is required")
+	// The same character bound as every other reveal (audit P9 L10).
+	reason, ok := reasonText(in.Reason)
+	if !ok {
+		jsonErr(w, http.StatusBadRequest, "bad_request", reasonBoundsMessage)
 		return
 	}
 	id := chi.URLParam(r, "id")
@@ -118,18 +118,24 @@ func (s *server) revealCode(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad id")
 		return
 	}
-	actor, ok := s.paymentStepUp(w, r, in.Password)
+	actor, ok := s.stepUp(w, r, in.Password)
 	if !ok {
+		return
+	}
+	// Recorded before the code is shown, and the reveal is refused if the record cannot be written, so a code is
+	// never shown unaudited (audit P9 L10). Never audit the code itself.
+	if err := s.auditErr(r, "otp_code.revealed", "otp_challenge", id, map[string]any{"reason": reason}); err != nil {
+		jsonErr(w, http.StatusServiceUnavailable, "audit_unavailable", "the reveal could not be recorded, so the code was not shown")
 		return
 	}
 	st, raw, err := s.scd.call(r.Context(), http.MethodPost, "/v1/admin/otp/"+id+"/reveal", map[string]any{"operator": actor})
 	if err != nil {
+		s.audit(r, "otp_code.reveal_failed", "otp_challenge", id, map[string]any{"reason": reason})
 		jsonErr(w, http.StatusBadGateway, "scd_unreachable", "the sign-in service could not be reached")
 		return
 	}
-	if st < 300 {
-		// Never audit the code itself.
-		s.audit(r, "otp_code.revealed", "otp_challenge", id, map[string]any{"reason": reason})
+	if st >= 300 {
+		s.audit(r, "otp_code.reveal_failed", "otp_challenge", id, map[string]any{"reason": reason, "status": st})
 	}
 	s.relayScd(w, st, raw)
 }

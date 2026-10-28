@@ -61,20 +61,40 @@ type usageStayRow struct {
 const usageSearchHeader = "X-Usage-Search"
 
 // parseWindow reads an explicit from/to, defaulting to the last 30 days (a dispute has a period; all-time is slowest and least useful).
-func parseWindow(r *http.Request) (from, to time.Time) {
+// parseWindow reads ?from and ?to (RFC 3339; default the last 30 days). A value that does not parse, or a window
+// that ends before it starts, is an error: it used to be ignored silently, so the operator saw a different period
+// from the one asked for (audit P9 L12).
+func parseWindow(r *http.Request) (from, to time.Time, err error) {
 	to = time.Now().UTC()
 	from = to.AddDate(0, 0, -30)
 	if v := r.URL.Query().Get("from"); v != "" {
-		if t, err := time.Parse(time.RFC3339, v); err == nil {
-			from = t.UTC()
+		t, perr := time.Parse(time.RFC3339, v)
+		if perr != nil {
+			return from, to, errors.New("from must be an RFC 3339 time")
 		}
+		from = t.UTC()
 	}
 	if v := r.URL.Query().Get("to"); v != "" {
-		if t, err := time.Parse(time.RFC3339, v); err == nil {
-			to = t.UTC()
+		t, perr := time.Parse(time.RFC3339, v)
+		if perr != nil {
+			return from, to, errors.New("to must be an RFC 3339 time")
 		}
+		to = t.UTC()
 	}
-	return from, to
+	if to.Before(from) {
+		return from, to, errors.New("to must not be before from")
+	}
+	return from, to, nil
+}
+
+// readWindow is parseWindow for a handler: ok=false means a 400 was written.
+func readWindow(w http.ResponseWriter, r *http.Request) (from, to time.Time, ok bool) {
+	from, to, err := parseWindow(r)
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "bad_request", err.Error())
+		return from, to, false
+	}
+	return from, to, true
 }
 
 func queryLimit(r *http.Request, def, max int) int {
@@ -86,19 +106,22 @@ func queryLimit(r *http.Request, def, max int) int {
 
 // listUsageStays orders by use, descending: an operator without a room number starts there, and one with a room filters.
 func (s *server) listUsageStays(w http.ResponseWriter, r *http.Request) {
-	from, to := parseWindow(r)
+	from, to, ok := readWindow(w, r)
+	if !ok {
+		return
+	}
 	limit := queryLimit(r, 50, 200)
 
-	// The room/reservation filter is one UI field. The search travels in X-Usage-Search; ?q= is still read for an older console.
+	// The room/reservation filter is one UI field. The search travels only in X-Usage-Search: a ?q= would put
+	// guest search text in URLs and proxy logs (audit P9 L11).
 	q, ok := readSearch(w, r, usageSearchHeader)
 	if !ok {
 		return
 	}
-	if q == "" {
-		q = strings.TrimSpace(r.URL.Query().Get("q"))
-	}
 
-	rows, err := s.db.Query(r.Context(), `
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+	rows, err := s.db.Query(ctx, `
 		WITH stay_usage AS (
 		  SELECT e.stay_id,
 		         COALESCE(SUM(se.bytes_down), 0) AS down,
@@ -235,7 +258,10 @@ func (s *server) readStayUsage(ctx context.Context, stayID string, from, to time
 }
 
 func (s *server) getStayUsage(w http.ResponseWriter, r *http.Request) {
-	from, to := parseWindow(r)
+	from, to, ok := readWindow(w, r)
+	if !ok {
+		return
+	}
 	out, err := s.readStayUsage(r.Context(), chi.URLParam(r, "stay_id"), from, to)
 	switch {
 	case errors.Is(err, errNoSuchSource):
@@ -354,7 +380,10 @@ func (s *server) getDeviceUsage(w http.ResponseWriter, r *http.Request) {
 			"that is not a device address. A device address looks like 7a:1b:2c:3d:4e:5f.")
 		return
 	}
-	from, to := parseWindow(r)
+	from, to, ok := readWindow(w, r)
+	if !ok {
+		return
+	}
 
 	var out struct {
 		MAC       string           `json:"mac"`
@@ -445,7 +474,9 @@ const sessionSamplesMax = 2000
 // listSessionSamples returns the durable samples a session total was summed from.
 func (s *server) listSessionSamples(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "session_id")
-	rows, err := s.db.Query(r.Context(), `
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+	rows, err := s.db.Query(ctx, `
 		SELECT sampled_at, bytes_down, bytes_up
 		  FROM iam_v2.accounting_records
 		 WHERE session_id = $1 AND tenant_id = $2 AND site_id = $3
@@ -607,19 +638,20 @@ func (s *server) listUsageSources(w http.ResponseWriter, r *http.Request) {
 			"the access source type must be one of: stay, account, voucher, open")
 		return
 	}
-	from, to := parseWindow(r)
+	from, to, ok := readWindow(w, r)
+	if !ok {
+		return
+	}
 	// Paged by ?page and ?page_size (?limit= still sizes the page for older clients, up to 200); ordered by use then identity so page boundaries are stable.
 	pg, ok := readPage(w, r, 200)
 	if !ok {
 		return
 	}
-	// The search text travels in X-Usage-Search (a username or room number; edged logs request lines). ?q= is still read for an older console.
+	// The search text travels only in X-Usage-Search (a username or room number; edged logs request lines), and
+	// readSearch bounds its length (audit P9 L11).
 	raw, ok := readSearch(w, r, usageSearchHeader)
 	if !ok {
 		return
-	}
-	if raw == "" {
-		raw = r.URL.Query().Get("q")
 	}
 	q := likeEscape(normaliseSourceQuery(raw))
 
@@ -731,7 +763,10 @@ func (s *server) getSourceUsage(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusNotFound, "not_found", "no such access source at this site")
 		return
 	}
-	from, to := parseWindow(r)
+	from, to, ok := readWindow(w, r)
+	if !ok {
+		return
+	}
 	out, err := s.readSourceUsage(r.Context(), kind, id, from, to)
 	switch {
 	case errors.Is(err, errNoSuchSource):

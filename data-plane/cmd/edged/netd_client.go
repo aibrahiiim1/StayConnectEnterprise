@@ -55,7 +55,7 @@ func (c *netdClient) call(ctx context.Context, method, path string, body any) (i
 func (c *netdClient) proxy(w http.ResponseWriter, r *http.Request, method, path string, body any) {
 	st, raw, err := c.call(r.Context(), method, path, body)
 	if err != nil {
-		jsonErr(w, http.StatusBadGateway, "netd_unreachable", err.Error())
+		internalErr(w, r, http.StatusBadGateway, "netd_unreachable", err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

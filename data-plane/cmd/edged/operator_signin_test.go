@@ -172,6 +172,29 @@ func TestDummyHashCostsTheSameAsARealOne(t *testing.T) {
 	}
 }
 
+// P9 L3: a stored hash's own argon2 parameters are bounded before argon2 runs, so a hash written outside edged
+// cannot make one sign-in allocate gigabytes. The old verifier would have run argon2 with m=4 GiB here.
+func TestVerifyPasswordRefusesAHashWithHostileParameters(t *testing.T) {
+	real, err := hashPassword("pw-for-bounds")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := strings.Split(real, "$")
+	for _, params := range []string{"m=4194304,t=1,p=4", "m=65536,t=1000,p=4", "m=65536,t=1,p=255"} {
+		hostile := strings.Join([]string{"", parts[1], parts[2], params, parts[4], parts[5]}, "$")
+		start := time.Now()
+		if verifyPassword("pw-for-bounds", hostile) {
+			t.Errorf("%s: a hash outside the verifier bounds must not verify", params)
+		}
+		if d := time.Since(start); d > 200*time.Millisecond {
+			t.Errorf("%s: refused only after %v; argon2 must not run", params, d)
+		}
+	}
+	if !verifyPassword("pw-for-bounds", real) {
+		t.Fatal("a hash edged wrote must still verify")
+	}
+}
+
 func TestLoginRefusesAnOversizedBodyBeforeTouchingTheDatabase(t *testing.T) {
 	s := &server{sessions: newSessionStore(time.Hour)} // no database: reaching it would panic
 	body := `{"email":"a@b.c","password":"` + strings.Repeat("x", authBodyLimit) + `"}`
@@ -362,6 +385,7 @@ func TestSigninProtectionBoundsMatchTheMigration(t *testing.T) {
 // The throttle counts the address Caddy sets in X-Real-IP, not a value a browser could put first in X-Forwarded-For.
 func TestClientIPPrefersTheAddressCaddySets(t *testing.T) {
 	r := httptest.NewRequest("POST", "/edge/v1/auth/login", nil)
+	r.RemoteAddr = "127.0.0.1:40000" // the appliance's proxy
 	r.Header.Set("X-Forwarded-For", "10.9.9.9, 198.51.100.7")
 	r.Header.Set("X-Real-IP", "198.51.100.7")
 	if got := clientIP(r); got != "198.51.100.7" {
@@ -370,5 +394,17 @@ func TestClientIPPrefersTheAddressCaddySets(t *testing.T) {
 	r.Header.Del("X-Real-IP")
 	if got := clientIP(r); got != "10.9.9.9" {
 		t.Fatalf("without X-Real-IP the first forwarded address is used, got %q", got)
+	}
+}
+
+// P9 L5: a peer that is not the loopback proxy cannot choose its address with forwarding headers.
+func TestClientIPIgnoresForwardingHeadersFromANonLoopbackPeer(t *testing.T) {
+	r := httptest.NewRequest("POST", "/edge/v1/auth/login", nil)
+	r.RemoteAddr = "198.51.100.4:50002"
+	r.Header.Set("X-Real-IP", "10.1.1.1")
+	r.Header.Set("X-Forwarded-For", "10.2.2.2")
+	r.Header.Set("True-Client-IP", "10.3.3.3")
+	if got := clientIP(r); got != "198.51.100.4" {
+		t.Fatalf("clientIP = %q, want the peer address", got)
 	}
 }

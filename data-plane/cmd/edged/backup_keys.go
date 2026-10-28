@@ -159,7 +159,7 @@ func (s *server) addBackupKeyHolder(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusConflict, "awaiting_assignment", "this appliance has no site yet")
 		return
 	}
-	actor, ok := s.portalStepUp(w, r, in.Password)
+	actor, ok := s.stepUp(w, r, in.Password)
 	if !ok {
 		return
 	}
@@ -228,7 +228,7 @@ func (s *server) removeBackupKeyHolder(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "reason_required", "a bounded reason (4-500 characters) is required")
 		return
 	}
-	actor, ok := s.portalStepUp(w, r, in.Password)
+	actor, ok := s.stepUp(w, r, in.Password)
 	if !ok {
 		return
 	}

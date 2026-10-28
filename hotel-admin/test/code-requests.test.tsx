@@ -44,6 +44,16 @@ describe("Code requests", () => {
     expect(await screen.findByText("482913")).toBeTruthy();
   });
 
+  it("asks for a reason of at least four characters before revealing, like every other reveal", async () => {
+    render(<CodeRequestsCard roles={["hotel_it_manager"]} />);
+    fireEvent.click(await screen.findByRole("button", { name: /show code/i }));
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "ok" } });
+    fireEvent.change(screen.getByLabelText("Confirm your password"), { target: { value: "pw" } });
+    fireEvent.click(screen.getAllByRole("button", { name: /show code/i }).pop()!);
+    expect(await screen.findByText(/Give a reason: 4 to 500 characters/)).toBeTruthy();
+    expect(post).not.toHaveBeenCalled();
+  });
+
   it("never offers to show an existing client's code, and says why", async () => {
     g.mockResolvedValue({ ...resp, requests: [{ ...pending, code_available: false, existing_client: true }] });
     render(<CodeRequestsCard roles={["front_office_operator"]} />);

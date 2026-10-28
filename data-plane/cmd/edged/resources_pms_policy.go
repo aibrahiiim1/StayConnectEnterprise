@@ -626,11 +626,6 @@ func (s *server) clearPMSRoute(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"guest_network_id": gnID, "removed": tag.RowsAffected()})
 }
 
-type policyOut struct {
-	routingState
-	Mode string `json:"mode"`
-}
-
 func (s *server) listPMSRouting(w http.ResponseWriter, r *http.Request) {
 	routes, err := s.routesForInterface(r, "")
 	if err != nil {

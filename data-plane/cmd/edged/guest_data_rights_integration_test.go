@@ -47,20 +47,24 @@ func TestIntegration_GuestDataRights_FindExportErase(t *testing.T) {
 	}
 
 	// Who may: site_admin and the IT manager; not the desk.
-	q := "/guest-data-rights/search?q=" + "ada-" + sfx
-	st, body := f.do(t, "GET", q, nil)
+	q := "ada-" + sfx
+	st, body := f.searchGuestData(t, q)
 	matches, _ := body["matches"].([]any)
 	if st != 200 || len(matches) != 2 {
 		t.Fatalf("search by address = %d %v, want the account and the identity", st, body)
 	}
-	if st, body := f.do(t, "GET", "/guest-data-rights/search?q=02:AA:BB:CC:DD:01", nil); st != 200 || len(body["matches"].([]any)) != 1 {
+	// P9 L11: search text in the URL is no longer read, so it cannot end up in proxy logs.
+	if st, _ := f.do(t, "GET", "/guest-data-rights/search?q="+q, nil); st != 400 {
+		t.Fatalf("a ?q= search must be refused, got %d", st)
+	}
+	if st, body := f.searchGuestData(t, "02:AA:BB:CC:DD:01"); st != 200 || len(body["matches"].([]any)) != 1 {
 		t.Fatalf("search by MAC = %d %v, want the account that used the device", st, body)
 	}
-	if st, _ := newAPIIn(t, f.tenant, "hotel_it_manager").do(t, "GET", q, nil); st != 200 {
+	if st, _ := newAPIIn(t, f.tenant, "hotel_it_manager").searchGuestData(t, q); st != 200 {
 		t.Fatalf("the IT manager cannot search: %d", st)
 	}
 	for _, role := range []string{"front_office_operator", "guest_relations_operator", "site_viewer"} {
-		if st, _ := newAPIIn(t, f.tenant, role).do(t, "GET", q, nil); st != 403 {
+		if st, _ := newAPIIn(t, f.tenant, role).searchGuestData(t, q); st != 403 {
 			t.Fatalf("%s reached guest data rights: %d", role, st)
 		}
 	}
@@ -191,7 +195,7 @@ func TestIntegration_GuestDataRights_FindExportErase(t *testing.T) {
 	}
 
 	// The search no longer finds the account; erasing the identity too leaves nothing.
-	st, body = f.do(t, "GET", q, nil)
+	st, body = f.searchGuestData(t, q)
 	matches, _ = body["matches"].([]any)
 	if st != 200 || len(matches) != 1 || matches[0].(map[string]any)["kind"] != "principal" {
 		t.Fatalf("search after erasure = %v", body)
@@ -199,7 +203,7 @@ func TestIntegration_GuestDataRights_FindExportErase(t *testing.T) {
 	if st, body := f.do(t, "POST", "/guest-data-rights/erase", req("principal", principal, "same request", f.password)); st != 200 {
 		t.Fatalf("erase identity = %d %v", st, body)
 	}
-	if st, body := f.do(t, "GET", q, nil); st != 200 || len(body["matches"].([]any)) != 0 {
+	if st, body := f.searchGuestData(t, q); st != 200 || len(body["matches"].([]any)) != 0 {
 		t.Fatalf("search after both erasures = %v", body)
 	}
 	if st, _ := f.do(t, "POST", "/guest-data-rights/erase", req("account", acct, "again", f.password)); st != 200 {
@@ -212,11 +216,11 @@ func TestIntegration_GuestDataRights_ErasesAStay(t *testing.T) {
 	f := newAPI(t)
 	sfx := fmt.Sprint(time.Now().UnixNano())
 	stay := seedGuestDataStay(t, f, "R-OUT-"+sfx, "CHECKED_OUT")
-	st, body := f.do(t, "GET", "/guest-data-rights/search?q=R-OUT-"+sfx, nil)
+	st, body := f.searchGuestData(t, "R-OUT-"+sfx)
 	if m, _ := body["matches"].([]any); st != 200 || len(m) != 1 {
 		t.Fatalf("search by reservation = %d %v", st, body)
 	}
-	if st, body := f.do(t, "GET", "/guest-data-rights/search?q=lovelace", nil); st != 200 || len(body["matches"].([]any)) != 1 {
+	if st, body := f.searchGuestData(t, "lovelace"); st != 200 || len(body["matches"].([]any)) != 1 {
 		t.Fatalf("search by guest name = %d %v", st, body)
 	}
 	st, body = f.do(t, "POST", "/guest-data-rights/erase", map[string]any{"kind": "stay", "id": stay, "reason": "guest asked", "password": f.password})
@@ -451,7 +455,7 @@ func TestIntegration_GuestDataRights_OneGuestOfASharedStay(t *testing.T) {
 	}
 
 	// The search offers each guest, not the stay.
-	st, body := f.do(t, "GET", "/guest-data-rights/search?q="+res, nil)
+	st, body := f.searchGuestData(t, res)
 	kinds := map[string]int{}
 	for _, m := range body["matches"].([]any) {
 		kinds[m.(map[string]any)["kind"].(string)]++
@@ -494,7 +498,7 @@ func TestIntegration_GuestDataRights_OneGuestOfASharedStay(t *testing.T) {
 	}
 
 	// Bob is now the only guest: the search offers the stay, and erasing him is the whole stay.
-	st, body = f.do(t, "GET", "/guest-data-rights/search?q="+res, nil)
+	st, body = f.searchGuestData(t, res)
 	if m, _ := body["matches"].([]any); st != 200 || len(m) != 1 || m[0].(map[string]any)["kind"] != "stay" {
 		t.Fatalf("search after = %d %v", st, body)
 	}

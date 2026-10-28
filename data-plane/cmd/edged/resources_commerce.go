@@ -352,7 +352,9 @@ func (s *server) listCommerceQuotes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) listCommercePurchases(w http.ResponseWriter, r *http.Request) {
-	p, disabled, err := s.commerce.Purchases(r.Context(), s.tenantID, s.siteID, 100)
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+	p, disabled, err := s.commerce.Purchases(ctx, s.tenantID, s.siteID, 100)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "list failed")
 		return

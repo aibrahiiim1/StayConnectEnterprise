@@ -273,7 +273,7 @@ func TestIntegration_GuestDataIsolation_NoOtherSitesGuest(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("sign in at the other site: %v", err)
 	}
-	st, body := f.do(t, "GET", "/guest-data-rights/search?q="+email, nil)
+	st, body := f.searchGuestData(t, email)
 	if m, _ := body["matches"].([]any); st != 200 || len(m) != 0 {
 		t.Fatalf("another site's guest was offered: %d %v", st, body)
 	}

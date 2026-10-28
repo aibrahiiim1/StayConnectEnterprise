@@ -56,8 +56,9 @@ describe("session identity re-validation", () => {
     await act(async () => {});
     const settled = renders;
     get.mockResolvedValue(who(["frontdesk"]));
+    // Async advance: each re-validation settles before the next tick (usePoll skips a tick while one is pending).
     await act(async () => {
-      vi.advanceTimersByTime(WHOAMI_REVALIDATE_MS * 3);
+      await vi.advanceTimersByTimeAsync(WHOAMI_REVALIDATE_MS * 3);
     });
     expect(get).toHaveBeenCalledTimes(4);
     expect(renders).toBe(settled);

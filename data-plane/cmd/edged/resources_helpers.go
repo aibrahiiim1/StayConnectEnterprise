@@ -25,6 +25,8 @@ const (
 	pageSizeDefault = 50
 	pageSizeMax     = 200
 	searchMaxLen    = 100
+	// pageMax keeps (page-1)*page_size far from overflow; a larger page was a 500 (audit P9 L12).
+	pageMax = 100000
 )
 
 type pageReq struct {
@@ -42,8 +44,8 @@ func parsePage(q url.Values, legacyMax int) (pageReq, error) {
 	p := pageReq{Page: 1, Size: pageSizeDefault}
 	if v := q.Get("page"); v != "" {
 		n, err := strconv.Atoi(v)
-		if err != nil || n < 1 {
-			return p, errors.New("page must be a positive whole number")
+		if err != nil || n < 1 || n > pageMax {
+			return p, fmt.Errorf("page must be a whole number from 1 to %d", pageMax)
 		}
 		p.Page = n
 	}

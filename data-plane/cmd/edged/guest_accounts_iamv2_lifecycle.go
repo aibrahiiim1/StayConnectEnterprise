@@ -14,17 +14,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
-
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
 
 type contextT = context.Context
-
-const iamv2MethodAccount = iamv2.MethodAccount
-
-func (s *server) iamv2AccountAuthority() bool {
-	return s.iamv2Cfg.Enabled(iamv2MethodAccount)
-}
 
 // iamv2Account is not edgeGuestAccount: absent fields are omitted, never filled with a zero time or a legacy
 // value. created_at is NULL (omitted) for accounts created before it was recorded.
@@ -163,8 +155,8 @@ func (s *server) listGuestAccountsIAMv2(w http.ResponseWriter, r *http.Request) 
 	page, size := 1, accountsPageSizeDefault
 	if v := qv.Get("page"); v != "" {
 		n, err := strconv.Atoi(v)
-		if err != nil || n < 1 {
-			jsonErr(w, http.StatusBadRequest, "bad_request", "page must be a positive whole number")
+		if err != nil || n < 1 || n > pageMax {
+			jsonErr(w, http.StatusBadRequest, "bad_request", fmt.Sprintf("page must be a whole number from 1 to %d", pageMax))
 			return
 		}
 		page = n

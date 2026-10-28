@@ -254,7 +254,15 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 		})
 	})
 	f.srv = httptest.NewServer(r)
-	t.Cleanup(func() { f.srv.Close(); p.Close() })
+	t.Cleanup(func() {
+		f.srv.Close()
+		// Deliberate wrong passwords leave step-up throttle rows for this operator and the loopback address; left
+		// behind, a second suite on the same database failed with 429 (audit P9 CC4).
+		_, _ = p.Exec(context.Background(), `DELETE FROM public.operator_signin_throttle
+		     WHERE (scope = $1 AND key_hash = $2) OR (scope = $3 AND key_hash = $4)`,
+			scopeReauth, throttleKey(scopeReauth, f.operator), scopeIP, throttleKey(scopeIP, "127.0.0.1"))
+		p.Close()
+	})
 	return f
 }
 

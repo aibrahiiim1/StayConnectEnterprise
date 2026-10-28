@@ -8,7 +8,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { api, Whoami } from "@/lib/api";
+import { api } from "@/lib/api";
 import { canRead, canWrite } from "@/lib/roles";
 import { SiteModule, SiteModules } from "@/lib/payment-admin";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 import { ArrowUpRight, BedDouble, CreditCard, Gift, Ticket } from "lucide-react";
 import { CardPaymentConfig } from "./card-config";
 import { CodeList } from "./codes";
+import { useOperatorRoles } from "@/lib/whoami-context";
 
 type Tone = "ok" | "warn" | "err" | "default" | "info";
 
@@ -71,10 +72,7 @@ function moduleState(m: SiteModule | undefined): MethodState {
 }
 
 export default function PaymentMethodsPage() {
-  const [roles, setRoles] = useState<string[] | null>(null);
-  useEffect(() => {
-    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
-  }, []);
+  const roles = useOperatorRoles();
   const readable = roles === null ? false : canRead("payment-providers", roles);
   const writable = roles === null ? false : canWrite("payment-providers", roles);
 

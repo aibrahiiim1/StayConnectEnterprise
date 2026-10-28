@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, CircleSlash, Gauge, Layers, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
-import { api, ApiError, ListResp, Whoami } from "@/lib/api";
+import { api, ApiError, ListResp } from "@/lib/api";
 import { canWrite } from "@/lib/roles";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { deletePlan, getPlanDeletability, type RevisionInfo } from "@/lib/api/commerce";
@@ -38,6 +38,7 @@ import {
   stalePackagesFor, repinPayload, repinOutcomeMessage, repinSkippedMessage, commercialTermsOf,
   type PackageCurrentDTO,
 } from "@/lib/repin";
+import { useOperatorRoles } from "@/lib/whoami-context";
 
 type PlanSummary = {
   plan_id: string; code: string; enabled: boolean;
@@ -68,10 +69,7 @@ export default function ServicePlansPage() {
   const [formErr, setFormErr] = useState<unknown>(null);
   const [unavailable, setUnavailable] = useState(false);
   // Fails closed while loading; edged enforces the real gate.
-  const [roles, setRoles] = useState<string[] | null>(null);
-  useEffect(() => {
-    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
-  }, []);
+  const roles = useOperatorRoles();
   const writable = roles !== null && canWrite("commercial-packages", roles);
   const [showNew, setShowNew] = useState(false);
   const [prefill, setPrefill] = useState<PlanSummary | null>(null);

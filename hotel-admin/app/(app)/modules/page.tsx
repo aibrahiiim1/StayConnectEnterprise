@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowUpRight } from "lucide-react";
-import { api, Whoami } from "@/lib/api";
+import { api } from "@/lib/api";
 import { PageHeader, PageShell } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,6 +20,7 @@ import { ConfirmDialog } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
 import { useCapabilities } from "@/lib/capabilities";
 import { moduleReasonWords, READINESS_WORDS, SITE_TYPE_LABELS, type ModuleReport, type ModuleState } from "@/lib/modules";
+import { useOperatorRoles } from "@/lib/whoami-context";
 
 const CONFIGURE: Record<string, { href: string; label: string }> = {
   hospitality: { href: "/pms-interfaces", label: "PMS connection" },
@@ -60,11 +61,8 @@ const RECORDS: Record<string, { href: string; label: string; surface: string }[]
 
 export default function ModulesPage() {
   const toast = useToast();
-  const [roles, setRoles] = useState<string[] | null>(null);
+  const roles = useOperatorRoles();
   const caps = useCapabilities();
-  useEffect(() => {
-    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
-  }, []);
   const mayToggle = roles !== null && (roles.includes("site_admin") || roles.includes("tenant_admin"));
 
   const [report, setReport] = useState<ModuleReport | null>(null);

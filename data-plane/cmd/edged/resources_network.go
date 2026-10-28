@@ -646,7 +646,7 @@ func (s *server) netApply(w http.ResponseWriter, r *http.Request) {
 			unrevertedStagedChanges(w, everything, rerr, "the appliance's network service could not be reached")
 			return
 		}
-		jsonErr(w, http.StatusBadGateway, "netd_unreachable", err.Error())
+		internalErr(w, r, http.StatusBadGateway, "netd_unreachable", err)
 		return
 	}
 	var res struct {
@@ -722,7 +722,7 @@ func (s *server) dhcpLeases(w http.ResponseWriter, r *http.Request) {
 	}
 	st, raw, err := s.netd.call(r.Context(), http.MethodGet, "/v1/leases", nil)
 	if err != nil {
-		jsonErr(w, http.StatusBadGateway, "netd_unreachable", err.Error())
+		internalErr(w, r, http.StatusBadGateway, "netd_unreachable", err)
 		return
 	}
 	if st != http.StatusOK {
@@ -733,7 +733,7 @@ func (s *server) dhcpLeases(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := pageLeases(raw, search, pg)
 	if err != nil {
-		jsonErr(w, http.StatusBadGateway, "dhcp_leases_unreadable", err.Error())
+		internalErr(w, r, http.StatusBadGateway, "dhcp_leases_unreadable", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -823,6 +823,20 @@ func (s *server) createReservation(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
+	var subnet string
+	if err := s.db.QueryRow(ctx, `SELECT text(subnet_cidr) FROM guest_networks WHERE id::text=$1`, in.GuestNetworkID).
+		Scan(&subnet); err != nil {
+		if isNoRows(err) {
+			jsonErr(w, http.StatusBadRequest, "bad_request", "guest_network_id does not name a client network")
+			return
+		}
+		jsonErr(w, http.StatusInternalServerError, "internal", "the client network could not be read")
+		return
+	}
+	if code, msg := reservedIPRefusal(in.ReservedIP, subnet); code != "" {
+		jsonErr(w, http.StatusBadRequest, code, msg)
+		return
+	}
 	var id string
 	err := s.db.QueryRow(ctx, `
         INSERT INTO dhcp_reservations (guest_network_id, mac, reserved_ip, hostname, enabled)
@@ -852,6 +866,22 @@ func (s *server) updateReservation(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
+	if strings.TrimSpace(in.ReservedIP) != "" {
+		var subnet string
+		if err := s.db.QueryRow(ctx, `SELECT text(gn.subnet_cidr) FROM dhcp_reservations d
+		     JOIN guest_networks gn ON gn.id = d.guest_network_id WHERE d.id::text=$1`, id).Scan(&subnet); err != nil {
+			if isNoRows(err) {
+				jsonErr(w, http.StatusNotFound, "not_found", "reservation not found")
+				return
+			}
+			jsonErr(w, http.StatusInternalServerError, "internal", "the reservation could not be read")
+			return
+		}
+		if code, msg := reservedIPRefusal(in.ReservedIP, subnet); code != "" {
+			jsonErr(w, http.StatusBadRequest, code, msg)
+			return
+		}
+	}
 	tag, err := s.db.Exec(ctx, `
         UPDATE dhcp_reservations SET
           reserved_ip=COALESCE(NULLIF($2,'')::inet, reserved_ip),
@@ -997,7 +1027,7 @@ func (s *server) confirmRevision(w http.ResponseWriter, r *http.Request) {
 		map[string]string{"revision_id": id, "actor": s.actor(r)})
 	if err != nil {
 		s.audit(r, "network.revision.confirm_failed", "network_revision", id, map[string]any{"error": err.Error()})
-		jsonErr(w, http.StatusBadGateway, "netd_unreachable", err.Error())
+		internalErr(w, r, http.StatusBadGateway, "netd_unreachable", err)
 		return
 	}
 	s.audit(r, "network.revision.confirmed", "network_revision", id, map[string]any{"kept": st < 300, "status": st})
@@ -1037,7 +1067,7 @@ func (s *server) rollbackRevision(w http.ResponseWriter, r *http.Request) {
 		map[string]string{"revision_id": id, "actor": s.actor(r)})
 	if err != nil {
 		s.audit(r, "network.revision.rollback_failed", "network_revision", id, map[string]any{"error": err.Error()})
-		jsonErr(w, http.StatusBadGateway, "netd_unreachable", err.Error())
+		internalErr(w, r, http.StatusBadGateway, "netd_unreachable", err)
 		return
 	}
 	s.audit(r, "network.revision.rolledback", "network_revision", id, map[string]any{"undone": st < 300, "status": st})

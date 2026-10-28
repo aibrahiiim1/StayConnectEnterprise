@@ -340,23 +340,31 @@ func redactMap(m map[string]any) {
 
 // Read from the audit log, the only place provenance is written. Named so a test can execute this exact text;
 // the `public.` qualifiers are load-bearing for that test, which retargets the statement at a schema with production column types.
+// Each side is filtered by its action and by this interface's revision ids ($1) BEFORE the full join: with the
+// filters in the ON/WHERE of a full join Postgres can push neither down, and the statement joined the whole audit
+// log to itself (performance audit D7-M1: cancelled at 600 s on 2 million rows; 0.63 s filtered first).
 const pmsRevisionProvenanceSQL = `
-	SELECT COALESCE(a.payload->>'revision_id', p.payload->>'revision_id') AS rev_id,
+	WITH a AS (
+	    SELECT payload->>'revision_id' AS rev_id, ts, actor_id
+	      FROM public.audit_log
+	     WHERE action = 'pms_interface_revision.authored' AND payload->>'revision_id' = ANY($1::text[])),
+	     p AS (
+	    SELECT payload->>'revision_id' AS rev_id, ts, actor_id, payload->>'reason_code' AS reason_code
+	      FROM public.audit_log
+	     WHERE action = 'pms_interface.revision_published' AND payload->>'revision_id' = ANY($1::text[]))
+	SELECT COALESCE(a.rev_id, p.rev_id) AS rev_id,
 	       min(a.ts) AS authored_at, min(p.ts) AS published_at,
 	       COALESCE(max(p.actor_id::text), max(a.actor_id::text), '') AS actor_id,
 	       COALESCE(max(op.display_name), max(op.email), '') AS actor_label,
-	       COALESCE(max(p.payload->>'reason_code'), '') AS reason_code
-	  FROM public.audit_log a
-	  FULL JOIN public.audit_log p
-	         ON p.action='pms_interface.revision_published'
-	        AND p.payload->>'revision_id' = a.payload->>'revision_id'
+	       COALESCE(max(p.reason_code), '') AS reason_code
+	  FROM a
+	  FULL JOIN p ON p.rev_id = a.rev_id
 	  -- COMPARED AS TEXT, DELIBERATELY. audit_log.actor_id is text and operators.id is uuid, so the direct
 	  -- comparison is not a style question: PostgreSQL has no uuid = text operator and rejects the whole
 	  -- statement. Casting the other way (actor_id::uuid) would parse every actor string in the audit log
 	  -- and throw on the first that is not a uuid -- and actor_id is text precisely because it is not
 	  -- guaranteed to be one. Widening uuid to text always succeeds.
 	  LEFT JOIN public.operators op ON op.id::text = COALESCE(p.actor_id, a.actor_id)
-	 WHERE a.action='pms_interface_revision.authored' OR p.action='pms_interface.revision_published'
 	 GROUP BY 1`
 
 func (s *server) listPMSInterfaceRevisions(w http.ResponseWriter, r *http.Request) {
@@ -406,7 +414,11 @@ func (s *server) listPMSInterfaceRevisions(w http.ResponseWriter, r *http.Reques
 	// logged and the response carries provenance_status, so "says nothing" and "could not be read" differ.
 	provenanceStatus := "AVAILABLE"
 	if len(out) > 0 {
-		prov, err := s.db.Query(ctx, pmsRevisionProvenanceSQL)
+		revIDs := make([]string, len(out))
+		for i := range out {
+			revIDs[i] = out[i].ID
+		}
+		prov, err := s.db.Query(ctx, pmsRevisionProvenanceSQL, revIDs)
 		switch {
 		case err != nil:
 			provenanceStatus = "UNAVAILABLE"

@@ -60,6 +60,20 @@ func TestUpdateNetworkRefusesHostileText(t *testing.T) {
 	}
 }
 
+func TestReservedIPMustBeInsideTheSubnet(t *testing.T) {
+	for _, tc := range []struct{ ip, subnet, code string }{
+		{"10.0.0.5", "10.0.0.0/24", ""},
+		{"10.0.1.5", "10.0.0.0/24", "reservation_outside_subnet"},
+		{"not-an-ip", "10.0.0.0/24", "bad_ip"},
+		{"2001:db8::1", "10.0.0.0/24", "bad_ip"},
+		{"10.0.0.5", "", ""}, // no readable subnet: netd's apply-time check stands
+	} {
+		if code, _ := reservedIPRefusal(tc.ip, tc.subnet); code != tc.code {
+			t.Errorf("reservedIPRefusal(%q, %q) = %q, want %q", tc.ip, tc.subnet, code, tc.code)
+		}
+	}
+}
+
 func TestReservationHostnameIsValidated(t *testing.T) {
 	s := &server{}
 	rec := postJSON(s.createReservation, http.MethodPost, "/dhcp/reservations",
