@@ -344,7 +344,7 @@
   "next_authorized_action": "Work normal missions under the PRODUCT-OWNER-LED DELIVERY model D42 (2026-09-26): implement, target-test, deploy completed changes to PRE-LIVE 172.21.60.25 under the standing deployment decision, stop at READY FOR PRODUCT OWNER TESTING, and merge only after explicit Product Owner acceptance (po-merge-approved). The comprehensive validation runs only on 'FULL CHECK THE WHOLE CODE'. No agent requests PRE-LIVE deployment approval again.",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase7-Plan.md",
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
-  "latest_accepted_po_decision": "D76",
+  "latest_accepted_po_decision": "D77",
   "current_state_facts": {
     "_note": "MACHINE-READABLE CURRENT STATE. Every current-state surface in this repository is validated against these fields by tools/validate-current-state-parity.py, which runs in the Project Governance gate. They exist because prose alone let a contradiction survive a green gate: current_maturity still said an authorization was awaited and iam_v2 was 49/0 while this file already recorded 63 tables and an executed Live Increment 9. A fact that is only asserted in sentences cannot be diffed; a fact recorded here can be.",
     "phase": "7",
@@ -1278,7 +1278,7 @@
     "prelive_phase4_flag_posture": "PRE-LIVE 172.21.60.25 since 2026-09-30 (D47): scd runs STAYCONNECT_PHASE4_MASTER, _PAYMENT, _PAYMENT_PROVIDER, _POSTING, _FINANCIAL_REVIEW, _OUTBOX_WORKER and _PMS_TRANSMIT; pmsd runs _MASTER, _OUTBOX_WORKER and _PMS_TRANSMIT; edged runs _MASTER, _POSTING and _FINANCIAL_REVIEW. STAYCONNECT_PAYMENT_LIVE_ALLOWED is set nowhere. Real PMS postings ever: one (T0204, USD 1.00, PA OK). Payment-provider traffic ever: none.",
     "phase4_flags_off_scope": "phase4_flags_off records the DELIVERED REPOSITORY configuration (no file in the tree enables a Phase-4 flag; scripts/ci/phase4-dark-check.sh asserts it). It is not a statement about the PRE-LIVE environment, whose posture is recorded in prelive_phase4_flag_posture."
   },
-  "latest_transition_id": "T0261",
+  "latest_transition_id": "T0262",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1773,20 +1773,20 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "MODULES_FOLLOW_THE_LICENCE",
-    "decision": "D76 (modules follow the licence: the Hotel module installed; room sign-in only where it is in use, 2026-10-28).",
-    "decision_note": "Deployed to the test appliance 172.21.96.97 only (release onegate-appliance-8b18aec418bb). Not deployed to PRE-LIVE; the production Central is unaffected (no Central change).",
-    "manifest": "docs/manifests/ModulesLicence-change-manifest.md",
-    "base": "474b782a058eeb8679bd3b94c1ea3f6982d0bf64",
-    "base_note": "Master after the merge of PR #259 (474b782a).",
-    "head": "8b18aec4",
-    "head_note": "The last content commit of branch fix/modules-licence-driven. Governance commits follow it.",
-    "transition": "T0261",
-    "previous_delivery": "T0260",
-    "pr": 260,
-    "pr_state": "PR #260; its protected merge is authorised by the Product Owner's request",
-    "note": "T0261. Go-Live not authorised.",
-    "branch": "fix/modules-licence-driven"
+    "kind": "FINANCIAL_MODULES_CONFIGURABLE",
+    "decision": "D77 (available means configurable; execution separate; nothing unimplemented available, 2026-10-28).",
+    "decision_note": "Deployed to the test appliance 172.21.96.97 only (release onegate-appliance-d25999781b1a). Not deployed to PRE-LIVE or Central. No provider call, posting or financial transaction was made.",
+    "manifest": "docs/manifests/FinancialModulesConfigurable-change-manifest.md",
+    "base": "f99716d87d4bc0d6bfb82c6ef7db2c3611f7bedb",
+    "base_note": "Master after the merge of PR #260 (f99716d8).",
+    "head": "d2599978",
+    "head_note": "The last content commit of branch fix/financial-modules-configurable. Governance commits follow it.",
+    "transition": "T0262",
+    "previous_delivery": "T0261",
+    "pr": 261,
+    "pr_state": "PR #261; its protected merge is authorised by the Product Owner's mission",
+    "note": "T0262. Go-Live not authorised.",
+    "branch": "fix/financial-modules-configurable"
   },
   "onboarding_reconciliation": {
     "decision": "D37",

@@ -85,8 +85,46 @@ describe("Modules licensed but not installed", () => {
     });
     render(<ModulesPage />);
     expect(await screen.findByText(/predates the Hotel module/)).toBeInTheDocument();
-    expect(screen.getByText(/Card payment calls a payment provider/)).toBeInTheDocument();
-    expect(screen.getByText(/Room charge posts charges to the PMS/)).toBeInTheDocument();
+    expect(screen.getByText(/predates configurable card payment/)).toBeInTheDocument();
+    expect(screen.getByText(/predates configurable room charge/)).toBeInTheDocument();
     expect(screen.queryByText("This appliance does not run this module.")).toBeNull();
+  });
+});
+
+describe("Modules with no implementation in this release", () => {
+  it("never shows high availability or white label as available, and says why", async () => {
+    (api.get as ReturnType<typeof vi.fn>).mockImplementation((p: string) => {
+      if (p === "/auth/whoami") return Promise.resolve({ roles: ["site_admin"] });
+      const off = { deployed: false, licensed: true, enabled: true, ready: true, reasons: ["NOT_DEPLOYED"] };
+      return Promise.resolve({
+        site_type: "HOTEL", license_state: "Active", deployment: {},
+        modules: { ha: mod("ha", "High availability", off), white_label: mod("white_label", "White label", off) },
+      });
+    });
+    render(<ModulesPage />);
+    expect(await screen.findByText(/OneGate does not provide high availability yet/)).toBeInTheDocument();
+    expect(screen.getByText(/Portal branding is available to every site/)).toBeInTheDocument();
+    for (const name of ["High availability", "White label"]) {
+      const card = screen.getByText(name).closest("div.flex.flex-col, [class*='flex-col']") as HTMLElement;
+      expect((within(card).getByText("Available").nextElementSibling as HTMLElement).textContent).toBe("No");
+      // Nothing to run, so nothing is claimed ready.
+      expect((within(card).getByText("Ready").nextElementSibling as HTMLElement).textContent).toBe("—");
+    }
+  });
+});
+
+describe("A configurable module that may not run", () => {
+  it("shows the readiness reason and never the bare NOT_READY code", async () => {
+    (api.get as ReturnType<typeof vi.fn>).mockImplementation((p: string) => {
+      if (p === "/auth/whoami") return Promise.resolve({ roles: ["site_admin"] });
+      return Promise.resolve({
+        site_type: "HOTEL", license_state: "Active", deployment: {},
+        modules: { card_payment: mod("card_payment", "Card payment", { deployed: true, licensed: true, enabled: true, switchable: true,
+          ready: false, reasons: ["NOT_READY"], readiness: ["PROVIDER_CALLS_NOT_AUTHORISED"] }) },
+      });
+    });
+    render(<ModulesPage />);
+    expect(await screen.findByText(/not authorised to contact a payment provider/)).toBeInTheDocument();
+    expect(screen.queryByText("NOT_READY")).toBeNull();
   });
 });

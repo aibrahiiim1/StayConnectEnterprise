@@ -71,6 +71,13 @@ func (s *server) initCard(ctx context.Context, secretsDir string) {
 		return
 	}
 	s.card.key = k
+	// Configurable, not executable: accounts and their sealed credentials can be kept, but without the provider-call
+	// capability no engine exists, nothing is offered to a client and no provider is ever contacted.
+	if !s.ceiling.Available(deployment.CapCardProviderCalls) {
+		s.card.unready = "PROVIDER_CALLS_NOT_AUTHORISED"
+		slog.Info("card payment configurable; provider calls are not authorised on this appliance")
+		return
+	}
 	runtimeDSN := os.Getenv("SCD_PAYMENT_DB_URL")
 	outcomeDSN := os.Getenv(payment.EnvOutcomeDSN)
 	if runtimeDSN == "" || outcomeDSN == "" {
@@ -332,7 +339,8 @@ func (s *server) paymentGardenDomains(ctx context.Context) []string {
 	}
 	snap := s.moduleSnapshot(ctx)
 	st := snap.Modules[lic.ModuleCardPayment]
-	if !(st.Deployed && st.Licensed && st.Enabled) {
+	// The garden opens provider domains to clients who have not signed in: only where checkout can actually run.
+	if !(st.Deployed && st.Licensed && st.Enabled) || !s.ceiling.Available(deployment.CapCardProviderCalls) {
 		return nil
 	}
 	seen := map[string]bool{}
@@ -572,6 +580,12 @@ func (s *server) paymentAccountSave(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) paymentAccountTest(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	// A connection test is a real provider call: refused while provider calls are not authorised, whatever else is set up.
+	if !s.ceiling.Available(deployment.CapCardProviderCalls) {
+		writeJSON(w, http.StatusConflict, map[string]any{"ok": false, "error": "provider_calls_not_authorised",
+			"message": "This appliance is not authorised to contact a payment provider, so the connection cannot be tested."})
+		return
+	}
 	if s.card == nil || !s.card.key.Present() {
 		writeJSON(w, http.StatusConflict, map[string]any{"ok": false, "error": "payment_key_missing"})
 		return

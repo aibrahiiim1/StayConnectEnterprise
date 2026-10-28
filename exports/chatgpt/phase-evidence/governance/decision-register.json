@@ -1146,6 +1146,20 @@
       "does_not_authorize": "Installing or enabling card payment, room charge, PMS posting, LIVE payments or any payment-provider activity; commissioning a PMS; any PRE-LIVE or production change; Go-Live.",
       "implementation": "Branch fix/modules-licence-driven, PR #260, recorded by T0261. deploy/scripts/apply-product-profile.sh (called by provision-fresh-appliance.sh and appliance-install.sh --upgrade); data-plane/cmd/edged roomSignInInScope (modules.go) used by the Default Network readiness and the network overview; hotel-admin moduleReasonWords. Tests: edged TestRoomSignInInScopeOnlyWithTheHotelModuleInUse, hotel-admin modules-page. No migration. Review fix 8b18aec4: Hotel child flags only under an enabled master.",
       "supersedes_in_part": "The installer design that left the PMS surface flags off until commissioning (inventory G9, manual C.10 step 2): only pmsd stays dark now."
+    },
+    {
+      "id": "D77",
+      "decided_on": "2026-10-28",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-10-28",
+      "status": "ACTIVE",
+      "title": "AVAILABLE MEANS CONFIGURABLE HERE; EXECUTION IS A SEPARATE PERMISSION; NOTHING UNIMPLEMENTED IS AVAILABLE (2026-10-28). The product profile installs the card-payment and room-charge configuration domains (STAYCONNECT_PHASE4_MASTER, _PAYMENT, _POSTING). A module's Available column means it can be configured on this appliance; whether it may execute is separate and shows as readiness. Card payment may call a provider only with the new capability card_payment_provider_calls (STAYCONNECT_PHASE4_PAYMENT_PROVIDER): without it no checkout engine, no connection test, no provider domain in the walled garden, never offered. Room charge never runs without transmit. The profile never writes an execution switch and refuses to make an inert one effective. Licence keys with no implementation (high availability, white label) are never reported available, and no readiness is shown for them.",
+      "authorization_evidence": "The Product Owner's mission of 2026-10-28: make every genuinely implemented module included in the appliance licence available for configuration, including Card Payment and Room Charge, with availability reflecting real installed capability; keep licensing, site switches, readiness and execution permissions separate; no real payment-provider calls, PMS posting, financial transactions, PMS configuration changes, PRE-LIVE or Central deployment, or Go-Live; never claim an unimplemented capability is available; verify on the authorised test appliance; protected delivery.",
+      "does_not_authorize": "Any payment-provider call (test or live), LIVE payments, PMS posting, financial transactions, PMS configuration, enabling any execution switch (STAYCONNECT_PHASE4_PAYMENT_PROVIDER, _OUTBOX_WORKER, _PMS_TRANSMIT, _FINANCIAL_REVIEW, STAYCONNECT_PAYMENT_LIVE_ALLOWED), PRE-LIVE or Central deployment, Go-Live.",
+      "implementation": "Branch fix/financial-modules-configurable, PR #261, recorded by T0262. data-plane/internal/deployment ceiling (CapCardPayment = payment domain, new CapCardProviderCalls, ha/white_label never deployed); cmd/scd card_checkout (key loaded for configuration, no engine without provider calls, PROVIDER_CALLS_NOT_AUTHORISED, connection test 409, garden gated); deploy/scripts/apply-product-profile.sh (Phase-4 domains, execution-switch guard); hotel-admin modules and payment-methods wording, no readiness for an unavailable module. Tests: deployment ceiling (3), scd TestConnectionTestRefusedWithoutProviderCalls, hotel-admin modules-page and payment-methods-page. No migration. Review fix d2599978: a financial domain is never added under its own execution switches.",
+      "supersedes_in_part": "D76's statement that card payment and room charge remain uninstalled: they are now installed for configuration only; execution remains unauthorised."
     }
   ]
 }
