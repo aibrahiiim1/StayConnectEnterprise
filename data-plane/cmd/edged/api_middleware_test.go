@@ -9,6 +9,18 @@ import (
 	"testing"
 )
 
+// P9 L2: every API answer, a generated password or voucher code included, is marked uncacheable.
+func TestAPIAnswersAreNotCacheable(t *testing.T) {
+	h := noStore(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]string{"generated_password": "x"})
+	}))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/edge/v1/guest-accounts/x/password", nil))
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control = %q, want no-store", got)
+	}
+}
+
 // P9 M1: a 2 MB body to an ordinary write route is refused; the routes that carry larger payloads still pass.
 func TestRequestBodiesAreBounded(t *testing.T) {
 	var decodeErr error

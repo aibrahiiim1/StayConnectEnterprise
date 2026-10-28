@@ -306,6 +306,7 @@ func main() {
 	r.Route("/edge/v1", func(r chi.Router) {
 		// Every state-changing request, login included, must come from the console's own origin.
 		r.Use(sameOrigin)
+		r.Use(noStore)
 		r.Get("/health", s.health)
 		r.Post("/auth/login", s.login)
 		r.Post("/auth/login/code", s.loginCode)

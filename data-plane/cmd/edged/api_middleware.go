@@ -25,6 +25,16 @@ func bodyLimitFor(path string) int64 {
 	return defaultBodyLimit
 }
 
+// noStore marks every Admin Console API answer uncacheable. Generated passwords, voucher codes and new account
+// credentials are returned in ordinary responses; one header on all of them is simpler and safer than
+// remembering it per handler (audit P9 L2). A handler may still set a stricter value.
+func noStore(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		next.ServeHTTP(w, r)
+	})
+}
+
 // limitRequestBody refuses a declared over-size body with 413 before any handler runs, and caps an undeclared
 // (chunked) one so the read fails at the limit instead of buffering it.
 func limitRequestBody(next http.Handler) http.Handler {
