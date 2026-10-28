@@ -142,7 +142,9 @@ export default function NetworkSettingsPage() {
   async function doConfirm() {
     setBusy(true); setErr(null);
     try {
-      await api.post("/network/system/confirm", {});
+      // The change the operator is looking at; netd refuses to keep a different one (audit P8 L14).
+      const revision = applyResp?.revision_id ?? state?.pending?.revision_id;
+      await api.post("/network/system/confirm", revision ? { revision_id: revision } : {});
       if (timer.current) clearInterval(timer.current);
       setApplyResp(null); setCountdown(0); setValidation(null);
       toast.success("Configuration kept", "The new WAN / LAN settings are now permanent.");

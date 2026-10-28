@@ -1217,6 +1217,8 @@ export type SysNetPending = {
   deadline_unix: number;
   management_url: string;
   backup_path: string;
+  // The pending change's id, once netd reports it: confirm sends it back so a different change is not kept.
+  revision_id?: string;
 };
 
 export type SysNetState = {
@@ -1258,6 +1260,7 @@ export type SysNetApplyResp = {
   deadline_unix?: number;
   message?: string;
   verify?: Record<string, boolean>;
+  revision_id?: string;
 };
 
 export type BackupHealth = {

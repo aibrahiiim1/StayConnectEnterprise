@@ -49,9 +49,28 @@ func (s *server) sysNetApply(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) sysNetConfirm(w http.ResponseWriter, r *http.Request) {
+	// The console sends the revision the operator saw, so netd can refuse to keep a different pending change
+	// (audit P8 L14, edged half). Optional while netd's system-network state does not report it yet.
+	var in struct {
+		RevisionID string `json:"revision_id"`
+	}
+	if r.ContentLength != 0 {
+		if err := decodeJSON(r, &in); err != nil {
+			jsonErr(w, http.StatusBadRequest, "bad_request", "malformed request body")
+			return
+		}
+	}
+	if in.RevisionID != "" && !uuidRe.MatchString(in.RevisionID) {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "revision_id must be the pending change's id")
+		return
+	}
 	sess := sessFrom(r.Context())
 	body := map[string]any{"Actor": sess.Email, "ActorID": sess.OperatorID, "SourceIP": clientIP(r)}
-	s.audit(r, "network.system.confirm", "system_network", "", nil)
+	if in.RevisionID != "" {
+		// Both spellings: netd's request struct may name the field either way, and the other key is ignored.
+		body["RevisionID"], body["revision_id"] = in.RevisionID, in.RevisionID
+	}
+	s.audit(r, "network.system.confirm", "system_network", in.RevisionID, nil)
 	st, raw, err := s.netd.call(r.Context(), http.MethodPost, "/v1/system-network/confirm", body)
 	if err != nil {
 		jsonErr(w, http.StatusBadGateway, "netd_unreachable", err.Error())

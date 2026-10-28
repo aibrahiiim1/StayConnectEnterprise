@@ -343,6 +343,20 @@ describe("WAN / LAN settings", () => {
     expect(await screen.findByText("Change applied — confirmation required")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Keep this configuration" })).toBeTruthy();
   });
+
+  // Audit P8 L14: keeping the change names the pending change the operator is looking at.
+  it("Keep sends the pending change's revision when the appliance reports it", async () => {
+    const rev = "11111111-2222-4333-8444-555555555555";
+    route({
+      "/auth/whoami": IT,
+      "/network/system": { ...STATE, pending: { deadline_unix: Math.floor(Date.now() / 1000) + 120, management_url: "https://192.168.60.25", backup_path: "/b", revision_id: rev } },
+      "/network/system/history": { history: [] },
+    });
+    post.mockResolvedValue({ state: "confirmed" });
+    render(<WanLanPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Keep this configuration" }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith("/network/system/confirm", { revision_id: rev }));
+  });
 });
 
 describe("TLS certificate", () => {
