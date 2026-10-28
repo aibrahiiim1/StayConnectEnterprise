@@ -188,13 +188,15 @@ func (r *pgRepo) UpdateTransport(ctx context.Context, u TransportUpdate) error {
 		string(u.Status), u.LastConnectAttemptAt, u.LastConnectedAt, u.LastHeartbeatAt, u.DisconnectedSince, u.ErrorCode.String())
 }
 
-func (r *pgRepo) UpdateContinuity(ctx context.Context, u ContinuityUpdate) error {
-	return r.cas(ctx, `UPDATE iam_v2.pms_interface_runtime SET
+const updateContinuitySQL = `UPDATE iam_v2.pms_interface_runtime SET
 		continuity_status=$5, last_valid_event_at=COALESCE($6,last_valid_event_at),
 		discontinuity_detected_at=COALESCE($7,discontinuity_detected_at),
 		last_resync_marker_at=COALESCE($8,last_resync_marker_at),
 		last_event_cursor=COALESCE(NULLIF($9,''),last_event_cursor), updated_at=now()
-		WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3 AND runtime_generation=$4`,
+		WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3 AND runtime_generation=$4`
+
+func (r *pgRepo) UpdateContinuity(ctx context.Context, u ContinuityUpdate) error {
+	return r.cas(ctx, updateContinuitySQL,
 		u.TenantID, u.SiteID, u.PMSInterfaceID, u.ExpectedGeneration,
 		string(u.Status), u.LastValidEventAt, u.DiscontinuityAt, u.LastResyncMarkerAt, u.LastEventCursor)
 }
@@ -254,16 +256,17 @@ func (r *pgRepo) AllocateResyncGeneration(ctx context.Context, req ResyncScope) 
 	return g, nil
 }
 
-// insertInboxRow first proves, in the same transaction, that the caller still owns the runtime generation, then inserts.
-func (r *pgRepo) insertInboxRow(ctx context.Context, row InboxRow) (string, error) {
+// beginOwned opens a Stay-capability transaction and proves, under the exact runtime generation, that the caller
+// still owns the interface; the row lock is held to commit.
+func (r *pgRepo) beginOwned(ctx context.Context, row InboxRow) (pgx.Tx, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
 	// Appending to the inbox is a write to the capability-scoped Stay family.
 	if err := writerguard.Open(ctx, tx, writerguard.CapStay); err != nil {
-		return "", err
+		_ = tx.Rollback(ctx)
+		return nil, err
 	}
 	// synchronous ownership proof under the exact runtime generation
 	var owned int
@@ -271,11 +274,34 @@ func (r *pgRepo) insertInboxRow(ctx context.Context, row InboxRow) (string, erro
 		WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3 AND runtime_generation=$4 FOR UPDATE`,
 		row.TenantID, row.SiteID, row.PMSInterfaceID, row.ExpectedGeneration).Scan(&owned)
 	if err != nil {
+		_ = tx.Rollback(ctx)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return "", ErrStaleGeneration
+			return nil, ErrStaleGeneration
 		}
+		return nil, err
+	}
+	return tx, nil
+}
+
+// insertInboxRow first proves, in the same transaction, that the caller still owns the runtime generation, then inserts.
+func (r *pgRepo) insertInboxRow(ctx context.Context, row InboxRow) (string, error) {
+	tx, err := r.beginOwned(ctx, row)
+	if err != nil {
 		return "", err
 	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	id, err := insertRowTx(ctx, tx, row)
+	if err != nil {
+		return id, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+// insertRowTx inserts one inbox row inside an owned transaction.
+func insertRowTx(ctx context.Context, tx pgx.Tx, row InboxRow) (string, error) {
 	payload := row.Payload
 	if len(payload) == 0 {
 		payload = []byte("{}")
@@ -295,7 +321,7 @@ func (r *pgRepo) insertInboxRow(ctx context.Context, row InboxRow) (string, erro
 		ON CONFLICT (tenant_id, site_id, pms_interface_id, resync_generation, external_event_identity) WHERE admission_kind = 'RESYNC' DO NOTHING`
 	}
 	var id string
-	err = tx.QueryRow(ctx, `INSERT INTO iam_v2.stay_events
+	err := tx.QueryRow(ctx, `INSERT INTO iam_v2.stay_events
 		(tenant_id, site_id, pms_interface_id, external_event_identity, event_type,
 		 pms_timestamp_raw, pms_timestamp_utc, source_timezone, received_at,
 		 sequence_version, normalization_version, clock_suspect, payload,
@@ -321,6 +347,67 @@ func (r *pgRepo) insertInboxRow(ctx context.Context, row InboxRow) (string, erro
 	}
 	if err != nil {
 		return "", err
+	}
+	return id, nil
+}
+
+// StageResyncEvents stages a batch of RESYNC rows of one generation in ONE transaction under ONE ownership proof
+// (performance audit D6-M2 step 1). The generation is invisible until it is published, so a batch that is never
+// written is no different from a sweep that stopped early. A repeat (se_resync_identity) is inserted once and
+// counted; any other failure rolls the whole batch back.
+func (r *pgRepo) StageResyncEvents(ctx context.Context, rows []InboxRow) (staged, duplicates int, err error) {
+	if len(rows) == 0 {
+		return 0, 0, nil
+	}
+	tx, err := r.beginOwned(ctx, rows[0])
+	if err != nil {
+		return 0, 0, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	for _, row := range rows {
+		if row.TenantID != rows[0].TenantID || row.SiteID != rows[0].SiteID ||
+			row.PMSInterfaceID != rows[0].PMSInterfaceID || row.ExpectedGeneration != rows[0].ExpectedGeneration {
+			return 0, 0, errors.New("pmsd: a staging batch spans more than one owner scope")
+		}
+		row.AdmissionKind = "RESYNC"
+		if _, ierr := insertRowTx(ctx, tx, row); ierr != nil {
+			if errors.Is(ierr, ErrDuplicateResyncEvent) {
+				duplicates++
+				continue
+			}
+			return 0, 0, ierr
+		}
+		staged++
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, 0, err
+	}
+	return staged, duplicates, nil
+}
+
+// AdmitLiveEventAndContinuity admits a LIVE row and records continuity in ONE transaction under the ownership
+// proof (performance audit D6-M2 step 3). An exact repeat inserts nothing, advances nothing and returns
+// *DuplicateLiveEventError, as AdmitLiveEvent does.
+func (r *pgRepo) AdmitLiveEventAndContinuity(ctx context.Context, row InboxRow, u ContinuityUpdate) (string, error) {
+	row.AdmissionKind = "LIVE"
+	row.ResyncGeneration = 0
+	tx, err := r.beginOwned(ctx, row)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	id, err := insertRowTx(ctx, tx, row)
+	if err != nil {
+		return id, err
+	}
+	tag, err := tx.Exec(ctx, updateContinuitySQL,
+		u.TenantID, u.SiteID, u.PMSInterfaceID, u.ExpectedGeneration,
+		string(u.Status), u.LastValidEventAt, u.DiscontinuityAt, u.LastResyncMarkerAt, u.LastEventCursor)
+	if err != nil {
+		return "", err
+	}
+	if tag.RowsAffected() == 0 {
+		return "", ErrStaleGeneration
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return "", err

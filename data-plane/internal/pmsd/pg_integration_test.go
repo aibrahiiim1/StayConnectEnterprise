@@ -575,15 +575,17 @@ func TestIntegration_SinkResyncLifecycle(t *testing.T) {
 	if err := sink.OnDomainEvent(ctx, mkEvent(hex(0x22))); err != nil {
 		t.Fatal(err)
 	}
-	if n := scalarInt(t, pool, `SELECT count(*) FROM iam_v2.stay_events WHERE pms_interface_id=$1 AND admission_kind='RESYNC'`, s.iface); n != 1 {
-		t.Fatalf("staged RESYNC row count = %d, want 1", n)
-	}
+	// Roster rows are written in batches (performance audit D6-M2): before DE the row is buffered or staged, and
+	// in either case never consumable.
 	if consumableCount(t, pool, s, hex(0x22)) != 0 {
 		t.Fatal("staged row must be invisible before DE")
 	}
-	// DE → publish; the staged row becomes consumable
+	// DE → every buffered row is written, then the generation is published and the row becomes consumable
 	if err := sink.OnResyncComplete(time.Now(), ""); err != nil {
 		t.Fatal(err)
+	}
+	if n := scalarInt(t, pool, `SELECT count(*) FROM iam_v2.stay_events WHERE pms_interface_id=$1 AND admission_kind='RESYNC'`, s.iface); n != 1 {
+		t.Fatalf("staged RESYNC row count = %d, want 1", n)
 	}
 	if consumableCount(t, pool, s, hex(0x22)) != 1 {
 		t.Fatal("published staged row must be consumable")

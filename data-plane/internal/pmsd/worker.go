@@ -227,6 +227,8 @@ type workerSink struct {
 	// open window (staged once). Both reset at DS.
 	adapterSkipped int64
 	dupSkipped     int64
+	// stageBuf holds RESYNC rows not yet written when the repository stages in batches (D6-M2).
+	stageBuf []InboxRow
 
 	// Coverage of the sweep in flight, held until the publish succeeds: an unpublished sweep never
 	// produced an authoritative roster.
@@ -263,6 +265,7 @@ func (s *workerSink) RequireInitialResync(at time.Time) error {
 	s.synced = false
 	s.resyncing = false
 	s.adapterSkipped, s.dupSkipped = 0, 0
+	s.stageBuf = s.stageBuf[:0]
 	// The automatic sync uses the same stage model as an operator's. Counters are zeroed here, not at DS, so
 	// the previous roster's totals aren't shown between request and receipt.
 	zero := int64(0)
@@ -285,6 +288,7 @@ func (s *workerSink) OnResyncStart(at time.Time) error {
 	s.resyncing = true
 	s.received = 0
 	s.adapterSkipped, s.dupSkipped = 0, 0
+	s.stageBuf = s.stageBuf[:0]
 	zero := int64(0)
 	s.stage(StageReceiving, StageUpdate{RecordsReceived: &zero})
 	return s.w.repo.UpdateSync(s.ctx, SyncUpdate{axisBase: s.ax(), Status: SyncResyncInProgress, ResyncStartedAt: &at})
@@ -303,6 +307,10 @@ func (s *workerSink) OnResyncComplete(at time.Time, _ string) error {
 	if !s.resyncing || s.resyncGen == 0 {
 		// A DE without a DS is spurious: leave the barrier up.
 		return nil
+	}
+	// Every buffered record is durable before the generation can be published.
+	if err := s.flushStaged(); err != nil {
+		return err
 	}
 	// Written before the publish so a slow publish shows its final step, not RECEIVING.
 	s.stage(StagePublishing, StageUpdate{})
@@ -350,6 +358,7 @@ func (s *workerSink) OnDisconnected(at time.Time, code Code) error {
 		// Lost mid-roster: nothing published, the last known-good mirror is untouched (INTERRUPTED, not FAILED).
 		s.stage(StageInterrupted, StageUpdate{FailureCode: code.String()})
 		s.resyncing = false
+		s.stageBuf = s.stageBuf[:0] // never written; the generation is abandoned unpublished
 	case !s.synced:
 		// Lost before DS: the sync never started, so FAILED with the transport code, not INTERRUPTED.
 		s.stage(StageFailed, StageUpdate{FailureCode: code.String()})
@@ -368,6 +377,15 @@ func (s *workerSink) OnDomainEvent(ctx context.Context, ev Event) error {
 	switch {
 	case s.resyncing:
 		row.ResyncGeneration = s.resyncGen
+		if _, ok := s.w.repo.(resyncBatchStager); ok {
+			// Buffered and written in batches under one ownership proof (D6-M2); flushed at the batch size and
+			// before the publish.
+			s.stageBuf = append(s.stageBuf, row)
+			if len(s.stageBuf) >= stageBatchSize {
+				return s.flushStaged()
+			}
+			return nil
+		}
 		if _, err := s.w.repo.StageResyncEvent(s.ctx, row); err != nil {
 			if errors.Is(err, ErrDuplicateResyncEvent) {
 				// The same record twice in one window: staged once, counted as skipped, the window continues.
@@ -392,6 +410,22 @@ func (s *workerSink) OnDomainEvent(ctx context.Context, ev Event) error {
 		// Barrier: no LIVE admission before the initial sync completes.
 		return nil
 	default:
+		cont := ContinuityUpdate{axisBase: s.ax(), Status: ContinuityContinuous, LastValidEventAt: ptr(ev.NormalizedAt), LastEventCursor: clip(ev.Cursor, maxCursorLen)}
+		if one, ok := s.w.repo.(liveContinuityAdmitter); ok {
+			// Admission and continuity in one transaction (D6-M2 step 3).
+			if _, err := one.AdmitLiveEventAndContinuity(s.ctx, row, cont); err != nil {
+				var dup *DuplicateLiveEventError
+				if errors.As(err, &dup) {
+					s.w.deps.log().Info("pmsd: duplicate live record ignored",
+						"interface", NewUUIDValue(s.w.iface.ID).String(), "record_type", safeRecordType(ev.RecordType),
+						"processing_status", safeProcessingStatus(dup.ProcessingStatus))
+					return nil
+				}
+				return failedAt(stepAdmitLive, err)
+			}
+			s.w.deps.wake.notify(s.w.iface.ID)
+			return nil
+		}
 		if _, err := s.w.repo.AdmitLiveEvent(s.ctx, row); err != nil {
 			var dup *DuplicateLiveEventError
 			if errors.As(err, &dup) {
@@ -405,8 +439,48 @@ func (s *workerSink) OnDomainEvent(ctx context.Context, ev Event) error {
 		}
 		// The row is committed and claimable: wake the applier rather than wait for its idle poll (D6-H1).
 		s.w.deps.wake.notify(s.w.iface.ID)
-		return failedAt(stepRecordContinuity, s.w.repo.UpdateContinuity(s.ctx, ContinuityUpdate{axisBase: s.ax(), Status: ContinuityContinuous, LastValidEventAt: ptr(ev.NormalizedAt), LastEventCursor: clip(ev.Cursor, maxCursorLen)}))
+		return failedAt(stepRecordContinuity, s.w.repo.UpdateContinuity(s.ctx, cont))
 	}
+}
+
+// stageBatchSize bounds how many RESYNC rows share one transaction and one ownership proof (D6-M2).
+const stageBatchSize = 50
+
+// resyncBatchStager and liveContinuityAdmitter are the batched writes a repository may offer; one that does not
+// is driven a row at a time, as before.
+type resyncBatchStager interface {
+	StageResyncEvents(ctx context.Context, rows []InboxRow) (staged, duplicates int, err error)
+}
+
+type liveContinuityAdmitter interface {
+	AdmitLiveEventAndContinuity(ctx context.Context, row InboxRow, u ContinuityUpdate) (string, error)
+}
+
+// flushStaged writes the buffered RESYNC rows; a failure ends the cycle like a single-row staging failure did.
+func (s *workerSink) flushStaged() error {
+	if len(s.stageBuf) == 0 {
+		return nil
+	}
+	b, _ := s.w.repo.(resyncBatchStager)
+	staged, dups, err := b.StageResyncEvents(s.ctx, s.stageBuf)
+	s.stageBuf = s.stageBuf[:0]
+	if err != nil {
+		return failedAt(stepStageResync, err)
+	}
+	before := s.received
+	s.received += int64(staged)
+	if dups > 0 {
+		s.dupSkipped += int64(dups)
+		total := s.adapterSkipped + s.dupSkipped
+		s.stage(StageReceiving, StageUpdate{RecordsSkipped: &total})
+		s.w.deps.log().Info("pmsd: repeated records inside one resync skipped",
+			"interface", NewUUIDValue(s.w.iface.ID).String(), "duplicates_this_roster", s.dupSkipped)
+	}
+	if s.received/25 != before/25 {
+		got := s.received
+		s.stage(StageReceiving, StageUpdate{RecordsReceived: &got})
+	}
+	return nil
 }
 
 func (s *workerSink) inboxRow(ev Event) InboxRow {
