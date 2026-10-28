@@ -280,6 +280,9 @@ else
   changed="$(install_binaries)"
   step "6. units and the product profile"
   bash "$SC/deploy/scripts/install-service-units.sh" "$SC/deploy"
+  # A missing *_DB_URL is added from this appliance's own credentials; a present one is never changed (audit X3).
+  bash "$SC/deploy/scripts/backfill-db-urls.sh" "$ETC" \
+    || die "could not check the services' database URLs (above); the new binaries are installed but the services were not restarted"
   # What this release ships to a fresh install, an upgraded appliance gets too (keys only added when absent).
   bash "$SC/deploy/scripts/apply-product-profile.sh" "$SC/deploy" /etc/stayconnect \
     || die "the product profile was refused (above); the new binaries are installed but the services were not restarted"
