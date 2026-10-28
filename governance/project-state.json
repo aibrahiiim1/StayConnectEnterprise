@@ -1775,11 +1775,11 @@
   "current_delivery": {
     "kind": "FINANCIAL_MODULES_CONFIGURABLE",
     "decision": "D77 (available means configurable; execution separate; nothing unimplemented available, 2026-10-28).",
-    "decision_note": "Deployed to the test appliance 172.21.96.97 only (release onegate-appliance-46459d83158f). Not deployed to PRE-LIVE or Central. No provider call, posting or financial transaction was made.",
+    "decision_note": "Deployed to the test appliance 172.21.96.97 only (release onegate-appliance-d25999781b1a). Not deployed to PRE-LIVE or Central. No provider call, posting or financial transaction was made.",
     "manifest": "docs/manifests/FinancialModulesConfigurable-change-manifest.md",
     "base": "f99716d87d4bc0d6bfb82c6ef7db2c3611f7bedb",
     "base_note": "Master after the merge of PR #260 (f99716d8).",
-    "head": "9b5a1d31",
+    "head": "d2599978",
     "head_note": "The last content commit of branch fix/financial-modules-configurable. Governance commits follow it.",
     "transition": "T0262",
     "previous_delivery": "T0261",

@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `f99716d87d4bc0d6bfb82c6ef7db2c3611f7bedb`
-- **HEAD commit:** `9b5a1d314e68739c3a80573effa6743f1bc0e755`
-- **Provenance (generation HEAD = inventory_head):** `8478a404929d7e533433120774448652b003b03f`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `d25999781b1a0199c2469082954a275daf907efc`
+- **Provenance (generation HEAD = inventory_head):** `d25999781b1a0199c2469082954a275daf907efc`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `fix/financial-modules-configurable`
 - **Remote branch:** `origin/fix/financial-modules-configurable`
 - **Changed files:** 41
@@ -16,34 +16,34 @@
 | `data-plane/cmd/scd/card_provider_calls_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Card payment and room charge configurable, never executable; unimplemented modules never shown as available |
 | `data-plane/internal/deployment/ceiling.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Card payment and room charge configurable, never executable; unimplemented modules never shown as available |
 | `data-plane/internal/deployment/ceiling_test.go` | MODIFIED | `M` | tests/tooling | RUNTIME | rollback RESTORES prior content | Card payment and room charge configurable, never executable; unimplemented modules never shown as available |
-| `deploy/scripts/apply-product-profile.sh` | MODIFIED | `M` | configuration | DEPLOY | rollback RESTORES prior content | Card payment and room charge configurable, never executable; unimplemented modules never shown as available |
+| `deploy/scripts/apply-product-profile.sh` | MODIFIED | `M` | configuration | DEPLOY | rollback RESTORES prior content | Product profile: never add a financial domain whose execution switches are already on |
 | `docs/architecture/ONEGATE_SYSTEM_HANDBOOK.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Card payment and room charge configurable, never executable; unimplemented modules never shown as available |
 | `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: D77 and T0262 record card payment and room charge configurable, never executable, and nothing unimplemented shown available |
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: D77 and T0262 record card payment and room charge configurable, never executable, and nothing unimplemented shown available |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: D77 and T0262 record card payment and room charge configurable, never executable, and nothing unimplemented shown available |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: D77 and T0262 record card payment and room charge configurable, never executable, and nothing unimplemented shown available |
 | `docs/inventory/onegate-components.json` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Card payment and room charge configurable, never executable; unimplemented modules never shown as available |
-| `docs/manifests/FinancialModulesConfigurable-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Governance: D77 and T0262 record card payment and room charge configurable, never executable, and nothing unimplemented shown available |
-| `docs/runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Manual A3.9: module availability verified on the test appliance |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/GIT_STAT_5041aff6.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/GIT_STAT_8478a404.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
+| `docs/manifests/FinancialModulesConfigurable-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Governance: export packs at T0262 and the manifest that covers them |
+| `docs/runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Product profile: never add a financial domain whose execution switches are already on |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0262 and the manifest that covers them |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0262 and the manifest that covers them |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0262 and the manifest that covers them |
+| `exports/chatgpt/phase-evidence/GIT_STAT_5041aff6.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Governance: export packs at T0262 and the manifest that covers them |
+| `exports/chatgpt/phase-evidence/GIT_STAT_8478a404.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Governance: export packs at T0262 and the manifest that covers them |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0262 and the manifest that covers them |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0262 and the manifest that covers them |
+| `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0262 and the manifest that covers them |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0262 and the manifest that covers them |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0262 and the manifest that covers them |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0262 and the manifest that covers them |
+| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0262 and the manifest that covers them |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: D77 and T0262 record card payment and room charge configurable, never executable, and nothing unimplemented shown available |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0262 and the manifest that covers them |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: D77 and T0262 record card payment and room charge configurable, never executable, and nothing unimplemented shown available |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0262 and the manifest that covers them |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0262 and the manifest that covers them |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0262 and the manifest that covers them |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0262 and the manifest that covers them |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: D77 and T0262 record card payment and room charge configurable, never executable, and nothing unimplemented shown available |
 | `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: D77 and T0262 record card payment and room charge configurable, never executable, and nothing unimplemented shown available |
 | `governance/transitions/T0262.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: D77 and T0262 record card payment and room charge configurable, never executable, and nothing unimplemented shown available |
@@ -57,18 +57,18 @@
 ## Total diff statistics (`git diff --stat`)
 ```text
  data-plane/cmd/scd/card_checkout.go                |  16 ++-
- data-plane/cmd/scd/card_provider_calls_test.go     |  24 ++++
+ data-plane/cmd/scd/card_provider_calls_test.go     |  24 +++++
  data-plane/internal/deployment/ceiling.go          |  23 ++--
  data-plane/internal/deployment/ceiling_test.go     |  53 +++++++++
- deploy/scripts/apply-product-profile.sh            |  42 ++++++-
+ deploy/scripts/apply-product-profile.sh            |  57 +++++++++-
  docs/architecture/ONEGATE_SYSTEM_HANDBOOK.md       |   1 +
  .../StayConnect-IAM-Phase0-Contract.md             |   4 +-
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   4 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   4 +-
  docs/context/StayConnect-IAM-Handoff.md            |   4 +-
  docs/inventory/onegate-components.json             |   5 +-
- ...FinancialModulesConfigurable-change-manifest.md | 131 +++++++++++++++++++++
- .../ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md        |  46 ++++++--
+ ...FinancialModulesConfigurable-change-manifest.md | 119 +++++++++++++++++++++
+ .../ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md        |  49 +++++++--
  .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 352771 -> 352773 bytes
  .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 170738 -> 171613 bytes
  ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 44051 -> 44053 bytes
@@ -82,48 +82,36 @@
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   4 +-
  .../StayConnect-IAM-Phase1B-Plan.md                |   4 +-
  .../chatgpt/stayconnectenterprise/00-START-HERE.md |   4 +-
- exports/chatgpt/stayconnectenterprise/MANIFEST.md  |  62 +++++-----
+ exports/chatgpt/stayconnectenterprise/MANIFEST.md  |  62 +++++------
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   4 +-
  .../StayConnect-IAM-Handoff.md                     |   4 +-
  .../StayConnect-IAM-Phase0-Contract.md             |   4 +-
  .../StayConnect-IAM-Phase1A-Plan.md                |   4 +-
  .../StayConnect-IAM-Phase1B-Plan.md                |   4 +-
  governance/decision-register.json                  |  14 +++
- governance/project-state.json                      |  32 ++---
+ governance/project-state.json                      |  32 +++---
  governance/transitions/T0262.json                  |  34 ++++++
  hotel-admin/app/(app)/modules/page.tsx             |   2 +-
  .../app/(app)/payment-methods/card-config.tsx      |   4 +-
  hotel-admin/lib/modules.ts                         |   7 +-
  hotel-admin/lib/payment-admin.ts                   |   1 +
- hotel-admin/test/modules-page.test.tsx             |  42 ++++++-
+ hotel-admin/test/modules-page.test.tsx             |  42 +++++++-
  hotel-admin/test/payment-methods-page.test.tsx     |  11 ++
- 41 files changed, 528 insertions(+), 112 deletions(-)
+ 41 files changed, 534 insertions(+), 112 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
 ```text
 M  docs/manifests/FinancialModulesConfigurable-change-manifest.md
-M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
-M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
-M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-D  exports/chatgpt/phase-evidence/GIT_STAT_5041aff6.txt
-A  exports/chatgpt/phase-evidence/GIT_STAT_8478a404.txt
-M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
-M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/phase-evidence/governance/decision-register.json
-M  exports/chatgpt/phase1b-planning/MANIFEST.md
-M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
-M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md
-M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md
+M  governance/decision-register.json
+M  governance/project-state.json
+M  governance/transitions/T0262.json
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: d2599978 Product profile: never add a financial domain whose execution switches are already on
+HISTORICAL: 871b2708 Governance: export packs at T0262 and the manifest that covers them
 HISTORICAL: 8478a404 Governance: D77 and T0262 record card payment and room charge configurable, never executable, and nothing unimplemented shown available
 HISTORICAL: 9b5a1d31 Manual A3.9: module availability verified on the test appliance
 HISTORICAL: 46459d83 Modules: no readiness is shown for a module that is not available (nothing to run is never 'Ready: Yes')
