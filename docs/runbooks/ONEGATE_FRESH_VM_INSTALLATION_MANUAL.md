@@ -1035,3 +1035,19 @@ appliance, networking or trust:
 
 Not exercised from outside: registering a *new* appliance end to end (it would create a Central record). Registration and the CSR use the
 same 443 listener and name verified here, and an appliance on Central's own subnet completed them (A3.2, A3.6).
+
+### A3.9 Module availability on the test appliance (2026-10-28)
+
+Release `onegate-appliance-46459d83158f` installed on `172.21.96.97` with `--upgrade` (after an encrypted, proven-restorable backup). The
+profile added `STAYCONNECT_PHASE4_MASTER/_PAYMENT/_POSTING` to `scd.env`; a re-run changed no env file; no execution switch is in any env file.
+
+| Module | Available | Ready | Observed |
+|---|---|---|---|
+| Hotel, paid access | Yes | Yes | in use |
+| Card payment | **Yes** | No — `PROVIDER_CALLS_NOT_AUTHORISED` | *Payment methods* served; a TEST-mode account saved with sealed placeholder credentials; *Test connection* refused (409, "Not tested"); a LIVE save refused; no Stripe/Paymob address in the walled garden; scd: "provider calls are not authorised"; account disabled afterwards |
+| Room charge | **Yes** | No — `PMS_POSTING_NOT_AUTHORISED` | the PMS financial-onboarding screen served; posting worker not deployed, transmit off, `pmsd` inactive; no PMS configured |
+| SMS, WhatsApp, email accounts, social sign-in | Yes | — | switched off at the site |
+| High availability, white label | **No**, Ready — | — | "Not implemented in this release" |
+
+A new Client passed the journey 12/12 on the final release.
+
