@@ -66,7 +66,9 @@ func TestPendingSigninsHandOutCopies(t *testing.T) {
 	if p.get(tok) != nil {
 		t.Fatal("dropOperator left the pending sign-in")
 	}
-	if passwordFingerprint("a") == passwordFingerprint("b") || passwordFingerprint("a") != passwordFingerprint("a") {
+	// Different passwords differ, and the fingerprint is stable for the same password across calls.
+	a1, a2 := passwordFingerprint("a"), passwordFingerprint("a")
+	if a1 == passwordFingerprint("b") || a1 != a2 {
 		t.Fatal("passwordFingerprint does not tell hashes apart")
 	}
 }

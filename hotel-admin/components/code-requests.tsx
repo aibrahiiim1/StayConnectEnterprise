@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { canWrite } from "@/lib/roles";
+import { REASON_HINT, reasonOk } from "@/lib/reason";
 import { formatDate } from "@/lib/utils";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -122,6 +123,7 @@ function RevealDialog({ request, onClose }: { request: CodeRequest | null; onClo
       onConfirm={async () => {
         if (!request) return;
         if (code) { onClose(); return; }
+        if (!reasonOk(reason)) { setError(new Error(`Give a reason: ${REASON_HINT}`)); return; }
         setBusy(true); setError(null);
         try {
           const r = await api.post<{ code: string }>(`/code-reveal/${request.challenge_id}`, { reason: reason.trim(), password });
@@ -135,7 +137,7 @@ function RevealDialog({ request, onClose }: { request: CodeRequest | null; onClo
         <p className="text-center font-mono text-3xl tracking-[0.3em]" aria-label="Code">{code}</p>
       ) : (
         <>
-          <Field label="Reason" required hint="Recorded in the audit log.">
+          <Field label="Reason" required hint={REASON_HINT}>
             <Input value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} aria-label="Reason" />
           </Field>
           <Field label="Confirm your password" required>

@@ -280,7 +280,12 @@ type dumpResult struct {
 	entries []entry
 	done    bool
 	err     error
+	// interrupted: a message carried NLM_F_DUMP_INTR, so the table changed during the dump and entries may be missing.
+	interrupted bool
 }
+
+// nlmFDumpIntr is NLM_F_DUMP_INTR.
+const nlmFDumpIntr = 0x10
 
 // parseMessages reads every netlink message in one datagram. done reports NLMSG_DONE; an NLMSG_ERROR with a
 // non-zero code is returned as err (a zero code is an ACK).
@@ -294,6 +299,9 @@ func parseMessages(buf []byte) dumpResult {
 			return r
 		}
 		payload := buf[nlmsgHdrLen:l]
+		if binary.LittleEndian.Uint16(buf[6:8])&nlmFDumpIntr != 0 {
+			r.interrupted = true
+		}
 		switch {
 		case t == nlmsgDone:
 			r.done = true

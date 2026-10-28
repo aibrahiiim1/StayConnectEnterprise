@@ -9,8 +9,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strconv"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -44,15 +47,6 @@ type Base struct {
 	MFA *auth.MFA
 }
 
-func (b *Base) issueAssignment(ctx context.Context, applianceID, state string) error {
-	if b.AssignKey == nil {
-		return errors.New("assignment signing key not configured")
-	}
-	ab := &AssignmentBase{Base: b, SignKey: b.AssignKey}
-	_, err := ab.Issue(ctx, applianceID, state)
-	return err
-}
-
 type ListMeta struct {
 	HasMore bool   `json:"has_more"`
 	Cursor  string `json:"cursor,omitempty"`
@@ -78,10 +72,6 @@ func WriteList[T any](w http.ResponseWriter, rows []T, meta ListMeta) {
 }
 
 // WriteErr is for call sites without a request; prefer Fail, which includes trace_id.
-func WriteErr(w http.ResponseWriter, status int, msg string) {
-	WriteJSON(w, status, map[string]string{"error": msg})
-}
-
 // Cursor = base64url(JSON {t: RFC3339Nano, i: id})
 // Keyset is ordered by (created_at DESC, id DESC). Stable on ties.
 
@@ -129,13 +119,106 @@ func ParseLimit(r *http.Request, def, max int) int {
 	return def
 }
 
+// MaxJSONBody bounds every operator request body; nothing the console sends comes near it (audit Phase 1 M9).
+const MaxJSONBody = 64 << 10
+
+// fieldLimits are the longest values accepted, by JSON field name, on any operator write (audit Phase 1 M9).
+// Names and codes are signed into assignments; the rest are stored and shown to other operators.
+var fieldLimits = map[string]int{
+	"name":         120,
+	"display_name": 120,
+	"code":         48,
+	"reason":       500,
+	"note":         500,
+	"confirm":      120,
+	"password":     1024,
+	"new_password": 1024,
+	"email":        254,
+}
+
+// FieldLimitError names the field that is too long; its message is safe to show.
+type FieldLimitError struct {
+	Field string
+	Max   int
+}
+
+func (e *FieldLimitError) Error() string {
+	return fmt.Sprintf("%s must be at most %d characters", e.Field, e.Max)
+}
+
+// DecodeJSON decodes a bounded body strictly and then applies fieldLimits.
 func DecodeJSON(r *http.Request, dst any) error {
 	if r.Body == nil {
 		return errors.New("empty body")
 	}
-	dec := json.NewDecoder(r.Body)
+	dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, MaxJSONBody))
 	dec.DisallowUnknownFields()
-	return dec.Decode(dst)
+	if err := dec.Decode(dst); err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			return fmt.Errorf("request body is larger than %d bytes", MaxJSONBody)
+		}
+		return err
+	}
+	return CheckFieldLimits(dst)
+}
+
+// CheckFieldLimits applies fieldLimits to the string and *string fields of a struct (or pointer to one).
+func CheckFieldLimits(v any) error {
+	rv := reflect.ValueOf(v)
+	for rv.Kind() == reflect.Pointer {
+		if rv.IsNil() {
+			return nil
+		}
+		rv = rv.Elem()
+	}
+	if rv.Kind() != reflect.Struct {
+		return nil
+	}
+	rt := rv.Type()
+	for i := 0; i < rt.NumField(); i++ {
+		if !rt.Field(i).IsExported() {
+			continue
+		}
+		f := rv.Field(i)
+		if f.Kind() == reflect.Pointer && !f.IsNil() {
+			f = f.Elem()
+		}
+		if f.Kind() == reflect.Struct {
+			if err := CheckFieldLimits(f.Interface()); err != nil {
+				return err
+			}
+			continue
+		}
+		name, _, _ := strings.Cut(rt.Field(i).Tag.Get("json"), ",")
+		if max, ok := fieldLimits[name]; ok && f.Kind() == reflect.String && utf8.RuneCountInString(f.String()) > max {
+			return &FieldLimitError{Field: name, Max: max}
+		}
+	}
+	return nil
+}
+
+// limitExceeded reports a field or size limit error from DecodeJSON; callers whose body is optional still
+// refuse those.
+func limitExceeded(w http.ResponseWriter, r *http.Request, err error) bool {
+	var fl *FieldLimitError
+	if errors.As(err, &fl) || (err != nil && strings.HasPrefix(err.Error(), "request body is larger")) {
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, badBody(err))
+		return true
+	}
+	return false
+}
+
+// badBody is the 400 message for a DecodeJSON error: the field or size limit when that is the cause.
+func badBody(err error) string {
+	var fl *FieldLimitError
+	if errors.As(err, &fl) {
+		return fl.Error()
+	}
+	if err != nil && strings.HasPrefix(err.Error(), "request body is larger") {
+		return err.Error()
+	}
+	return "bad body"
 }
 
 func IsNoRows(err error) bool { return errors.Is(err, pgx.ErrNoRows) }

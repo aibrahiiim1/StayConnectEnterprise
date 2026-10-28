@@ -129,6 +129,20 @@ func TestDumpRequestIsAnIPv4Dump(t *testing.T) {
 	}
 }
 
+// Audit Phase 8 L10: a dump the kernel marks interrupted is recognised, so the flush repeats it.
+func TestInterruptedDumpIsRecognised(t *testing.T) {
+	clean := append(ctMsg(1, "10.20.0.51", "8.8.8.8", "8.8.8.8", "192.168.60.25", false), doneMsg(1)...)
+	if r := parseMessages(clean); r.interrupted {
+		t.Fatal("a clean dump was read as interrupted")
+	}
+	intr := append(putNlmsg(nfnlSubsysCTNetlink<<8|ipctnlMsgCtNew, nlmFMulti|nlmFDumpIntr, 1,
+		ctMsg(1, "10.20.0.51", "8.8.8.8", "8.8.8.8", "192.168.60.25", false)[nlmsgHdrLen:]), doneMsg(1)...)
+	r := parseMessages(intr)
+	if !r.interrupted || len(r.entries) != 1 || !r.done {
+		t.Fatalf("an interrupted dump was not recognised: %+v", r)
+	}
+}
+
 func TestErrorsAndAcks(t *testing.T) {
 	if r := parseMessages(errMsg(1, 0)); r.err != nil {
 		t.Fatalf("an ACK is not an error: %v", r.err)

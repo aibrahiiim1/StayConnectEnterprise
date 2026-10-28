@@ -10,11 +10,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"regexp"
@@ -35,7 +37,8 @@ func sniffImage(b []byte) (ext, mime string) {
 	switch {
 	case len(b) > 8 && bytes.Equal(b[:8], []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}):
 		return ".png", "image/png"
-	case len(b) > 3 && b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF:
+	// SOI followed by a marker segment (FF C0..FE): three bytes alone also match non-images (audit P9 L9).
+	case len(b) > 4 && b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF && b[3] >= 0xC0 && b[3] != 0xFF:
 		return ".jpg", "image/jpeg"
 	case len(b) > 12 && bytes.Equal(b[:4], []byte("RIFF")) && bytes.Equal(b[8:12], []byte("WEBP")):
 		return ".webp", "image/webp"
@@ -78,7 +81,8 @@ func (s *server) listPortalAssets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, e := range entries {
-		if e.IsDir() {
+		// Only stored images: an upload in flight is a hidden temporary file.
+		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
 			continue
 		}
 		fi, err := e.Info()
@@ -110,8 +114,14 @@ func (s *server) uploadPortalAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
-	buf := make([]byte, maxAssetBytes+1)
-	n, _ := file.Read(buf)
+	// Read the whole part, never more than the limit plus one byte: a single Read may return less than the file,
+	// and a fixed 8 MB buffer per request is not needed (audit P9 L9).
+	data, err := io.ReadAll(io.LimitReader(file, maxAssetBytes+1))
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "the image could not be read")
+		return
+	}
+	n := len(data)
 	if n == 0 {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "the image was empty")
 		return
@@ -121,7 +131,6 @@ func (s *server) uploadPortalAsset(w http.ResponseWriter, r *http.Request) {
 			fmt.Sprintf("the image must be %d MB or smaller", maxAssetBytes>>20))
 		return
 	}
-	data := buf[:n]
 
 	// The bytes decide: neither the filename nor the client Content-Type says what a browser will do with the file.
 	ext, mime := sniffImage(data)
@@ -141,7 +150,7 @@ func (s *server) uploadPortalAsset(w http.ResponseWriter, r *http.Request) {
 	sum := sha256.Sum256(data)
 	name := hex.EncodeToString(sum[:8]) + ext
 	dest := filepath.Join(portalAssetDir, name)
-	if err := os.WriteFile(dest, data, 0o644); err != nil {
+	if err := writeFileAtomically(portalAssetDir, name, data, 0o644); err != nil {
 		// Name the path and reason: edged runs under ProtectSystem=strict, so this directory must be on its allowlist.
 		slog.Error("portal asset not stored", "path", dest, "err", err)
 		jsonErr(w, http.StatusInternalServerError, "asset_dir_unavailable",
@@ -204,4 +213,27 @@ func (s *server) deletePortalAsset(w http.ResponseWriter, r *http.Request) {
 	}
 	s.audit(r, "portal_asset.deleted", "portal_asset", name, nil)
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": name})
+}
+
+// writeFileAtomically writes to a temporary file in dir and renames it into place, so portald never serves a
+// half-written image to a guest (audit P9 L9).
+func writeFileAtomically(dir, name string, data []byte, perm os.FileMode) error {
+	tmp, err := os.CreateTemp(dir, ".upload-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }() // a no-op once renamed
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, filepath.Join(dir, name))
 }

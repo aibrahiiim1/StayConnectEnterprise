@@ -73,7 +73,7 @@ func (s *server) getSignInProtection(w http.ResponseWriter, r *http.Request) {
 
 	out, err := s.effectiveProtection(ctx)
 	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "policy_unreadable", err.Error())
+		internalErr(w, r, http.StatusInternalServerError, "policy_unreadable", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -179,7 +179,7 @@ func (s *server) putSignInProtection(w http.ResponseWriter, r *http.Request) {
 
 	before, err := s.effectiveProtection(ctx)
 	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "policy_unreadable", err.Error())
+		internalErr(w, r, http.StatusInternalServerError, "policy_unreadable", err)
 		return
 	}
 
@@ -189,7 +189,7 @@ func (s *server) putSignInProtection(w http.ResponseWriter, r *http.Request) {
 		s.tenantID, s.siteID, p.MaxFailedAttempts, p.WindowSeconds, p.RestrictionSeconds,
 		actor, strings.TrimSpace(in.Reason)).Scan(&version)
 	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "policy_not_saved", err.Error())
+		internalErr(w, r, http.StatusInternalServerError, "policy_not_saved", err)
 		return
 	}
 
@@ -212,7 +212,7 @@ func (s *server) putSignInProtection(w http.ResponseWriter, r *http.Request) {
 
 	out, err := s.effectiveProtection(ctx)
 	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "policy_unreadable", err.Error())
+		internalErr(w, r, http.StatusInternalServerError, "policy_unreadable", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -231,7 +231,7 @@ func (s *server) listSignInProtectionChanges(w http.ResponseWriter, r *http.Requ
 		 ORDER BY changed_at DESC
 		 LIMIT 100`, s.tenantID, s.siteID)
 	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "changes_unreadable", err.Error())
+		internalErr(w, r, http.StatusInternalServerError, "changes_unreadable", err)
 		return
 	}
 	defer rows.Close()
@@ -243,7 +243,7 @@ func (s *server) listSignInProtectionChanges(w http.ResponseWriter, r *http.Requ
 		if err := rows.Scan(&c.ChangedAt, &c.ChangedBy, &reason,
 			&c.OldMaxFailedAttempts, &c.OldObservationWindowSeconds, &c.OldRestrictionSeconds,
 			&c.NewMaxFailedAttempts, &c.NewObservationWindowSeconds, &c.NewRestrictionSeconds); err != nil {
-			jsonErr(w, http.StatusInternalServerError, "changes_unreadable", err.Error())
+			internalErr(w, r, http.StatusInternalServerError, "changes_unreadable", err)
 			return
 		}
 		if reason != nil {
@@ -294,7 +294,7 @@ func (s *server) listSignInRestrictions(w http.ResponseWriter, r *http.Request) 
 		 ORDER BY expires_at ASC
 		 LIMIT 500`, s.tenantID, s.siteID)
 	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "restrictions_unreadable", err.Error())
+		internalErr(w, r, http.StatusInternalServerError, "restrictions_unreadable", err)
 		return
 	}
 	defer rows.Close()
@@ -304,7 +304,7 @@ func (s *server) listSignInRestrictions(w http.ResponseWriter, r *http.Request) 
 		var x restrictionOut
 		if err := rows.Scan(&x.ID, &x.DeviceMAC, &x.GuestNetwork, &x.LastSubmittedRoom,
 			&x.FailureCount, &x.Reason, &x.RestrictedAt, &x.ExpiresAt, &x.RemainingSeconds); err != nil {
-			jsonErr(w, http.StatusInternalServerError, "restrictions_unreadable", err.Error())
+			internalErr(w, r, http.StatusInternalServerError, "restrictions_unreadable", err)
 			return
 		}
 		out = append(out, x)
@@ -360,7 +360,7 @@ func (s *server) releaseSignInRestriction(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "restriction_unreadable", err.Error())
+		internalErr(w, r, http.StatusInternalServerError, "restriction_unreadable", err)
 		return
 	}
 
@@ -368,7 +368,7 @@ func (s *server) releaseSignInRestriction(w http.ResponseWriter, r *http.Request
 	if err := s.db.QueryRow(ctx,
 		`SELECT iam_v2.guest_signin_release($1::uuid,$2::uuid,$3::uuid,$4,$5)`,
 		s.tenantID, s.siteID, id, actor, reason).Scan(&affected); err != nil {
-		jsonErr(w, http.StatusInternalServerError, "release_failed", err.Error())
+		internalErr(w, r, http.StatusInternalServerError, "release_failed", err)
 		return
 	}
 	if affected == 0 {

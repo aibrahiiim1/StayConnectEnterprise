@@ -48,19 +48,23 @@ func fiasTLSConfig(rev Revision) (*tls.Config, error) {
 func fiasTLS(ctx context.Context, raw net.Conn, rev Revision) (net.Conn, error) {
 	cfg, err := fiasTLSConfig(rev)
 	if err != nil {
-		raw.Close()
+		_ = raw.Close()
 		return nil, err
 	}
-	timeout := rev.DialTimeout
-	if timeout <= 0 {
-		timeout = 15 * time.Second
-	}
-	hctx, cancel := context.WithTimeout(ctx, timeout)
+	hctx, cancel := context.WithTimeout(ctx, dialTimeoutOf(rev))
 	defer cancel()
 	c := tls.Client(raw, cfg)
 	if err := c.HandshakeContext(hctx); err != nil {
-		raw.Close()
+		_ = raw.Close()
 		return nil, fmt.Errorf("fias tls handshake: %w", err)
 	}
 	return c, nil
+}
+
+// dialTimeoutOf bounds both the TCP connect and the TLS handshake of one FIAS dial.
+func dialTimeoutOf(rev Revision) time.Duration {
+	if rev.DialTimeout > 0 {
+		return rev.DialTimeout
+	}
+	return 15 * time.Second
 }

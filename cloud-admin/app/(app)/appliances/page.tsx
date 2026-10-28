@@ -4,7 +4,7 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FileUp, Server } from "lucide-react";
 import {
-  api, itemsOf, qs, type ApplianceRow, type Customer, type Items, type Overview, type RequestOptions, type Site,
+  api, itemsOf, qs, withStepUp, type ApplianceRow, type Customer, type Items, type Overview, type RequestOptions, type Site,
 } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,7 @@ import { ActivateDialog } from "@/components/appliance-dialogs";
 import { ListState } from "@/components/record-view";
 import { usePermissions } from "@/lib/permissions";
 import { usePoll } from "@/lib/use-poll";
+import { keepUnchanged } from "@/lib/keep-unchanged";
 import { useQueryState } from "@/lib/use-query-state";
 import { ACTIVATION, ACTIVATION_ORDER, CONNECTION, CONNECTION_ORDER, LICENSE, LICENSE_ORDER } from "@/lib/status";
 import { cn } from "@/lib/utils";
@@ -62,7 +63,9 @@ function Appliances() {
     setRefreshing(true);
     try {
       const r = await api.get<Items<ApplianceRow>>(`/cloud/v1/appliances${query}`, opts);
-      setRows(sortAppliances(itemsOf(r)));
+      // Unchanged rows keep their objects, so only changed rows re-render (performance audit D8-M2).
+      const next = sortAppliances(itemsOf(r));
+      setRows((prev) => keepUnchanged(prev, next));
       setErr(null);
     } catch (e) {
       setErr(e);
@@ -102,7 +105,8 @@ function Appliances() {
       } catch {
         throw new Error("That file is not an activation request. Download it again from the appliance's Admin Console.");
       }
-      const row = await api.post<ApplianceRow>("/cloud/v1/offline-activation/requests", body);
+      // Importing creates an appliance, so it needs a password step-up like every appliance action.
+      const row = await withStepUp(() => api.post<ApplianceRow>("/cloud/v1/offline-activation/requests", body));
       toast.success(`${row.serial} imported`, "Activate it, then download its activation package.");
       router.push(`/appliances/${row.id}`);
     } catch (e) {

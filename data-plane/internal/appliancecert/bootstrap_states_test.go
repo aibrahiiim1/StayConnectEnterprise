@@ -18,10 +18,21 @@ type statusCentral struct {
 	csrSubmissions atomic.Int32
 	certPEM        atomic.Value // string
 	caPEM          string
+	helloFailures  atomic.Int32 // the next N mTLS hellos fail
+	hellos         atomic.Int32
 }
 
 func (c *statusCentral) handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/appliance/hello", func(w http.ResponseWriter, r *http.Request) {
+		c.hellos.Add(1)
+		if c.helloFailures.Load() > 0 {
+			c.helloFailures.Add(-1)
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	})
 	mux.HandleFunc("/v1/appliance/csr", func(w http.ResponseWriter, r *http.Request) {
 		c.csrSubmissions.Add(1)
 		w.WriteHeader(http.StatusAccepted)

@@ -50,7 +50,7 @@ func (s *server) getNetworkPolicy(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	out, err := s.networkPolicy(ctx)
 	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "policy_unreadable", err.Error())
+		internalErr(w, r, http.StatusInternalServerError, "policy_unreadable", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -92,13 +92,13 @@ func (s *server) putNetworkPolicy(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	before, err := s.networkPolicy(ctx)
 	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "policy_unreadable", err.Error())
+		internalErr(w, r, http.StatusInternalServerError, "policy_unreadable", err)
 		return
 	}
 	var version int64
 	if err := s.db.QueryRow(ctx, `SELECT iam_v2.guest_signin_network_policy_set($1::uuid,$2::uuid,$3,$4,$5,$6,$7)`,
 		s.tenantID, s.siteID, p.MaxFailures, p.WindowSeconds, p.PauseSeconds, actor, reason).Scan(&version); err != nil {
-		jsonErr(w, http.StatusInternalServerError, "policy_not_saved", err.Error())
+		internalErr(w, r, http.StatusInternalServerError, "policy_not_saved", err)
 		return
 	}
 	s.audit(r, "guest_signin_network_policy.update", "site", s.siteID, map[string]any{
@@ -111,7 +111,7 @@ func (s *server) putNetworkPolicy(w http.ResponseWriter, r *http.Request) {
 	})
 	out, err := s.networkPolicy(ctx)
 	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "policy_unreadable", err.Error())
+		internalErr(w, r, http.StatusInternalServerError, "policy_unreadable", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -138,7 +138,7 @@ func (s *server) listNetworkPauses(w http.ResponseWriter, r *http.Request) {
 		 WHERE p.tenant_id = $1 AND p.site_id = $2 AND p.ended_at IS NULL AND p.expires_at > now()
 		 ORDER BY p.started_at DESC`, s.tenantID, s.siteID)
 	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "pauses_unreadable", err.Error())
+		internalErr(w, r, http.StatusInternalServerError, "pauses_unreadable", err)
 		return
 	}
 	defer rows.Close()
@@ -147,7 +147,7 @@ func (s *server) listNetworkPauses(w http.ResponseWriter, r *http.Request) {
 		var p networkPauseOut
 		if err := rows.Scan(&p.ID, &p.GuestNetwork, &p.StartedAt, &p.ExpiresAt, &p.RemainingSeconds,
 			&p.FailureCount, &p.ConfirmedDevices); err != nil {
-			jsonErr(w, http.StatusInternalServerError, "pauses_unreadable", err.Error())
+			internalErr(w, r, http.StatusInternalServerError, "pauses_unreadable", err)
 			return
 		}
 		out = append(out, p)
@@ -179,7 +179,7 @@ func (s *server) listNetworkPauseDevices(w http.ResponseWriter, r *http.Request)
 	for rows.Next() {
 		var d device
 		if err := rows.Scan(&d.DeviceMAC, &d.LastSubmittedRoom, &d.LastAttemptAt, &d.Attempts, &d.Confirmed); err != nil {
-			jsonErr(w, http.StatusInternalServerError, "devices_unreadable", err.Error())
+			internalErr(w, r, http.StatusInternalServerError, "devices_unreadable", err)
 			return
 		}
 		out = append(out, d)
@@ -239,7 +239,7 @@ func (s *server) endNetworkPause(w http.ResponseWriter, r *http.Request) {
 	var n int
 	if err := s.db.QueryRow(ctx, `SELECT iam_v2.guest_signin_end_network_pause($1::uuid,$2::uuid,$3::uuid,$4,$5)`,
 		s.tenantID, s.siteID, id, actor, reason).Scan(&n); err != nil {
-		jsonErr(w, http.StatusInternalServerError, "end_failed", err.Error())
+		internalErr(w, r, http.StatusInternalServerError, "end_failed", err)
 		return
 	}
 	if n == 0 {
@@ -277,7 +277,7 @@ func (s *server) confirmPausedDevice(w http.ResponseWriter, r *http.Request) {
 	var n int
 	if err := s.db.QueryRow(ctx, `SELECT iam_v2.guest_signin_confirm_device($1::uuid,$2::uuid,$3::uuid,$4::macaddr,$5,$6)`,
 		s.tenantID, s.siteID, id, mac.String(), actor, reason).Scan(&n); err != nil {
-		jsonErr(w, http.StatusInternalServerError, "confirm_failed", err.Error())
+		internalErr(w, r, http.StatusInternalServerError, "confirm_failed", err)
 		return
 	}
 	if n == 0 {

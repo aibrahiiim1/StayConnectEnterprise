@@ -9,8 +9,8 @@
 
 Product words (Client, Admin Console, Client Portal, Site) are defined in [PRODUCT_TERMINOLOGY.md](PRODUCT_TERMINOLOGY.md).
 Current environments and retired targets: [`CLAUDE.md`](../CLAUDE.md) §0D. Removed documents, and the commit to read
-each from: [ARCHIVE.md](ARCHIVE.md). Open findings of the backend and performance audits:
-[AUDIT_BACKLOG.md](AUDIT_BACKLOG.md).
+each from: [ARCHIVE.md](ARCHIVE.md). Audit findings and their status: [AUDIT_BACKLOG.md](AUDIT_BACKLOG.md); the decisions they wait on:
+[AUDIT_DECISIONS.md](AUDIT_DECISIONS.md).
 
 > **Production model.** Onboarding is zero-touch: a factory-clean appliance registers itself with Central (no token)
 > and waits for **Activate** (customer, site, licence terms); a site without internet uses offline activation. The

@@ -19,19 +19,26 @@ type Config struct {
 	// AllowPublicListen lets a production ctrlapi bind the operator listener to every interface; Central binds
 	// loopback behind Caddy, so this is only for a deployment that deliberately fronts it otherwise.
 	AllowPublicListen bool
+	// DBURLDefaulted: CTRLAPI_DB_URL was not set and the development default (a published password, TLS off)
+	// is in use. A production ctrlapi refuses to start on it (audit Phase 10 X3).
+	DBURLDefaulted bool
 }
+
+// devDBURL is the development database; never acceptable in production.
+const devDBURL = "postgres://stayconnect:stayconnect@127.0.0.1:5432/stayconnect?sslmode=disable"
 
 // Hardening is the default: loopback listener and Secure cookie, and a production ctrlapi refuses to start
 // when either is weakened without the explicit opt-out (Validate).
 func Load() (Config, error) {
 	c := Config{
 		Addr:              env("CTRLAPI_ADDR", "127.0.0.1:8080"),
-		DBURL:             env("CTRLAPI_DB_URL", "postgres://stayconnect:stayconnect@127.0.0.1:5432/stayconnect?sslmode=disable"),
+		DBURL:             env("CTRLAPI_DB_URL", devDBURL),
 		RedisURL:          env("CTRLAPI_REDIS_URL", "redis://127.0.0.1:6379/0"),
 		Env:               env("CTRLAPI_ENV", "dev"),
 		CookieSecure:      env("CTRLAPI_COOKIE_SECURE", "true") != "false",
 		AllowPublicListen: env("CTRLAPI_ALLOW_PUBLIC_LISTEN", "false") == "true",
 	}
+	c.DBURLDefaulted = env("CTRLAPI_DB_URL", "") == ""
 	level, err := ParseLogLevel(env("CTRLAPI_LOG_LEVEL", "info"))
 	if err != nil {
 		return c, err
@@ -62,9 +69,14 @@ func ListensOnAllInterfaces(addr string) bool {
 	return ip != nil && ip.IsUnspecified()
 }
 
+// Production reports CTRLAPI_ENV=production (or prod).
+func (c Config) Production() bool {
+	return strings.EqualFold(c.Env, "production") || strings.EqualFold(c.Env, "prod")
+}
+
 // Validate returns the problems that refuse a start (production only) and the warnings to log.
 func (c Config) Validate() (errs []string, warnings []string) {
-	prod := strings.EqualFold(c.Env, "production") || strings.EqualFold(c.Env, "prod")
+	prod := c.Production()
 	report := func(msg string) {
 		if prod {
 			errs = append(errs, msg)
@@ -78,6 +90,9 @@ func (c Config) Validate() (errs []string, warnings []string) {
 	}
 	if !c.CookieSecure {
 		report("CTRLAPI_COOKIE_SECURE=false: the console session cookie would be sent over plain HTTP")
+	}
+	if c.DBURLDefaulted || c.DBURL == devDBURL {
+		report("CTRLAPI_DB_URL is not set: ctrlapi would connect with the published development password; set it in the env file")
 	}
 	return errs, warnings
 }

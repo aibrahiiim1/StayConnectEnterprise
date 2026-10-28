@@ -4,7 +4,7 @@
 // Releasing a device or pause only permits another attempt; it never signs anyone in.
 
 import { useCallback, useEffect, useState } from "react";
-import { api, ApiError, inBackground } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { REASON_MAX_CHARS, REASON_MIN_CHARS } from "@/lib/reason";
 import { Card, CardBody, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,6 +14,7 @@ import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { Skeleton } from "@/components/ui/misc";
 import { ReadOnlyNotice, SettingField } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
+import { usePoll } from "@/lib/use-poll";
 
 export type NetworkPausePolicy = {
   network_max_failures: number;
@@ -187,11 +188,8 @@ export function NetworkPausesNotice({ canAct }: { canAct: boolean }) {
       setPauses(Array.isArray(r?.pauses) ? r.pauses : []);
     } catch { /* Advisory pause status must not break an unrelated screen. */ }
   }, []);
-  useEffect(() => {
-    void load();
-    const t = setInterval(() => void inBackground(load), 30_000);
-    return () => clearInterval(t);
-  }, [load]);
+  useEffect(() => { void load(); }, [load]);
+  usePoll(() => load(), 30_000);
 
   async function openLetThrough(p: NetworkPause) {
     setLetting(p); setPicked(""); setDevices(null); setActionErr(null);

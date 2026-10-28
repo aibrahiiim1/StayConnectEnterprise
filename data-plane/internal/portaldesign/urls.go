@@ -87,7 +87,8 @@ func checkFragmentHref(raw string) (string, error) {
 	return CheckLinkURL(s)
 }
 
-// CheckImageURL covers logo/background/hero: appliance path, https, or inline raster. Never inline SVG (it can carry script).
+// CheckImageURL is the base image rule: appliance path, https, or inline raster. Never inline SVG (it can carry script).
+// Design image fields and fragments use the stricter checkFragmentImage.
 func CheckImageURL(raw string) (string, error) {
 	s, err := normaliseURL(raw)
 	if err != nil {

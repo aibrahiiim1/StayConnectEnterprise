@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -63,7 +64,8 @@ func (r *Registry) Handler() http.Handler {
 // Middleware must be mounted so chi's RoutePattern() is populated when the request finishes.
 func (r *Registry) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		ww := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		// chi's wrapper keeps http.Flusher and http.Hijacker visible to handlers (audit Phase 1 CC8).
+		ww := middleware.NewWrapResponseWriter(w, req.ProtoMajor)
 		start := time.Now()
 		next.ServeHTTP(ww, req)
 		dur := time.Since(start).Seconds()
@@ -72,17 +74,11 @@ func (r *Registry) Middleware(next http.Handler) http.Handler {
 		if route == "" {
 			route = "unmatched"
 		}
-		r.HTTPRequests.WithLabelValues(req.Method, route, strconv.Itoa(ww.status)).Inc()
+		status := ww.Status()
+		if status == 0 {
+			status = http.StatusOK
+		}
+		r.HTTPRequests.WithLabelValues(req.Method, route, strconv.Itoa(status)).Inc()
 		r.HTTPDuration.WithLabelValues(req.Method, route).Observe(dur)
 	})
-}
-
-type statusRecorder struct {
-	http.ResponseWriter
-	status int
-}
-
-func (s *statusRecorder) WriteHeader(code int) {
-	s.status = code
-	s.ResponseWriter.WriteHeader(code)
 }

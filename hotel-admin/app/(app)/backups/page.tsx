@@ -4,7 +4,7 @@
 // Download is limited to site admin and IT manager, asks for the password each time, and is not offered to other roles.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, ApiError, BACKGROUND_HEADER, ListResp, BackupHealth, BackupSettings, Whoami } from "@/lib/api";
+import { api, ApiError, BACKGROUND_HEADER, ListResp, BackupHealth, BackupSettings } from "@/lib/api";
 import { PageShell, PageHeader, StatCard, StatGrid } from "@/components/ui/page";
 import { Card, CardBody, SectionCard } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
@@ -35,6 +35,7 @@ import { submitDownload } from "@/lib/backup-download";
 import {
   Archive, ShieldCheck, Download, RotateCcw, AlertTriangle, CheckCircle2, Loader2,
 } from "lucide-react";
+import { useOperatorRoles } from "@/lib/whoami-context";
 
 type Artifact = {
   name: string; kind?: string; size_bytes: number; modified_at?: string;
@@ -51,7 +52,7 @@ type VerifyOutcome = { name: string; ok: boolean; text: string };
 
 export default function BackupsPage() {
   const toast = useToast();
-  const [roles, setRoles] = useState<string[] | null>(null);
+  const roles = useOperatorRoles();
   const [artifacts, setArtifacts] = useState<Artifact[] | null>(null);
   const [maint, setMaint] = useState<Maintenance | null>(null);
   const [lastRestore, setLastRestore] = useState<RestoreResult | null>(null);
@@ -97,7 +98,6 @@ export default function BackupsPage() {
 
   useEffect(() => {
     load();
-    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
   }, [load]);
 
   const newest = artifacts?.[0] ?? null;

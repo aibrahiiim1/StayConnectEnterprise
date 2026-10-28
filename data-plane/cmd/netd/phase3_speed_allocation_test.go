@@ -32,6 +32,49 @@ func allocWriter(t *testing.T, tc *fakeTC, g *fakeGate, ips ...string) *phase3Sh
 	return p
 }
 
+// The renewal pass re-rates a SHARED session under its group (its floor, not the whole allowance) and re-rates the
+// group itself, once per pass, when the package rate changes (audit Phase 8 M4 / Phase 6 M4).
+func TestSpeedAllocation_SharedReRateKeepsTheGroupAndFollowsTheAllowance(t *testing.T) {
+	tc, g := newFakeTC(), newFakeGate()
+	p := allocWriter(t, tc, g, "10.0.0.11", "10.0.0.12")
+	a := allocSession("a", "10.0.0.11", "ent-1", "SHARED")
+	b := allocSession("b", "10.0.0.12", "ent-1", "SHARED")
+	if res, err := p.submit(context.Background(), envelope(1, a, b), time.Now()); err != nil || res.Failed != 0 {
+		t.Fatalf("first pass: %+v %v", res, err)
+	}
+	a.DownKbps, b.DownKbps = 40000, 40000
+	tc.mu.Lock()
+	tc.calls = nil
+	tc.mu.Unlock()
+	if res, err := p.submit(context.Background(), envelope(2, a, b), time.Now()); err != nil || res.Failed != 0 {
+		t.Fatalf("renewal pass: %+v %v", res, err)
+	}
+	group := shape.GroupClassid("ent-1")
+	rerates, groups := 0, 0
+	tc.mu.Lock()
+	for _, c := range tc.calls {
+		switch c.op {
+		case "rerate":
+			rerates++
+			if c.group != group {
+				t.Errorf("session %s re-rated outside its group (%q): every device would be guaranteed the whole allowance", c.ip, c.group)
+			}
+		case "group":
+			groups++
+		}
+	}
+	tc.mu.Unlock()
+	if rerates != 2 {
+		t.Fatalf("re-rates = %d, want 2", rerates)
+	}
+	if groups != 2 { // once per pass for the bridge and once for its ifb, not once per device
+		t.Fatalf("group re-rates = %d, want 2", groups)
+	}
+	if rate, ok := tc.groupRate("br-guest", group); !ok || rate != 40000 {
+		t.Fatalf("the group did not follow the new allowance: %d (present=%v)", rate, ok)
+	}
+}
+
 // PER_DEVICE: no group is created and each session hangs off the root at its own rate.
 func TestSpeedAllocation_PerDeviceKeepsIndependentRates(t *testing.T) {
 	tc, g := newFakeTC(), newFakeGate()

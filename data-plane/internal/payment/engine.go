@@ -396,6 +396,9 @@ func classify(err error) error {
 		{"PAYMENT_STATUS_TERMINAL", ErrNotExecutable},
 		{"PAYMENT_REFUND_EXCEEDS_CHARGE", ErrNotExecutable},
 		{"ptx_one_live_charge_per_settlement", ErrNotExecutable},
+		// Audit P6 L5: a concurrent second checkout start for one settlement collides on the idempotency key; it
+		// is "already executing", the same as the live-charge index, not a repository failure (a 500).
+		{"payment_transactions_idempotency_key_key", ErrNotExecutable},
 		{"CALLBACK_EVIDENCE_UNSAFE", ErrUntrustedInput},
 		{"GRANT_NOT_SETTLED", ErrNotExecutable},
 		{"GRANT_WRONG_RAIL", ErrNotExecutable},

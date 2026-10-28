@@ -3,8 +3,8 @@
 // Protel FIAS sends no record total before the end of a sync, so never show a progress bar, percentage or
 // "X of Y": only the real count received so far.
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { api, inBackground, type PmsInterfaceHealth } from "@/lib/api";
+import { useCallback, useRef, useState } from "react";
+import { api, type PmsInterfaceHealth } from "@/lib/api";
 import { connectionEndWords } from "@/lib/api/pms-connections";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,7 @@ import { HelpSection, HelpTip } from "@/components/help";
 import { Separator } from "@/components/ui/misc";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { RefreshCw } from "lucide-react";
+import { usePoll } from "@/lib/use-poll";
 
 // The server sends the token; the staff wording lives here and an unrecognised token falls back rather than rendering raw.
 const STAGE_WORDS: Record<string, string> = {
@@ -70,10 +71,7 @@ export function SynchronizationCard({
   const refreshRef = useRef(onRefreshed);
   refreshRef.current = onRefreshed;
   const delay = active ? 3000 : 10000;
-  useEffect(() => {
-    const t = setInterval(() => void inBackground(() => refreshRef.current()), delay);
-    return () => clearInterval(t);
-  }, [delay]);
+  usePoll(() => refreshRef.current(), delay);
 
   const canRequest =
     health?.transport_status === "CONNECTED" && !active && health?.sync_status !== "RESYNC_IN_PROGRESS";

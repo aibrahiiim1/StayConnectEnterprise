@@ -85,7 +85,7 @@ func (a *applier) applyBundle(ctx context.Context, revID string, intent []netcfg
 	// Persistence: write the netplan file and validate it (no apply; the live state is already correct via ip commands).
 	// A dry run writes nothing: these files decide what comes up after the next reboot.
 	if !a.dryRun {
-		if err := os.WriteFile(a.netplanFile, netcfg.RenderNetplan(managed), 0o600); err != nil {
+		if err := writeFileAtomic(a.netplanFile, netcfg.RenderNetplan(managed), 0o600); err != nil {
 			return fmt.Errorf("write netplan: %w", err)
 		}
 		if err := a.run(ctx, "netplan", "generate"); err != nil {
@@ -163,7 +163,7 @@ func (a *applier) applyBundle(ctx context.Context, revID string, intent []netcfg
 
 	// Unbound fragment + apply. Not written on a dry run, for the reason given at the netplan write above.
 	if !a.dryRun {
-		if err := os.WriteFile(a.unboundFrag, netcfg.RenderUnbound(intent), 0o644); err != nil {
+		if err := writeFileAtomic(a.unboundFrag, netcfg.RenderUnbound(intent), 0o644); err != nil {
 			return fmt.Errorf("write unbound: %w", err)
 		}
 	}
@@ -492,7 +492,7 @@ func (a *applier) reconcileConfirmed(ctx context.Context) (string, []string) {
 			if _, err := os.ReadFile(filepath.Join(bundle, "stayconnect-guest.conf")); err == nil {
 				frag := netcfg.RenderUnbound(intent)
 				_ = os.WriteFile(filepath.Join(bundle, "stayconnect-guest.conf"), frag, 0o644)
-				if werr := os.WriteFile(a.unboundFrag, frag, 0o644); werr != nil {
+				if werr := writeFileAtomic(a.unboundFrag, frag, 0o644); werr != nil {
 					bootProblems = append(bootProblems, "guest resolver fragment: "+werr.Error())
 				}
 				if uerr := a.applyUnbound(ctx); uerr != nil {
@@ -679,7 +679,7 @@ func (a *applier) rollback(ctx context.Context, failedID, reason string) []strin
 		}
 		if raw, err := os.ReadFile(filepath.Join(prevBundle, "stayconnect-guest.conf")); err == nil {
 			portalFragChanged = false // the restart below reloads both fragments
-			if werr := os.WriteFile(a.unboundFrag, raw, 0o644); werr != nil {
+			if werr := writeFileAtomic(a.unboundFrag, raw, 0o644); werr != nil {
 				rb.fail("rollback_unbound", "guest resolver fragment not restored", werr, nil)
 			} else if uerr := a.applyUnbound(ctx); uerr != nil {
 				rb.fail("rollback_unbound", "guest resolver not restarted", uerr, nil)
@@ -693,7 +693,7 @@ func (a *applier) rollback(ctx context.Context, failedID, reason string) []strin
 	}
 	if raw, err := os.ReadFile(filepath.Join(prevBundle, "50-stayconnect-guest.yaml")); err == nil {
 		// And regenerate: restoring the YAML without `netplan generate` left the generated units describing the FAILED revision, so the next reboot recreated destroyed bridges.
-		if werr := os.WriteFile(a.netplanFile, raw, 0o600); werr != nil {
+		if werr := writeFileAtomic(a.netplanFile, raw, 0o600); werr != nil {
 			rb.fail("rollback_netplan", "netplan file not restored", werr, nil)
 		} else if gerr := a.run(ctx, "netplan", "generate"); gerr != nil {
 			rb.fail("rollback_netplan", "the restored netplan could not be regenerated", gerr, nil)
@@ -927,9 +927,23 @@ func ifaceExists(name string) bool {
 	return err == nil
 }
 
+// ifaceQueryBin and ifaceQueryTimeout are fields of the interface queries below so a test can prove the bound.
+var (
+	ifaceQueryBin     = "ip"
+	ifaceQueryTimeout = 10 * time.Second
+)
+
+// ipv4AddrShow runs `ip -o -4 addr show dev NAME` with a deadline, so a hung `ip` cannot hold an apply, a
+// verification or the lock it runs under (audit Phase 8 L11).
+func ipv4AddrShow(name string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), ifaceQueryTimeout)
+	defer cancel()
+	return exec.CommandContext(ctx, ifaceQueryBin, "-o", "-4", "addr", "show", "dev", name).Output()
+}
+
 // ifaceAddrs lists the IPv4 CIDRs configured on an interface ("10.20.0.1/24"), newest kernel order.
 func ifaceAddrs(name string) []string {
-	out, err := exec.Command("ip", "-o", "-4", "addr", "show", "dev", name).Output()
+	out, err := ipv4AddrShow(name)
 	if err != nil {
 		return nil
 	}
@@ -946,7 +960,7 @@ func ifaceAddrs(name string) []string {
 }
 
 func ifaceHasIP(name, ip string) bool {
-	out, err := exec.Command("ip", "-o", "-4", "addr", "show", "dev", name).Output()
+	out, err := ipv4AddrShow(name)
 	if err != nil {
 		return false
 	}
@@ -954,7 +968,7 @@ func ifaceHasIP(name, ip string) bool {
 }
 
 func ifaceHasAnyIP(name string) bool {
-	out, err := exec.Command("ip", "-o", "-4", "addr", "show", "dev", name).Output()
+	out, err := ipv4AddrShow(name)
 	if err != nil {
 		return false
 	}

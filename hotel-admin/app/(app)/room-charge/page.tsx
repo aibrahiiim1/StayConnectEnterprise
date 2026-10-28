@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { api, ApiError, Whoami } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { canRead } from "@/lib/roles";
 import {
   ANSWER_EFFECT_WORDS, ANSWER_NAMES, AnswerMeaning, OnboardingInterface, OnboardingResp, RESERVATION_TARGET, SiteModules,
@@ -30,6 +30,7 @@ import { useToast } from "@/components/ui/toast";
 import { ArrowUpRight, CheckCircle2, ShieldCheck, Undo2 } from "lucide-react";
 import { CodeList, CodeText } from "../payment-methods/codes";
 import { RoomChargeLiveNotice } from "@/components/room-charge-live-notice";
+import { useOperatorRoles } from "@/lib/whoami-context";
 
 const FIAS = "protel-fias";
 const ATTESTATION_MIN = 20;
@@ -43,10 +44,7 @@ type AnswerChange = { iface: OnboardingInterface; meaning: AnswerMeaning; action
 
 export default function RoomChargePage() {
   const toast = useToast();
-  const [roles, setRoles] = useState<string[] | null>(null);
-  useEffect(() => {
-    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
-  }, []);
+  const roles = useOperatorRoles();
   const readable = roles === null ? false : canRead("pms-financial-onboarding", roles);
   const isSiteAdmin = roles?.includes("site_admin") ?? false;
 

@@ -466,7 +466,7 @@ func TestIntegration_Ownership_SharedAccessIsNotRedactedOrSearchedByDevice(t *te
 		f.tenant, room); err != nil {
 		t.Fatalf("seed audit: %v", err)
 	}
-	st, body := f.do(t, "GET", "/guest-data-rights/search?q=02:aa:00:07:00:01", nil)
+	st, body := f.searchGuestData(t, "02:aa:00:07:00:01")
 	if m, _ := body["matches"].([]any); st != 200 || len(m) != 0 {
 		t.Fatalf("a MAC search offered %v (%d), want nothing: the device is the room's, not one person's", body, st)
 	}

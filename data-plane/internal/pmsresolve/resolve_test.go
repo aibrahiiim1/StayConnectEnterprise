@@ -56,8 +56,13 @@ func TestD6_CandidateCap(t *testing.T) {
 // Forged client hints cannot matter: Resolve has no hint input, only the trusted candidate vector.
 func TestD7_ForgedHintsIgnored(t *testing.T) {
 	vec := []Candidate{c("A", Verified), c("B", NoMatch)}
-	if Resolve(vec, 8) != Resolve(vec, 8) {
-		t.Fatal("D7: outcome must depend ONLY on the candidate vector")
+	want := Resolve(vec, 8)
+	if want.Resolution != ResVerified || want.InterfaceID != "A" {
+		t.Fatalf("D7: got %+v, want VERIFIED A", want)
+	}
+	// An equal vector built afresh gives the same outcome: nothing but the vector is an input.
+	if got := Resolve([]Candidate{c("A", Verified), c("B", NoMatch)}, 8); got != want {
+		t.Fatalf("D7: outcome must depend ONLY on the candidate vector: %+v vs %+v", got, want)
 	}
 }
 

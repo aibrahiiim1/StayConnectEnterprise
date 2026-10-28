@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -66,7 +67,9 @@ func (s *server) postingLoop(ctx context.Context, w *postingWorker) {
 	if w == nil {
 		return
 	}
+	lanes := newLaneScheduler()
 	defer w.pool.Close()
+	defer lanes.wait() // no lane may still be posting when the pool closes
 	t := time.NewTicker(2 * time.Second)
 	defer t.Stop()
 	var lastRecover, lastApply time.Time
@@ -80,6 +83,9 @@ func (s *server) postingLoop(ctx context.Context, w *postingWorker) {
 			continue
 		}
 		if time.Since(lastRecover) > time.Minute {
+			// Recovery concludes attempts left SENDING as UNKNOWN; it must never see a lane's live attempt, so it waits
+			// until no lane is mid-posting.
+			lanes.wait()
 			if n, err := w.engine.RecoverOrphanedAttempts(ctx, s.tenID, s.siteID, 0); err != nil {
 				slog.Error("posting worker: orphan recovery failed", "err", err)
 			} else if n > 0 {
@@ -88,25 +94,63 @@ func (s *server) postingLoop(ctx context.Context, w *postingWorker) {
 			lastRecover = time.Now()
 		}
 		if time.Since(lastApply) > 30*time.Second {
+			lanes.wait()
 			if err := w.engine.ApplySettlementOutcomes(ctx, s.tenID, s.siteID); err != nil {
 				slog.Error("posting worker: settlement catch-up failed", "err", err)
 			}
 			lastApply = time.Now()
 		}
 		for _, iface := range s.queuedLanes(ctx, w) {
-			// One posting per lane per tick: a lane is serialized by the database (one IN_FLIGHT per
-			// interface), and a slow PMS on one interface never holds another.
-			out, err := w.engine.RunOnce(ctx, s.tenID, s.siteID, iface)
-			if out.Claimed {
-				slog.Info("posting worker: attempt concluded", "posting", out.PostingID, "attempt", out.AttemptNo,
-					"result", out.Result, "as", out.ASStatus, "code", string(out.RefusedFor), "not_sent_reason", out.NotSentReason)
-			}
-			if err != nil && out.Result != "UNKNOWN" && out.Result != "DECLINED" {
-				slog.Warn("posting worker: lane pass failed", "interface", iface, "err", err)
-			}
+			// One posting per lane at a time, each lane in its own goroutine: a lane is also serialized by the database
+			// (one IN_FLIGHT per interface), and a slow PMS on one interface no longer holds the others.
+			iface := iface
+			lanes.start(iface, func() {
+				out, err := w.engine.RunOnce(ctx, s.tenID, s.siteID, iface)
+				if out.Claimed {
+					slog.Info("posting worker: attempt concluded", "posting", out.PostingID, "attempt", out.AttemptNo,
+						"result", out.Result, "as", out.ASStatus, "code", string(out.RefusedFor), "not_sent_reason", out.NotSentReason)
+				}
+				if err != nil && out.Result != "UNKNOWN" && out.Result != "DECLINED" {
+					slog.Warn("posting worker: lane pass failed", "interface", iface, "err", err)
+				}
+			})
 		}
 	}
 }
+
+// laneScheduler runs each lane's pass in its own goroutine and never starts a lane that is still running.
+type laneScheduler struct {
+	mu      sync.Mutex
+	running map[string]bool
+	wg      sync.WaitGroup
+}
+
+func newLaneScheduler() *laneScheduler { return &laneScheduler{running: map[string]bool{}} }
+
+// start runs fn for lane unless that lane's previous pass is still running; it reports whether it started.
+func (l *laneScheduler) start(lane string, fn func()) bool {
+	l.mu.Lock()
+	if l.running[lane] {
+		l.mu.Unlock()
+		return false
+	}
+	l.running[lane] = true
+	l.wg.Add(1)
+	l.mu.Unlock()
+	go func() {
+		defer func() {
+			l.mu.Lock()
+			delete(l.running, lane)
+			l.mu.Unlock()
+			l.wg.Done()
+		}()
+		fn()
+	}()
+	return true
+}
+
+// wait blocks until no lane is running.
+func (l *laneScheduler) wait() { l.wg.Wait() }
 
 func (s *server) queuedLanes(ctx context.Context, w *postingWorker) []string {
 	rows, err := w.pool.Query(ctx, `SELECT DISTINCT pms_interface_id::text FROM iam_v2.posting_outbox

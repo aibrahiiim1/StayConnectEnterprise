@@ -51,16 +51,16 @@ type IssueParams struct {
 	DeviceMAC string
 }
 
-// bindDevice failing fails the issue: an unbound code would be verifiable from anywhere.
-func bindDevice(ctx context.Context, db *pgxpool.Pool, challengeID, tenantID, mac string) error {
+// bindDevice failing fails the issue: an unbound code would be verifiable from anywhere. Old bindings are pruned by scd's periodic job
+// (pruneOTPEscrow), not on this path.
+func bindDevice(ctx context.Context, tx pgx.Tx, challengeID, tenantID, mac string) error {
 	if strings.TrimSpace(mac) == "" {
 		return nil
 	}
-	if _, err := db.Exec(ctx, `INSERT INTO iam_v2.otp_device_bindings (challenge_id, tenant_id, device_mac)
+	if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.otp_device_bindings (challenge_id, tenant_id, device_mac)
 	     VALUES ($1::uuid, $2::uuid, $3::macaddr)`, challengeID, tenantID, mac); err != nil {
 		return fmt.Errorf("otp: bind device: %w", err)
 	}
-	_, _ = db.Exec(ctx, `DELETE FROM iam_v2.otp_device_bindings WHERE issued_at < now() - interval '1 day'`)
 	return nil
 }
 
@@ -70,17 +70,34 @@ type Issued struct {
 	ExpiresAt   time.Time
 }
 
-// Issue enforces cooldown and hourly caps, then stores the code. With a ring the code_hash is a keyed HMAC pinned to
-// the active generation; with a nil ring it is the legacy salt:sha256 and otp_key_generation stays NULL.
+// Issue enforces cooldown and hourly caps, then stores the code. The checks and the insert run in one transaction under advisory locks on the
+// destination and the source address, so parallel requests cannot all pass the same count. With a ring the code_hash is a keyed HMAC pinned to the
+// active generation; with a nil ring it is the legacy salt:sha256 and otp_key_generation stays NULL.
 func Issue(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, p IssueParams) (*Issued, error) {
 	if p.TenantID == "" || p.Channel == "" || p.Destination == "" {
 		return nil, fmt.Errorf("otp: tenant/channel/destination required")
 	}
 	dest := strings.ToLower(strings.TrimSpace(p.Destination))
 
+	tx, err := db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("otp: begin: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	// Lock order is always destination, then address, so two requests never wait on each other in a cycle.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('otp-dest:' || $1 || ':' || $2 || ':' || $3))`,
+		p.TenantID, p.Channel, dest); err != nil {
+		return nil, fmt.Errorf("otp: lock: %w", err)
+	}
+	if p.IP != "" {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('otp-ip:' || $1 || ':' || $2))`, p.TenantID, p.IP); err != nil {
+			return nil, fmt.Errorf("otp: lock: %w", err)
+		}
+	}
+
 	var lastAt *time.Time
 	var hourCount int
-	if err := db.QueryRow(ctx, `
+	if err := tx.QueryRow(ctx, `
         SELECT max(issued_at),
                count(*) FILTER (WHERE issued_at > now() - interval '1 hour')
           FROM auth_otps
@@ -98,7 +115,7 @@ func Issue(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, p IssuePara
 	// Per-source-IP limit across all destinations and channels (anti-enumeration).
 	if p.IP != "" {
 		var ipHour int
-		if err := db.QueryRow(ctx, `
+		if err := tx.QueryRow(ctx, `
             SELECT count(*) FROM auth_otps
              WHERE tenant_id = $1
                AND ip = $2::inet
@@ -114,11 +131,11 @@ func Issue(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, p IssuePara
 	code := generate6()
 	expires := time.Now().Add(DefaultTTL)
 
+	var id string
 	if ring == nil {
 		salt := randHex(8)
 		hash := hashOTP(salt, code)
-		var id string
-		if err := db.QueryRow(ctx, `
+		if err := tx.QueryRow(ctx, `
         INSERT INTO auth_otps
           (tenant_id, appliance_id, channel, destination,
            code_hash, expires_at, max_attempts, ip, user_agent)
@@ -132,24 +149,18 @@ func Issue(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, p IssuePara
 			salt+":"+hash, expires, DefaultMaxAttempts, p.IP, p.UserAgent).Scan(&id); err != nil {
 			return nil, fmt.Errorf("otp: insert: %w", err)
 		}
-		if err := bindDevice(ctx, db, id, p.TenantID, p.DeviceMAC); err != nil {
-			return nil, err
+	} else {
+		// The digest binds the challenge id, so the id is generated before the HMAC is computed.
+		if err := tx.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&id); err != nil {
+			return nil, fmt.Errorf("otp: id gen: %w", err)
 		}
-		return &Issued{ChallengeID: id, Code: code, ExpiresAt: expires}, nil
-	}
-
-	// The digest binds the challenge id, so the id is generated before the HMAC is computed.
-	var id string
-	if err := db.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&id); err != nil {
-		return nil, fmt.Errorf("otp: id gen: %w", err)
-	}
-	gen, digestHex, err := ring.Issue(otpkey.Challenge{
-		TenantID: p.TenantID, Channel: p.Channel, Destination: dest, ChallengeID: id,
-	}, code)
-	if err != nil {
-		return nil, fmt.Errorf("otp: hmac issue: %w", err)
-	}
-	if _, err := db.Exec(ctx, `
+		gen, digestHex, err := ring.Issue(otpkey.Challenge{
+			TenantID: p.TenantID, Channel: p.Channel, Destination: dest, ChallengeID: id,
+		}, code)
+		if err != nil {
+			return nil, fmt.Errorf("otp: hmac issue: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `
         INSERT INTO auth_otps
           (id, tenant_id, appliance_id, channel, destination,
            code_hash, otp_key_generation, expires_at, max_attempts, ip, user_agent)
@@ -159,11 +170,15 @@ func Issue(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, p IssuePara
            CASE WHEN $10 = '' THEN NULL ELSE $10::inet END,
            NULLIF($11,''))
     `, id, p.TenantID, p.ApplianceID, p.Channel, dest,
-		digestHex, gen, expires, DefaultMaxAttempts, p.IP, p.UserAgent); err != nil {
-		return nil, fmt.Errorf("otp: insert: %w", err)
+			digestHex, gen, expires, DefaultMaxAttempts, p.IP, p.UserAgent); err != nil {
+			return nil, fmt.Errorf("otp: insert: %w", err)
+		}
 	}
-	if err := bindDevice(ctx, db, id, p.TenantID, p.DeviceMAC); err != nil {
+	if err := bindDevice(ctx, tx, id, p.TenantID, p.DeviceMAC); err != nil {
 		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("otp: commit: %w", err)
 	}
 	return &Issued{ChallengeID: id, Code: code, ExpiresAt: expires}, nil
 }
@@ -171,16 +186,8 @@ func Issue(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, p IssuePara
 type Verified struct {
 	ChallengeID string
 	TenantID    string
-	TemplateID  string
 	Channel     string
 	Destination string
-}
-
-// Verify records the attempt and consumes the row on success; attempt increment and consume are atomic in one FOR
-// UPDATE tx. A pinned key generation verifies with its keyed HMAC; a NULL generation is a legacy OTP accepted only
-// while unexpired. It does not check the device: guest paths call VerifyFrom.
-func Verify(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, challengeID, code string) (*Verified, error) {
-	return verify(ctx, db, ring, challengeID, code)
 }
 
 // VerifyFrom fails closed: no device, another device, or no binding is refused with ErrOtherDevice before the code is
@@ -201,6 +208,9 @@ func VerifyFrom(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, challe
 	return verify(ctx, db, ring, challengeID, code)
 }
 
+// verify records the attempt and consumes the row on success; attempt increment and consume are atomic in one FOR
+// UPDATE tx. A pinned key generation verifies with its keyed HMAC; a NULL generation is a legacy OTP accepted only
+// while unexpired. It does not check the device: guest paths call VerifyFrom.
 func verify(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, challengeID, code string) (*Verified, error) {
 	tx, err := db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -210,7 +220,6 @@ func verify(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, challengeI
 
 	var (
 		tenantID, channel, destination, codeHash string
-		templateID                               *string
 		expiresAt                                time.Time
 		attempts, maxAttempts                    int
 		consumedAt                               *time.Time
@@ -270,16 +279,12 @@ func verify(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, challengeI
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
-	out := &Verified{
+	return &Verified{
 		ChallengeID: challengeID,
 		TenantID:    tenantID,
 		Channel:     channel,
 		Destination: destination,
-	}
-	if templateID != nil {
-		out.TemplateID = *templateID
-	}
-	return out, nil
+	}, nil
 }
 
 func generate6() string {

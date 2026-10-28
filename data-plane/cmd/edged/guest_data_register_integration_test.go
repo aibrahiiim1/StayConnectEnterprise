@@ -34,6 +34,14 @@ func TestIntegration_GuestDataRegister_DeadlineAnswerAndRemoval(t *testing.T) {
 	if st, _ := f.do(t, "POST", "/guest-data-rights/register", map[string]any{"kind": "ACCESS", "received_at": received, "requester": ""}); st == 201 {
 		t.Errorf("a request with no requester was recorded")
 	}
+	// P9 L13: free text is bounded in Go too; the verification method had no bound anywhere.
+	if st, body := f.do(t, "POST", "/guest-data-rights/register", map[string]any{"kind": "ACCESS", "received_at": received,
+		"requester": who, "verification_method": strings.Repeat("m", 65)}); st != 400 || body["error"] != "invalid_verification_method" {
+		t.Errorf("an over-long verification method = %d %v", st, body)
+	}
+	if st, body := f.do(t, "POST", "/guest-data-rights/register/"+id+"/extend", map[string]any{"reason": "no"}); st != 400 || body["error"] != "invalid_reason" {
+		t.Errorf("a too-short extension reason = %d %v", st, body)
+	}
 
 	st, list := f.do(t, "GET", "/guest-data-rights/register", nil)
 	if st != 200 || !strings.Contains(fmt.Sprint(list), who) {

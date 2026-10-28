@@ -43,12 +43,18 @@ export function useServerPage<R extends PagedFields>({
   const [loading, setLoading] = useState(false);
 
   const latest = useRef(0);
+  const inflight = useRef<AbortController | null>(null);
   const headerKey = headers ? JSON.stringify(headers) : "";
   const reload = useCallback(async () => {
     const mine = ++latest.current;
+    // A newer question cancels the older request, so edged stops its query instead of finishing it for nobody.
+    inflight.current?.abort();
+    const ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    inflight.current = ctl;
     setLoading(true);
     try {
-      const r = await api.get<R>(url, headerKey ? (JSON.parse(headerKey) as Record<string, string>) : undefined);
+      const r = await api.get<R>(url, headerKey ? (JSON.parse(headerKey) as Record<string, string>) : undefined,
+        ctl ? { signal: ctl.signal } : undefined);
       if (mine !== latest.current) return; // superseded
       setResp(r);
       setRespUrl(url + "\n" + headerKey);
@@ -57,9 +63,13 @@ export function useServerPage<R extends PagedFields>({
       if (mine !== latest.current) return; // superseded
       setErr(e);
     } finally {
-      if (mine === latest.current) setLoading(false);
+      if (mine === latest.current) {
+        setLoading(false);
+        inflight.current = null;
+      }
     }
   }, [url, headerKey]);
+  useEffect(() => () => inflight.current?.abort(), []);
 
   useEffect(() => {
     if (enabled) void reload();

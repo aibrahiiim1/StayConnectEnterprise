@@ -42,18 +42,30 @@ func SigningKeyState(ctx context.Context, b *Base, keyID string) (string, error)
 	return state, err
 }
 
-func resignRegistry(ctx context.Context, b *Base, regRoot ed25519.PrivateKey, reason string) {
+// errNoRegistryRoot refuses a key-state change that could not be published to appliances (audit Phase 1 M3).
+var errNoRegistryRoot = errors.New("the assignment registry root key is not loaded (CTRLAPI_REGISTRY_ROOT_KEY): " +
+	"a key-state change could not be re-signed into the trust registry, so nothing was changed")
+
+// resignRegistry publishes the key states; its failure is returned, never swallowed (audit Phase 1 M3).
+func resignRegistry(ctx context.Context, b *Base, regRoot ed25519.PrivateKey, reason string) error {
 	if regRoot == nil {
-		return
+		return errNoRegistryRoot
 	}
 	rb := &RegistryBase{Base: b, RootKey: regRoot}
-	_, _ = rb.Rebuild(ctx, reason)
+	if _, err := rb.Rebuild(ctx, reason); err != nil {
+		return fmt.Errorf("the key state is changed but the trust registry was NOT re-signed (appliances keep the "+
+			"previous registry until ctrlapi re-signs it; restart ctrlapi or repeat the command): %w", err)
+	}
+	return nil
 }
 
 // KeyToVerifyOnly stops a key signing while keeping it trusted for documents already issued. Always safe.
 func KeyToVerifyOnly(ctx context.Context, b *Base, regRoot ed25519.PrivateKey, keyID, reason string) error {
 	if reason == "" {
 		return errors.New("a reason is required")
+	}
+	if regRoot == nil {
+		return errNoRegistryRoot
 	}
 	tag, err := b.DB.Exec(ctx, `
         UPDATE assignment_signing_keys SET state='verify_only', verify_only_at=now(), reason=$2
@@ -64,10 +76,10 @@ func KeyToVerifyOnly(ctx context.Context, b *Base, regRoot ed25519.PrivateKey, k
 	if tag.RowsAffected() == 0 {
 		return errors.New("no active signing key with that id")
 	}
-	resignRegistry(ctx, b, regRoot, "key "+keyID+" -> verify_only")
+	rerr := resignRegistry(ctx, b, regRoot, "key "+keyID+" -> verify_only")
 	audit.System(ctx, b.DB, "assignment.signing_key_verify_only", "assignment_key", keyID,
-		map[string]any{"key_id": keyID, "reason": reason})
-	return nil
+		map[string]any{"key_id": keyID, "reason": reason, "registry_resigned": rerr == nil})
+	return rerr
 }
 
 // KeyRevoke removes all trust in a key. Refused while a current assignment is still signed by it (those appliances
@@ -75,6 +87,9 @@ func KeyToVerifyOnly(ctx context.Context, b *Base, regRoot ed25519.PrivateKey, k
 func KeyRevoke(ctx context.Context, b *Base, regRoot ed25519.PrivateKey, keyID, reason string, emergency bool) (int64, error) {
 	if reason == "" {
 		return 0, errors.New("a reason is required")
+	}
+	if regRoot == nil {
+		return 0, errNoRegistryRoot
 	}
 	var state string
 	var deps int64
@@ -102,8 +117,9 @@ func KeyRevoke(ctx context.Context, b *Base, regRoot ed25519.PrivateKey, keyID, 
 	if emergency {
 		action = "assignment.signing_key_revoked_emergency"
 	}
-	resignRegistry(ctx, b, regRoot, "key "+keyID+" -> revoked")
+	rerr := resignRegistry(ctx, b, regRoot, "key "+keyID+" -> revoked")
 	audit.System(ctx, b.DB, action, "assignment_key", keyID, map[string]any{
-		"key_id": keyID, "reason": reason, "emergency_compromise": emergency, "stranded_assignments": deps})
-	return deps, nil
+		"key_id": keyID, "reason": reason, "emergency_compromise": emergency, "stranded_assignments": deps,
+		"registry_resigned": rerr == nil})
+	return deps, rerr
 }

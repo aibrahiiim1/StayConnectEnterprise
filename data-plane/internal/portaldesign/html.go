@@ -288,8 +288,6 @@ func checkAttr(tag, key, val string, is *issueSet) (string, bool) {
 		return "", false
 	case "time|datetime":
 		return capText(val, 64), true
-	case "abbr|title":
-		return capText(val, 256), true
 	}
 
 	// Anything unlisted (formaction, srcdoc, srcset, ping, http-equiv, ...) is dropped.

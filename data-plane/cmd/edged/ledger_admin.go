@@ -5,7 +5,28 @@ package main
 
 import (
 	"net/http"
+	"sync"
+	"time"
 )
+
+// ledgerFreshEvery is the least time between two fresh secondary-storage probes asked for through the status route.
+const ledgerFreshEvery = 30 * time.Second
+
+var (
+	ledgerFreshMu   sync.Mutex
+	ledgerFreshLast time.Time
+)
+
+// allowFreshLedgerProbe reports whether a fresh probe may run now, and if so records it.
+func allowFreshLedgerProbe(now time.Time) bool {
+	ledgerFreshMu.Lock()
+	defer ledgerFreshMu.Unlock()
+	if !ledgerFreshLast.IsZero() && now.Sub(ledgerFreshLast) < ledgerFreshEvery {
+		return false
+	}
+	ledgerFreshLast = now
+	return true
+}
 
 func (s *server) relayJSON(w http.ResponseWriter, r *http.Request, method, path string, body any) (int, []byte, bool) {
 	code, raw, err := s.scd.call(r.Context(), method, path, body)
@@ -25,7 +46,9 @@ func writeRaw(w http.ResponseWriter, code int, raw []byte) {
 
 func (s *server) ledgerStatusGet(w http.ResponseWriter, r *http.Request) {
 	path := "/v1/ledger/status"
-	if r.URL.Query().Get("fresh") == "1" {
+	// A fresh status makes scd probe the secondary storage; on a read-only route that is rationed to one probe per
+	// ledgerFreshEvery across all callers, otherwise the cached status is served (audit P9 L12).
+	if r.URL.Query().Get("fresh") == "1" && allowFreshLedgerProbe(time.Now()) {
 		path += "?fresh=1"
 	}
 	if code, raw, ok := s.relayJSON(w, r, http.MethodGet, path, nil); ok {

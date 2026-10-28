@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
@@ -158,9 +159,20 @@ func (s *server) pollAllServices(ctx context.Context) {
 	for _, spec := range s.services() {
 		s.pollOne(ctx, spec)
 	}
-	_, _ = s.db.Exec(ctx, `DELETE FROM appliance_recovery_events
-	    WHERE id NOT IN (SELECT id FROM appliance_recovery_events ORDER BY id DESC LIMIT 2000)`)
+	// Trim only after something was recorded, and by primary key: the anti-join ran a write transaction every
+	// 10 s on an idle appliance (performance audit D7-L2).
+	if recoveryEventsSinceTrim.Swap(0) > 0 {
+		_, _ = s.db.Exec(ctx, trimRecoveryEventsSQL)
+	}
 }
+
+// trimRecoveryEventsSQL keeps the newest 2,000 recovery events; with fewer, the subquery is NULL and nothing goes.
+const trimRecoveryEventsSQL = `DELETE FROM appliance_recovery_events
+    WHERE id < (SELECT id FROM appliance_recovery_events ORDER BY id DESC OFFSET 1999 LIMIT 1)`
+
+// recoveryEventsSinceTrim counts recorded events since the last trim; it starts at 1 so the first poll after a
+// start trims whatever an earlier run left.
+var recoveryEventsSinceTrim = func() *atomic.Int64 { var n atomic.Int64; n.Store(1); return &n }()
 
 func (s *server) pollOne(ctx context.Context, spec svcSpec) {
 	now := time.Now()
@@ -400,6 +412,7 @@ func (s *server) recordRecovery(ctx context.Context, service, event, cause, acti
 	   (service, event, cause, action, backoff_level, result, duration_ms, actor)
 	   VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
 		service, event, sanitizeDetail(cause), action, level, result, durMS, actor)
+	recoveryEventsSinceTrim.Add(1)
 }
 
 func bootID() string {

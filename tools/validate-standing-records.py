@@ -85,6 +85,8 @@ HISTORICAL_TREES = (
 
 SKIP_TREES = (
     ".git/", "node_modules/", ".cleanroom/", "iam_v2_scratch/accepted/",
+    # Agent worktrees (git worktrees of this repository, created by delivery tooling) are copies, not content.
+    ".claude/worktrees/",
     # BUILD OUTPUT IS NOT A SURFACE ANYBODY READS. The Next.js bundles under .deploy/ and .next/ contain
     # every string the UI can render, minified, so they match any vocabulary rule by construction.
     "cloud-admin/.deploy/", "hotel-admin/.deploy/", "web-admin/.deploy/",

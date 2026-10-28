@@ -29,7 +29,5 @@ func emailOf(s *auth.Session) string {
 	return s.Email
 }
 
-// clientIPFromReq: see package clientip for which headers are trusted.
-func clientIPFromReq(r *http.Request) string { return clientip.From(r) }
-
+// clientIP: see package clientip for which headers are trusted.
 func clientIP(r *http.Request) string { return clientip.From(r) }

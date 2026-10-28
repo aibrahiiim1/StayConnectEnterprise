@@ -64,6 +64,10 @@ func ParseIdentity(text string) (*age.X25519Identity, error) {
 			return id, nil
 		}
 	}
+	// A line longer than the scanner's buffer stops the scan; that is a damaged file, not a file without a key.
+	if err := sc.Err(); err != nil {
+		return nil, fmt.Errorf("the backup key file could not be read: %w", err)
+	}
 	return nil, ErrNoIdentity
 }
 
@@ -108,7 +112,9 @@ func NewCheckCode() (string, error) {
 	return b.String(), nil
 }
 
-// CheckCodeHash is what the appliance stores; case, spaces and dashes are ignored.
+// CheckCodeHash is what the appliance stores; case, spaces and dashes are ignored. The check code is NOT a secret
+// (about 39 bits, printed beside the key): it only proves the holder saved the file, so an unsalted digest is enough
+// and nothing may treat it as a credential.
 func CheckCodeHash(code string) string {
 	norm := strings.Map(func(r rune) rune {
 		switch {

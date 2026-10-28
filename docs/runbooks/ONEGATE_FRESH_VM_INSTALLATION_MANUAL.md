@@ -697,6 +697,23 @@ unchanged. `apply-pending-migrations.sh --list` prints the pending set without c
 
 **Compatibility gates you must respect:** a `netd` older than the nft converger is refused if the legacy `auth_ipv4` set is non-empty/unreadable (it would de-authorise every online Client); `scd`/`edged` older than migration 0155 are refused while any `SHARED_STRICT` policy exists.
 
+
+#### E.5.1 Before upgrading to a release with the 2026-10-28 audit remediation — **[CODE]**, not yet run on a VM
+
+Check these on the appliance first (each refuses or changes something an older release accepted):
+
+| Change | What to check before the upgrade |
+|---|---|
+| `appliance-install.sh --upgrade` adds a missing `SCD/EDGED/NETD/ACCTD_DB_URL` to an existing env file from `/etc/stayconnect/.dsn` (never changes a set value) | nothing; read the log line it prints |
+| Migrations 0159–0161 add indexes on `iam_v2.sessions` and revoke `PUBLIC` execute on a trigger function | each index build holds a write lock for seconds at appliance volumes: upgrade in a quiet period |
+| The Client Portal's logo, background and hero image must be an uploaded `/assets/…` image, an `https` address or an inline image | a saved design pointing anywhere else stops showing that image: re-upload it |
+| pmsd refuses a published revision with a certificate pin and TLS off, and refuses `pmsd.env` keys that are not 32-byte hex while the connector is on | the PMS revision and `pmsd.env` keys |
+| After a PMS feed gap, room sign-in stays refused until the requested resync publishes (it no longer reopens on the next live record) | if the PMS never answers the resync request, sign-in stays refused until the link reconnects |
+| A damaged licence-state or revocation file makes the appliance **unlicensed** (log: `licence state damaged`; the `.prev` copy is tried first) instead of silently resetting replay protection | restore the file from a backup, or re-fetch the licence from Central |
+| A damaged `identity.json` (key missing or not matching) stops registration instead of creating a new identity; the Admin Console keeps working | restore `/etc/stayconnect/identity/` from a backup |
+| An assignment older than the one already adopted is refused at boot | a factory reset clears it |
+| Guest routes answer `503` with `Retry-After` above 64 requests in flight; guest request bodies above 64 KB get `413`; one guest address may hold at most 256 open connections to the portal ports | nothing |
+
 ### E.6 Rollback
 
 | What | How |
@@ -769,7 +786,7 @@ bash deploy/scripts/central-install.sh --mode new --admin-email ops@<your-domain
 
 The installer's 14 steps (idempotent; never regenerates an existing secret/key/CA/certificate; never overwrites different trust material; refuses `--mode new` over a database that already holds appliances or licences):
 
-1. verify the release (`SHA256SUMS`, clean source state, binary embeds the commit, console `BUILD_ID`) · 2. host prerequisites (`--install-prereqs` apt-installs docker, compose v2, caddy, Node 20, age; refuses a host whose `sc-central-pg` was not created from `central-infra.yml`) · 3. user `stayconnect`, directories, **generated `db_password`/`redis_password` files** (`openssl rand -hex 32`, only if absent) · 4. install tooling and `ctrlapi` (previous kept as `.bak-<stamp>`) · 5. `docker compose up` and wait healthy · 6. **identity** — vendor licence key, assignment signing key, registry root key, internal TLS CA; `ctrlapi`'s first start creates the appliance Root + Intermediate CA and moves the Root key to `/etc/stayconnect/pki-offline` · 7. `central-migrate.sh up` + `verify` (56 migrations) · 8. render `/etc/stayconnect/ctrlapi.env` (0600) and `central-endpoint.env` · 9. install units, **mask the stock `caddy.service`**, enable ctrlapi/cloud-admin/caddy/backup timers · 10. console release directory + atomic symlink · 11. start ctrlapi, write `ca-bundle.crt` (intermediate + root) and restart · 12. seed the first platform admin (unless one exists / `--skip-admin`) · 13. console up, internal TLS issuance, render + validate the Caddyfile, restart Caddy, `ufw` enable, timers, **first backup** · 14. publish the **public** trust files to `/opt/stayconnect/central/appliance-trust/`, write `DEPLOYED.json`, run `central-deploy.sh smoke` and `central-preflight.sh` — **the install fails if they fail.**
+1. verify the release (`SHA256SUMS`, clean source state, binary embeds the commit, console `BUILD_ID`) · 2. host prerequisites (`--install-prereqs` apt-installs docker, compose v2, caddy, Node 20, age; refuses a host whose `sc-central-pg` was not created from `central-infra.yml`) · 3. user `stayconnect`, directories, **generated `db_password`/`redis_password` files** (`openssl rand -hex 32`, only if absent) · 4. install tooling and `ctrlapi` (previous kept as `.bak-<stamp>`) · 5. `docker compose up` and wait healthy · 6. **identity** — vendor licence key, assignment signing key, registry root key, internal TLS CA, and the appliance Root + Intermediate CA created once by `ctrlapi init-ca` with the Root key written to `/etc/stayconnect/pki-offline` (`ctrlapi serve` never creates CA material: with a CA file missing it refuses to run the appliance CA, audit Phase 1 H1) · 7. `central-migrate.sh up` + `verify` (56 migrations) · 8. render `/etc/stayconnect/ctrlapi.env` (0600) and `central-endpoint.env` · 9. install units, **mask the stock `caddy.service`**, enable ctrlapi/cloud-admin/caddy/backup timers · 10. console release directory + atomic symlink · 11. start ctrlapi, write `ca-bundle.crt` (intermediate + root) and restart · 12. seed the first platform admin (unless one exists / `--skip-admin`) · 13. console up, internal TLS issuance, render + validate the Caddyfile, restart Caddy, `ufw` enable, timers, **first backup** · 14. publish the **public** trust files to `/opt/stayconnect/central/appliance-trust/`, write `DEPLOYED.json`, run `central-deploy.sh smoke` and `central-preflight.sh` — **the install fails if they fail.**
 
 Lab install (what the validation ran): `--mode new --tls internal --endpoint-config <lab central-endpoint.env> --extra-names <public-ip>,<private-ip> --install-prereqs`; result: smoke 7/7 PASS, preflight READY, 56 migrations, `ufw` 22/443/9443.
 

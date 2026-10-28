@@ -272,6 +272,40 @@ func TestIntegration_Acct_ReadFailureIsNotZeroUsage(t *testing.T) {
 	}
 }
 
+// Audit P6 L13: a class missing from the counter dump must not be ingested as a reading of 0 bytes.
+func TestIntegration_Acct_MissingClassIsNotZeroUsage(t *testing.T) {
+	f := newIngest(t, 0)
+	ctx := context.Background()
+	ent, sess, ep := f.live(t, "10.9.0.1", "br-guest")
+	c := newFakeCounters()
+
+	// The interfaces are readable, but this session's class is not in the dump: nothing may be baselined.
+	c.set("br-guest", 999, 1)
+	c.set(shape.IFBName("br-guest"), 999, 1)
+	if n := f.p3.accountingPass(ctx, c, ep, "br-lan", time.Now()); n != 0 {
+		t.Fatal("a missing class produced accounting")
+	}
+	if f.p3.AccountingDegraded() == "" {
+		t.Fatal("a missing class must surface as degraded accounting")
+	}
+	if n := f.countRows(t, `SELECT count(*) FROM iam_v2.accounting_checkpoints WHERE session_id=$1`, sess); n != 0 {
+		t.Fatal("a missing class was ingested as a reading of 0 bytes")
+	}
+
+	c.absolutes(t, "br-guest", "10.9.0.1", 1000, 1000)
+	f.p3.accountingPass(ctx, c, ep, "br-lan", time.Now())
+	if up, down, _, _ := f.checkpoint(t, sess); up != 1000 || down != 1000 {
+		t.Fatalf("the first real reading did not baseline: %d/%d", up, down)
+	}
+	c.absolutes(t, "br-guest", "10.9.0.1", 1250, 1400)
+	if n := f.p3.accountingPass(ctx, c, ep, "br-lan", time.Now()); n != 1 {
+		t.Fatal("the next real reading was not billed")
+	}
+	if u, d := f.usage(t, ent); u != 250 || d != 400 {
+		t.Fatalf("usage = %d/%d, want 250/400", u, d)
+	}
+}
+
 // A class minor is reused when a class is recreated; a checkpoint must never pass to another session on it.
 func TestIntegration_Acct_CheckpointsAreNotInheritedAcrossSessions(t *testing.T) {
 	f := newIngest(t, 0)

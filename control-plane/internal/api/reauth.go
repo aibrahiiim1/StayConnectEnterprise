@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
@@ -15,11 +16,16 @@ const ReauthTTL = 5 * time.Minute
 
 func reauthKey(sessionToken string) string { return "reauth:" + sessionToken }
 
-func MarkReauth(rdb *redis.Client, sessionToken string) {
-	if rdb == nil || sessionToken == "" {
-		return
+// MarkReauth records a successful step-up. Its error is returned: answering ok without the mark would leave the
+// operator refused on the next sensitive action with no explanation (audit Phase 1 L2).
+func MarkReauth(ctx context.Context, rdb *redis.Client, sessionToken string) error {
+	if rdb == nil {
+		return errors.New("step-up store unavailable")
 	}
-	_ = rdb.Set(context.Background(), reauthKey(sessionToken), "1", ReauthTTL).Err()
+	if sessionToken == "" {
+		return errors.New("no session")
+	}
+	return rdb.Set(ctx, reauthKey(sessionToken), "1", ReauthTTL).Err()
 }
 
 // RequireReauth demands a recent password re-authentication (within ReauthTTL) in addition to the permission check.

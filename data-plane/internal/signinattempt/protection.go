@@ -8,7 +8,9 @@ package signinattempt
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -24,13 +26,26 @@ type ProtectionStore struct{ pool *pgxpool.Pool }
 
 func NewProtectionStore(pool *pgxpool.Pool) *ProtectionStore { return &ProtectionStore{pool: pool} }
 
+var noStoreOnce sync.Once
+
+// disabled reports a store with no database, which enforces nothing; it is logged once as an error, never silently.
+func (s *ProtectionStore) disabled() bool {
+	if s != nil && s.pool != nil {
+		return false
+	}
+	noStoreOnce.Do(func() {
+		slog.Error("sign-in protection: no database store, so per-device and network sign-in limits are NOT enforced")
+	})
+	return true
+}
+
 // Check asks whether this device is currently refused. A device with no hardware address is never
 // restricted (nothing to attribute it to; such a submission fails as malformed anyway). An error is NOT
 // "allowed": the caller refuses with a service failure that does not count as a wrong credential, since
 // allowing on error would let one broken query switch the control off.
 func (s *ProtectionStore) Check(ctx context.Context, tenantID, siteID string, mac net.HardwareAddr) (Gate, error) {
 	var g Gate
-	if s == nil || s.pool == nil || len(mac) == 0 {
+	if s.disabled() || len(mac) == 0 {
 		return g, nil
 	}
 	var remaining *int
@@ -53,7 +68,7 @@ func (s *ProtectionStore) Check(ctx context.Context, tenantID, siteID string, ma
 // second tally, so the number an operator sees is the number the policy acted on.
 func (s *ProtectionStore) NoteFailure(ctx context.Context, tenantID, siteID string, mac net.HardwareAddr,
 	networkID, networkName, room string) (restricted bool, expiresAt *time.Time, count int, err error) {
-	if s == nil || s.pool == nil || len(mac) == 0 {
+	if s.disabled() || len(mac) == 0 {
 		return false, nil, 0, nil
 	}
 	err = s.pool.QueryRow(ctx, `
@@ -66,7 +81,7 @@ func (s *ProtectionStore) NoteFailure(ctx context.Context, tenantID, siteID stri
 
 // NoteSuccess clears the device's counter.
 func (s *ProtectionStore) NoteSuccess(ctx context.Context, tenantID, siteID string, mac net.HardwareAddr) error {
-	if s == nil || s.pool == nil || len(mac) == 0 {
+	if s.disabled() || len(mac) == 0 {
 		return nil
 	}
 	_, err := s.pool.Exec(ctx,

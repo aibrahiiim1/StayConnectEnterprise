@@ -5,6 +5,8 @@ package main
 import (
 	"context"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"github.com/stayconnect/enterprise/data-plane/internal/postinghandoff"
 	"log/slog"
 	"net"
@@ -46,7 +48,14 @@ func main() {
 		poolErr  error
 	)
 	getPool := func(ctx context.Context) (*pgxpool.Pool, error) {
-		poolOnce.Do(func() { pool, poolErr = pgxpool.New(ctx, dsn) })
+		poolOnce.Do(func() {
+			pc, err := poolConfig(dsn)
+			if err != nil {
+				poolErr = err
+				return
+			}
+			pool, poolErr = pgxpool.NewWithConfig(ctx, pc)
+		})
 		return pool, poolErr
 	}
 
@@ -77,14 +86,27 @@ func main() {
 	}()
 
 	// No assignment-verification key here: tenant/site come from the Central-signed assignment (pmsd.CentralAssignmentLoader), not a pmsd-local trust root.
+	// A key that is set must decode to at least 32 bytes; with the connector on, a bad one stops start-up and names the
+	// variable (never the value) instead of surfacing later as an unnamed CONFIG_INVALID at dial time (audit P7 L8).
+	// An absent key keeps its existing meaning: the dial refuses without it. Dark (connector off) never stops here.
+	keyErr := func(name string, err error) {
+		if err != nil && cfg.ConnectorOn() {
+			log.Error("pmsd: key setting invalid", "variable", name, "code", "CONFIG_INVALID", "reason", err.Error())
+			os.Exit(1)
+		}
+	}
 	keyring := pmsd.MapKeyring{}
 	if kid := os.Getenv("PMSD_SECRET_KEY_ID"); kid != "" {
-		if kb, err := hex.DecodeString(os.Getenv("PMSD_SECRET_KEY_HEX")); err == nil {
+		kb, err := decodeKeyEnv(os.Getenv, "PMSD_SECRET_KEY_HEX")
+		keyErr("PMSD_SECRET_KEY_HEX", err)
+		if err == nil && kb != nil {
 			keyring[kid] = kb
 		}
 	}
-	evKey, _ := hex.DecodeString(os.Getenv("PMSD_EVIDENCE_KEY_HEX"))
-	identKey, _ := hex.DecodeString(os.Getenv("PMSD_EVENT_IDENTITY_KEY_HEX"))
+	evKey, err := decodeKeyEnv(os.Getenv, "PMSD_EVIDENCE_KEY_HEX")
+	keyErr("PMSD_EVIDENCE_KEY_HEX", err)
+	identKey, err := decodeKeyEnv(os.Getenv, "PMSD_EVENT_IDENTITY_KEY_HEX")
+	keyErr("PMSD_EVENT_IDENTITY_KEY_HEX", err)
 	evKeyVer := envInt("PMSD_EVIDENCE_KEY_VERSION")
 	identKeyVer := envInt("PMSD_EVENT_IDENTITY_KEY_VERSION")
 	netDialer := func(ctx context.Context, network, address string) (net.Conn, error) {
@@ -158,6 +180,43 @@ func main() {
 		os.Exit(1)
 	}
 	log.Info("pmsd: stopped cleanly")
+}
+
+// defaultPoolMaxConns sizes the shared pool explicitly (audit P7 L11): each interface worker holds one connection
+// for its lock for the whole cycle, beside the applier, the relay authoriser and the repository writes. pgx's default
+// (max(4, CPUs)) can be all lockers on a small appliance or exceed svc_pmsd's CONNECTION LIMIT 10 on a large one.
+// A pool_max_conns in PMSD_DB_URL still wins.
+const defaultPoolMaxConns = 8
+
+func poolConfig(dsn string) (*pgxpool.Config, error) {
+	pc, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return nil, err
+	}
+	if !strings.Contains(dsn, "pool_max_conns") {
+		pc.MaxConns = defaultPoolMaxConns
+	}
+	return pc, nil
+}
+
+// minKeyBytes is the documented key size (openssl rand -hex 32).
+const minKeyBytes = 32
+
+// decodeKeyEnv returns nil, nil for an unset variable; a set one must be hex of at least minKeyBytes. The error
+// never carries the value.
+func decodeKeyEnv(getenv func(string) string, name string) ([]byte, error) {
+	v := strings.TrimSpace(getenv(name))
+	if v == "" {
+		return nil, nil
+	}
+	b, err := hex.DecodeString(v)
+	if err != nil {
+		return nil, errors.New("not hexadecimal")
+	}
+	if len(b) < minKeyBytes {
+		return nil, fmt.Errorf("shorter than %d bytes", minKeyBytes)
+	}
+	return b, nil
 }
 
 func envInt(name string) int {

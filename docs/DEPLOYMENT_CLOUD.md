@@ -146,15 +146,15 @@ What it does, in order (each step converges; re-running is safe):
 4. stores the release tooling, installs ctrlapi;
 5. installs the compose file, starts Postgres + Redis, waits until they answer queries;
 6. **identity**: `vendor-signing-key.sh init`, `ctrlapi gen-assignment-key`, `ctrlapi gen-registry-key`,
-   `central-mint-tls.sh --init-ca` — each only if absent; refuses outright if the database already holds
+   `central-mint-tls.sh --init-ca`, `ctrlapi init-ca --no-db` (the appliance CA) — each only if absent; refuses outright if the database already holds
    appliances or licences but a key is missing (that is a move, not a new Central);
 7. `central-migrate.sh up` + `verify`;
 8. renders `ctrlapi.env` (passwords, origins, every path explicit), installs `central-endpoint.env`, records the
    install settings in `/etc/stayconnect/central-install.env`;
 9. installs the units, masks the stock `caddy.service`, enables the backup-retention and daily database-backup timers;
 10. installs the console release;
-11. starts ctrlapi — its first start creates the appliance CA and moves the Root CA key to
-    `/etc/stayconnect/pki-offline` — then writes `pki/ca-bundle.crt` (intermediate + root) and restarts it so
+11. starts ctrlapi (in `--mode new` the appliance CA was created at step 6 by `ctrlapi init-ca`, the Root CA key
+    written to `/etc/stayconnect/pki-offline`; `ctrlapi serve` never creates CA material) — then writes `pki/ca-bundle.crt` (intermediate + root) and restarts it so
     offline activation packages carry it; checks the assignment key is registered;
 12. seeds the first platform admin (skipped when one exists);
 13. starts the console, issues the :443 certificate, renders + validates the Caddyfile, starts Caddy, applies
@@ -266,6 +266,17 @@ bash /opt/stayconnect/central/tooling/deploy/scripts/central-deploy.sh rollback 
 ```
 
 Never `pg_restore --clean` a TimescaleDB database: it drops the extension and every hypertable with it.
+
+### 7.1 Before deploying a release with the 2026-10-28 audit remediation
+
+Not deployed to the production Central by that mission; check these first:
+
+- `CTRLAPI_DB_URL` must be set in `ctrlapi.env`: a production ctrlapi now refuses to start without it.
+- Central migrations 0057–0058 are additive (one nullable column, three indexes); 0058 builds indexes on the audit
+  and fetch-log tables and blocks writes to them while it builds: deploy in a quiet period.
+- `ctrlapi serve` never creates CA material; on an existing Central the CA files are present, so nothing changes.
+  A Central missing a CA file now starts with the appliance CA and mTLS listener disabled instead of minting a root.
+- Appliance registration refuses a serial outside `[A-Za-z0-9._-]` (only an `SCD_SERIAL` override could produce one).
 
 ## 8. Earlier Central hosts (historical)
 

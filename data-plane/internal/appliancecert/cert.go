@@ -1,6 +1,6 @@
 // Package appliancecert manages the appliance mutual-TLS client certificate lifecycle: CSR from the local identity key, signed-auth submission, atomic
-// storage, mTLS transport to Central (the signed-request JWT stays layered on top) and rotation with verify-before-switch and rollback. The private key
-// never leaves the box; the certificate and CA are public.
+// storage, mTLS transport to Central (the signed-request JWT stays layered on top) and rotation that proves a new certificate with an mTLS hello before
+// it is stored. The private key never leaves the box; the certificate and CA are public.
 package appliancecert
 
 import (
@@ -59,12 +59,30 @@ func (m *Manager) OnAttempt(fn func(error)) { m.onAttempt = fn }
 
 func (m *Manager) mtlsKeyPath() string { return filepath.Join(m.dir, "mtls-client.key") }
 
+// ingressClient carries every call to Central's HTTPS ingress. A bounded timeout matters: a silently dropping firewall would otherwise block the
+// bootstrap or the reconcile loop for good.
+var ingressClient = &http.Client{Timeout: 15 * time.Second}
+
+const (
+	maxResponseBody = 1 << 20
+	maxErrorBody    = 512
+)
+
 // Independent of the identity-signing key: this key backs the CSR and the mTLS client certificate only, and is never uploaded or placed in identity.json.
 func (m *Manager) ensureMTLSKey() error {
 	if m.mtlsPriv != nil {
 		return nil
 	}
-	if raw, err := os.ReadFile(m.mtlsKeyPath()); err == nil {
+	raw, err := os.ReadFile(m.mtlsKeyPath())
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		// Only a missing key is created. Any other failure (permissions after a restore, I/O) must not replace the key the installed
+		// certificate carries.
+		return fmt.Errorf("mtls key unreadable (not regenerating): %w", err)
+	}
+	if err == nil {
+		if fi, serr := os.Stat(m.mtlsKeyPath()); serr == nil && fi.Mode().Perm()&0o077 != 0 {
+			slog.Warn("appliancecert: mTLS key file is readable by group or others", "path", m.mtlsKeyPath(), "mode", fi.Mode().Perm())
+		}
 		block, _ := pem.Decode(raw)
 		if block == nil {
 			return errors.New("mtls key PEM decode failed")
@@ -129,7 +147,7 @@ func (m *Manager) apiBase() (string, *http.Client) {
 	if m.ready && m.client != nil {
 		return m.mtlsBase, m.client
 	}
-	return m.ctrlBase, http.DefaultClient
+	return m.ctrlBase, ingressClient
 }
 
 // The certificate-status contract, as Central implements it (CertBase.FetchCertificate):
@@ -397,7 +415,7 @@ func (m *Manager) rotateCert(ctx context.Context) error {
 			return err
 		}
 		if status == statusIssued && certPEM != "" && fprOfPEM(certPEM) != currentFpr {
-			if err := m.installCollected(ctx, certPEM, caPEM); err != nil {
+			if err := m.installVerified(ctx, certPEM, caPEM); err != nil {
 				return err
 			}
 			m.clearRotationPending()
@@ -420,11 +438,30 @@ func (m *Manager) rotateCert(ctx context.Context) error {
 		// Filed, not yet issued. The next tick will look again rather than file another.
 		return ErrCertPending
 	}
-	if err := m.installCollected(ctx, certPEM, caPEM); err != nil {
+	if err := m.installVerified(ctx, certPEM, caPEM); err != nil {
 		return err
 	}
 	m.clearRotationPending()
 	return nil
+}
+
+// installVerified proves a rotated certificate with an mTLS hello from a candidate client BEFORE anything is stored or switched. A failed hello leaves
+// the current certificate in use and the pending marker in place, so the next tick collects and tries the same certificate again without a new CSR.
+func (m *Manager) installVerified(ctx context.Context, certPEM, caPEM string) error {
+	if err := m.ensureMTLSKey(); err != nil {
+		return err
+	}
+	if err := m.matchesLocalKey([]byte(certPEM)); err != nil {
+		return err
+	}
+	cl, _, err := m.buildClient([]byte(certPEM), []byte(caPEM))
+	if err != nil {
+		return err
+	}
+	if _, err := m.signedDoWith(ctx, cl, m.mtlsBase, http.MethodGet, "/v1/appliance/hello", nil, nil); err != nil {
+		return fmt.Errorf("rotation verify failed (current certificate kept): %w", err)
+	}
+	return m.installCollected(ctx, certPEM, caPEM)
 }
 
 // THE PENDING-ROTATION MARKER IS ON DISK, NOT IN MEMORY: scd restarts on assignment changes, deploys, crashes and reboots, so an in-process guard would
@@ -520,25 +557,36 @@ func (m *Manager) loadLocal() error {
 	return m.installPEM(certPEM, caPEM)
 }
 
-func (m *Manager) installPEM(certPEM, caPEM []byte) error {
+func (m *Manager) buildClient(certPEM, caPEM []byte) (*http.Client, *x509.Certificate, error) {
 	keyDER, err := x509.MarshalPKCS8PrivateKey(m.mtlsPriv)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
 	pair, err := tls.X509KeyPair(certPEM, keyPEM)
 	if err != nil {
-		return fmt.Errorf("client keypair: %w", err)
+		return nil, nil, fmt.Errorf("client keypair: %w", err)
 	}
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM(caPEM) {
-		return errors.New("ca bundle parse failed")
+		return nil, nil, errors.New("ca bundle parse failed")
 	}
-	leaf, _ := x509.ParseCertificate(pair.Certificate[0])
-	sum := x509sha256(leaf.Raw)
+	leaf, err := x509.ParseCertificate(pair.Certificate[0])
+	if err != nil {
+		return nil, nil, fmt.Errorf("certificate parse: %w", err)
+	}
 	cl := &http.Client{Timeout: 15 * time.Second, Transport: &http.Transport{
 		TLSClientConfig: &tls.Config{Certificates: []tls.Certificate{pair}, RootCAs: pool, MinVersion: tls.VersionTLS12},
 	}}
+	return cl, leaf, nil
+}
+
+func (m *Manager) installPEM(certPEM, caPEM []byte) error {
+	cl, leaf, err := m.buildClient(certPEM, caPEM)
+	if err != nil {
+		return err
+	}
+	sum := x509sha256(leaf.Raw)
 	m.mu.Lock()
 	m.client = cl
 	m.notAfter = leaf.NotAfter
@@ -556,13 +604,24 @@ func (m *Manager) store(ctx context.Context, certPEM, caPEM []byte) error {
 	if err := m.matchesLocalKey(certPEM); err != nil {
 		return err
 	}
+	// The pair must load before anything is written, so a bad CA bundle never leaves an unusable pair on disk.
+	if _, _, err := m.buildClient(certPEM, caPEM); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(m.dir, 0o700); err != nil {
 		return err
 	}
+	oldCert, oldErr := os.ReadFile(m.certPath())
 	if err := writeAtomic(m.certPath(), certPEM, 0o644); err != nil {
 		return err
 	}
 	if err := writeAtomic(m.caPath(), caPEM, 0o644); err != nil {
+		// Put the previous certificate back so the files on disk stay one matching pair.
+		if oldErr == nil {
+			if rerr := writeAtomic(m.certPath(), oldCert, 0o644); rerr != nil {
+				slog.Error("appliancecert: could not restore the previous certificate after a failed CA write", "err", rerr)
+			}
+		}
 		return err
 	}
 	return m.installPEM(certPEM, caPEM)
@@ -606,7 +665,15 @@ func writeAtomic(path string, data []byte, mode os.FileMode) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmpName, path)
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
 }
 
 // A signed-auth + mTLS call proving the client cert is accepted; returns the server-echoed identity.
@@ -622,7 +689,8 @@ func (m *Manager) MTLSHello(ctx context.Context) (map[string]any, error) {
 	return out, nil
 }
 
-// Rotates when within `within` of expiry: fetches the new cert, verifies it with an mTLS hello BEFORE switching, and rolls back if that fails.
+// Rotates when within `within` of expiry. rotateCert proves the new certificate with an mTLS hello before it is stored, so a failed hello never
+// switches certificates and needs no rollback.
 func (m *Manager) MaybeRotate(ctx context.Context, within time.Duration) error {
 	m.mu.RLock()
 	na, ready := m.notAfter, m.ready
@@ -630,26 +698,12 @@ func (m *Manager) MaybeRotate(ctx context.Context, within time.Duration) error {
 	if !ready || time.Until(na) > within {
 		return nil
 	}
-	oldCert, _ := os.ReadFile(m.certPath())
-	oldCA, _ := os.ReadFile(m.caPath())
 	slog.Info("appliancecert: rotating certificate before expiry", "not_after", na)
 	if err := m.rotateCert(ctx); err != nil {
 		return err
 	}
-	if _, err := m.MTLSHello(ctx); err != nil {
-		// Verify-before-switch failed → roll back to the previous certificate.
-		slog.Warn("appliancecert: rotated cert failed verification, rolling back", "err", err)
-		if oldCert != nil && oldCA != nil {
-			_ = m.store(ctx, oldCert, oldCA)
-		}
-		return fmt.Errorf("rotation verify failed: %w", err)
-	}
-	slog.Info("appliancecert: rotation complete", "fpr", m.fpr)
+	slog.Info("appliancecert: rotation complete", "fpr", m.currentFpr())
 	return nil
-}
-
-func (m *Manager) signedDo(ctx context.Context, base, method, path string, body []byte, out any) (int, error) {
-	return m.signedDoWith(ctx, http.DefaultClient, base, method, path, body, out)
 }
 
 func (m *Manager) signedDoWith(ctx context.Context, cl *http.Client, base, method, path string, body []byte, out any) (int, error) {
@@ -674,8 +728,14 @@ func (m *Manager) signedDoWith(ctx context.Context, cl *http.Client, base, metho
 		return 0, err
 	}
 	defer resp.Body.Close()
-	b, _ := io.ReadAll(resp.Body)
+	b, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
+	if err != nil {
+		return resp.StatusCode, fmt.Errorf("read response: %w", err)
+	}
 	if resp.StatusCode >= 400 {
+		if len(b) > maxErrorBody {
+			b = b[:maxErrorBody]
+		}
 		return resp.StatusCode, fmt.Errorf("status %d: %s", resp.StatusCode, string(b))
 	}
 	if out != nil {
@@ -760,7 +820,7 @@ func (m *Manager) collectIngress(ctx context.Context) (status, certPEM, caPEM st
 		CertificatePEM string `json:"certificate_pem"`
 		CAChain        string `json:"ca_chain"`
 	}
-	if _, err := m.signedDoWith(ctx, http.DefaultClient, m.ctrlBase, http.MethodGet, "/v1/appliance/certificate", nil, &out); err != nil {
+	if _, err := m.signedDoWith(ctx, ingressClient, m.ctrlBase, http.MethodGet, "/v1/appliance/certificate", nil, &out); err != nil {
 		return "", "", "", fmt.Errorf("cert fetch: %w", err)
 	}
 	return out.Status, out.CertificatePEM, out.CAChain, nil
@@ -772,7 +832,7 @@ func (m *Manager) submitCSRIngress(ctx context.Context) error {
 		return err
 	}
 	body, _ := json.Marshal(map[string]string{"csr_pem": string(csrPEM)})
-	if _, err := m.signedDoWith(ctx, http.DefaultClient, m.ctrlBase, http.MethodPost, "/v1/appliance/csr", body, nil); err != nil {
+	if _, err := m.signedDoWith(ctx, ingressClient, m.ctrlBase, http.MethodPost, "/v1/appliance/csr", body, nil); err != nil {
 		return fmt.Errorf("csr submit: %w", err)
 	}
 	slog.Info("appliancecert: CSR submitted (reconcile)")

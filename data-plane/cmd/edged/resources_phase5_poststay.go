@@ -74,7 +74,7 @@ func (s *server) listPostStayProfiles(w http.ResponseWriter, r *http.Request) {
 		 ORDER BY psp.created_at DESC
 		 LIMIT 500`, s.tenantID, s.siteID)
 	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "query_failed", err.Error())
+		internalErr(w, r, http.StatusInternalServerError, "query_failed", err)
 		return
 	}
 	defer rows.Close()
@@ -85,7 +85,7 @@ func (s *server) listPostStayProfiles(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&v.ID, &v.StayID, &v.Episode, &v.Reservation, &v.Room, &v.StayStatus,
 			&v.Status, &v.Generation, &v.IssuedVia, &v.IssuedAt, &v.ValidUntil,
 			&v.RevokedAt, &v.RevokeReason, &v.Authenticable, &v.PMSConnection); err != nil {
-			jsonErr(w, http.StatusInternalServerError, "scan_failed", err.Error())
+			internalErr(w, r, http.StatusInternalServerError, "scan_failed", err)
 			return
 		}
 		if !identity {
@@ -218,7 +218,7 @@ func (s *server) revokePostStayProfile(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, http.StatusConflict, "not_active",
 				"no ACTIVE post-stay profile with that id; revocation is terminal and is not repeated")
 		default:
-			jsonErr(w, http.StatusInternalServerError, "revoke_failed", err.Error())
+			internalErr(w, r, http.StatusInternalServerError, "revoke_failed", err)
 		}
 		return
 	}

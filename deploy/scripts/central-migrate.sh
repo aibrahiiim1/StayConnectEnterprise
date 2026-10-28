@@ -90,6 +90,14 @@ else
   PSQLIN() { psql -v ON_ERROR_STOP=1 "$DSN" "$@"; }
 fi
 Q() { PSQL -tA -c "$1"; }
+# QV runs SQL read from its stdin with psql variables (-v name=value, referenced as :'name'), so a value is
+# quoted by psql and never pasted into the SQL text (audit P3 L4).
+QV() { PSQLIN -tAq "$@" -f -; }
+
+VERSION_RE='^[0-9]{4}_[a-z0-9_]+$'
+APPLIED_BY="$(id -un 2>/dev/null || true)"
+printf '%s' "$APPLIED_BY" | grep -Eq '^[A-Za-z0-9._@-]{1,64}$' || APPLIED_BY=unknown
+LOCK_SQL="SELECT pg_advisory_xact_lock(hashtext('central-migrate'))"
 
 checksum() {
   if command -v sha256sum >/dev/null; then sha256sum "$1" | cut -d' ' -f1
@@ -125,18 +133,79 @@ versions_files() {
   done | sort
 }
 
+# Every version reaches SQL only through psql variables, and is also held to the naming rule (as edge-migrate.sh
+# does), checked here in the main shell so a bad name stops the run instead of shortening a loop's input.
+check_names() {
+  local f base
+  for f in "$MIGRATIONS"/*.up.sql; do
+    [ -e "$f" ] || continue
+    base="$(basename "$f")"
+    printf '%s\n' "${base%.up.sql}" | grep -Eq "$VERSION_RE" \
+      || die "migration file name '$base' does not match NNNN_lower_case_name.up.sql"
+  done
+}
+
 # row_state prints MISSING (never applied), NOCHECKSUM (recorded by hand before this ledger existed), or
 # the stored checksum.
 row_state() {
   local out
-  out="$(Q "SELECT COALESCE(NULLIF(checksum,''),'NOCHECKSUM') FROM schema_migrations WHERE version='$1'")"
+  out="$(printf '%s\n' "SELECT COALESCE(NULLIF(checksum,''),'NOCHECKSUM') FROM schema_migrations WHERE version = :'v';" \
+         | QV -v v="$1")"
   [ -n "$out" ] || out="MISSING"
   printf '%s' "$out"
 }
 
 backfill_checksum() {
-  PSQL -q -c "UPDATE schema_migrations SET checksum='$2', name=COALESCE(name,'$1.up.sql'), adopted=true
-              WHERE version='$1' AND COALESCE(checksum,'')=''" >/dev/null
+  printf '%s\n' "UPDATE schema_migrations SET checksum = :'cs', name = COALESCE(name, :'v' || '.up.sql'), adopted = true
+                 WHERE version = :'v' AND COALESCE(checksum,'') = '';" | QV -v v="$1" -v cs="$2" >/dev/null
+}
+
+# migration_stream <file> writes the migration, its ledger row and the run lock as ONE transaction (audit P3 M3):
+#   * the ledger row commits with the migration or not at all, so a crash between the two cannot leave a
+#     migrated schema with no record of it (or a record with no schema);
+#   * a transaction-scoped advisory lock serialises concurrent runs, and the version is re-checked under it,
+#     so two runs never both apply the same migration -- the second one fails, having changed nothing.
+# A file that manages its own transaction must have exactly one BEGIN; line and one COMMIT; line, with nothing
+# but comments after the COMMIT: the lock and check go after its BEGIN and the ledger row before its COMMIT.
+# Anything else is refused rather than guessed at. Values reach SQL only as psql variables (:'sm_*').
+tx_shape() { # tx_shape <file> -> "plain" (no transaction control) or "own" (one BEGIN; ... COMMIT;); dies otherwise
+  local file="$1" begins commits last
+  begins="$(grep -ciE '^[[:space:]]*BEGIN[[:space:]]*;' "$file" || true)"
+  commits="$(grep -ciE '^[[:space:]]*COMMIT[[:space:]]*;' "$file" || true)"
+  if [ "$begins" = 0 ] && [ "$commits" = 0 ]; then echo plain; return 0; fi
+  [ "$begins" = 1 ] && [ "$commits" = 1 ] \
+    || die "$(basename "$file") has $begins BEGIN; and $commits COMMIT; lines; a migration has neither or exactly one of each"
+  last="$(grep -niE '^[[:space:]]*COMMIT[[:space:]]*;' "$file" | cut -d: -f1)"
+  if tail -n +"$((last+1))" "$file" | grep -vqE '^[[:space:]]*(--.*)?$'; then
+    die "$(basename "$file") has statements after its COMMIT; they would run outside the migration's transaction"
+  fi
+  echo own
+}
+
+migration_stream() {
+  local file="$1" pre post
+  pre="$LOCK_SQL;
+SET LOCAL central_migrate.version = :'sm_version';
+DO \$cm\$ BEGIN
+  IF EXISTS (SELECT 1 FROM schema_migrations WHERE version = current_setting('central_migrate.version')) THEN
+    RAISE EXCEPTION 'central-migrate: % is already recorded (applied by a concurrent run?); nothing was changed',
+      current_setting('central_migrate.version');
+  END IF;
+END \$cm\$;"
+  post="INSERT INTO schema_migrations (version, name, checksum, applied_by, adopted)
+VALUES (:'sm_version', :'sm_version' || '.up.sql', :'sm_checksum', :'sm_by', false)
+ON CONFLICT (version) DO UPDATE SET checksum = EXCLUDED.checksum, name = EXCLUDED.name,
+                                    applied_by = EXCLUDED.applied_by, adopted = false;"
+  if [ "$(tx_shape "$file")" = plain ]; then
+    printf 'BEGIN;\n%s\n' "$pre"
+    cat "$file"
+    printf '\n%s\nCOMMIT;\n' "$post"
+    return 0
+  fi
+  PRE="$pre" POST="$post" awk '
+    !b && /^[[:space:]]*[Bb][Ee][Gg][Ii][Nn][[:space:]]*;/ { print; print ENVIRON["PRE"]; b=1; next }
+    /^[[:space:]]*[Cc][Oo][Mm][Mm][Ii][Tt][[:space:]]*;/ { print ENVIRON["POST"] }
+    { print }' "$file"
 }
 
 report() {
@@ -154,7 +223,9 @@ report() {
                   drift=$((drift+1)) ;;
     esac
   done < <(versions_files)
-  say "$applied applied, $pending pending, $drift modified${nocs:+, $nocs awaiting checksum backfill}"
+  local backfill=""
+  [ "$nocs" -gt 0 ] && backfill=", $nocs awaiting checksum backfill"
+  say "$applied applied, $pending pending, $drift modified$backfill"
   [ "$drift" = 0 ] || return 2
   [ "$pending" = 0 ] || return 1
   return 0
@@ -167,20 +238,15 @@ apply_one() {
     return 0
   fi
   say "applying $version"
-  # SOME MIGRATIONS MANAGE THEIR OWN TRANSACTION and some do not. Wrapping a file that already says BEGIN
-  # in --single-transaction makes psql warn and, worse, lets the file's COMMIT close the wrapper early. So
-  # the file's own choice is respected, and the ledger row is written immediately after it succeeds.
-  if grep -qiE '^[[:space:]]*BEGIN[[:space:]]*;' "$file"; then
-    PSQLIN -q -f - < "$file"
-  else
-    PSQLIN -q --single-transaction -f - < "$file"
-  fi
-  PSQL -q -c "INSERT INTO schema_migrations (version, name, checksum, applied_by, adopted)
-              VALUES ('$version', '$version.up.sql', '$cs', '$(id -un 2>/dev/null || echo unknown)', false)
-              ON CONFLICT (version) DO UPDATE SET checksum=EXCLUDED.checksum, name=EXCLUDED.name,
-                                                 applied_by=EXCLUDED.applied_by, adopted=false" >/dev/null
+  tx_shape "$file" >/dev/null
+  # The migration and its ledger row are one transaction (see migration_stream). psql's exit status is one
+  # proof; the ledger row carrying this file's checksum is the other.
+  migration_stream "$file" | PSQLIN -q -v sm_version="$version" -v sm_checksum="$cs" -v sm_by="$APPLIED_BY" -f -
+  [ "$(row_state "$version")" = "$cs" ] || die "$version ran but its ledger row is missing or wrong; investigate before re-running"
   say "  ok"
 }
+
+check_names
 
 case "$cmd" in
 
@@ -241,6 +307,12 @@ adopt)
   # schema yourself first, object by object. Getting it wrong is recoverable in one direction only, so it
   # names exactly what it will record and insists on --yes.
   [ -n "$THROUGH" ] || die "adopt needs --through <version>, e.g. --through 0043"
+  printf '%s\n' "$THROUGH" | grep -Eq '^[0-9]{4}(_[a-z0-9_]+)?$' \
+    || die "--through '$THROUGH' is not a migration number (NNNN) or name (NNNN_name)"
+  # It must name a migration that exists: '--through 9999' would otherwise record every migration, including
+  # ones this database has never seen, as applied.
+  ls "$MIGRATIONS" | grep -q "^${THROUGH%%_*}_.*\.up\.sql$" \
+    || die "--through ${THROUGH%%_*} names no migration in $MIGRATIONS"
   ensure_ledger
   say "these migrations will be RECORDED AS ALREADY APPLIED, without being run:"
   n=0
@@ -255,14 +327,18 @@ adopt)
   say "Only do this if this database genuinely already has all of the above."
   say "Anything after ${THROUGH%%_*} stays pending and will be applied normally by '$0 up'."
   [ "$YES" = 1 ] || die "re-run with --yes to confirm"
-  while IFS=$'\t' read -r version file; do
-    if [ "${version%%_*}" \> "${THROUGH%%_*}" ]; then continue; fi
-    if [ "$(row_state "$version")" != "MISSING" ]; then continue; fi
-    PSQL -q -c "INSERT INTO schema_migrations (version, name, checksum, applied_by, adopted)
-                VALUES ('$version', '$version.up.sql', '$(checksum "$file")',
-                        '$(id -un 2>/dev/null || echo unknown)', true)
-                ON CONFLICT (version) DO NOTHING" >/dev/null
-  done < <(versions_files)
+  # One transaction under the run lock, so an adopt never interleaves with an 'up'. Each value is a psql
+  # variable set by \set from an already validated version and a hex checksum.
+  {
+    printf 'BEGIN;\n%s;\n' "$LOCK_SQL"
+    while IFS=$'\t' read -r version file; do
+      if [ "${version%%_*}" \> "${THROUGH%%_*}" ]; then continue; fi
+      printf '\\set sm_version %s\n\\set sm_checksum %s\n' "$version" "$(checksum "$file")"
+      printf '%s\n' "INSERT INTO schema_migrations (version, name, checksum, applied_by, adopted)
+VALUES (:'sm_version', :'sm_version' || '.up.sql', :'sm_checksum', :'sm_by', true) ON CONFLICT (version) DO NOTHING;"
+    done < <(versions_files)
+    printf 'COMMIT;\n'
+  } | QV -v sm_by="$APPLIED_BY" >/dev/null
   say "adopted through ${THROUGH%%_*} — now run '$0 status' and apply the rest with '$0 up'"
   ;;
 

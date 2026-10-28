@@ -460,7 +460,7 @@ func TestIntegration_RestoreReplay_AnAddressThatStartsWithAnonIsStillAnonymised(
 		t.Fatalf("seed principal: %v", err)
 	}
 	// It is offered by the search and erased.
-	if st, body := f.do(t, "GET", "/guest-data-rights/search?q=anon-carl-"+sfx, nil); st != 200 || len(body["matches"].([]any)) != 1 {
+	if st, body := f.searchGuestData(t, "anon-carl-"+sfx); st != 200 || len(body["matches"].([]any)) != 1 {
 		t.Fatalf("search = %d %v", st, body)
 	}
 	if st, body := f.do(t, "POST", "/guest-data-rights/erase", gdReq(f, "principal", principal, "guest asked")); st != 200 {

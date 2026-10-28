@@ -138,9 +138,11 @@ func (s *Service) TestAccess(ctx context.Context, actor string) (*TestResult, er
 	}
 	st.ZoneID = zi.ID
 	dir := s.Opts.directoryURL(st.ACMEDirectory)
-	s.acmeMu.Lock()
+	if err := s.acquireACME(ctx); err != nil {
+		return nil, refuse(http.StatusServiceUnavailable, "busy", "%s", err.Error())
+	}
 	_, err = s.acmeClient(ctx, &st, dir)
-	s.acmeMu.Unlock()
+	s.releaseACME()
 	if err != nil {
 		AppendEvent(ctx, s.DB, "", "", EvAccessTested, actor, map[string]any{"ok": false, "zone_id": zi.ID, "error": truncate(err.Error(), 500)})
 		return nil, refuse(http.StatusBadGateway, "acme_failed", "DNS access works, but the ACME account could not be registered: %s", err.Error())
@@ -178,9 +180,11 @@ func (s *Service) ApplyCAA(ctx context.Context, actor string) (*CAAResult, error
 		return nil, refuse(http.StatusConflict, "not_configured", "%s", why)
 	}
 	dir := s.Opts.directoryURL(st.ACMEDirectory)
-	s.acmeMu.Lock()
+	if err := s.acquireACME(ctx); err != nil {
+		return nil, refuse(http.StatusServiceUnavailable, "busy", "%s", err.Error())
+	}
 	_, err = s.acmeClient(ctx, &st, dir)
-	s.acmeMu.Unlock()
+	s.releaseACME()
 	if err != nil {
 		return nil, refuse(http.StatusBadGateway, "acme_failed", "%s", err.Error())
 	}

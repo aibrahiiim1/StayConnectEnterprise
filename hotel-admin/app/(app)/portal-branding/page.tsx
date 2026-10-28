@@ -6,7 +6,7 @@
 // Safety is the server's: every change goes to /portal-branding/validate and the preview renders the sanitised fields.
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { api, ApiError, ListResp, PortalAsset, Whoami } from "@/lib/api";
+import { api, ApiError, ListResp, PortalAsset } from "@/lib/api";
 import { PageHeader, PageShell } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -37,6 +37,7 @@ import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
 import { LanguagesSection } from "./languages";
 import { ProfileBar } from "./profiles";
 import { PRIVACY_TEMPLATE } from "./privacy-template";
+import { useOperatorRoles } from "@/lib/whoami-context";
 
 // Room numbers are mentioned only where hospitality is licensed.
 const pageHelp = (hospitality: boolean) => (
@@ -124,7 +125,7 @@ export default function PortalSettingsPage() {
   const [saved, setSaved] = useState<Design | null>(null);
   const [d, setD] = useState<Design>({});
   const [revisions, setRevisions] = useState<RevisionSummary[]>([]);
-  const [roles, setRoles] = useState<string[] | null>(null);
+  const roles = useOperatorRoles();
   const [section, setSection] = useState<Section>("template");
   const [wordingLang, setWordingLang] = useState<string | undefined>(undefined);
   const [loadErr, setLoadErr] = useState<unknown>(null);
@@ -159,7 +160,6 @@ export default function PortalSettingsPage() {
 
   useEffect(() => {
     load();
-    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
   }, [load]);
 
   const dirty = useMemo(() => saved !== null && JSON.stringify(d) !== JSON.stringify(saved), [d, saved]);

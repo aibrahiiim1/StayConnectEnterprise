@@ -391,6 +391,66 @@ func TestKernel_ReRatePreservesTheCounterSeries(t *testing.T) {
 	}
 }
 
+// Audit Phase 8 M4 / Phase 6 M4, on a real kernel: two SHARED sessions under one group are re-rated; each keeps its
+// floor under the group and the group alone carries the allowance. (The old re-rate raised each session's rate to
+// the whole allowance, so every device could use all of it at once.)
+func TestKernel_SharedReRateKeepsEachSessionsFloor(t *testing.T) {
+	if !ifbOK {
+		t.Skip("KG_IFB=0: ifb unavailable; see LIMITATIONS in the evidence artifact")
+	}
+	sh := shapeClient()
+	a, b := mustIP(t, "10.77.0.31"), mustIP(t, "10.77.0.32")
+	group := shape.GroupClassid("kernel-shared-ent")
+	t.Cleanup(func() {
+		_ = sh.AbortSession(context.Background(), guestIface, a)
+		_ = sh.AbortSession(context.Background(), guestIface, b)
+		for _, dev := range []string{guestIface, shape.IFBName(guestIface)} {
+			_ = exec.Command(tcWrapper, "class", "del", "dev", dev, "classid", group).Run()
+		}
+	})
+	if err := sh.EnsureBridgeInfra(ctx(t), guestIface); err != nil {
+		t.Fatal(err)
+	}
+	for _, dev := range []string{guestIface, shape.IFBName(guestIface)} {
+		if err := sh.EnsureGroupClass(ctx(t), dev, group, 8000); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, ip := range []net.IP{a, b} {
+		if err := sh.PrepareSessionIn(ctx(t), guestIface, ip, 8000, 8000, group); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, ip := range []net.IP{a, b} {
+		if err := sh.ReRateSessionIn(ctx(t), guestIface, ip, 8000, 8000, group); err != nil {
+			t.Fatalf("re-rate %s: %v", ip, err)
+		}
+	}
+	for _, dev := range []string{guestIface, shape.IFBName(guestIface)} {
+		out := run(t, tcWrapper, "class", "show", "dev", dev)
+		for _, ip := range []net.IP{a, b} {
+			cid := shape.ClassidForIP(ip)
+			line := classLine(out, cid)
+			if !strings.Contains(line, "parent "+group) || !strings.Contains(line, "rate 800Kbit") || !strings.Contains(line, "ceil 8Mbit") {
+				t.Fatalf("%s on %s after the re-rate: %q (want parent %s, rate 800Kbit, ceil 8Mbit)", cid, dev, line, group)
+			}
+		}
+		if g := classLine(out, group); !strings.Contains(g, "rate 8Mbit") || !strings.Contains(g, "ceil 8Mbit") {
+			t.Fatalf("group %s on %s changed: %q", group, dev, g)
+		}
+	}
+}
+
+// classLine returns the `tc class show` line for one classid.
+func classLine(out, cid string) string {
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, "class htb "+cid+" ") {
+			return l
+		}
+	}
+	return ""
+}
+
 func TestKernel_FoundationInstallPreservesAPopulatedLegacySet(t *testing.T) {
 	c := nftClient()
 	f := &nftfoundation.Foundation{NftPath: nftWrapper, Run: nftfoundation.ExecRunner}

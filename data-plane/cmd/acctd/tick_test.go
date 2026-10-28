@@ -6,6 +6,22 @@ import (
 	"time"
 )
 
+// Audit P6 L14: no built-in database URL (it carried a published password and sslmode=disable).
+func TestDatabaseURLIsRequired(t *testing.T) {
+	if _, err := loadCfg(func(string) string { return "" }); err == nil {
+		t.Fatal("acctd started without ACCTD_DB_URL")
+	}
+	c, err := loadCfg(func(k string) string {
+		if k == "ACCTD_DB_URL" {
+			return "postgres://acctd@127.0.0.1/stayconnect"
+		}
+		return ""
+	})
+	if err != nil || c.DBURL != "postgres://acctd@127.0.0.1/stayconnect" {
+		t.Fatalf("cfg = %+v, err = %v", c, err)
+	}
+}
+
 func TestTickSecondsIsBounded(t *testing.T) {
 	for _, c := range []struct {
 		raw  string

@@ -164,9 +164,12 @@ func (s *server) listClientDevices(w http.ResponseWriter, r *http.Request) {
 	}
 	page := 1
 	if v := r.URL.Query().Get("page"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			page = n
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > pageMax {
+			jsonErr(w, http.StatusBadRequest, "bad_request", fmt.Sprintf("page must be a whole number from 1 to %d", pageMax))
+			return
 		}
+		page = n
 	}
 	const size = 50
 	ctx, cancel := dbCtx(r)
@@ -207,6 +210,12 @@ func (s *server) listClientDevices(w http.ResponseWriter, r *http.Request) {
 		out = append(out, d)
 	}
 	rows.Close()
+	// A read cut off mid-way (the 10 s dbCtx) ends rows.Next without an error; it must not read as "no devices"
+	// (performance audit D7-M2).
+	if err := rows.Err(); err != nil {
+		jsonErr(w, http.StatusServiceUnavailable, "read_incomplete", "the device list could not be read in time; try again")
+		return
+	}
 	more := len(out) > size
 	if more {
 		out = out[:size]
@@ -316,6 +325,10 @@ func (s *server) getClientDevice(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	rows.Close()
+	if rows.Err() != nil {
+		jsonErr(w, http.StatusServiceUnavailable, "read_incomplete", "the device's packages could not be read in time; try again")
+		return
+	}
 
 	sessions := []deviceSessionRow{}
 	srows, err := s.db.Query(ctx, `
@@ -398,6 +411,10 @@ func (s *server) endDeviceSessions(r *http.Request, ctx context.Context, deviceI
 		}
 	}
 	rows.Close()
+	if rows.Err() != nil {
+		// A partial read would disconnect only some of the device's sessions and report success.
+		return 0, http.StatusServiceUnavailable, "read_incomplete", "the device's sessions could not be read in time; nothing was changed"
+	}
 	if len(ids) == 0 {
 		return 0, 0, "", ""
 	}
@@ -719,7 +736,7 @@ func (s *server) setDeviceSettings(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusConflict, "awaiting_assignment", "this appliance has no site yet, so nothing can be saved")
 		return
 	}
-	actor, ok := s.portalStepUp(w, r, in.Password)
+	actor, ok := s.stepUp(w, r, in.Password)
 	if !ok {
 		return
 	}

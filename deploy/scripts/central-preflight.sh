@@ -167,8 +167,8 @@ if [ -s "$PKI_ROOT_CRT" ] && [ -s "$PKI_INT_CRT" ] && [ -s "$PKI_INT_KEY" ]; the
     bad "$PKI_INT_CRT does not chain to $PKI_ROOT_CRT"
   fi
   if [ -s "$PKI_ROOT_KEY" ]; then
-    warn "the Root CA private key is still in the runtime directory ($PKI_ROOT_KEY); ctrlapi moves it to
-        $(envget CTRLAPI_ROOT_CA_OFFLINE_DIR || echo /etc/stayconnect/pki-offline) on start — then take it to cold storage"
+    warn "the Root CA private key is in the runtime directory ($PKI_ROOT_KEY); it belongs in cold storage (move it via
+        $(envget CTRLAPI_ROOT_CA_OFFLINE_DIR || echo /etc/stayconnect/pki-offline), then off the host)"
   fi
 else
   bad "appliance CA incomplete ($PKI_ROOT_CRT, $PKI_INT_CRT, $PKI_INT_KEY) — the mTLS listener and certificate

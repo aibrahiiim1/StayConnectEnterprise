@@ -64,6 +64,15 @@ func TestIntegration_API_PmsRevisionProvenanceSQLRunsAgainstProductionColumnType
 		"appliance-bootstrap"); err != nil {
 		t.Fatalf("seed audit entries: %v", err)
 	}
+	// D7-M1: another interface's revision is not read, and no other action counts as authorship.
+	const other = "33333333-3333-3333-3333-333333333333"
+	if _, err := p.Exec(ctx, `
+		INSERT INTO `+schema+`.audit_log(ts, actor_type, actor_id, action, payload) VALUES
+		  ($1, 'operator', 'x', 'pms_interface_revision.authored', jsonb_build_object('revision_id',$2::text)),
+		  ($1, 'operator', 'x', 'pms_interface.something_else',    jsonb_build_object('revision_id',$3::text))`,
+		authored.Add(-time.Hour), other, attributed); err != nil {
+		t.Fatalf("seed unrelated entries: %v", err)
+	}
 
 	// The real statement, retargeted at this schema, so there is no second copy to drift.
 	sql := strings.ReplaceAll(pmsRevisionProvenanceSQL, "public.", schema+".")
@@ -72,7 +81,7 @@ func TestIntegration_API_PmsRevisionProvenanceSQLRunsAgainstProductionColumnType
 			"retarget it and would silently stop proving anything")
 	}
 
-	rows, err := p.Query(ctx, sql)
+	rows, err := p.Query(ctx, sql, []string{attributed, departed})
 	if err != nil {
 		// Production discards this error, so it can only surface here.
 		t.Fatalf("the provenance query does not run against production column types: %v", err)
@@ -113,6 +122,9 @@ func TestIntegration_API_PmsRevisionProvenanceSQLRunsAgainstProductionColumnType
 	}
 	if !a.publishedAt.After(*a.authoredAt) {
 		t.Errorf("published %v should follow authored %v", a.publishedAt, a.authoredAt)
+	}
+	if a.authoredAt != nil && !a.authoredAt.Equal(authored.Truncate(time.Microsecond)) {
+		t.Errorf("authored_at = %v, want the authoring entry's time %v (no other action counts)", a.authoredAt, authored)
 	}
 
 	// A version by an unknown actor still appears with its reason and no invented name.

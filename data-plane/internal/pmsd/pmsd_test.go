@@ -6,6 +6,8 @@ import (
 	"io"
 	"log/slog"
 	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -79,6 +81,7 @@ type fakeRepo struct {
 	publishedGen map[string]int64
 	liveRows     []string
 	stagedRows   []string
+	stagedKeys   map[string]bool
 	// Operator command channel + durable progress, faked at the repo boundary.
 	cmdQueue       []ResyncCommand
 	cmdGen         int64
@@ -211,6 +214,15 @@ func (r *fakeRepo) StageResyncEvent(ctx context.Context, row InboxRow) (string, 
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	// se_resync_identity: one row per identity per generation.
+	key := strconv.FormatInt(row.ResyncGeneration, 10) + "/" + row.ExternalEventIdentity
+	if r.stagedKeys == nil {
+		r.stagedKeys = map[string]bool{}
+	}
+	if r.stagedKeys[key] {
+		return "", ErrDuplicateResyncEvent
+	}
+	r.stagedKeys[key] = true
 	r.stagedRows = append(r.stagedRows, row.ExternalEventIdentity)
 	return "resync-" + row.ExternalEventIdentity, nil
 }
@@ -468,6 +480,34 @@ func TestRevision_CredentialCoherence(t *testing.T) {
 	}
 	if !validRevision().RequiresSecret() {
 		t.Error("AUTH_KEY must require a secret")
+	}
+}
+
+// Audit P7 L3: a certificate pin without TLS, or a pin that is not a SHA-256 value, is a configuration error at
+// validation, never a silent plaintext link.
+func TestRevision_TLSPinCoherence(t *testing.T) {
+	pin := strings.Repeat("ab", 32)
+	r := noneRevision()
+	r.TLSCertSHA256 = pin
+	if Classify(r.Validate()) != CodeConfigInvalid {
+		t.Errorf("pin without TLS: %v, want CONFIG_INVALID", r.Validate())
+	}
+	r.TLS = true
+	if err := r.Validate(); err != nil {
+		t.Errorf("pin with TLS must validate: %v", err)
+	}
+	r.TLSCertSHA256 = strings.ToUpper(strings.Repeat("ab:", 31) + "ab")
+	if err := r.Validate(); err != nil {
+		t.Errorf("colon-separated upper-case pin must validate: %v", err)
+	}
+	r.TLSCertSHA256 = "abcd"
+	if Classify(r.Validate()) != CodeConfigInvalid {
+		t.Errorf("short pin: %v, want CONFIG_INVALID", r.Validate())
+	}
+	r = noneRevision()
+	r.TLS = true
+	if err := r.Validate(); err != nil {
+		t.Errorf("TLS without a pin must validate: %v", err)
 	}
 }
 

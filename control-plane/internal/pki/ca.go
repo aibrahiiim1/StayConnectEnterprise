@@ -3,7 +3,9 @@
 package pki
 
 import (
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
@@ -45,46 +47,105 @@ func LoadOrCreate(keyPath string, version int) (*CA, error) {
 	return &CA{priv: priv, cert: cert, intPEM: certPEM, certPEM: certPEM, Version: version}, nil
 }
 
-// LoadCAChain builds the two-tier CA. The root key is needed only to sign the intermediate on first setup;
-// after that it is moved offline and all issuance uses the intermediate.
-func LoadCAChain(rootKeyPath, intKeyPath string, version int) (*CA, error) {
-	intPriv, err := loadOrCreateKey(intKeyPath)
+// LoadCA loads the two-tier CA that InitCA created. It never creates key or certificate material: a missing
+// root certificate, intermediate certificate or intermediate key is an error, so a restore that lost one file
+// leaves the PKI off instead of minting a new root that no appliance trusts (audit Phase 1 H1).
+func LoadCA(rootCertPath, intCertPath, intKeyPath string, version int) (*CA, error) {
+	rootPEM, err := os.ReadFile(rootCertPath)
 	if err != nil {
+		return nil, fmt.Errorf("pki: root CA certificate: %w", err)
+	}
+	intPEM, err := os.ReadFile(intCertPath)
+	if err != nil {
+		return nil, fmt.Errorf("pki: intermediate CA certificate: %w", err)
+	}
+	intPriv, err := loadKey(intKeyPath)
+	if err != nil {
+		return nil, fmt.Errorf("pki: intermediate CA key: %w", err)
+	}
+	rootCert, err := parseCertPEM(rootPEM)
+	if err != nil {
+		return nil, fmt.Errorf("pki: root CA certificate: %w", err)
+	}
+	intCert, err := parseCertPEM(intPEM)
+	if err != nil {
+		return nil, fmt.Errorf("pki: intermediate CA certificate: %w", err)
+	}
+	if err := checkChain(rootCert, intCert, intPriv, time.Now()); err != nil {
 		return nil, err
 	}
-	rootCertPath := certSibling(rootKeyPath)
-	intCertPath := certSibling(intKeyPath)
+	bundle := append(append([]byte{}, intPEM...), rootPEM...)
+	return &CA{priv: intPriv, cert: intCert, intPEM: intPEM, rootPEM: rootPEM, certPEM: bundle, Version: version}, nil
+}
 
-	// Persisted public certs mean the root private key is not needed.
-	rootPEM, rerr := os.ReadFile(rootCertPath)
-	intPEM, ierr := os.ReadFile(intCertPath)
-	if rerr == nil && ierr == nil {
-		intCert, err := parseCertPEM(intPEM)
-		if err != nil {
+// checkChain proves the intermediate is the root's, holds intKey, and is still valid (audit Phase 1 L16).
+func checkChain(root, inter *x509.Certificate, intKey ed25519.PrivateKey, now time.Time) error {
+	if !root.IsCA || !inter.IsCA {
+		return errors.New("pki: root and intermediate must both be CA certificates")
+	}
+	if err := inter.CheckSignatureFrom(root); err != nil {
+		return fmt.Errorf("pki: intermediate CA is not signed by the root CA: %w", err)
+	}
+	pub, ok := inter.PublicKey.(ed25519.PublicKey)
+	if !ok || !pub.Equal(intKey.Public()) {
+		return errors.New("pki: intermediate CA key does not match the intermediate CA certificate")
+	}
+	if now.After(inter.NotAfter) || now.After(root.NotAfter) {
+		return errors.New("pki: the CA certificate has expired")
+	}
+	return nil
+}
+
+// InitCA creates a brand-new two-tier CA, once, for a fresh Central (`ctrlapi init-ca`). It refuses when any of
+// the files already exists. The root key is written to rootKeyPath, which belongs outside the runtime PKI
+// directory and then in cold storage; serve never needs it.
+func InitCA(rootKeyPath, rootCertPath, intCertPath, intKeyPath string, version int) (*CA, error) {
+	for _, p := range []string{rootKeyPath, rootCertPath, intCertPath, intKeyPath} {
+		if _, err := os.Lstat(p); err == nil {
+			return nil, fmt.Errorf("pki: %s already exists; refusing to create a new CA over existing material", p)
+		} else if !os.IsNotExist(err) {
 			return nil, err
 		}
-		bundle := append(append([]byte{}, intPEM...), rootPEM...)
-		return &CA{priv: intPriv, cert: intCert, intPEM: intPEM, rootPEM: rootPEM, certPEM: bundle, Version: version}, nil
 	}
-
-	rootPriv, err := loadOrCreateKey(rootKeyPath)
+	_, rootPriv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, err
 	}
-	rootCert, rootPEM2, err := selfSignRoot(rootPriv)
+	_, intPriv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, err
 	}
-	intCert, intPEM2, err := signIntermediate(intPriv, rootCert, rootPriv, version)
+	rootCert, rootPEM, err := selfSignRoot(rootPriv)
 	if err != nil {
 		return nil, err
 	}
-	// Persist the public certs so later boots never need the root key.
-	_ = writeAtomic(rootCertPath, rootPEM2, 0o644)
-	_ = writeAtomic(intCertPath, intPEM2, 0o644)
-	bundle := append(append([]byte{}, intPEM2...), rootPEM2...)
-	return &CA{priv: intPriv, cert: intCert, intPEM: intPEM2, rootPEM: rootPEM2, certPEM: bundle, Version: version}, nil
+	intCert, intPEM, err := signIntermediate(intPriv, rootCert, rootPriv, version)
+	if err != nil {
+		return nil, err
+	}
+	rootKeyPEM, err := keyPEM(rootPriv)
+	if err != nil {
+		return nil, err
+	}
+	intKeyPEM, err := keyPEM(intPriv)
+	if err != nil {
+		return nil, err
+	}
+	for _, f := range []struct {
+		path string
+		data []byte
+		mode os.FileMode
+	}{{rootKeyPath, rootKeyPEM, 0o600}, {intKeyPath, intKeyPEM, 0o600}, {rootCertPath, rootPEM, 0o644}, {intCertPath, intPEM, 0o644}} {
+		if err := writeNew(f.path, f.data, f.mode); err != nil {
+			return nil, err
+		}
+	}
+	bundle := append(append([]byte{}, intPEM...), rootPEM...)
+	return &CA{priv: intPriv, cert: intCert, intPEM: intPEM, rootPEM: rootPEM, certPEM: bundle, Version: version}, nil
 }
+
+// CertSibling is the certificate path that belongs to a CA key path (root-ca.key → root-ca.crt).
+func CertSibling(keyPath string) string { return certSibling(keyPath) }
 
 func certSibling(keyPath string) string {
 	ext := filepath.Ext(keyPath)
@@ -103,42 +164,75 @@ func (c *CA) IntermediatePEM() []byte { return c.intPEM }
 
 func (c *CA) RootPEM() []byte { return c.rootPEM }
 
-func loadOrCreateKey(keyPath string) (ed25519.PrivateKey, error) {
+func loadKey(keyPath string) (ed25519.PrivateKey, error) {
 	raw, err := os.ReadFile(keyPath)
-	if err == nil {
-		block, _ := pem.Decode(raw)
-		if block == nil {
-			return nil, errors.New("pki: CA key PEM decode failed")
-		}
-		k, err := x509.ParsePKCS8PrivateKey(block.Bytes)
-		if err != nil {
-			return nil, fmt.Errorf("pki: parse CA key: %w", err)
-		}
-		ed, ok := k.(ed25519.PrivateKey)
-		if !ok {
-			return nil, errors.New("pki: CA key is not Ed25519")
-		}
-		return ed, nil
-	}
-	if !os.IsNotExist(err) {
-		return nil, err
-	}
-	if err := os.MkdirAll(filepath.Dir(keyPath), 0o700); err != nil {
-		return nil, err
-	}
-	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, err
 	}
+	block, _ := pem.Decode(raw)
+	if block == nil {
+		return nil, errors.New("pki: CA key PEM decode failed")
+	}
+	k, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("pki: parse CA key: %w", err)
+	}
+	ed, ok := k.(ed25519.PrivateKey)
+	if !ok {
+		return nil, errors.New("pki: CA key is not Ed25519")
+	}
+	return ed, nil
+}
+
+func keyPEM(priv ed25519.PrivateKey) ([]byte, error) {
 	der, err := x509.MarshalPKCS8PrivateKey(priv)
 	if err != nil {
 		return nil, err
 	}
-	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
+	return pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), nil
+}
+
+// loadOrCreateKey is the single-tier dev CA's key (LoadOrCreate, tests only).
+func loadOrCreateKey(keyPath string) (ed25519.PrivateKey, error) {
+	priv, err := loadKey(keyPath)
+	if err == nil || !errors.Is(err, os.ErrNotExist) {
+		return priv, err
+	}
+	if err := os.MkdirAll(filepath.Dir(keyPath), 0o700); err != nil {
+		return nil, err
+	}
+	_, priv, err = ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+	pemBytes, err := keyPEM(priv)
+	if err != nil {
+		return nil, err
+	}
 	if err := writeAtomic(keyPath, pemBytes, 0o600); err != nil {
 		return nil, err
 	}
 	return priv, nil
+}
+
+// writeNew creates path (and its directory) and fails if it exists.
+func writeNew(path string, data []byte, mode os.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 // selfSignRoot builds the deterministic root (pathlen=1: it signs one intermediate).
@@ -244,6 +338,9 @@ func (c *CA) SignApplianceCSR(csrPEM []byte, applianceID, tenantID, siteID strin
 	if err := csr.CheckSignature(); err != nil {
 		return nil, fmt.Errorf("pki: CSR signature invalid (proof-of-possession failed): %w", err)
 	}
+	if err := checkCSRKey(csr.PublicKey); err != nil {
+		return nil, err
+	}
 	uri, err := url.Parse(fmt.Sprintf("%s://appliance/%s", uriScheme, applianceID))
 	if err != nil {
 		return nil, err
@@ -279,6 +376,19 @@ func (c *CA) SignApplianceCSR(csrPEM []byte, applianceID, tenantID, siteID strin
 		NotBefore:      tmpl.NotBefore,
 		NotAfter:       tmpl.NotAfter,
 	}, nil
+}
+
+// checkCSRKey accepts the appliance's Ed25519 key, or ECDSA P-256/P-384; nothing else (audit Phase 1 L11).
+func checkCSRKey(pub any) error {
+	switch k := pub.(type) {
+	case ed25519.PublicKey:
+		return nil
+	case *ecdsa.PublicKey:
+		if k.Curve == elliptic.P256() || k.Curve == elliptic.P384() {
+			return nil
+		}
+	}
+	return errors.New("pki: CSR key must be Ed25519 or ECDSA P-256/P-384")
 }
 
 func (c *CA) SignServer(hosts []string, validity time.Duration) (certPEM, keyPEM []byte, err error) {

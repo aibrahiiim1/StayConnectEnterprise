@@ -7,7 +7,7 @@
 // the row; the Health column reads from that record.
 
 import { useEffect, useState } from "react";
-import { api, ListResp, Whoami, NotificationProvider, NotificationTestResult } from "@/lib/api";
+import { api, ListResp, NotificationProvider, NotificationTestResult } from "@/lib/api";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { Card } from "@/components/ui/card";
@@ -26,6 +26,7 @@ import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { formatRelative } from "@/lib/utils";
 import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
+import { useOperatorRoles } from "@/lib/whoami-context";
 
 type Channel = "email" | "sms" | "whatsapp";
 type Security = "starttls" | "tls" | "none";
@@ -109,7 +110,7 @@ function extraOf(f: FormState): Record<string, string> | undefined {
 export default function NotificationsPage() {
   const toast = useToast();
   const [rows, setRows] = useState<NotificationProvider[] | null>(null);
-  const [roles, setRoles] = useState<string[] | null>(null);
+  const roles = useOperatorRoles();
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [formErr, setFormErr] = useState<unknown>(null);
@@ -136,7 +137,6 @@ export default function NotificationsPage() {
   }
   useEffect(() => {
     load();
-    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
   }, []);
 
   function openNew() {

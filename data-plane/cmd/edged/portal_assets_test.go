@@ -3,7 +3,12 @@ package main
 // The asset directory is served unauthenticated before sign-in, so what may be stored is decided by
 // inspecting the bytes, never by the uploader's filename or Content-Type.
 
-import "testing"
+import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestAssetTypeIsDecidedByTheBytes(t *testing.T) {
 	png := append([]byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}, make([]byte, 40)...)
@@ -15,6 +20,44 @@ func TestAssetTypeIsDecidedByTheBytes(t *testing.T) {
 		if ext, mime := sniffImage(b); ext == "" || mime == "" {
 			t.Errorf("a real %s was not recognised", name)
 		}
+	}
+}
+
+// P9 L9: three bytes are not enough to call something a JPEG; the SOI must be followed by a marker segment.
+func TestJPEGNeedsAMarkerAfterTheStartOfImage(t *testing.T) {
+	for _, b := range [][]byte{
+		append([]byte{0xFF, 0xD8, 0xFF, 0x00}, make([]byte, 40)...),
+		append([]byte{0xFF, 0xD8, 0xFF, 0xFF}, make([]byte, 40)...),
+		append([]byte{0xFF, 0xD8, 0xFF, '<'}, []byte("html>")...),
+	} {
+		if ext, _ := sniffImage(b); ext != "" {
+			t.Errorf("% x... was accepted as a JPEG", b[:4])
+		}
+	}
+	for _, m := range []byte{0xE0, 0xE1, 0xDB, 0xEE} {
+		if ext, _ := sniffImage(append([]byte{0xFF, 0xD8, 0xFF, m}, make([]byte, 40)...)); ext != ".jpg" {
+			t.Errorf("a JPEG starting FF D8 FF %X was not recognised", m)
+		}
+	}
+}
+
+// P9 L9: the stored file appears whole or not at all, and no temporary file is left behind.
+func TestAssetIsWrittenAtomically(t *testing.T) {
+	dir := t.TempDir()
+	data := bytes.Repeat([]byte{0xAB}, 3<<20)
+	if err := writeFileAtomically(dir, "0123456789abcdef.png", data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "0123456789abcdef.png"))
+	if err != nil || !bytes.Equal(got, data) {
+		t.Fatalf("stored file differs: %v", err)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Fatalf("a temporary file was left behind: %d entries", len(entries))
+	}
+	if fi, _ := os.Stat(filepath.Join(dir, "0123456789abcdef.png")); fi.Mode().Perm() != 0o644 {
+		t.Fatalf("mode %v, want 0644 so portald can read it", fi.Mode().Perm())
 	}
 }
 

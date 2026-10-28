@@ -15,12 +15,12 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
 IMAGE="${SITEDB_SELFTEST_IMAGE:-timescale/timescaledb:2.16.1-pg16}"
-C="sc-migrate-selftest-$$"
+C="${APPLY_PENDING_SELFTEST_CONTAINER:-sc-migrate-selftest-$$}"
 pass=0; fail=0
 ok()  { pass=$((pass+1)); printf '  PASS  %s\n' "$1"; }
 bad() { fail=$((fail+1)); printf '  FAIL  %s\n' "$1"; }
 W="$(mktemp -d)"
-cleanup() { docker rm -f "$C" >/dev/null 2>&1; rm -rf "$W"; }
+cleanup() { docker rm -f -v "$C" >/dev/null 2>&1; rm -rf "$W"; }
 trap cleanup EXIT
 docker run -d --name "$C" -e POSTGRES_USER=stayconnect -e POSTGRES_PASSWORD=selftest -e POSTGRES_DB=stayconnect "$IMAGE" >/dev/null || exit 2
 up=0; for _ in $(seq 1 60); do

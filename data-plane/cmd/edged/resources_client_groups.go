@@ -8,9 +8,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -56,6 +58,10 @@ func validateClientGroupWrite(in clientGroupWrite, creating bool) string {
 	}
 	if in.Description != nil && len(*in.Description) > 500 {
 		return "the description must be at most 500 characters"
+	}
+	// The change reason is optional but bounded: it is kept in the group's history (audit P9 L13).
+	if utf8.RuneCountInString(strings.TrimSpace(in.Reason)) > reasonMaxChars {
+		return fmt.Sprintf("the reason must be at most %d characters", reasonMaxChars)
 	}
 	if in.Priority != nil && (*in.Priority < 1 || *in.Priority > 1000) {
 		return "priority must be between 1 (wins) and 1000"
@@ -360,6 +366,10 @@ func (s *server) deleteClientGroup(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var in clientGroupWrite
 	_ = decodeJSON(r, &in)
+	if utf8.RuneCountInString(strings.TrimSpace(in.Reason)) > reasonMaxChars {
+		jsonErr(w, http.StatusBadRequest, "bad_request", fmt.Sprintf("the reason must be at most %d characters", reasonMaxChars))
+		return
+	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	tx, err := s.db.Begin(ctx)

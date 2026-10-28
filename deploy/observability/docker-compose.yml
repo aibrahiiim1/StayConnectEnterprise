@@ -67,7 +67,8 @@ services:
       - stayconnect-alertmanager
     environment:
       GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      # No published fallback password (SECURITY_HARDENING item 6): the stack refuses to start without one.
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD to a generated password}
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_AUTH_ANONYMOUS_ENABLED: "false"
       # Run Grafana on :3001 to avoid colliding with the admin console on :3000.

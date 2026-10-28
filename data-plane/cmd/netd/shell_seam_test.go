@@ -8,6 +8,35 @@ import (
 	"testing"
 )
 
+// The files that decide what comes up after a reboot (guest netplan, the Unbound fragment, the Kea config and its
+// bootstrap snapshot, the WAN/LAN netplan files and their marker) are written atomically: a power cut mid-write must
+// leave the old file or the new one, never a truncated one (audit Phase 8 L12). The guard reads the source.
+func TestBootConfigFilesAreNeverWrittenInPlace(t *testing.T) {
+	inPlace := regexp.MustCompile(`os\.WriteFile\(\s*(a\.netplanFile|a\.unboundFrag|a\.keaConfPath\(\)|a\.keaSnapshotPath\(\)|ps\.wan|ps\.lan|dst|path|tmp)\b`)
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		if name != "apply_ops.go" && name != "kea_bootstrap.go" && name != "sysnet.go" {
+			continue
+		}
+		raw, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, line := range strings.Split(string(raw), "\n") {
+			if inPlace.MatchString(line) {
+				t.Errorf("%s:%d writes a boot configuration file in place: %s", name, i+1, strings.TrimSpace(line))
+			}
+		}
+	}
+}
+
 // Production must never call the test seams a.runFn and a.outFn directly: they are nil outside tests, so a direct call panics on the first real apply and strands the revision in applying.
 // No behavioural test can see this, so the guard reads the source.
 func TestNoDirectSeamCallsInProductionCode(t *testing.T) {

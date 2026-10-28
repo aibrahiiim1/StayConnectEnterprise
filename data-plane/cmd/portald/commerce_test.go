@@ -86,8 +86,10 @@ func TestCommerceRoutesAbsentWhenDark(t *testing.T) {
 	defer closeFn()
 	srv := httptest.NewServer(h.routes())
 	defer srv.Close()
+	// An unmounted path gets the catch-all redirect (perf D3-M1); it is read as it comes, not followed.
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	for _, p := range []string{"/api/commerce/packages", "/api/commerce/quote", "/api/commerce/confirm"} {
-		resp, err := http.Get(srv.URL + p)
+		resp, err := client.Get(srv.URL + p)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -37,16 +37,6 @@ var whatsappExtraKeys = map[string]bool{"template_name": true, "language": true,
 // the sealed secret, never a column.
 var smtpExtraKeys = map[string]bool{"host": true, "port": true, "security": true, "username": true, "timeout_seconds": true}
 
-func extraKeysFor(channel, kind string) map[string]bool {
-	switch {
-	case channel == "whatsapp":
-		return whatsappExtraKeys
-	case channel == "email" && kind == "smtp":
-		return smtpExtraKeys
-	}
-	return map[string]bool{}
-}
-
 var (
 	reMetaPhoneID   = regexp.MustCompile(`^[0-9]{5,32}$`)
 	reMetaTemplate  = regexp.MustCompile(`^[a-z0-9_]{1,512}$`)
@@ -125,6 +115,25 @@ type notifyWriteReq struct {
 func (in notifyWriteReq) onlySwitchesOff() bool {
 	return in.Enabled != nil && !*in.Enabled && in.DisplayName == nil && in.APIKey == nil &&
 		in.APIUser == nil && in.FromAddress == nil && in.FromName == nil && in.Region == nil && len(in.Extra) == 0
+}
+
+// changedFields names the settings a patch touches, for the audit; never a value, so no secret can leak.
+func (in notifyWriteReq) changedFields() []string {
+	out := []string{}
+	for _, f := range []struct {
+		name string
+		set  bool
+	}{
+		{"enabled", in.Enabled != nil}, {"display_name", in.DisplayName != nil},
+		{"api_key", in.APIKey != nil && strings.TrimSpace(*in.APIKey) != ""}, {"api_user", in.APIUser != nil},
+		{"from_address", in.FromAddress != nil}, {"from_name", in.FromName != nil}, {"region", in.Region != nil},
+		{"extra", len(in.Extra) > 0},
+	} {
+		if f.set {
+			out = append(out, f.name)
+		}
+	}
+	return out
 }
 
 type notifyProviderShape struct {
@@ -457,6 +466,20 @@ func (s *server) patchNotifyProvider(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// The secret goes first, as for social providers: if scd refuses it, nothing else is applied, and every
+	// outcome is audited (audit P9 L15). The audit names what changed, never the secret.
+	changed := in.changedFields()
+	secretReplaced := false
+	if secret := strings.TrimSpace(strDeref(in.APIKey)); secret != "" {
+		if ok, msg := s.storeNotifySecret(r, id, secret); !ok {
+			s.audit(r, "notification_provider.update_failed", "notification_provider", id, map[string]any{
+				"fields": changed, "stage": "secret"})
+			jsonErr(w, http.StatusBadGateway, "secret_not_stored", msg)
+			return
+		}
+		secretReplaced = true
+	}
+
 	var n edgeNotificationProvider
 	err = scanNotify(s.db.QueryRow(ctx, `
         UPDATE notification_providers SET
@@ -474,6 +497,11 @@ func (s *server) patchNotifyProvider(w http.ResponseWriter, r *http.Request) {
 		in.Enabled, in.DisplayName,
 		in.APIUser, in.FromAddress, in.FromName, in.Region, extraArg,
 	), &n)
+	if err != nil {
+		// The secret, if one was given, is already replaced: the record says so.
+		s.audit(r, "notification_provider.update_failed", "notification_provider", id, map[string]any{
+			"fields": changed, "stage": "settings", "secret_replaced": secretReplaced})
+	}
 	if isNoRows(err) {
 		jsonErr(w, http.StatusNotFound, "not_found", "provider not found")
 		return
@@ -486,13 +514,8 @@ func (s *server) patchNotifyProvider(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "update failed")
 		return
 	}
-	if secret := strings.TrimSpace(strDeref(in.APIKey)); secret != "" {
-		if ok, msg := s.storeNotifySecret(r, id, secret); !ok {
-			jsonErr(w, http.StatusBadGateway, "secret_not_stored", msg)
-			return
-		}
-	}
-	s.audit(r, "notification_provider.updated", "notification_provider", id, nil)
+	s.audit(r, "notification_provider.updated", "notification_provider", id, map[string]any{
+		"fields": changed, "secret_replaced": secretReplaced})
 	s.pokeSCD(r, "/v1/admin/notify/reload")
 	writeJSON(w, http.StatusOK, n)
 }

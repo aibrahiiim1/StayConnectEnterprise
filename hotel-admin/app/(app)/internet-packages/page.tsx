@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Package, Plus } from "lucide-react";
-import { api, ApiError, Whoami } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { canWrite } from "@/lib/roles";
 import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
@@ -15,6 +15,7 @@ import { ErrorBanner } from "@/components/ui/error-banner";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { PackagesTab } from "./packages-tab";
 import { ActivityTab } from "./activity-tab";
+import { useOperatorRoles } from "@/lib/whoami-context";
 
 type Tab = "packages" | "activity";
 
@@ -36,10 +37,7 @@ export default function InternetPackagesPage() {
   const [addRequest, setAddRequest] = useState(0);
   const { disabled, guard } = useDisabled();
   // Fails closed while loading; edged enforces the real gate either way.
-  const [roles, setRoles] = useState<string[] | null>(null);
-  useEffect(() => {
-    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
-  }, []);
+  const roles = useOperatorRoles();
   const writable = roles !== null && canWrite("commercial-packages", roles);
 
   return (

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/stayconnect/enterprise/control-plane/internal/audit"
 	"github.com/stayconnect/enterprise/control-plane/internal/auth"
@@ -106,6 +107,14 @@ func (u *userWrite) normalizeRole() bool {
 	return false
 }
 
+// duplicateEmailMessage words a duplicate-email conflict neutrally on a customer's users.
+func duplicateEmailMessage(customerID, platformMsg string) string {
+	if customerID != "" {
+		return "this email cannot be used; choose another"
+	}
+	return platformMsg
+}
+
 // mayGrant decides who may hand out a role: only a platform_owner creates another platform_owner, and only a
 // platform role or a tenant_owner creates a tenant_owner.
 func mayGrant(s *auth.Session, role string) bool {
@@ -149,7 +158,11 @@ func validUserEmail(e string) bool {
 // createUser inserts an operator with exactly one role. customerID "" = a Team member.
 func (b *Base) createUser(w http.ResponseWriter, r *http.Request, customerID string) {
 	var in userWrite
-	if err := DecodeJSON(r, &in); err != nil || !in.normalizeRole() {
+	if err := DecodeJSON(r, &in); err != nil {
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, badBody(err))
+		return
+	}
+	if !in.normalizeRole() {
 		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "bad body (a user holds exactly one role)")
 		return
 	}
@@ -188,7 +201,13 @@ func (b *Base) createUser(w http.ResponseWriter, r *http.Request, customerID str
         INSERT INTO operators (tenant_id, email, display_name, password_hash, status)
         VALUES (NULLIF($1,'')::uuid, $2, NULLIF($3,''), $4, 'active') RETURNING id::text`,
 		customerID, in.Email, strings.TrimSpace(deref(in.DisplayName)), hash).Scan(&id); err != nil {
-		Fail(w, r, http.StatusConflict, CodeConflict, "a user with that email already exists")
+		// Only a duplicate is a conflict; emails are unique platform-wide, so a customer's own administrators get
+		// a neutral answer that does not confirm the address exists elsewhere (audit Phase 1 L13).
+		if isUniqueViolation(err) {
+			Fail(w, r, http.StatusConflict, CodeConflict, duplicateEmailMessage(customerID, "a user with that email already exists"))
+			return
+		}
+		failInternal(w, r, "Central could not create the user (database error).", err)
 		return
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO operator_roles (operator_id, tenant_id, role) VALUES ($1, NULLIF($2,'')::uuid, $3)`,
@@ -208,7 +227,11 @@ func (b *Base) createUser(w http.ResponseWriter, r *http.Request, customerID str
 // updateUser changes display name, status, role and/or password.
 func (b *Base) updateUser(w http.ResponseWriter, r *http.Request, customerID, id string) {
 	var in userWrite
-	if err := DecodeJSON(r, &in); err != nil || !in.normalizeRole() {
+	if err := DecodeJSON(r, &in); err != nil {
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, badBody(err))
+		return
+	}
+	if !in.normalizeRole() {
 		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "bad body (a user holds exactly one role)")
 		return
 	}
@@ -257,21 +280,28 @@ func (b *Base) updateUser(w http.ResponseWriter, r *http.Request, customerID, id
 		return
 	}
 	demoted := in.Role != "" && in.Role != "platform_owner" && in.Role != "platform_admin"
-	if customerID == "" && (in.Status == "disabled" || demoted) && b.isLastAdministrator(ctx, id) {
-		Fail(w, r, http.StatusConflict, CodeConflict, "this is the last active platform administrator")
-		return
-	}
 	tx, err := b.DB.Begin(ctx)
 	if err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "begin failed")
 		return
 	}
 	defer tx.Rollback(ctx)
+	if customerID == "" && (in.Status == "disabled" || demoted) {
+		last, err := isLastAdministratorTx(ctx, tx, id)
+		if err != nil {
+			failInternal(w, r, "Central could not check the platform administrators, so nothing changed.", err)
+			return
+		}
+		if last {
+			Fail(w, r, http.StatusConflict, CodeConflict, "this is the last active platform administrator")
+			return
+		}
+	}
 	emailChanged := in.Email != "" && in.Email != strings.ToLower(cur[0].Email)
 	if emailChanged {
 		if _, err := tx.Exec(ctx, `UPDATE operators SET email=$2, updated_at=now() WHERE id=$1`, id, in.Email); err != nil {
 			if isUniqueViolation(err) {
-				Fail(w, r, http.StatusConflict, CodeConflict, "another user already has this email")
+				Fail(w, r, http.StatusConflict, CodeConflict, duplicateEmailMessage(customerID, "another user already has this email"))
 				return
 			}
 			Fail(w, r, http.StatusInternalServerError, CodeInternal, "update failed")
@@ -358,13 +388,30 @@ func (b *Base) removeUser(w http.ResponseWriter, r *http.Request, customerID, id
 		Fail(w, r, http.StatusForbidden, CodeForbidden, "you may not remove a "+cur[0].Role)
 		return
 	}
-	if customerID == "" && b.isLastAdministrator(ctx, id) {
-		Fail(w, r, http.StatusConflict, CodeConflict, "this is the last active platform administrator")
+	tx, err := b.DB.Begin(ctx)
+	if err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "begin failed")
 		return
 	}
+	defer tx.Rollback(ctx)
+	if customerID == "" {
+		last, err := isLastAdministratorTx(ctx, tx, id)
+		if err != nil {
+			failInternal(w, r, "Central could not check the platform administrators, so nothing changed.", err)
+			return
+		}
+		if last {
+			Fail(w, r, http.StatusConflict, CodeConflict, "this is the last active platform administrator")
+			return
+		}
+	}
 	// Removing the row also ends their sessions: the next request finds no operator (session_policy.go).
-	if _, err := b.DB.Exec(ctx, `DELETE FROM operators WHERE id=$1`, id); err != nil {
+	if _, err := tx.Exec(ctx, `DELETE FROM operators WHERE id=$1`, id); err != nil {
 		slog.Warn("remove user failed", "operator_id", id, "err", err)
+		Fail(w, r, http.StatusConflict, CodeConflict, "The user could not be removed. Try again.")
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
 		Fail(w, r, http.StatusConflict, CodeConflict, "The user could not be removed. Try again.")
 		return
 	}
@@ -375,15 +422,24 @@ func (b *Base) removeUser(w http.ResponseWriter, r *http.Request, customerID, id
 
 // isLastAdministrator reports whether id is the only ACTIVE operator holding platform_owner or
 // platform_admin — removing, disabling or demoting it would leave nobody able to run Central.
-func (b *Base) isLastAdministrator(ctx context.Context, id string) bool {
+//
+// It runs inside the caller's transaction after taking a transaction lock that every such check takes, so two
+// concurrent demotions or removals cannot both pass; a query error is returned, never read as "not last"
+// (audit Phase 1 L1).
+func isLastAdministratorTx(ctx context.Context, tx pgx.Tx, id string) (bool, error) {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('central_platform_administrators'))`); err != nil {
+		return false, err
+	}
 	var others, self int
-	_ = b.DB.QueryRow(ctx, `
+	if err := tx.QueryRow(ctx, `
         SELECT count(DISTINCT o.id) FILTER (WHERE o.id::text <> $1),
                count(DISTINCT o.id) FILTER (WHERE o.id::text = $1)
           FROM operators o JOIN operator_roles r ON r.operator_id = o.id
          WHERE o.status = 'active' AND r.tenant_id IS NULL AND r.role IN ('platform_owner','platform_admin')`, id).
-		Scan(&others, &self)
-	return self > 0 && others == 0
+		Scan(&others, &self); err != nil {
+		return false, err
+	}
+	return self > 0 && others == 0, nil
 }
 
 func (b *Base) listTeam(w http.ResponseWriter, r *http.Request) {
@@ -585,7 +641,7 @@ func (b *Base) userDataExport(w http.ResponseWriter, r *http.Request) {
 		Reason string `json:"reason"`
 	}
 	if err := DecodeJSON(r, &in); err != nil {
-		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "bad body")
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, badBody(err))
 		return
 	}
 	reason := strings.TrimSpace(in.Reason)

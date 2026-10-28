@@ -6,10 +6,13 @@ package mail
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"mime"
+	"mime/quotedprintable"
 	"net"
 	"net/mail"
 	"net/smtp"
@@ -211,27 +214,31 @@ func (a *loginOrPlain) Next(fromServer []byte, more bool) ([]byte, error) {
 	return nil, errors.New("unexpected server challenge")
 }
 
-// render writes a minimal RFC 5322 message: text, plus HTML as a multipart alternative when given.
+// render writes a minimal RFC 5322 message: text, plus HTML as a multipart alternative when given. Addresses are built
+// by net/mail (a display name cannot change how the sender reads), bodies are quoted-printable (no line over 76
+// octets), the boundary is random so no body line can reshape the message, and each message has a Message-ID
+// (audit P5 L8).
 func (s *SMTP) render(m Message) string {
 	var b strings.Builder
 	from := s.cfg.FromAddress
 	if s.cfg.FromName != "" {
-		from = mime.QEncoding.Encode("utf-8", s.cfg.FromName) + " <" + s.cfg.FromAddress + ">"
+		from = (&mail.Address{Name: s.cfg.FromName, Address: s.cfg.FromAddress}).String()
 	}
 	b.WriteString("From: " + from + "\r\n")
 	b.WriteString("To: " + m.To + "\r\n")
 	b.WriteString("Subject: " + mime.QEncoding.Encode("utf-8", m.Subject) + "\r\n")
 	b.WriteString("Date: " + time.Now().UTC().Format(time.RFC1123Z) + "\r\n")
+	b.WriteString("Message-ID: <" + randomToken() + "@" + messageIDDomain(s.cfg.FromAddress) + ">\r\n")
 	b.WriteString("MIME-Version: 1.0\r\n")
 	if m.HTML == "" {
-		b.WriteString("Content-Type: text/plain; charset=utf-8\r\n\r\n")
-		b.WriteString(crlf(m.Text))
+		b.WriteString("Content-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n")
+		b.WriteString(quotedPrintable(m.Text))
 		return b.String()
 	}
-	const boundary = "=_onegate_alt_boundary_"
+	boundary := "=_onegate_" + randomToken()
 	b.WriteString("Content-Type: multipart/alternative; boundary=\"" + boundary + "\"\r\n\r\n")
-	b.WriteString("--" + boundary + "\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n" + crlf(m.Text) + "\r\n")
-	b.WriteString("--" + boundary + "\r\nContent-Type: text/html; charset=utf-8\r\n\r\n" + crlf(m.HTML) + "\r\n")
+	b.WriteString("--" + boundary + "\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n" + quotedPrintable(m.Text) + "\r\n")
+	b.WriteString("--" + boundary + "\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n" + quotedPrintable(m.HTML) + "\r\n")
 	b.WriteString("--" + boundary + "--\r\n")
 	return b.String()
 }
@@ -239,4 +246,27 @@ func (s *SMTP) render(m Message) string {
 func crlf(s string) string {
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	return strings.ReplaceAll(s, "\n", "\r\n")
+}
+
+func quotedPrintable(s string) string {
+	var b strings.Builder
+	w := quotedprintable.NewWriter(&b)
+	_, _ = w.Write([]byte(crlf(s)))
+	_ = w.Close()
+	return b.String()
+}
+
+func randomToken() string {
+	var r [16]byte
+	_, _ = rand.Read(r[:])
+	return hex.EncodeToString(r[:])
+}
+
+func messageIDDomain(from string) string {
+	if a, err := mail.ParseAddress(from); err == nil {
+		if i := strings.LastIndexByte(a.Address, '@'); i >= 0 && i < len(a.Address)-1 {
+			return a.Address[i+1:]
+		}
+	}
+	return "onegate.invalid"
 }

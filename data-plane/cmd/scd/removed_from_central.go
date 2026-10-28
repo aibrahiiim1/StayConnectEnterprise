@@ -60,11 +60,7 @@ func writeRemoved(path string, rec removedRecord) error {
 		return err
 	}
 	b, _ := json.MarshalIndent(rec, "", "  ")
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return writeFileSync(path, b, 0o644)
 }
 
 // mayRegister reports whether an appliance with no identity may self-register: enabled, a Central configured,

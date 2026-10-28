@@ -53,21 +53,49 @@ func (d *signInDamper) allow(key string) bool {
 	return true
 }
 
-// damped refuses with the hotel's own throttle answer (sign-in page for a form, 429 JSON for a script) without calling scd.
-func (h *handler) damped(next http.HandlerFunc) http.HandlerFunc {
+// dampAllows counts the request against its connection address; true when the damper is off.
+func (h *handler) dampAllows(r *http.Request) bool {
+	if h.signIns == nil {
+		return true
+	}
+	ip := clientIP(r)
+	key := ""
+	if ip != nil {
+		key = ip.String()
+	} else if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		key = host
+	}
+	return h.signIns.allow(key)
+}
+
+// dampedBudget is damped for the routes that answer every refusal through the Phase-3 failure-time budget: the
+// damper's refusal waits out the same budget and is written by the route's own refusal, so neither its timing nor
+// its shape stands out (audit P5 L2).
+func (h *handler) dampedBudget(next http.HandlerFunc, refuse func(http.ResponseWriter, *http.Request, *phase3Budget)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if h.signIns == nil {
+		if h.dampAllows(r) {
 			next(w, r)
 			return
 		}
-		ip := clientIP(r)
-		key := ""
-		if ip != nil {
-			key = ip.String()
-		} else if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-			key = host
-		}
-		if h.signIns.allow(key) {
+		b := h.newPhase3Budget(r)
+		defer b.cancel()
+		refuse(w, r, b)
+	}
+}
+
+// refuseDampedSignIn is the rate-limited sentence with no number: the damper does not know scd's wait.
+func (h *handler) refuseDampedSignIn(w http.ResponseWriter, r *http.Request, b *phase3Budget) {
+	h.phase3FailRetryAfter(w, r, b, "portal_damped", "RATE_LIMITED", 0)
+}
+
+func (h *handler) refuseDampedDevice(w http.ResponseWriter, r *http.Request, b *phase3Budget) {
+	h.deviceFail(w, r, b, "portal_damped")
+}
+
+// damped refuses with the hotel's own throttle answer (sign-in page for a form, 429 JSON for a script) without calling scd.
+func (h *handler) damped(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if h.dampAllows(r) {
 			next(w, r)
 			return
 		}

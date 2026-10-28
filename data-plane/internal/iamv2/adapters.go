@@ -9,41 +9,79 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/passwordhash"
 )
 
+type accountRow struct {
+	id, hash       string
+	enabled        bool
+	vf, vu, locked *time.Time
+}
+
+// accountRefusal is the deny reason for an account's state, or "" when it may sign in.
+func accountRefusal(r accountRow, now time.Time) string {
+	switch {
+	case r.id == "" || !r.enabled:
+		return "invalid_credentials"
+	case r.locked != nil && r.locked.After(now):
+		return "locked"
+	case (r.vf != nil && now.Before(*r.vf)) || (r.vu != nil && now.After(*r.vu)):
+		return "expired"
+	}
+	return ""
+}
+
+// authAccount verifies the password with no transaction open: argon2 takes tens of milliseconds to seconds under load,
+// and holding one of the service's few database connections meanwhile stalls every other sign-in. The account is read
+// first, the hash checked, and the transaction that issues the auth context re-reads the account and refuses it if its
+// password, state, lockout or validity changed in between.
 func (a *Authenticator) authAccount(ctx context.Context, req Request) (Result, error) {
 	if strings.TrimSpace(req.Username) == "" || req.Secret == "" {
 		return deny(MethodAccount, "missing_credentials"), nil
 	}
+	username := strings.ToLower(strings.TrimSpace(req.Username))
+	lookup := func(tx Tx) (accountRow, error) {
+		var r accountRow
+		var err error
+		r.id, r.hash, r.enabled, r.vf, r.vu, r.locked, err = tx.LookupAccount(ctx, req.TenantID, req.SiteID, username)
+		return r, err
+	}
 	now := a.now()
-	var res Result
-	err := a.repo.WithTx(ctx, func(tx Tx) error {
-		id, hash, enabled, vf, vu, locked, err := tx.LookupAccount(ctx, req.TenantID, req.SiteID, strings.ToLower(strings.TrimSpace(req.Username)))
-		if err != nil {
-			return err
-		}
-		if id == "" || !enabled {
+	var first accountRow
+	if err := a.repo.WithTx(ctx, func(tx Tx) error {
+		var err error
+		first, err = lookup(tx)
+		return err
+	}); err != nil {
+		return Result{}, &Error{Code: ErrRepo, Msg: "account"}
+	}
+	if reason := accountRefusal(first, now); reason != "" {
+		if first.id == "" || !first.enabled {
 			// Constant work: verify against a dummy hash to limit user enumeration.
 			_, _ = verifyArgon2id(req.Secret, dummyArgon2)
-			res = deny(MethodAccount, "invalid_credentials")
-			return nil
 		}
-		if locked != nil && locked.After(now) {
-			res = deny(MethodAccount, "locked")
-			return nil
-		}
-		if (vf != nil && now.Before(*vf)) || (vu != nil && now.After(*vu)) {
-			res = deny(MethodAccount, "expired")
-			return nil
-		}
-		ok, err := verifyArgon2id(req.Secret, hash)
-		if err != nil || !ok {
-			res = deny(MethodAccount, "invalid_credentials")
-			return nil
-		}
-		pin, err := accountGroupPin(ctx, tx, req, id)
+		return deny(MethodAccount, reason), nil
+	}
+	if ok, err := verifyArgon2id(req.Secret, first.hash); err != nil || !ok {
+		return deny(MethodAccount, "invalid_credentials"), nil
+	}
+	var res Result
+	err := a.repo.WithTx(ctx, func(tx Tx) error {
+		cur, err := lookup(tx)
 		if err != nil {
 			return err
 		}
-		res, err = a.finalizeWithPin(ctx, tx, MethodAccount, Subject{GuestAccountID: id}, req, now, pin)
+		if cur.id != first.id || cur.hash != first.hash {
+			// The password (or the account) changed while it was being checked.
+			res = deny(MethodAccount, "invalid_credentials")
+			return nil
+		}
+		if reason := accountRefusal(cur, a.now()); reason != "" {
+			res = deny(MethodAccount, reason)
+			return nil
+		}
+		pin, err := accountGroupPin(ctx, tx, req, cur.id)
+		if err != nil {
+			return err
+		}
+		res, err = a.finalizeWithPin(ctx, tx, MethodAccount, Subject{GuestAccountID: cur.id}, req, now, pin)
 		return err
 	})
 	if err != nil {

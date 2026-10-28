@@ -66,7 +66,7 @@ func (r *Resolver) Resolve(ctx context.Context, tenant, site, guestNetwork, requ
 	// Only a stored VERIFIED resolution is replayed (same request id, same Stay, so a double tap converges on
 	// one Auth Context). A stored refusal is not binding: the guest may have corrected a typo, so it is
 	// re-evaluated below with every probe run. Replaying it froze the portal on the first mistake.
-	prev, spent, err := r.load(ctx, tenant, site, requestID)
+	prev, spent, err := r.load(ctx, tenant, site, guestNetwork, requestID)
 	if err != nil {
 		return res, err
 	}
@@ -197,12 +197,15 @@ func (r *Resolver) mapped(ctx context.Context, tenant, site, guestNetwork string
 	return out, nil
 }
 
-func (r *Resolver) load(ctx context.Context, tenant, site, requestID string) (Result, bool, error) {
+// load finds a stored resolution by request id on the same guest network: a resolution recorded for another network is
+// never replayed here (request ids are random, so this is defence in depth).
+func (r *Resolver) load(ctx context.Context, tenant, site, guestNetwork, requestID string) (Result, bool, error) {
 	var res Result
 	var code string
 	var stay *string
 	err := r.pool.QueryRow(ctx, `SELECT outcome_code, resolved_stay_id::text FROM iam_v2.auth_resolutions
-		WHERE tenant_id=$1 AND site_id=$2 AND resolution_request_id=$3`, tenant, site, requestID).Scan(&code, &stay)
+		WHERE tenant_id=$1 AND site_id=$2 AND resolution_request_id=$3 AND guest_network_id=$4`,
+		tenant, site, requestID, guestNetwork).Scan(&code, &stay)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return res, false, nil
 	}
@@ -246,7 +249,7 @@ func (r *Resolver) store(ctx context.Context, tenant, site, guestNetwork, reques
 	if ct.RowsAffected() == 1 {
 		return nil, nil
 	}
-	prev, ok, err := r.load(ctx, tenant, site, requestID)
+	prev, ok, err := r.load(ctx, tenant, site, guestNetwork, requestID)
 	if err != nil {
 		return nil, err
 	}

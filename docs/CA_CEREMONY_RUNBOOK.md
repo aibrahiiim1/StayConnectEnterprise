@@ -26,11 +26,13 @@ authenticate anything current.
 | Copy | Where | Status |
 |---|---|---|
 | Custody copy taken 2026-09-27 (`root-ca.key.enc`, sha256 `a5aa1944…504c`, `root-ca.crt`) | the Product Owner's workstation custody folder | **No longer held** — Product-Owner confirmation, 2026-10-28. No destruction record exists and none is written here; whether it ever reached offline media is not recorded. |
-| Host backup (`root-ca.key.enc`, `root-ca.key.enc.sha256`, `CEREMONY_PASSPHRASE.txt` — the passphrase pick-up was never recorded) | `/opt/stayconnect/ca-ceremony-backup/` on the stopped first Central `150.0.0.252` (retired as a target) | **Not disposed.** Last verified present 2026-09-27. The delivery environment of 2026-10-28 holds no credentials for that host, and its egress proxy refuses the project's hosts (verified against the production Central), so the copy was neither re-verified nor shredded. Disposal: on the host console, `shred -u` the three files, then decommission the VM and its disks. |
-| Legacy runtime keys (Intermediate CA, vendor licence, assignment, registry-root and internal TLS CA private keys) | `/etc/stayconnect/` on the retired Central `172.21.96.196` (carried over by the 2026-09-27 restore) and on `150.0.0.252` | **Not disposed.** `172.21.96.196` may not be contacted (D78); disposal is a wipe/decommission of those VMs by their infrastructure owner, out of band. |
+| Host backup (`root-ca.key.enc`, `root-ca.key.enc.sha256`, `CEREMONY_PASSPHRASE.txt`) | `/opt/stayconnect/ca-ceremony-backup/` on the first Central `150.0.0.252` | **Host permanently removed** — Product-Owner confirmation, 2026-10-28 (the former servers have been permanently removed). The copy was last verified present on 2026-09-27; its secure erasure was not observed or verified by any delivery session, and none is claimed. |
+| Legacy runtime keys (Intermediate CA, vendor licence, assignment, registry-root and internal TLS CA private keys) | `/etc/stayconnect/` on the former Central `172.21.96.196` (carried over by the 2026-09-27 restore) and on `150.0.0.252` | **Hosts permanently removed** — same Product-Owner confirmation. Erasure of the disks was not observed or verified by any delivery session. |
 
-Until the two host-side rows are closed, the legacy keys exist only on retired hosts; with no system trusting them,
-their residual risk is limited to impersonating the legacy universe to a retired appliance.
+**Status:** no legacy copy is known to remain in the Product Owner's possession or on any host the project operates.
+What is recorded is the Product Owner's confirmation, not a verified key destruction: if any image, snapshot or backup
+of the removed servers survives elsewhere, it still contains these keys. No current system trusts them, so their
+residual risk is limited to impersonating the legacy universe, which nothing active relies on.
 
 ### Runtime layout (any Central)
 

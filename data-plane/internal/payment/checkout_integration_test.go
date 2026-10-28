@@ -264,6 +264,53 @@ func TestProviderRefundsAreRecordedNeverInitiated(t *testing.T) {
 	}
 }
 
+// Audit P6 M3: when the amount already recorded cannot be read, a provider's running refund total must not be
+// recorded again in full.
+func TestProviderRefundsFailedReadRecordsNothing(t *testing.T) {
+	s, e, prov, admin := cardFixture(t, ModeTest)
+	ctx := context.Background()
+	st, _ := e.StartCheckout(ctx, s.tenant, s.site, s.settlement, "WiFi", "http://p/r", "http://p/c")
+	prov.status = StatusResult{State: CheckoutCaptured, ProviderTxnRef: "pi_m3", AmountMinor: s.amount, Currency: "USD"}
+	if _, err := e.Reconcile(ctx, s.tenant, s.site, st.TransactionID); err != nil {
+		t.Fatal(err)
+	}
+	sum := func() int {
+		return count1(t, admin, `SELECT COALESCE(sum(amount_minor),0)::int FROM iam_v2.payment_transactions WHERE parent_transaction_id=$1 AND status='CAPTURED'`, st.TransactionID)
+	}
+	event := func(total int64) []ProviderEvent {
+		return []ProviderEvent{{EventID: "refund:" + st.TransactionID + ":" + strconv.FormatInt(total, 10),
+			Kind: "REFUND", AmountMinor: total, ProviderRef: "pi_m3", Cumulative: true}}
+	}
+	txn, err := e.loadTxn(ctx, s.tenant, s.site, st.TransactionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.recordReversals(ctx, txn, event(300))
+	if got := sum(); got != 300 {
+		t.Fatalf("first refund recorded as 300, got %d", got)
+	}
+
+	// The runtime read fails (a closed pool); the outcome login still works.
+	broken, err := pgxpool.New(ctx, os.Getenv("PHASE4_RUNTIME_DSN"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	broken.Close()
+	working := e.Runtime
+	e.Runtime = broken
+	e.recordReversals(ctx, txn, event(400))
+	e.Runtime = working
+	if got := sum(); got != 300 {
+		t.Fatalf("a failed read recorded the running total again: %d recorded, want 300", got)
+	}
+
+	// The next healthy pass records exactly the difference.
+	e.recordReversals(ctx, txn, event(400))
+	if got := sum(); got != 400 {
+		t.Fatalf("after recovery %d recorded, want 400", got)
+	}
+}
+
 func TestSealedCredentialsAreBoundToTheirOwner(t *testing.T) {
 	k := testKey(t)
 	sealed, err := SealCredentials(k, "t", "s", "a", "g", Credentials{"secret_key": "sk_test_1"})

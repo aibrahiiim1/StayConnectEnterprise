@@ -43,7 +43,7 @@ func (f *fixture) issueCert(appID string) *x509.Certificate {
 		f.t.Fatal(err)
 	}
 	cb := &CertBase{Base: f.base, CA: f.base.CA, ClientValid: 90 * 24 * time.Hour}
-	sc, err := cb.issueCertForAppliance(f.ctx, httptest.NewRequest(http.MethodPost, "/", nil), appID, "test")
+	sc, err := cb.issueCertForAppliance(f.ctx, httptest.NewRequest(http.MethodPost, "/", nil), appID, "test", false)
 	if err != nil {
 		f.t.Fatal(err)
 	}

@@ -1,3 +1,8 @@
+//go:build !stayconnect_production
+
+// Audit P6 L2: the provider test doubles (and their fixed signing secret) are never compiled into a production
+// binary (built with -tags stayconnect_production). The file keeps its path because transitions T0037/T0038 cite it.
+
 package payment
 
 import (
@@ -11,7 +16,8 @@ import (
 )
 
 // Deterministic in-process provider doubles: implementation evidence only, they prove nothing about any real provider.
-// They live in the non-test build so the DARK guard refuses them as it would a real adapter.
+// The tests still pass them through the DARK guard as they would a real adapter. They are test-only (audit P6 L2):
+// the fixed notification signing secret must not ship in the production build.
 
 type ScriptedProvider struct {
 	// Outcomes are consumed in order; the last one repeats once exhausted.

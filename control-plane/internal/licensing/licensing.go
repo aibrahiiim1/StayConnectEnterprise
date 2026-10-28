@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -28,6 +29,10 @@ func newUUID() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
+// uuidRe guards lookups by licence id: "id = $1::uuid" uses the primary key, where "id::text = $1" could not
+// (audit Phase 1 CC5), and a value that is not a uuid names no licence.
+var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
 type Service struct {
 	DB     *pgxpool.Pool
 	Signer *lic.Signer
@@ -36,6 +41,8 @@ type Service struct {
 var (
 	ErrNoSigner  = errors.New("vendor signing key not configured (CTRLAPI_VENDOR_KEY)")
 	ErrNoLicense = errors.New("no current licence")
+	// ErrSameStatus: suspend of a suspended licence, or resume of an active one, decided under the lock.
+	ErrSameStatus = errors.New("the licence is already in that state")
 )
 
 type IssueParams struct {
@@ -297,10 +304,33 @@ func (s *Service) CurrentEnvelopeForAppliance(ctx context.Context, applianceID s
 	return envelope, licenseID, err
 }
 
+// Revoke takes the same per-appliance lock as IssueTx, so it cannot interleave with an issue or a re-sign of
+// the appliance's licence (audit Phase 1 L4).
 func (s *Service) Revoke(ctx context.Context, licenseID string) error {
-	tag, err := s.DB.Exec(ctx, `
+	tx, err := s.DB.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if !uuidRe.MatchString(licenseID) {
+		return ErrNoLicense
+	}
+	var applianceID string
+	err = tx.QueryRow(ctx, `SELECT COALESCE(appliance_ids[1]::text,'') FROM licenses WHERE id = $1::uuid`, licenseID).Scan(&applianceID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNoLicense
+	}
+	if err != nil {
+		return err
+	}
+	if applianceID != "" {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 42))`, applianceID); err != nil {
+			return err
+		}
+	}
+	tag, err := tx.Exec(ctx, `
         UPDATE licenses SET status = 'revoked', revoked_at = now()
-         WHERE id = $1 AND status IN ('active','suspended')
+         WHERE id = $1::uuid AND status IN ('active','suspended')
     `, licenseID)
 	if err != nil {
 		return err
@@ -308,7 +338,7 @@ func (s *Service) Revoke(ctx context.Context, licenseID string) error {
 	if tag.RowsAffected() == 0 {
 		return ErrNoLicense
 	}
-	return nil
+	return tx.Commit(ctx)
 }
 
 const currentTermsColumns = `tenant_id::text, site_id::text, valid_until, valid_from, offline_grace_days,
@@ -371,6 +401,12 @@ func (s *Service) Reissue(ctx context.Context, licenseID, createdBy string) (*li
 	return s.reissueLocked(ctx, licenseID, createdBy, nil)
 }
 
+// ReissueTx is Reissue inside the caller's transaction, so a change the licence binds (the WAN MAC) and its
+// re-signing commit or fail together (audit Phase 1 M7).
+func (s *Service) ReissueTx(ctx context.Context, tx pgx.Tx, licenseID, createdBy string) (*lic.Document, error) {
+	return s.reissueTx(ctx, tx, licenseID, createdBy, nil)
+}
+
 // reissueLocked reads and re-signs the terms in one transaction under the per-appliance lock; reading them
 // outside it lets a racing suspend re-sign old terms over a new licence.
 func (s *Service) reissueLocked(ctx context.Context, licenseID, createdBy string, mutate func(*IssueParams) error) (*lic.Document, error) {
@@ -379,8 +415,22 @@ func (s *Service) reissueLocked(ctx context.Context, licenseID, createdBy string
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
+	doc, err := s.reissueTx(ctx, tx, licenseID, createdBy, mutate)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return doc, nil
+}
+
+func (s *Service) reissueTx(ctx context.Context, tx pgx.Tx, licenseID, createdBy string, mutate func(*IssueParams) error) (*lic.Document, error) {
+	if !uuidRe.MatchString(licenseID) {
+		return nil, ErrNoLicense
+	}
 	var applianceID string
-	err = tx.QueryRow(ctx, `SELECT COALESCE(appliance_ids[1]::text,'') FROM licenses WHERE id::text = $1`, licenseID).Scan(&applianceID)
+	err := tx.QueryRow(ctx, `SELECT COALESCE(appliance_ids[1]::text,'') FROM licenses WHERE id = $1::uuid`, licenseID).Scan(&applianceID)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && applianceID == "") {
 		return nil, ErrNoLicense
 	}
@@ -391,7 +441,7 @@ func (s *Service) reissueLocked(ctx context.Context, licenseID, createdBy string
 		return nil, err
 	}
 	cur, err := scanTerms(tx.QueryRow(ctx, `SELECT `+currentTermsColumns+`
-          FROM licenses WHERE id::text = $1 AND status IN ('active','suspended')`, licenseID))
+          FROM licenses WHERE id = $1::uuid AND status IN ('active','suspended')`, licenseID))
 	if err != nil {
 		return nil, err
 	}
@@ -403,9 +453,6 @@ func (s *Service) reissueLocked(ctx context.Context, licenseID, createdBy string
 	}
 	doc, _, err := s.IssueTx(ctx, tx, p)
 	if err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
 	return doc, nil
@@ -421,6 +468,9 @@ func (s *Service) Resume(ctx context.Context, licenseID, createdBy string) (*lic
 
 func (s *Service) reissueStatus(ctx context.Context, licenseID, createdBy string, status lic.DocStatus) (*lic.Document, error) {
 	return s.reissueLocked(ctx, licenseID, createdBy, func(p *IssueParams) error {
+		if p.Status == status {
+			return ErrSameStatus // checked under the lock: two racing suspends cannot both re-sign (audit Phase 1 L4)
+		}
 		if time.Until(p.ValidUntil) <= 0 {
 			return fmt.Errorf("licence already past valid_until; set new terms instead of suspend/resume")
 		}

@@ -37,6 +37,7 @@ type recordingSink struct {
 	overflow          bool
 	continuityFlt     int
 	initialResync     int
+	disconnected      []Code
 	q                 *BoundedQueue
 	// finDue is what FinancialResyncDue answers (nil = never due); finAsks counts the questions.
 	finDue  *bool
@@ -80,7 +81,12 @@ func (s *recordingSink) OnResyncComplete(time.Time, string) error {
 	s.mu.Unlock()
 	return nil
 }
-func (s *recordingSink) OnDisconnected(time.Time, Code) error { return nil }
+func (s *recordingSink) OnDisconnected(_ time.Time, c Code) error {
+	s.mu.Lock()
+	s.disconnected = append(s.disconnected, c)
+	s.mu.Unlock()
+	return nil
+}
 func (s *recordingSink) OnDomainEvent(ctx context.Context, ev Event) error {
 	if s.q != nil {
 		if err := s.q.Enqueue(ctx, ev); err != nil {

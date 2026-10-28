@@ -31,7 +31,6 @@ type colour struct{ r, g, b, a float64 } // channels 0..255, alpha 0..1
 
 var (
 	white   = colour{255, 255, 255, 1}
-	black   = colour{0, 0, 0, 1}
 	reRGBFn = regexp.MustCompile(`(?i)^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*(?:,\s*([0-9]*\.?[0-9]+)(%?)\s*)?\)$`)
 )
 

@@ -135,13 +135,8 @@ func ParsePA(body string) (PA, error) {
 	return PA{PNumber: pn, AS: as, Raw: body}, nil
 }
 
-func FormatCT(code string) string {
-	code = strings.TrimSpace(code)
-	if len(code) > maxCTLen {
-		return code[:maxCTLen]
-	}
-	return code
-}
-
 // AnswerDeadline is the bound after which a transmitted PS with no matched PA is UNKNOWN; it is not a retry timer.
 const AnswerDeadline = 30 * time.Second
+
+// settleTimeout bounds recording an attempt's outcome, which runs detached from the worker's cancellation.
+const settleTimeout = 10 * time.Second

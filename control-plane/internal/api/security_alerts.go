@@ -55,9 +55,7 @@ func publicError(r *http.Request, err error) string {
 	if err == nil {
 		return ""
 	}
-	var pe *pgconn.PgError
-	if errors.As(err, &pe) || errors.Is(err, pgx.ErrNoRows) || errors.Is(err, pgx.ErrTxClosed) ||
-		errors.Is(err, context.DeadlineExceeded) || pgconn.Timeout(err) {
+	if isDBError(err) {
 		slog.Warn("request failed on a database error", "path", r.URL.Path, "trace_id", middleware.GetReqID(r.Context()), "err", err)
 		return "Central hit a database error (see its log)"
 	}
@@ -68,6 +66,22 @@ func publicError(r *http.Request, err error) string {
 func failInternal(w http.ResponseWriter, r *http.Request, msg string, err error) {
 	slog.Warn(msg, "path", r.URL.Path, "trace_id", middleware.GetReqID(r.Context()), "err", err)
 	Fail(w, r, http.StatusInternalServerError, CodeInternal, msg)
+}
+
+// isDBError is an error from the database or its deadline, whose text is never shown to an operator.
+func isDBError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pe *pgconn.PgError
+	return errors.As(err, &pe) || errors.Is(err, pgx.ErrNoRows) || errors.Is(err, pgx.ErrTxClosed) ||
+		errors.Is(err, context.DeadlineExceeded) || pgconn.Timeout(err)
+}
+
+// failDB answers 503 for a failed read and logs the cause: an outage is not an empty page (audit Phase 1 L7).
+func failDB(w http.ResponseWriter, r *http.Request, msg string, err error) {
+	slog.Warn(msg, "path", r.URL.Path, "trace_id", middleware.GetReqID(r.Context()), "err", err)
+	Fail(w, r, http.StatusServiceUnavailable, "unavailable", msg)
 }
 
 func isUniqueViolation(err error) bool {

@@ -311,17 +311,24 @@ type loadedPair struct {
 	cert             *tls.Certificate
 	crtMod, keyMod   time.Time
 	crtSize, keySize int64
+	// checked is when the files were last looked at; within portalCertRecheck the pair is served without a look.
+	checked time.Time
 }
+
+// portalCertRecheck matches the TLS state poll: every handshake from an unsigned device's apps reaches here, so the files
+// are looked at once per interval, not twice per handshake under the lock (perf D3-L3).
+const portalCertRecheck = 15 * time.Second
 
 // Re-reads a pair only when its files change; a failed re-read (a renewal between its two renames) keeps the old pair.
 type portalCertServer struct {
 	state func() portalTLSState
+	now   func() time.Time
 	mu    sync.Mutex
 	cache map[string]*loadedPair
 }
 
 func newPortalCertServer(state func() portalTLSState) *portalCertServer {
-	return &portalCertServer{state: state, cache: map[string]*loadedPair{}}
+	return &portalCertServer{state: state, now: time.Now, cache: map[string]*loadedPair{}}
 }
 
 // Picks by SNI, else the canonical hostname's. No certificate is a handshake error: the listener starts before any exists.
@@ -354,6 +361,13 @@ func contains(xs []string, x string) bool {
 }
 
 func (c *portalCertServer) load(dir, host string) (*tls.Certificate, error) {
+	now := c.now()
+	c.mu.Lock()
+	if old := c.cache[host]; old != nil && now.Sub(old.checked) < portalCertRecheck {
+		c.mu.Unlock()
+		return old.cert, nil
+	}
+	c.mu.Unlock()
 	crtPath, keyPath := filepath.Join(dir, host+".crt"), filepath.Join(dir, host+".key")
 	ci, cerr := os.Stat(crtPath)
 	ki, kerr := os.Stat(keyPath)
@@ -367,22 +381,25 @@ func (c *portalCertServer) load(dir, host string) (*tls.Certificate, error) {
 			return nil, os.ErrNotExist
 		}
 		if old != nil {
+			old.checked = now
 			return old.cert, nil
 		}
 		return nil, os.ErrNotExist
 	}
 	if old != nil && old.crtMod.Equal(ci.ModTime()) && old.keyMod.Equal(ki.ModTime()) &&
 		old.crtSize == ci.Size() && old.keySize == ki.Size() {
+		old.checked = now
 		return old.cert, nil
 	}
 	pair, err := tls.LoadX509KeyPair(crtPath, keyPath)
 	if err != nil {
 		if old != nil {
+			old.checked = now
 			return old.cert, nil
 		}
 		return nil, err
 	}
-	c.cache[host] = &loadedPair{cert: &pair, crtMod: ci.ModTime(), keyMod: ki.ModTime(), crtSize: ci.Size(), keySize: ki.Size()}
+	c.cache[host] = &loadedPair{cert: &pair, crtMod: ci.ModTime(), keyMod: ki.ModTime(), crtSize: ci.Size(), keySize: ki.Size(), checked: now}
 	return &pair, nil
 }
 

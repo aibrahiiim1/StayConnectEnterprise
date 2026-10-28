@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"strings"
@@ -14,23 +15,27 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/livez"
 )
 
+// unixGet makes one health request over a unix socket. Keep-alives are off and the transport is closed after the
+// call: a throwaway transport left its idle connection open on both sides, leaking goroutines and file
+// descriptors on every 10 s health tick (performance audit D10-H1).
 func unixGet(ctx context.Context, sock, path string) (int, []byte, error) {
-	cl := &http.Client{
-		Timeout: 3 * time.Second,
-		Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+	tr := &http.Transport{
+		DisableKeepAlives: true,
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			var d net.Dialer
 			return d.DialContext(ctx, "unix", sock)
-		}},
+		},
 	}
+	defer tr.CloseIdleConnections()
+	cl := &http.Client{Timeout: 3 * time.Second, Transport: tr}
 	req, _ := http.NewRequestWithContext(ctx, "GET", "http://x"+path, nil)
 	resp, err := cl.Do(req)
 	if err != nil {
 		return 0, nil, err
 	}
 	defer resp.Body.Close()
-	buf := make([]byte, 4096)
-	n, _ := resp.Body.Read(buf)
-	return resp.StatusCode, buf[:n], nil
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	return resp.StatusCode, body, nil
 }
 
 // tcpGet never follows a redirect: the listener's own answer is what is measured. portald answers 302 to its

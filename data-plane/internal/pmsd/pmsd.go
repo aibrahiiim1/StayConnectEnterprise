@@ -6,10 +6,13 @@ package pmsd
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
@@ -135,6 +138,16 @@ func (r Revision) Validate() error {
 	if _, err := loadLocation(r.SourceTimezone); err != nil {
 		return coded(CodeConfigInvalid, errors.New("invalid source timezone"))
 	}
+	// A pin without TLS would connect in plaintext while the operator believes the link is pinned; edged's authoring
+	// refuses the same combination (audit P7 L3). The pin's format is checked here, not first at dial time.
+	if r.TLSCertSHA256 != "" {
+		if !r.TLS {
+			return coded(CodeConfigInvalid, errors.New("tls.cert_sha256 is set but tls.enabled is not true"))
+		}
+		if b, err := hex.DecodeString(strings.ToLower(strings.ReplaceAll(r.TLSCertSHA256, ":", ""))); err != nil || len(b) != sha256.Size {
+			return coded(CodeConfigInvalid, errors.New("tls.cert_sha256 is not a SHA-256 fingerprint"))
+		}
+	}
 	return nil
 }
 
@@ -247,7 +260,8 @@ type Repo interface {
 	// AdmitLiveEvent proves ownership and inserts in one transaction; a stale owner inserts nothing. An exact
 	// repeat of an admitted LIVE record inserts nothing and returns the existing id with *DuplicateLiveEventError.
 	AdmitLiveEvent(ctx context.Context, row InboxRow) (string, error)
-	// StageResyncEvent appends an immutable STAGED row, invisible to the Stay engine until publication.
+	// StageResyncEvent appends an immutable STAGED row, invisible to the Stay engine until publication. An exact
+	// repeat inside the same generation inserts nothing and returns ErrDuplicateResyncEvent.
 	StageResyncEvent(ctx context.Context, row InboxRow) (string, error)
 	// LoadConnectionSettings is read-only for the connector (a daemon that could widen its own backoff
 	// makes the configuration meaningless), keyed per interface so a flaky link doesn't slow a healthy one.
@@ -344,6 +358,8 @@ type Deps struct {
 	QueueEnqueueTimeout      time.Duration
 
 	jitter func(int64) int64
+	// wake connects the workers to the applier loops in this process (set by withDefaults; nil is inert).
+	wake *applierWake
 }
 
 var (
@@ -364,6 +380,10 @@ type DuplicateLiveEventError struct {
 }
 
 func (e *DuplicateLiveEventError) Error() string { return "pmsd: live record already admitted" }
+
+// ErrDuplicateResyncEvent reports that the same record was already staged in this resync generation; nothing was
+// inserted and the window continues (audit P7 M2).
+var ErrDuplicateResyncEvent = errors.New("pmsd: record already staged in this resync generation")
 
 func (d *Deps) now() time.Time {
 	if d.Now != nil {
@@ -398,6 +418,9 @@ func (d *Deps) withDefaults() {
 	}
 	if d.QueueEnqueueTimeout <= 0 {
 		d.QueueEnqueueTimeout = 2 * time.Second
+	}
+	if d.wake == nil {
+		d.wake = newApplierWake()
 	}
 }
 

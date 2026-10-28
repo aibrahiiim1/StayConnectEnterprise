@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/mail"
 	"time"
 )
 
@@ -41,6 +42,10 @@ func NewSendGrid(apiKey, fromAddress, fromName string) (*SendGrid, error) {
 func (s *SendGrid) Send(ctx context.Context, m Message) error {
 	if m.To == "" {
 		return errors.New("sendgrid: empty recipient")
+	}
+	// As the SMTP sender does, so a malformed address costs no provider call (audit P5 L9).
+	if _, err := mail.ParseAddress(m.To); err != nil {
+		return errors.New("sendgrid: invalid recipient")
 	}
 	body := sgRequest{
 		Personalizations: []sgPerson{{To: []sgEmail{{Email: m.To}}}},

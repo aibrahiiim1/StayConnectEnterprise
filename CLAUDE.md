@@ -118,7 +118,7 @@ project-wide settings refactor: it governs work as it is done.
 **Retired targets.** One register: `governance/project-state.json` → `current_state_facts.retired_hosts`, enforced
 by `tools/validate-standing-records.py`. It holds the retired former Central `172.21.96.196` (`sc-central.echofusion.com`)
 and the retired former PRE-LIVE appliance `172.21.60.25` (both permanently retired 2026-10-28); the first Central
-`150.0.0.252`, stopped and retired as a target since 2026-09-27; and the retired development reference appliance
+`150.0.0.252`, retired as a target since 2026-09-27 — all three servers permanently removed (PO, 2026-10-28); and the retired development reference appliance
 (octets only, T0194). **Never contact, deploy to, test against or restore from them**, and never replace a retired
 address with the production Central's: name the environment under test explicitly. Retiring a target does not
 falsify its records: what it served and proved stays as recorded; Git history is never rewritten.

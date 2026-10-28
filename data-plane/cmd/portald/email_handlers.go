@@ -91,7 +91,6 @@ func (h *handler) authOTPRequest(w http.ResponseWriter, r *http.Request) {
 		"destination": in.Destination,
 		"ip":          ipString(ip),
 		"mac":         mac.String(),
-		"portal_base": portalLinkBase(r),
 	})
 	req, _ := http.NewRequestWithContext(r.Context(), "POST",
 		"http://unix/v1/auth/otp/issue", bytes.NewReader(body))

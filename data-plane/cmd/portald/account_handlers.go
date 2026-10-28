@@ -57,16 +57,7 @@ var (
 )
 
 func setAccountCookie(w http.ResponseWriter, r *http.Request, token string) {
-	http.SetCookie(w, &http.Cookie{
-		Name: accountCookie, Value: token, Path: "/",
-		// HttpOnly: the page never needs it, and script that cannot read it cannot leak it.
-		HttpOnly: true,
-		// Secure whenever the page came over TLS; on the HTTP fallback a Secure cookie would never be sent back.
-		Secure:   r.TLS != nil,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   int(accountCookieLife / time.Second),
-		Expires:  time.Now().Add(accountCookieLife),
-	})
+	setPortalCookie(w, r, accountCookie, token, accountCookieLife)
 }
 
 // accountCtx carries a token issued during this response to a page that may follow in it.

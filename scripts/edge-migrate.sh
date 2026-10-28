@@ -79,7 +79,10 @@ HERE="$(cd "$(dirname "$0")/.." && pwd -P)"
 CANON_MIG_DIR="$HERE/data-plane/migrations"
 ONLY=""; ALL=0; EXPECT_DB=""; TARGET_KIND=""; ACK=""; EXPECT_SHA=""; DIR_OVERRIDE=""; ACK_DIR=""
 BOOTSTRAP=0; BOOTSTRAP_OWNER=""; APPLY_ROLE=""
-DOWN=0; ACK_DOWN=""
+DOWN=0; ACK_DOWN=""; OUT_OF_ORDER=0
+# The number of the factory-clean baseline that built this database, written by the provisioner (also read by
+# deploy/scripts/apply-pending-migrations.sh). Absent on an upgrade-path or test database.
+SCHEMA_BASELINE_FILE="${EDGE_SCHEMA_BASELINE_FILE:-${SC_SCHEMA_BASELINE_FILE:-/etc/stayconnect/schema-baseline}}"
 LEDGER_OWNER_ALLOWLIST="${LEDGER_OWNER_ALLOWLIST:-iam_v2_owner postgres}"
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -92,6 +95,7 @@ while [ $# -gt 0 ]; do
     --expect-sha256) EXPECT_SHA="$2"; shift 2;;
     --dir) DIR_OVERRIDE="$2"; shift 2;;
     --ack-noncanonical-dir) ACK_DIR="$2"; shift 2;;
+    --allow-out-of-order) OUT_OF_ORDER=1; shift;;
     --down) DOWN=1; shift;;
     --ack-down) ACK_DOWN="$2"; shift 2;;
     --bootstrap-ledger) BOOTSTRAP=1; shift;;
@@ -539,8 +543,66 @@ verify_baseline_for(){ # $1=version ; the Phase-2 commerce baseline must be pres
   echo "  factory-clean baseline install; the commerce baseline came from the baseline dump"
 }
 
+# NEVER BELOW WHAT THE DATABASE ALREADY HAS (audit P3 M2). The gap check only looks at or above the lowest
+# ledger row, so on a baseline-built appliance (ledger starts after the baseline) an older version -- one the
+# baseline already contains -- looked new, and a migration made only of CREATE OR REPLACE would silently put
+# old function bodies back. A single --only apply is therefore refused when its version is below the highest
+# numbered version in the ledger, or, on an empty ledger, not above the baseline that built the database.
+# --allow-out-of-order is the explicit escape for filling a genuine hole (an operator decision, never a loop's).
+verify_in_order(){ # $1 = version being applied
+  local ver="$1" head base
+  [ "$OUT_OF_ORDER" -eq 1 ] && { echo "  in-order check SKIPPED: --allow-out-of-order given for $ver"; return 0; }
+  head="$(q "SELECT coalesce(max(version),'') FROM public.schema_migrations WHERE version ~ '^[0-9]{4}_'")"
+  if [ -n "$head" ] && [ "$ver" \< "$head" ]; then
+    echo "REFUSED: $ver is below the newest applied migration $head." >&2
+    echo "         On a baseline-built appliance it is contained in the baseline; elsewhere it would be applied" >&2
+    echo "         out of order. If you are deliberately filling a hole in the ledger, re-run with" >&2
+    echo "         --allow-out-of-order." >&2
+    exit 3
+  fi
+  if [ -z "$head" ] && [ -r "$SCHEMA_BASELINE_FILE" ]; then
+    base="$(tr -dc '0-9' < "$SCHEMA_BASELINE_FILE" | head -c 4)"
+    if [ -n "$base" ] && [ ! "${ver:0:4}" \> "$base" ]; then
+      echo "REFUSED: $ver is contained in the factory-clean baseline $base that built this database" >&2
+      echo "         ($SCHEMA_BASELINE_FILE); re-running it could replace newer definitions with older ones." >&2
+      exit 3
+    fi
+  fi
+  return 0
+}
+
+# THE LEDGER ROW COMMITS WITH THE MIGRATION (audit P3 M3). The row used to be inserted after the file, whose own
+# COMMIT had already committed the schema, so a crash or dropped session in between left a migrated database
+# with no record of it. A file with its own BEGIN;/COMMIT; (exactly one of each, nothing after the COMMIT) gets
+# the insert just before its COMMIT; a file without transaction control is wrapped in one. Any other shape is
+# refused before anything runs.
+check_tx_shape(){ # $1 = file -> "plain" or "own"; exits 3 on any other shape
+  local f="$1" b c last
+  b="$(grep -ciE '^[[:space:]]*BEGIN[[:space:]]*;' "$f" || true)"
+  c="$(grep -ciE '^[[:space:]]*COMMIT[[:space:]]*;' "$f" || true)"
+  if [ "$b" = 0 ] && [ "$c" = 0 ]; then echo plain; return 0; fi
+  if [ "$b" != 1 ] || [ "$c" != 1 ]; then
+    echo "REFUSED: $(basename "$f") has $b BEGIN; and $c COMMIT; lines; a migration has neither or exactly one of each" >&2; exit 3
+  fi
+  last="$(grep -niE '^[[:space:]]*COMMIT[[:space:]]*;' "$f" | cut -d: -f1)"
+  if tail -n +"$((last+1))" "$f" | grep -vqE '^[[:space:]]*(--.*)?$'; then
+    echo "REFUSED: $(basename "$f") has statements after its COMMIT; they would run outside its transaction" >&2; exit 3
+  fi
+  echo own
+}
+
+body_with_ledger(){ # $1 = file, $2 = version (validated against NAME_RE), $3 = shape
+  local ins
+  ins="INSERT INTO public.schema_migrations(version) VALUES ('$2') ON CONFLICT DO NOTHING;"
+  if [ "$3" = plain ]; then
+    printf 'BEGIN;\n'; cat "$1"; printf '\n%s\nCOMMIT;\n' "$ins"
+  else
+    INS="$ins" awk '/^[[:space:]]*[Cc][Oo][Mm][Mm][Ii][Tt][[:space:]]*;/ { print ENVIRON["INS"] } { print }' "$1"
+  fi
+}
+
 apply_one(){ # $1=file  atomic lock-then-ledger
-  local f="$1" base ver sha key out
+  local f="$1" base ver sha key out shape
   base="$(basename "$f")"; ver="${base%.up.sql}"
   echo "$ver" | grep -Eq "$NAME_RE" || { echo "REFUSED: version '$ver' does not match $NAME_RE" >&2; exit 2; }
   sha="$(sha256sum "$f" | awk '{print $1}')"
@@ -556,7 +618,9 @@ apply_one(){ # $1=file  atomic lock-then-ledger
   fi
   verify_baseline_for "$ver"
   # Only for a single named apply: --all is ordered by construction.
+  [ "$ALL" -eq 1 ] || verify_in_order "$ver"
   [ "$ALL" -eq 1 ] || verify_no_gap_below "$ver" "$(dirname "$f")"
+  shape="$(check_tx_shape "$f")" || exit 3
   key="$(q "SELECT hashtextextended('stayconnect_edge_migrate:'||'$ver', 0)")"
   lkey="$(ledger_lock_key)"
 
@@ -609,8 +673,7 @@ apply_one(){ # $1=file  atomic lock-then-ledger
       fi
       printf "\\\\if :nogap\n"
       printf "\\\\if :need\n\\\\echo APPLYING_UNDER_LOCK\n"
-      cat "$f"
-      printf "\nINSERT INTO public.schema_migrations(version) VALUES ('%s') ON CONFLICT DO NOTHING;\n" "$ver"
+      body_with_ledger "$f" "$ver" "$shape"
       printf "\\\\else\n\\\\echo SKIP_AFTER_LOCK\n\\\\endif\n"
       printf "\\\\else\n\\\\echo GAP_APPEARED_UNDER_LOCK\n\\\\endif\n"
       printf "SELECT pg_advisory_unlock(%s);\nSELECT pg_advisory_unlock(%s);\n" "$key" "$lkey"

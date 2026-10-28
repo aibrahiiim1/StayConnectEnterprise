@@ -3,6 +3,7 @@
 package hwid
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 type Info struct {
@@ -130,12 +132,21 @@ func NormalizeMAC(s string) string {
 	return s
 }
 
+// commandTimeout bounds each helper command, so a hung ethtool or ip never stalls registration or licensing.
+var commandTimeout = 5 * time.Second
+
+func commandOutput(name string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	return exec.CommandContext(ctx, name, args...).Output()
+}
+
 // permMAC prefers the NIC firmware's permanent address over randomized/overridden ones.
 func permMAC(iface string) string {
 	if iface == "" {
 		return ""
 	}
-	if out, err := exec.Command("/usr/sbin/ethtool", "-P", iface).Output(); err == nil {
+	if out, err := commandOutput("/usr/sbin/ethtool", "-P", iface); err == nil {
 		if m := macRe.FindString(string(out)); m != "" && m != "00:00:00:00:00:00" {
 			return NormalizeMAC(m)
 		}
@@ -180,7 +191,7 @@ func wanInterface() string {
 			return v
 		}
 	}
-	if out, err := exec.Command("/usr/sbin/ip", "route", "show", "default").Output(); err == nil {
+	if out, err := commandOutput("/usr/sbin/ip", "route", "show", "default"); err == nil {
 		f := strings.Fields(string(out))
 		for i := 0; i < len(f)-1; i++ {
 			if f[i] == "dev" {

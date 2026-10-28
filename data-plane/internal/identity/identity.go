@@ -10,10 +10,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/applianceauth"
@@ -45,6 +47,13 @@ func (s *Store) keyPath() string { return filepath.Join(s.Dir, "ed25519.key") }
 
 // ErrCentralUnreachable marks a registration that got no HTTP answer from Central; it is retryable.
 var ErrCentralUnreachable = errors.New("central unreachable")
+
+// ErrIdentityDamaged means identity.json exists but its key is missing, unreadable or does not match the recorded public key.
+// It is never treated as "first boot": regenerating would turn an activated appliance into a new, unknown identity.
+var ErrIdentityDamaged = errors.New("IDENTITY_DAMAGED: identity.json exists but its key is missing or does not match")
+
+// createMu serialises first-time keypair creation within the process.
+var createMu sync.Mutex
 
 // LoadBound returns the persisted identity only when Central has bound an appliance id to it.
 // An unbound keypair (offline first activation) is not an enrolled identity; counting it would stop the
@@ -134,14 +143,13 @@ func (s *Store) Register(ctx context.Context, ctrlBase string, client HTTPDoer) 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		b := make([]byte, 512)
-		n, _ := resp.Body.Read(b)
-		return nil, &StatusError{Code: resp.StatusCode, Body: string(b[:n])}
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, &StatusError{Code: resp.StatusCode, Body: string(b)}
 	}
 	var r struct {
 		ApplianceID string `json:"appliance_id"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&r); err != nil {
 		return nil, fmt.Errorf("register decode: %w", err)
 	}
 	if r.ApplianceID == "" {
@@ -194,7 +202,15 @@ func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmpName, path)
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
 }
 
 func (s *Store) load() (*Identity, error) {
@@ -208,12 +224,23 @@ func (s *Store) load() (*Identity, error) {
 	}
 	priv, err := os.ReadFile(s.keyPath())
 	if err != nil {
-		return nil, fmt.Errorf("read key: %w", err)
+		// identity.json exists, so a missing key is damage, not a first boot.
+		return nil, fmt.Errorf("%w: read key: %v", ErrIdentityDamaged, err)
 	}
 	if len(priv) != ed25519.PrivateKeySize {
-		return nil, fmt.Errorf("ed25519.key wrong size: %d", len(priv))
+		return nil, fmt.Errorf("%w: ed25519.key wrong size: %d", ErrIdentityDamaged, len(priv))
 	}
-	id.privKey = ed25519.PrivateKey(priv)
+	key := ed25519.PrivateKey(priv)
+	if id.PublicKeyB64 != "" {
+		pub, err := base64.RawStdEncoding.DecodeString(id.PublicKeyB64)
+		if err != nil || !key.Public().(ed25519.PublicKey).Equal(ed25519.PublicKey(pub)) {
+			return nil, fmt.Errorf("%w: ed25519.key does not match public_key in identity.json", ErrIdentityDamaged)
+		}
+	}
+	if fi, err := os.Stat(s.keyPath()); err == nil && fi.Mode().Perm()&0o077 != 0 {
+		slog.Warn("identity: ed25519.key is readable by group or others", "path", s.keyPath(), "mode", fi.Mode().Perm())
+	}
+	id.privKey = key
 	return &id, nil
 }
 
@@ -237,6 +264,8 @@ func (s *Store) LoadPublic() (*Identity, error) {
 // EnsureLocalKeypair creates an identity keypair without contacting Central (offline first activation).
 // ApplianceID stays empty: only Central mints ids, and only the signed assignment carries tenant and site.
 func (s *Store) EnsureLocalKeypair() (*Identity, error) {
+	createMu.Lock()
+	defer createMu.Unlock()
 	if id, err := s.load(); err == nil {
 		return id, nil
 	} else if !errors.Is(err, os.ErrNotExist) {

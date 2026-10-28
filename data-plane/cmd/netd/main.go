@@ -341,6 +341,8 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 		// file Kea starts from holds the confirmed configuration.
 		"rollback_incomplete": s.ap.rollbackIncompleteStatus(),
 		"kea_disk":            s.ap.keaDiskStatus(),
+		// Whether the periodic firewall re-assertion keeps failing (audit Phase 8 L13).
+		"nft_reassert": s.ap.nftWatch.status(),
 	})
 }
 
