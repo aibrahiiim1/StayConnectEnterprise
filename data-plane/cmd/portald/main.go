@@ -565,8 +565,7 @@ func (h *handler) routes() http.Handler {
 	// Read-only; answers "nothing to say" for every device that has not just run out.
 	r.Post("/access/status", h.accessStatus)
 	// Phase 5 is mounted unconditionally for the same reason: the hop failing gives the same uniform non-success a wrong PIN gets.
-	r.Post("/poststay/issue", h.dampedBudget(h.postStayIssue, h.refuseDampedSignIn))
-	r.Post("/auth/post-stay-pin", h.dampedBudget(h.postStayAuth, h.refuseDampedSignIn))
+	r.Post("/auth/post-stay", h.dampedBudget(h.postStayAuth, h.refuseDampedSignIn))
 
 	// Phase 6 likewise: whether device management exists is decided twice behind this layer (deployment gate, per-appliance setting), and the guest gets the same uniform answer either way.
 	r.Post("/devices/list", h.dampedBudget(h.deviceList, h.refuseDampedDevice))

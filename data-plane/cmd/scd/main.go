@@ -939,8 +939,7 @@ func main() {
 		os.Exit(1)
 	}
 	if s.p5poststay = newPhase5PostStay(p5cfg, s, s.p3auth); s.p5poststay != nil {
-		r.Post("/v1/phase5/poststay/issue", s.p5poststay.issueHandler)
-		r.Post("/v1/phase5/auth/post-stay-pin", s.p5poststay.verifyHandler)
+		r.Post("/v1/phase5/auth/post-stay", s.p5poststay.verifyHandler)
 		r.Post("/v1/phase5/poststay/convert", s.p5poststay.convertHandler)
 		slog.Info("phase5 post-stay guest routes mounted", "flags", p5cfg.SafeFlagSummary())
 	} else {

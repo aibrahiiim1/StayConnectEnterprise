@@ -127,8 +127,8 @@ export const PORTAL_STRINGS: PortalString[] = [
   { group: "Messages", key: "err.acct.mismatch", english: "The two passwords do not match.", module: "email_otp" },
   { group: "Messages", key: "err.acct.limit", english: "This device cannot create another account today. Sign in to an existing account, or contact the site team for assistance.", module: "email_otp" },
 
-  { group: "Post-stay", key: "poststay.pin", english: "Post-stay PIN", module: "hospitality" },
-  { group: "Post-stay", key: "poststay.hint", english: "The PIN you were given at checkout", module: "hospitality" },
+  { group: "Post-stay", key: "poststay.hint", english: "The room number and reservation number of the stay you checked out of", module: "hospitality" },
+  { group: "Post-stay", key: "poststay.lasthint", english: "Needed only if this is not the device you used during your stay", module: "hospitality" },
 
   { group: "Buttons", key: "btn.login", english: "Login" },
   { group: "Buttons", key: "btn.submit", english: "Submit" },
@@ -289,7 +289,7 @@ export const PORTAL_STRINGS: PortalString[] = [
   { group: "Help and tips", key: "help.title", english: "Help with signing in" },
   { group: "Help and tips", key: "help.close", english: "Close" },
   { group: "Help and tips", key: "help.pms", english: "Enter your room number, then the detail asked for below it, exactly as it appears on your reservation.", module: "hospitality" },
-  { group: "Help and tips", key: "help.poststay", english: "Already checked out? Enter the PIN you were given at checkout to reconnect.", module: "hospitality" },
+  { group: "Help and tips", key: "help.poststay", english: "Already checked out? Enter your room number and reservation number to reconnect.", module: "hospitality" },
   { group: "Help and tips", key: "help.voucher", english: "Type the code exactly as it is printed on your voucher, then tap Login." },
   { group: "Help and tips", key: "help.account", english: "Enter the username and password you were given. If a voucher field is showing, switch on “Use Personal Account” first." },
   { group: "Help and tips", key: "help.email.account", english: "Sign in with your email address and password. New here? Tap “Create an account”, then open the link in the email we send you to verify the address. Forgot your password? Tap “Forgot password?” for a reset link.", module: "email_otp" },

@@ -1,11 +1,12 @@
 package main
 
-// Guest-facing post-stay surface. The guest never names their subject: no stay, room, PMS-interface or
-// profile parameter exists (a room parameter would be an occupancy oracle, a profile id an identity oracle);
-// everything derives from the device scd resolved itself.
+// Guest-facing post-stay surface (audit decision AD-36: room number + reservation number, bound to the original stay).
+// The guest never names a stay, a PMS interface or a profile. They type the room and the reservation of the stay they
+// left (and, from a device that was never on it, the last name on it); scd compares those with the records of the stays
+// the device it resolved itself was authorised on (internal/poststay). No PIN is issued, shown, reset or verified.
 //
-// Uniform non-success: every refusal (wrong or missing PIN, no identity, revoked, expired, locked out,
-// moved-on episode) returns the same status and body; the reason goes only to the log.
+// Uniform non-success: every refusal (a wrong room or reservation, no stay, revoked, expired, locked out, moved-on
+// episode) returns the same status and body; the reason goes only to the log.
 
 import (
 	"context"
@@ -27,7 +28,6 @@ type phase5PostStay struct {
 	store      *poststay.Store
 	ctxs       *authctx.Store
 	contextTTL time.Duration
-	pinValid   time.Duration
 }
 
 func newPhase5PostStay(cfg iamv2.Phase5Config, s *server, p3 *phase3Auth) *phase5PostStay {
@@ -40,12 +40,10 @@ func newPhase5PostStay(cfg iamv2.Phase5Config, s *server, p3 *phase3Auth) *phase
 		store:      poststay.New(s.db, s.authThrottle),
 		ctxs:       authctx.NewStore(s.db),
 		contextTTL: 10 * time.Minute,
-		pinValid:   24 * time.Hour,
 	}
 }
 
 const (
-	psOutcomeIssued    = "ISSUED"
 	psOutcomeVerified  = "VERIFIED"
 	psOutcomeGranted   = "GRANTED"
 	psOutcomeUnavailab = "UNAVAILABLE"
@@ -53,9 +51,6 @@ const (
 
 type psResponse struct {
 	Outcome string `json:"outcome"`
-	// PIN is present on ISSUED only: the one-time plaintext, never stored or returned again for this generation.
-	PIN       string `json:"pin,omitempty"`
-	ExpiresAt string `json:"pin_expires_at,omitempty"`
 	// AuthContextID/ExpiresIn/Offers are present on VERIFIED only (poststay.GrantableOffers).
 	AuthContextID string           `json:"auth_context_id,omitempty"`
 	ExpiresIn     int              `json:"expires_in_seconds,omitempty"`
@@ -82,48 +77,15 @@ func (p *phase5PostStay) decode(w http.ResponseWriter, r *http.Request, dst any)
 	return true
 }
 
-type psIssueReq struct {
-	// Device is the only input; unknown fields are rejected (DisallowUnknownFields).
-	Device wireDevice `json:"device"`
-}
-
-// issueHandler mints a post-stay PIN and returns the plaintext once. A lost response is not recoverable:
-// pin_revealed_at records only that the server returned it, so the guest needs a reset (a new, audited secret).
-func (p *phase5PostStay) issueHandler(w http.ResponseWriter, r *http.Request) {
-	var req psIssueReq
-	if !p.decode(w, r, &req) {
-		return
-	}
-	ctx := r.Context()
-	dev, err := p.p3.device(ctx, req.Device)
-	if err != nil {
-		p.unavailable(w, "device_identity: "+err.Error())
-		return
-	}
-	// The Stay comes from this device's authorization history, not the request.
-	stay, err := p.store.EligibleStayForDevice(ctx, dev.Tenant, dev.Site, dev.DeviceID)
-	if err != nil {
-		p.unavailable(w, "no_eligible_stay_for_device")
-		return
-	}
-	out, err := p.store.Issue(ctx, poststay.IssueRequest{
-		Tenant: dev.Tenant, Site: dev.Site, Stay: stay, ValidFor: p.pinValid})
-	if err != nil {
-		// Existing profile, ineligible stay or database refusal: one guest answer; the log distinguishes.
-		p.unavailable(w, "issue_refused: "+err.Error())
-		return
-	}
-	slog.Info("phase5 post-stay: PIN issued", "profile", out.Profile, "stay", stay)
-	writeJSONScd(w, http.StatusOK, psResponse{
-		Outcome: psOutcomeIssued, PIN: out.PIN, ExpiresAt: out.Expires.UTC().Format(time.RFC3339)})
-}
-
 type psVerifyReq struct {
 	Device wireDevice `json:"device"`
-	PIN    string     `json:"pin"`
+	// What the guest typed: the room and the reservation of the stay they left; the last name only from a new device.
+	Room        string `json:"room"`
+	Reservation string `json:"reservation"`
+	LastName    string `json:"last_name"`
 }
 
-// verifyHandler is the post-stay PIN re-authentication; success mints a one-time Auth Context, never a session.
+// verifyHandler is the post-stay re-authentication; success mints a one-time Auth Context, never a session.
 func (p *phase5PostStay) verifyHandler(w http.ResponseWriter, r *http.Request) {
 	var req psVerifyReq
 	if !p.decode(w, r, &req) {
@@ -140,11 +102,11 @@ func (p *phase5PostStay) verifyHandler(w http.ResponseWriter, r *http.Request) {
 		p.unavailable(w, "device_identity: "+err.Error())
 		return
 	}
-	// An empty PIN is not short-circuited: it takes the same throttle charge and constant-work verification,
-	// since a cheap answer would be a free probe for whether this device has a post-stay identity.
-	profile, err := p.store.VerifyForDevice(ctx, poststay.VerifyRequest{
-		Tenant: dev.Tenant, Site: dev.Site, PIN: req.PIN,
-		Device: dev.DeviceID, IP: ipString(dev)})
+	// An empty answer is not short-circuited: it takes the same throttle charge and the same comparisons, since a cheap
+	// answer would be a free probe for whether this device has a post-stay identity.
+	profile, err := p.store.Verify(ctx, poststay.VerifyRequest{
+		Tenant: dev.Tenant, Site: dev.Site, Device: dev.DeviceID, IP: ipString(dev),
+		Room: req.Room, Reservation: req.Reservation, LastName: req.LastName})
 	if err != nil {
 		switch {
 		case errors.Is(err, poststay.ErrThrottled):

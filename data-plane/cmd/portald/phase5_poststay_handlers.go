@@ -1,10 +1,11 @@
 package main
 
-// A post-stay guest submits only a PIN; identity is derived by scd from the connection's device, so no room,
-// name or stay appears in any body.
+// A post-stay guest submits the room number and the reservation number of the stay they left (audit decision AD-36);
+// from a device that was never on that stay they also give the last name on it. The stay itself is never named: scd
+// derives the candidates from the connection's device, so no stay, profile or interface appears in any body.
 //
-// Non-success uses the same uniform builder and response-time budget as the Phase-3 flow (a faster wrong-PIN
-// answer would tell an attacker which case they hit). Routes are mounted unconditionally like
+// Non-success uses the same uniform builder and response-time budget as the Phase-3 flow (a faster wrong-answer
+// reply would tell an attacker which case they hit). Routes are mounted unconditionally like
 // /auth/pms/phase3: while Phase 5 is dark the scd hop fails with the same uniform answer, so the portal
 // never reveals whether post-stay exists.
 
@@ -15,8 +16,10 @@ import (
 )
 
 type postStayIn struct {
-	PIN string `json:"pin,omitempty"`
-	// AuthContextID and PackageRevisionID appear only on the second call, after a successful PIN.
+	Room        string `json:"room,omitempty"`
+	Reservation string `json:"reservation,omitempty"`
+	LastName    string `json:"last_name,omitempty"`
+	// AuthContextID and PackageRevisionID appear only on the second call, after a successful check.
 	AuthContextID     string `json:"auth_context_id,omitempty"`
 	PackageRevisionID string `json:"package_revision_id,omitempty"`
 }
@@ -25,11 +28,7 @@ type postStayOut struct {
 	OK      bool   `json:"ok"`
 	Message string `json:"message,omitempty"`
 
-	// PIN is present on a successful issue only and shown once; the appliance cannot produce it again.
-	PIN       string `json:"pin,omitempty"`
-	ExpiresAt string `json:"pin_expires_at,omitempty"`
-
-	// NeedsChoice and Choices: a verified PIN awaiting the package choice (more than one offered).
+	// NeedsChoice and Choices: a verified check awaiting the package choice (more than one offered).
 	NeedsChoice   bool             `json:"needs_choice,omitempty"`
 	AuthContextID string           `json:"auth_context_id,omitempty"`
 	Choices       []postStayChoice `json:"choices,omitempty"`
@@ -47,8 +46,6 @@ type postStayChoice struct {
 
 type scdPostStayResp struct {
 	Outcome       string           `json:"outcome"`
-	PIN           string           `json:"pin"`
-	ExpiresAt     string           `json:"pin_expires_at"`
 	AuthContextID string           `json:"auth_context_id"`
 	ExpiresIn     int              `json:"expires_in_seconds"`
 	Offers        []postStayChoice `json:"offers"`
@@ -56,34 +53,7 @@ type scdPostStayResp struct {
 	EntitlementID string           `json:"entitlement_id"`
 }
 
-// postStayIssue serves POST /poststay/issue. The device already holding access authenticates the guest; scd
-// checks that lineage, and the portal takes no identity from the body.
-func (h *handler) postStayIssue(w http.ResponseWriter, r *http.Request) {
-	b := h.newPhase3Budget(r)
-	defer b.cancel()
-	var in postStayIn
-	if !decodePostStayStrict(w, r, b, h, &in) {
-		return
-	}
-	device, ok := h.postStayDevice(w, r, b)
-	if !ok {
-		return
-	}
-	body, _ := json.Marshal(map[string]any{"device": device})
-	var out scdPostStayResp
-	if !h.scdPhase3Call(b, "http://unix/v1/phase5/poststay/issue", body, &out) || out.Outcome != "ISSUED" {
-		h.phase3Fail(w, r, b, "poststay_issue_unavailable", classPostStay)
-		return
-	}
-	b.wait(r)
-	writeJSONPortal(w, http.StatusOK, postStayOut{
-		OK: true, PIN: out.PIN, ExpiresAt: out.ExpiresAt,
-		Message: "Write this down now. It is shown once and cannot be shown again — if you lose it, ask the " +
-			"site team for a new one.",
-	})
-}
-
-// postStayAuth serves POST /auth/post-stay-pin. Success yields a one-time Auth Context, never a session;
+// postStayAuth serves POST /auth/post-stay. Success yields a one-time Auth Context, never a session;
 // the session exists only after the conversion reaches GRANTED.
 func (h *handler) postStayAuth(w http.ResponseWriter, r *http.Request) {
 	b := h.newPhase3Budget(r)
@@ -101,9 +71,9 @@ func (h *handler) postStayAuth(w http.ResponseWriter, r *http.Request) {
 		h.postStayConvert(w, r, b, in.AuthContextID, in.PackageRevisionID, device)
 		return
 	}
-	body, _ := json.Marshal(map[string]any{"device": device, "pin": in.PIN})
+	body, _ := json.Marshal(map[string]any{"device": device, "room": in.Room, "reservation": in.Reservation, "last_name": in.LastName})
 	var out scdPostStayResp
-	if !h.scdPhase3Call(b, "http://unix/v1/phase5/auth/post-stay-pin", body, &out) || out.Outcome != "VERIFIED" {
+	if !h.scdPhase3Call(b, "http://unix/v1/phase5/auth/post-stay", body, &out) || out.Outcome != "VERIFIED" {
 		// Every non-success, including Phase 5 being dark, gets this one answer.
 		h.phase3Fail(w, r, b, "poststay_not_verified", classPostStay)
 		return
