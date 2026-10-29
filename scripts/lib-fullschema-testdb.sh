@@ -44,7 +44,9 @@ fullschema_post_baseline() { # the migrations published after the baseline snaps
 fullschema_build() {
   local c="$1" port="$2" db="$3"
   local root; root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-  local base="$root/data-plane/migrations/baseline/0000_production_baseline.sql"
+  # FULLSCHEMA_BASELINE_FILE builds from an EARLIER baseline (with FULLSCHEMA_BASELINE_TOP set to its last migration), so the
+  # migrations published since are applied the way an upgrade applies them.
+  local base="${FULLSCHEMA_BASELINE_FILE:-$root/data-plane/migrations/baseline/0000_production_baseline.sql}"
   local gatep="$root/deploy/gatep"
   local log; log="$(mktemp -d)"
   local ready=0 ok m f
@@ -89,10 +91,21 @@ fullschema_build() {
     -f /tmp/gatep/gatep-iam-ownership.sql >"$log/own.log" 2>&1 \
     || { echo "FULLSCHEMA: gatep-iam-ownership.sql failed"; tail -5 "$log/own.log"; return 1; }
   for m in $(fullschema_post_baseline "$root"); do
-    if ! fullschema_psql "$c" "$db" -q < "$root/data-plane/migrations/$m.up.sql" >"$log/$m.log" 2>&1; then
+    # FULLSCHEMA_APPLY_ROLE=iam_v2_owner applies each migration the way a live upgrade does (edge-migrate.sh --apply-role, a
+    # SET ROLE before the file), which is what finds a statement only a superuser or the table's owner may run.
+    # A file marked `-- edge-migrate: platform` is applied as the superuser, as the installer does (platform migration).
+    local role="${FULLSCHEMA_APPLY_ROLE:-}"
+    if head -n 20 "$root/data-plane/migrations/$m.up.sql" | grep -qE '^--[[:space:]]*edge-migrate:[[:space:]]*platform[[:space:]]*$'; then role=""; fi
+    if ! { [ -n "$role" ] && printf 'SET ROLE %s;\n' "$role"; cat "$root/data-plane/migrations/$m.up.sql"; } | fullschema_psql "$c" "$db" -q >"$log/$m.log" 2>&1; then
+if [ -n "${FULLSCHEMA_APPLY_ROLE:-}" ] && [ "${FULLSCHEMA_APPLY_ROLE_REPORT:-0}" = 1 ]; then
+        # Survey mode: say which migrations the apply role cannot run, then apply them as the superuser to go on.
+        echo "APPLY-ROLE FAILURE: $m: $(grep -m1 -E '^ERROR' "$log/$m.log")"
+        fullschema_psql "$c" "$db" -q < "$root/data-plane/migrations/$m.up.sql" >"$log/$m.su.log" 2>&1 || { echo "MIGRATION FAILED EVEN AS SUPERUSER: $m"; tail -5 "$log/$m.su.log"; return 1; }
+      else
       echo "MIGRATION FAILED: $m -- deterministic, not a flake"
       tail -10 "$log/$m.log"
       return 1
+      fi
     fi
     fullschema_psql "$c" "$db" -tAqc \
       "INSERT INTO public.schema_migrations(version) VALUES ('$m') ON CONFLICT DO NOTHING" >/dev/null 2>&1 || true

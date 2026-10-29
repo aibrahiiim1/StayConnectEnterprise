@@ -1,4 +1,5 @@
 -- 0166 -- THE ENFORCEMENT POLICY THE HOTEL MAY TUNE IS A PERSISTED, AUDITED SETTING.
+-- edge-migrate: platform
 --
 -- One singleton row, public.enforcement_policy, carries the operational values data-plane enforcement reads
 -- (docs/OPERATIONAL_SETTINGS_POLICY.md: default, unit, explanation, scope, permission, validation, audit):

@@ -1,4 +1,5 @@
 -- 0163 -- THE DURABLE THROTTLE CHARGE IS ONE ROUND TRIP (audit decision AD-51, finding D2-L1).
+-- edge-migrate: platform
 --
 -- public.auth_throttle_charge applies one attempt to every rule of the durable guest throttle inside a single
 -- statement: per rule, the standing block check, the window upsert and, past the limit, the block. It is a faithful port

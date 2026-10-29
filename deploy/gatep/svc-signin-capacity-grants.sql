@@ -32,3 +32,17 @@ BEGIN
     GRANT EXECUTE ON FUNCTION public.auth_throttle_charge(text[],text[],text[],integer[],integer[],boolean[],timestamptz,timestamptz,integer) TO svc_scd;
   END IF;
 END $g0171$;
+
+-- Migration 0162 (AD-52): an Admin Console change to the sign-in methods reaches scd's settings cache at once. The trigger is on
+-- public.tenants, which the platform role owns and the migration role may not touch, so it is created here (idempotent).
+DO $gtr$
+BEGIN
+  IF to_regprocedure('iam_v2.notify_settings_changed()') IS NULL THEN
+    RAISE NOTICE 'migration 0162 is not applied; tenants notify trigger skipped';
+    RETURN;
+  END IF;
+  DROP TRIGGER IF EXISTS notify_settings_changed ON public.tenants;
+  CREATE TRIGGER notify_settings_changed
+    AFTER UPDATE OF auth_methods ON public.tenants
+    FOR EACH STATEMENT EXECUTE FUNCTION iam_v2.notify_settings_changed();
+END $gtr$;
