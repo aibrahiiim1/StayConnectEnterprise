@@ -492,29 +492,19 @@ func (e *CheckoutEngine) recordReversals(ctx context.Context, t txnRow, events [
 			continue
 		}
 		touched = true
-		amount := ev.AmountMinor
-		if ev.Cumulative {
-			var recorded int64
-			if err := e.Runtime.QueryRow(ctx, `SELECT COALESCE(sum(amount_minor),0) FROM iam_v2.payment_transactions
-				WHERE parent_transaction_id=$1 AND transaction_type=$2 AND status='CAPTURED'`, t.id, ev.Kind).Scan(&recorded); err != nil {
-				// Audit P6 M3: subtracting from an unread total would record the whole running total again.
-				// Record nothing; the next sweep retries.
-				slog.Warn("card reversal not recorded: the amount already recorded could not be read",
-					"kind", ev.Kind, "err", err)
-				continue
-			}
-			amount = ev.AmountMinor - recorded
-			if amount <= 0 {
-				continue
-			}
-		}
+		// One database call does the running-total subtraction under the parent-row lock (Paymob reports refunds as a
+		// running total) and opens a REVERSAL_REFUSED review when the ledger refuses the reversal, for example a lost
+		// dispute after a partial refund (audit AD-42, P6 M3). Nothing refused is recorded as money.
 		var r string
-		if err := e.Outcome.QueryRow(ctx, `SELECT iam_v2.p4_record_provider_reversal($1,$2,$3,$4,$5,$6,$7)`,
-			t.tenant, t.site, t.id, ev.Kind, amount, ev.EventID, nullIfEmpty(ev.ProviderRef)).Scan(&r); err != nil {
-			// Audit P6 M3: a reversal the ledger refuses (for example a chargeback that would exceed the charge
-			// after a partial refund) must never vanish silently. Nothing is recorded; finance must review it.
+		if err := e.Outcome.QueryRow(ctx, `SELECT iam_v2.p4_record_provider_reversal_v2($1,$2,$3,$4,$5,$6,$7,$8)`,
+			t.tenant, t.site, t.id, ev.Kind, ev.AmountMinor, ev.Cumulative, ev.EventID, nullIfEmpty(ev.ProviderRef)).Scan(&r); err != nil {
 			slog.Error("card reversal reported by the provider was NOT recorded; finance review required",
 				"kind", ev.Kind, "transaction", t.id, "err", err)
+			continue
+		}
+		if r == "REVIEW_OPENED" {
+			slog.Error("card reversal refused by the ledger: a review case was opened for finance",
+				"kind", ev.Kind, "transaction", t.id)
 		}
 	}
 	if !touched {
