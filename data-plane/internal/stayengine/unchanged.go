@@ -25,7 +25,7 @@ func FastPathApplied() int64 { return fastPathApplied.Load() }
 // be no-ops keeps the two things the room sign-in feed rule reads: the stay's occupancy evidence is re-stamped (freshness) and
 // the event is APPLIED with the stay's last_applied_event_id pinned (lineage). Nothing is marked SKIPPED_DUPLICATE, because a
 // skipped record would not refresh the evidence that proves the guest is still in the house.
-func recordUnchanged(ctx context.Context, tx pgx.Tx, stayID string, ev InboxEvent) (bool, error) {
+func recordUnchanged(ctx context.Context, tx pgx.Tx, tenant, site, stayID string, ev InboxEvent) (bool, error) {
 	arrival, departure := parseYYMMDD(ev.ArrivalRaw), parseYYMMDD(ev.DepartureRaw)
 	var agent any
 	if ev.TravelAgent != nil {
@@ -41,7 +41,7 @@ func recordUnchanged(ctx context.Context, tx pgx.Tx, stayID string, ev InboxEven
 		   AND ($3::date IS NULL OR departure = $3::date)
 		   AND ($4::text IS NULL OR COALESCE(travel_agent,'') = $4::text)
 		   AND ($5::bool IS NULL OR vip IS NOT DISTINCT FROM $5::bool)
-		FROM iam_v2.stays WHERE id=$1`, stayID, arrival, departure, agent, vip).Scan(&same); err != nil {
+		FROM iam_v2.stays WHERE id=$1 AND tenant_id=$6 AND site_id=$7`, stayID, arrival, departure, agent, vip, tenant, site).Scan(&same); err != nil {
 		return false, err
 	}
 	if !same {
@@ -53,7 +53,7 @@ func recordUnchanged(ctx context.Context, tx pgx.Tx, stayID string, ev InboxEven
 		primary                        bool
 	}
 	rows, err := tx.Query(ctx, `SELECT COALESCE(external_guest_id,''), COALESCE(first_name_norm,''), COALESCE(last_name_norm,''),
-		COALESCE(display_name,''), is_primary FROM iam_v2.stay_guests WHERE stay_id=$1`, stayID)
+		COALESCE(display_name,''), is_primary FROM iam_v2.stay_guests WHERE stay_id=$1 AND tenant_id=$2 AND site_id=$3`, stayID, tenant, site)
 	if err != nil {
 		return false, err
 	}

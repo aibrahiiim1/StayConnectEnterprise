@@ -124,7 +124,6 @@ internal/payment/checkout.go	26a21832f5ba	UPDATE iam_v2.payment_checkouts SET pr
 internal/payment/checkout.go	3a8b8e7804ac	UPDATE iam_v2.payment_checkouts SET creation_outcome='AMBIGUOUS' WHERE transaction_id=$1
 internal/payment/checkout.go	709e3bee9584	UPDATE iam_v2.payment_checkouts SET last_status_at=now(), status_checks=status_checks+1, c
 internal/payment/checkout.go	a36c6a3e5b29	UPDATE iam_v2.payment_checkouts SET creation_outcome='NOT_CREATED' WHERE transaction_id=$1
-internal/payment/checkout.go	c3bf03256876	SELECT COALESCE(sum(amount_minor),0) FROM iam_v2.payment_transactions WHERE parent_transac
 internal/payment/checkout.go	c674faac6611	SELECT pt.status, se.status, pu.state, e.id::text, pc.redirect_url FROM iam_v2.payment_tra
 internal/payment/checkout.go	f31f3dfe46c8	SELECT status FROM iam_v2.payment_transactions WHERE id=$1
 internal/posting/engine.go	5b035af7924d	SELECT count(*) FROM iam_v2.posting_attempts WHERE internal_posting_id = $1 AND outcome <>

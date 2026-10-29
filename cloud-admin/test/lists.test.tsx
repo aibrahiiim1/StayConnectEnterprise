@@ -42,7 +42,7 @@ describe("Appliances", () => {
   it("lists waiting appliances first with an Activate button", async () => {
     nav.reset("/appliances");
     mockFetch([
-      { match: "/api/cloud/v1/appliances", body: { items: [appliance("activated"), { ...appliance("waiting"), id: "a9", serial: "OG-0009" }] } },
+      { match: /\/api\/cloud\/v1\/appliances\?/, body: { items: [appliance("activated"), { ...appliance("waiting"), id: "a9", serial: "OG-0009" }] } },
       { match: "/api/cloud/v1/overview", body: OVERVIEW },
       { match: "/api/cloud/v1/customers?status=all", body: { items: [CUSTOMER] } },
     ]);
@@ -71,7 +71,7 @@ describe("Appliances", () => {
   it("offers a customer's user no activation controls and no customer filter", async () => {
     nav.reset("/appliances");
     mockFetch([
-      { match: "/api/cloud/v1/appliances", body: { items: [appliance("waiting")] } },
+      { match: /\/api\/cloud\/v1\/appliances\?/, body: { items: [appliance("waiting")] } },
       { match: "/api/cloud/v1/overview", body: OVERVIEW },
     ]);
     renderAs(TENANT_ME, <AppliancesPage />);

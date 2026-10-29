@@ -255,7 +255,7 @@ func applyDecision(ctx context.Context, tx pgx.Tx, tenant, site, iface string, e
 		// AD-37 step 2: a record that changes nothing only re-stamps the occupancy evidence (freshness) and is applied with
 		// its lineage pinned by finishEvent; it does not rewrite the stay or its occupants.
 		if d.NewStatus == "" {
-			same, uerr := recordUnchanged(ctx, tx, cur.ID, ev)
+			same, uerr := recordUnchanged(ctx, tx, tenant, site, cur.ID, ev)
 			if uerr != nil {
 				return "", "", "", uerr
 			}

@@ -155,6 +155,7 @@ describe("Activate", () => {
     const site = within(dialog).getByLabelText(/^Site/);
     await waitFor(() => expect(within(site).getByRole("option", { name: "Demo Resort" })).toBeInTheDocument());
     await user.selectOptions(site, "s1");
+    await user.type(within(dialog).getByLabelText(/^Activation code/), "ab12-cd34");
     await user.click(within(dialog).getByRole("button", { name: "Activate" }));
 
     await waitFor(() => expect(calls.some((c) => c.url.endsWith("/activate"))).toBe(true));
@@ -200,6 +201,7 @@ describe("Activate", () => {
     await user.type(within(dialog).getByLabelText(/Clients online at once/), "250");
     await user.click(within(dialog).getByRole("radio", { name: "Until a date" }));
     await user.type(within(dialog).getByLabelText(/Ends on/), "2030-12-31");
+    await user.type(within(dialog).getByLabelText(/^Activation code/), "ab12-cd34");
     await user.click(within(dialog).getByRole("button", { name: "Activate" }));
 
     await waitFor(() => expect(calls.some((c) => c.url.endsWith("/activate"))).toBe(true));
