@@ -62,7 +62,7 @@ export function activationWords(st: CentralStatus): { title: string; tone: Tone;
         title: "Waiting for activation",
         tone: "info",
         body: (
-          <>Give your OneGate vendor this serial number. Nothing needs to be typed here — this page updates by itself once they activate it.</>
+          <>Give your OneGate vendor this serial number and the activation code below; they need both to activate this appliance. Nothing needs to be typed here — this page updates by itself once they activate it.</>
         ),
       };
     case "activating":
@@ -404,6 +404,17 @@ export function ApplianceStatus({ header }: { header?: (actions: React.ReactNode
                 </code>
                 {st.serial && <CopyButton value={st.serial} label="Copy serial number" size="sm" />}
               </div>
+              {d.activation_code && (
+                <>
+                  <div className="pt-2 text-xs text-muted-foreground">Activation code</div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <code data-testid="activation-code" className="rounded-md border border-border bg-surface px-3 py-1.5 font-mono text-lg font-semibold tracking-wide">
+                      {d.activation_code}
+                    </code>
+                    <CopyButton value={d.activation_code} label="Copy activation code" size="sm" />
+                  </div>
+                </>
+              )}
             </div>
           )}
         </Part>

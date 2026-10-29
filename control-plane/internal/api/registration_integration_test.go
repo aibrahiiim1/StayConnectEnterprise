@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-// A waiting appliance's identity key can be replaced only from the same hardware; a refusal raises one alert
+// A waiting appliance's identity key is never replaced (AD-1); a refusal raises one alert
 // (repeats fold into it) and every attempt is audited.
-func TestWaitingIdentityReplacementRequiresSameHardware(t *testing.T) {
+func TestWaitingIdentityIsNeverReplaced(t *testing.T) {
 	f := newFixture(t)
 	first := newBox("SC-TEST-0001", "hwf-genuine")
 	rec := f.register(first)
@@ -32,25 +32,23 @@ func TestWaitingIdentityReplacementRequiresSameHardware(t *testing.T) {
 		t.Fatalf("repeated refusals must fold into ONE open alert, got %d", n)
 	}
 	if n := f.count(`SELECT (detail->>'repeats')::int FROM appliance_security_alerts WHERE appliance_id=$1 AND kind='identity_replacement_refused'`, id); n != 4 {
-		t.Fatalf("the alert must count every attempt (4), got %d", n)
+		t.Fatalf("the alert must count every attempt before the last one (4), got %d", n)
 	}
 	if n := f.count(`SELECT count(*) FROM audit_log WHERE action='appliance.identity_replacement_refused' AND target_id=$1`, id); n != 4 {
 		t.Fatalf("every refused replacement must be audited, got %d", n)
 	}
 
+	// AD-1: the SAME hardware fingerprint no longer earns a key swap either; the operator deletes the waiting row.
 	reset := newBox("SC-TEST-0001", "hwf-genuine")
 	rec = f.register(reset)
-	if rec.Code != http.StatusOK || decode(t, rec)["appliance_id"] != id {
-		t.Fatalf("same-hardware replacement must keep the waiting row: %d %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusForbidden || decode(t, rec)["error"] != "identity_replacement_refused" {
+		t.Fatalf("a matching fingerprint must not replace a waiting key: %d %s", rec.Code, rec.Body.String())
 	}
-	if n := f.count(`SELECT count(*) FROM appliances WHERE id=$1 AND public_key=$2`, id, reset.pubB64); n != 1 {
-		t.Fatal("the new key was not adopted")
+	if n := f.count(`SELECT count(*) FROM appliances WHERE id=$1 AND public_key=$2`, id, first.pubB64); n != 1 {
+		t.Fatal("the waiting appliance's key changed")
 	}
-	if n := f.count(`SELECT count(*) FROM audit_log WHERE action='appliance.identity_replaced' AND target_id=$1`, id); n != 1 {
-		t.Fatalf("an accepted replacement must be audited, got %d", n)
-	}
-	if rec = f.register(first); rec.Code != http.StatusForbidden || decode(t, rec)["error"] != "identity_retired" {
-		t.Fatalf("the replaced key must never register again, got %d %s", rec.Code, rec.Body.String())
+	if n := f.count(`SELECT count(*) FROM audit_log WHERE action='appliance.identity_replaced' AND target_id=$1`, id); n != 0 {
+		t.Fatalf("no replacement may be recorded, got %d", n)
 	}
 }
 

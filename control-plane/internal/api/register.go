@@ -191,6 +191,14 @@ func (b *IdentityBase) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 
 	// No live row: a new appliance, or a retired box back after a factory reset. Either gets a new row, so the
 	// retired row's history and previous customer are never shown to whoever activates this one.
+	if ref := constantAnchorRefusal(req.Serial, req.HardwareFingerprint); ref != nil { // AD-19
+		Fail(w, r, ref.Status, ref.Code, ref.Message)
+		return
+	}
+	if ref := b.registrationCapRefusal(ctx, r, req.Serial, ip); ref != nil { // AD-20
+		Fail(w, r, ref.Status, ref.Code, ref.Message)
+		return
+	}
 	tx, err := b.DB.Begin(ctx)
 	if err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "create appliance failed")
@@ -271,111 +279,30 @@ func (b *IdentityBase) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, map[string]any{"appliance_id": appID, "status": "pending_approval"})
 }
 
-// replaceWaitingIdentity adopts a new identity key on a WAITING row (the box was factory-reset before activation).
-// The serial proves nothing, so it is accepted only when the recorded hardware fingerprint is present and exactly
-// matches; otherwise it is refused with a security alert (delete the waiting appliance to register as new).
-// Every replacement is audited.
+// replaceWaitingIdentity refuses a new identity key on a WAITING row (AD-1). The serial and the hardware fingerprint
+// are not secret, so neither proves that the new key belongs to the box the row describes; accepting it on a
+// fingerprint match let anyone who knew both take over a waiting row and receive its assignment, licence and
+// certificates. If the real box was factory-reset before activation, the operator deletes the waiting row and the
+// box registers as new; the activation code then proves which box the operator is looking at. Every refusal is
+// alerted and audited.
 func (b *IdentityBase) replaceWaitingIdentity(w http.ResponseWriter, r *http.Request, ctx context.Context,
 	id, storedHWF string, req registerReq, held, ip string) {
-	if storedHWF == "" || req.HardwareFingerprint == "" || storedHWF != req.HardwareFingerprint {
-		reason := "the presented hardware fingerprint does not match the one recorded for this waiting appliance"
-		if storedHWF == "" {
-			reason = "Central has no hardware fingerprint for this waiting appliance, so a new identity cannot be bound to it"
-		} else if req.HardwareFingerprint == "" {
-			reason = "the registration carried no hardware fingerprint"
-		}
-		b.alertAndAudit(ctx, r, id, req.Serial, "identity_replacement_refused", map[string]any{
-			"reason":          reason + " — someone who knows this serial may be trying to take over the waiting appliance",
-			"serial":          req.Serial,
-			"appliance_id":    id,
-			"operator_action": "If this is the same box after a factory reset, delete the waiting appliance in Central; the box then registers as new.",
-		}, ip)
-		audit.Op(r.Context(), b.DB, r, "appliance.identity_replacement_refused", "appliance", id, map[string]any{
-			"serial": req.Serial, "source_ip": ip, "new_identity_key_fingerprint": identityFprFromPubB64(req.PublicKey),
-			"reason": reason})
-		Fail(w, r, http.StatusForbidden, "identity_replacement_refused",
-			"registration rejected: a waiting appliance with this serial is registered under another identity from different hardware")
-		return
-	}
-	tx, err := b.DB.Begin(ctx)
-	if err != nil {
-		Fail(w, r, http.StatusInternalServerError, CodeInternal, "registration failed")
-		return
-	}
-	defer tx.Rollback(ctx)
-	var oldPub, state string
-	if err := tx.QueryRow(ctx, `SELECT COALESCE(public_key,''), lifecycle_state FROM appliances WHERE id=$1 FOR UPDATE`, id).
-		Scan(&oldPub, &state); err != nil || state != "pending_approval" {
-		Fail(w, r, http.StatusConflict, "invalid_state", "the appliance changed state; retry")
-		return
-	}
-	// The previous key is remembered as retired and its certificates revoked.
-	if oldPub != "" {
-		if _, err := tx.Exec(ctx, `INSERT INTO retired_appliance_identities (public_key, serial, appliance_id, reason)
-            VALUES ($1,$2,$3,'replaced by a new identity while waiting (factory reset)') ON CONFLICT (public_key) DO NOTHING`,
-			oldPub, req.Serial, id); err != nil {
-			Fail(w, r, http.StatusInternalServerError, CodeInternal, "registration failed")
-			return
-		}
-	}
-	if _, err := tx.Exec(ctx, `
-        INSERT INTO appliance_certificate_revocations (certificate_id, appliance_id, fingerprint_sha256, reason)
-        SELECT c.id, c.appliance_id, c.fingerprint_sha256, 'identity replaced'
-          FROM appliance_certificates c WHERE c.appliance_id=$1 AND c.status='active'
-        ON CONFLICT DO NOTHING`, id); err != nil {
-		Fail(w, r, http.StatusInternalServerError, CodeInternal, "registration failed")
-		return
-	}
-	if _, err := tx.Exec(ctx, `UPDATE appliance_certificates SET status='revoked', revoked_at=now(),
-        revocation_reason='identity replaced' WHERE appliance_id=$1 AND status='active'`, id); err != nil {
-		Fail(w, r, http.StatusInternalServerError, CodeInternal, "registration failed")
-		return
-	}
-	// A pending request belongs to the replaced installation: it carries an mTLS key that no longer exists, and while it
-	// reads as "pending" the new installation would never file its own. Close it so Activate cannot sign it (F1).
-	tag, err := tx.Exec(ctx, `UPDATE appliance_certificate_requests SET status='rejected', decided_at=now()
-        WHERE appliance_id=$1 AND status='pending'`, id)
-	if err != nil {
-		Fail(w, r, http.StatusInternalServerError, CodeInternal, "registration failed")
-		return
-	}
-	voided := tag.RowsAffected()
-	if voided > 0 {
-		if _, err := tx.Exec(ctx, `INSERT INTO appliance_certificate_events (appliance_id, event, detail, actor, source_ip)
-            VALUES ($1,'csr_voided',jsonb_build_object('reason','identity replaced','requests',$2::int),'registration',$3)`,
-			id, voided, ip); err != nil {
-			Fail(w, r, http.StatusInternalServerError, CodeInternal, "registration failed")
-			return
-		}
-	}
-	if _, err := tx.Exec(ctx, `
-        UPDATE appliances SET
-            public_key = $2, current_cert_fingerprint = NULL,
-            wan_mac = NULLIF($3,''), lan_mac = NULLIF($4,''),
-            hostname = NULLIF($5,''), model = NULLIF($6,''),
-            held_customer_id = NULLIF($8,'')::uuid,
-            registered_at = now(), last_seen_at = now(), last_public_ip = $7, updated_at = now()
-         WHERE id = $1`, id, req.PublicKey, req.WANMAC, req.LANMAC, req.Hostname, req.Model, ip, held); err != nil {
-		Fail(w, r, http.StatusInternalServerError, CodeInternal, "registration failed")
-		return
-	}
-	if err := tx.Commit(ctx); err != nil {
-		Fail(w, r, http.StatusInternalServerError, CodeInternal, "registration failed")
-		return
-	}
-	details := map[string]any{"serial": req.Serial, "source_ip": ip,
-		"previous_identity_key_fingerprint": identityFprFromPubB64(oldPub),
-		"new_identity_key_fingerprint":      identityFprFromPubB64(req.PublicKey),
-		"voided_certificate_requests":       voided}
-	if held != "" {
-		details["holds_customer_id"] = held
-	}
-	audit.Op(r.Context(), b.DB, r, "appliance.identity_replaced", "appliance", id, details)
-	WriteJSON(w, http.StatusOK, map[string]any{"appliance_id": id, "status": "pending_approval"})
+	reason := "a waiting appliance with this serial is already registered under another identity key"
+	b.alertAndAudit(ctx, r, id, req.Serial, "identity_replacement_refused", map[string]any{
+		"reason":          reason + " - a waiting appliance's identity key is never replaced; someone who knows this serial may be trying to take over the row",
+		"serial":          req.Serial,
+		"appliance_id":    id,
+		"operator_action": "If this is the same box after a factory reset, delete the waiting appliance in Central; the box then registers as new. Compare the activation code on the appliance with the one Central shows before activating.",
+	}, ip)
+	audit.Op(r.Context(), b.DB, r, "appliance.identity_replacement_refused", "appliance", id, map[string]any{
+		"serial": req.Serial, "source_ip": ip, "new_identity_key_fingerprint": identityFprFromPubB64(req.PublicKey),
+		"reason": reason})
+	Fail(w, r, http.StatusForbidden, "identity_replacement_refused",
+		"registration rejected: a waiting appliance with this serial is registered under another identity")
 }
 
 // alertAndAudit audits only when a new alert was raised, so repeated unauthenticated attempts cost one row per window.
-func (b *IdentityBase) alertAndAudit(ctx context.Context, r *http.Request, applianceID, serial, kind string, detail map[string]any, ip string) {
+func (b *Base) alertAndAudit(ctx context.Context, r *http.Request, applianceID, serial, kind string, detail map[string]any, ip string) {
 	isNew, err := raiseAlertOnce(ctx, b.DB, applianceID, serial, kind, detail, ip)
 	if err != nil {
 		slog.Warn("security alert not recorded", "kind", kind, "err", err)

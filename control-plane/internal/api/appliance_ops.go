@@ -54,6 +54,8 @@ type activateReq struct {
 	} `json:"new_site"`
 	License licenseTerms `json:"license"`
 	Reason  string       `json:"reason"`
+	// ActivationCode is the code the appliance shows on its own Admin Console (AD-1). Activation is refused without it.
+	ActivationCode string `json:"activation_code"`
 }
 
 // activate: POST /cloud/v1/appliances/{id}/activate — WAITING appliances only.
@@ -110,11 +112,11 @@ func (b *Base) activate(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(ctx)
 
 	// Lock and re-check the state: two concurrent activations yield one 409, never two assignments.
-	var lifecycle, held string
+	var lifecycle, held, pubB64 string
 	var deleting bool
-	if err := tx.QueryRow(ctx, `SELECT lifecycle_state, COALESCE(held_customer_id::text,''), deletion_started_at IS NOT NULL
-          FROM appliances WHERE id=$1 FOR UPDATE`, id).
-		Scan(&lifecycle, &held, &deleting); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT lifecycle_state, COALESCE(held_customer_id::text,''), deletion_started_at IS NOT NULL,
+          COALESCE(public_key,'') FROM appliances WHERE id=$1 FOR UPDATE`, id).
+		Scan(&lifecycle, &held, &deleting, &pubB64); err != nil {
 		Fail(w, r, http.StatusNotFound, CodeNotFound, "appliance not found")
 		return
 	}
@@ -124,6 +126,13 @@ func (b *Base) activate(w http.ResponseWriter, r *http.Request) {
 	}
 	if deleting { // audit Phase 1 M8
 		Fail(w, r, http.StatusConflict, "invalid_state", "the appliance is being deleted; it cannot be activated")
+		return
+	}
+	// AD-1: the operator must read the code off the appliance's own screen; serial and MAC are not secret.
+	if ref := activationCodeRefusal(pubB64, in.ActivationCode); ref != nil {
+		audit.Op(r.Context(), b.DB, r, "appliance.activation_code_refused", "appliance", id,
+			map[string]any{"supplied": strings.TrimSpace(in.ActivationCode) != ""})
+		Fail(w, r, ref.Status, ref.Code, ref.Message)
 		return
 	}
 	// An appliance still holding a customer's data activates only for that customer (held_customer.go); checked before anything is created.

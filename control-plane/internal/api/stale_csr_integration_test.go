@@ -90,20 +90,20 @@ func TestReinstallBeforeActivationNeverSignsTheEarlierRequest(t *testing.T) {
 	}
 
 	second := newInstallation("SC-TEST-F1", "hwf-f1")
+	// AD-1 supersedes "the reinstall adopts the waiting row": a waiting row's key is never replaced. The operator deletes
+	// the waiting row and the reinstalled box registers as a NEW row.
 	rec := f.register(second.box)
-	if rec.Code != http.StatusOK || decode(t, rec)["appliance_id"] != id {
-		t.Fatalf("the reinstall must adopt the waiting row: %d %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusForbidden || decode(t, rec)["error"] != "identity_replacement_refused" {
+		t.Fatalf("the reinstall must not take over the waiting row: %d %s", rec.Code, rec.Body.String())
 	}
-	if n := f.count(`SELECT count(*) FROM appliance_certificate_requests WHERE appliance_id=$1 AND status='pending'`, id); n != 0 {
-		t.Fatalf("the replaced installation's request must be voided, %d still pending", n)
+	if rec = f.operatorCall(f.base.deleteAppliance, http.MethodDelete, id,
+		map[string]any{"confirm_serial": "SC-TEST-F1", "reason": "reinstalled before activation"}); rec.Code >= 300 {
+		t.Fatalf("delete the waiting row: %d %s", rec.Code, rec.Body.String())
 	}
-	if n := f.count(`SELECT count(*) FROM appliance_certificate_events WHERE appliance_id=$1 AND event='csr_voided'`, id); n != 1 {
-		t.Fatalf("the voiding must be recorded once, got %d", n)
+	if rec = f.register(second.box); rec.Code != http.StatusOK {
+		t.Fatalf("the reinstalled box registers as new: %d %s", rec.Code, rec.Body.String())
 	}
-	if n := f.count(`SELECT (payload->>'voided_certificate_requests')::int FROM audit_log
-            WHERE action='appliance.identity_replaced' AND target_id=$1`, id); n != 1 {
-		t.Fatalf("the identity replacement audit must name the voided request, got %d", n)
-	}
+	id = decode(t, rec)["appliance_id"].(string)
 	if st := f.certStatus(id)["status"]; st != "none" {
 		t.Fatalf("the new installation must be told none so it files its own CSR, got %v", st)
 	}

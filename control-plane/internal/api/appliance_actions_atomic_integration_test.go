@@ -64,7 +64,7 @@ func TestDeleteMarksTheApplianceAndAFailureClearsIt(t *testing.T) {
 		t.Fatalf("a waiting appliance can be marked: %v %v", ok, err)
 	}
 	rec := f.operatorCall(f.base.activate, http.MethodPost, app, map[string]any{
-		"customer_id": cust, "site_id": site, "reason": "x", "license": map[string]any{"max_concurrent_online_guests": 5}})
+		"customer_id": cust, "site_id": site, "reason": "x", "activation_code": f.codeFor(app), "license": map[string]any{"max_concurrent_online_guests": 5}})
 	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "being deleted") {
 		t.Fatalf("activation of an appliance being deleted = %d %s, want 409", rec.Code, rec.Body.String())
 	}

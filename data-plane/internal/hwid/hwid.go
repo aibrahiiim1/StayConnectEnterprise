@@ -92,14 +92,28 @@ func hardwareAnchor() (anchor, source string) {
 			return mac, "nic-perm-mac"
 		}
 	}
-	return "stayconnect-unknown-anchor", "none"
+	return ConstantAnchor, "none"
 }
 
 func Serial() string {
 	anchor, _ := hardwareAnchor()
+	return serialFor(anchor)
+}
+
+// ConstantAnchor is the value every appliance without DMI data, machine-id or NIC falls back to (AD-19). Central
+// refuses NEW registrations whose serial or fingerprint is the one derived from it; control-plane api carries the
+// derived literals and constant_anchor_test.go proves they equal what this package computes.
+const ConstantAnchor = "stayconnect-unknown-anchor"
+
+func serialFor(anchor string) string {
 	sum := sha256.Sum256([]byte("stayconnect-serial-v1:" + anchor))
 	s := encodeCrockford(sum[:], 12)
 	return "SC-" + s[0:4] + "-" + s[4:8] + "-" + s[8:12]
+}
+
+func fingerprintFor(parts []string) string {
+	sum := sha256.Sum256([]byte("stayconnect-hwfp-v1:" + strings.Join(parts, "|")))
+	return hex.EncodeToString(sum[:16])
 }
 
 // Fingerprint covers DMI identity fields only, never NIC MACs, so a WAN NIC replacement does not change it.
@@ -115,8 +129,7 @@ func Fingerprint() string {
 			parts = append(parts, "machine-id="+v)
 		}
 	}
-	sum := sha256.Sum256([]byte("stayconnect-hwfp-v1:" + strings.Join(parts, "|")))
-	return hex.EncodeToString(sum[:16])
+	return fingerprintFor(parts)
 }
 
 func NormalizeMAC(s string) string {

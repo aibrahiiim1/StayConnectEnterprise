@@ -861,6 +861,8 @@ export type CentralStatus = {
   central: { state: CentralLinkState; last_contact_at: string | null; last_error: string | null };
   details: {
     identity_key_fingerprint: string;
+    /** Shown while waiting; the vendor types it into Central to prove they are activating this box. */
+    activation_code?: string;
     cert_fingerprint: string;
     cert_not_after: string | null;
     assignment_version: number | null;

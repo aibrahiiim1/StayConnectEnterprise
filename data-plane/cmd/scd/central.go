@@ -6,8 +6,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -202,7 +204,9 @@ type centralInputs struct {
 	LastFailCode      int
 
 	IdentityFpr, WANMAC, LANMAC, Endpoint string
-	Version, PermissiveBlocked            string
+	// ActivationCode is derived from the identity public key (AD-1); shown while the appliance waits for activation.
+	ActivationCode             string
+	Version, PermissiveBlocked string
 
 	Removed bool
 }
@@ -226,6 +230,7 @@ type centralLink struct {
 
 type centralDetails struct {
 	IdentityKeyFingerprint string     `json:"identity_key_fingerprint"`
+	ActivationCode         string     `json:"activation_code,omitempty"`
 	CertFingerprint        string     `json:"cert_fingerprint"`
 	CertNotAfter           *time.Time `json:"cert_not_after"`
 	AssignmentVersion      *int64     `json:"assignment_version"`
@@ -365,7 +370,7 @@ func computeCentralStatus(in centralInputs) CentralStatus {
 		License:     licv,
 		Central:     link,
 		Details: centralDetails{
-			IdentityKeyFingerprint: in.IdentityFpr, CertFingerprint: in.CertFpr, CertNotAfter: timePtr(in.CertNotAfter),
+			IdentityKeyFingerprint: in.IdentityFpr, ActivationCode: in.ActivationCode, CertFingerprint: in.CertFpr, CertNotAfter: timePtr(in.CertNotAfter),
 			WANMAC: in.WANMAC, LANMAC: in.LANMAC, CentralEndpoint: in.Endpoint,
 			AssignmentStatus: in.Asg.Outcome.String(), LicenseID: in.Lic.LicenseID,
 			SoftwareVersion: in.Version, BuildProfile: buildprofile.Name, PermissiveBlocked: in.PermissiveBlocked,
@@ -446,7 +451,8 @@ func (s *server) centralInputs(ctx context.Context) centralInputs {
 		Now: now, ApplianceID: s.applID, Serial: firstNonEmpty(s.hw.Serial, s.serial),
 		Lic: s.licSnapshot(), CentralConfigured: s.ctrlBase != "",
 		IdentityFpr: s.identityKeyFpr, WANMAC: s.hw.WANMAC, LANMAC: s.hw.LANMAC, Endpoint: s.ctrlBase,
-		Version: scdVersion, PermissiveBlocked: s.permissiveBlocked,
+		ActivationCode: s.activationCode(),
+		Version:        scdVersion, PermissiveBlocked: s.permissiveBlocked,
 		Removed: s.isRemovedFromCentral(),
 	}
 	var doc *assignment.Document
@@ -617,4 +623,21 @@ func (s *server) centralOfflinePackage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.setupOfflineImport(w, r)
+}
+
+// activationCode is the code for the identity key this appliance holds, including a key generated locally before
+// Central has registered it (identity.json is world-readable; the private key is not read). Empty when no key exists
+// yet. It is public-key derived, so showing it is harmless; the console shows it only while waiting.
+func (s *server) activationCode() string {
+	pubB64 := s.identityPubB64
+	if pubB64 == "" && s.idStore != nil {
+		if id, err := s.idStore.LoadPublic(); err == nil && id != nil {
+			pubB64 = id.PublicKeyB64
+		}
+	}
+	raw, err := base64.RawStdEncoding.DecodeString(pubB64)
+	if err != nil || len(raw) != ed25519.PublicKeySize {
+		return ""
+	}
+	return applianceauth.ActivationCode(ed25519.PublicKey(raw))
 }

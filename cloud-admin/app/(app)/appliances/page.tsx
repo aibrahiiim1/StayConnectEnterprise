@@ -8,7 +8,7 @@ import {
 } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Select } from "@/components/ui/input";
+import { Input, Select } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { PageHeader, PageShell } from "@/components/ui/page";
@@ -52,6 +52,8 @@ function Appliances() {
   const [refreshing, setRefreshing] = useState(false);
   const [activate, setActivate] = useState<ApplianceRow | null>(null);
   const [importing, setImporting] = useState(false);
+  // The code the appliance shows on its own screen; the file alone does not prove the operator is at the box.
+  const [importCode, setImportCode] = useState("");
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   const query = qs({
@@ -97,6 +99,11 @@ function Appliances() {
 
   async function importRequest(file: File | null) {
     if (!file) return;
+    if (!importCode.trim()) {
+      toast.error("Enter the activation code", "Type the activation code shown on the appliance before importing its request.");
+      if (fileRef.current) fileRef.current.value = "";
+      return;
+    }
     setImporting(true);
     try {
       let body: unknown;
@@ -106,7 +113,7 @@ function Appliances() {
         throw new Error("That file is not an activation request. Download it again from the appliance's Admin Console.");
       }
       // Importing creates an appliance, so it needs a password step-up like every appliance action.
-      const row = await withStepUp(() => api.post<ApplianceRow>("/cloud/v1/offline-activation/requests", body));
+      const row = await withStepUp(() => api.post<ApplianceRow>(`/cloud/v1/offline-activation/requests?activation_code=${encodeURIComponent(importCode.trim())}`, body));
       toast.success(`${row.serial} imported`, "Activate it, then download its activation package.");
       router.push(`/appliances/${row.id}`);
     } catch (e) {
@@ -147,6 +154,14 @@ function Appliances() {
         actions={
           can["appliances.activate"] ? (
             <>
+              <Input
+                aria-label="Activation code shown on the appliance"
+                placeholder="Activation code"
+                className="w-40"
+                value={importCode}
+                maxLength={12}
+                onChange={(e) => setImportCode(e.target.value)}
+              />
               <input
                 ref={fileRef}
                 type="file"

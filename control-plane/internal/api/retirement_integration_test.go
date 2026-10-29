@@ -125,7 +125,7 @@ func TestUnregisteredAssignmentKeyDoesNotSign(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := f.operatorCall(f.base.activate, http.MethodPost, app, map[string]any{
-		"customer_id": cust, "site_id": site, "reason": "x",
+		"customer_id": cust, "site_id": site, "reason": "x", "activation_code": f.codeFor(app),
 		"license": map[string]any{"max_concurrent_online_guests": 5}})
 	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "not registered") {
 		t.Fatalf("an unregistered signing key must not sign: %d %s", rec.Code, rec.Body.String())
