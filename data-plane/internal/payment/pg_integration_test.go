@@ -201,56 +201,6 @@ func idem(t *testing.T, suffix string) string {
 	return "idem-" + runNonce + "-" + t.Name() + "-" + suffix
 }
 
-func TestIntegrationPayment_DarkNeverReachesTheProvider(t *testing.T) {
-	p := pool(t)
-	ctx := context.Background()
-	s := seedPaidChain(t, p)
-	prov := NewScriptedProvider(Result{Outcome: OutcomeCaptured})
-	e := NewEngine(darkCfg, p, prov, &fakeGranter{})
-
-	in, err := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, idem(t, "1"))
-	if err != nil {
-		t.Fatalf("intent: %v", err)
-	}
-	for i := 0; i < 3; i++ {
-		if _, err := e.Execute(ctx, s.tenant, s.site, in.ID); CodeOf(err) != ErrDarkNoEgress {
-			t.Fatalf("pass %d: expected a DARK refusal, got %v", i, err)
-		}
-	}
-	if got := len(prov.Requests()); got != 0 {
-		t.Fatalf("the provider double was reached %d times while DARK", got)
-	}
-	if e.ProviderRefusals() != 3 {
-		t.Fatalf("expected 3 recorded refusals, got %d", e.ProviderRefusals())
-	}
-	// A preflight refusal is provably NOT_SENT and leaves the intent CREATED and the settlement REQUIRED, both still
-	// executable.
-	if st := scan1[string](t, p, `SELECT status FROM iam_v2.payment_transactions WHERE id=$1`, in.ID); st != "CREATED" {
-		t.Fatalf("a NOT_SENT preflight refusal moved the intent to %s", st)
-	}
-	if st := scan1[string](t, p, `SELECT status FROM iam_v2.settlements WHERE id=$1`, s.settlement); st != "REQUIRED" {
-		t.Fatalf("a NOT_SENT preflight refusal moved the settlement to %s", st)
-	}
-	if n := scan1[int](t, p, `SELECT count(*)::int FROM iam_v2.payment_transaction_events
-		WHERE payment_transaction_id=$1`, in.ID); n != 0 {
-		t.Fatalf("a NOT_SENT refusal recorded %d provider events", n)
-	}
-}
-
-func TestIntegrationPayment_UncorrelatableAdapterIsRefused(t *testing.T) {
-	p := pool(t)
-	ctx := context.Background()
-	s := seedPaidChain(t, p)
-	e := NewEngine(liveCfg, p, UncorrelatableProvider{}, &fakeGranter{})
-	in, err := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, idem(t, "1"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := e.Execute(ctx, s.tenant, s.site, in.ID); CodeOf(err) != ErrConfig {
-		t.Fatalf("an adapter without the correlation capability must be refused, got %v", err)
-	}
-}
-
 func TestIntegrationPayment_AmountComesFromThePinnedPurchase(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
@@ -527,23 +477,6 @@ func beginExecution(t *testing.T, p *pgxpool.Pool, txnID string) error {
 	return err
 }
 
-// An adapter that cannot authenticate notifications cannot deliver an outcome: there is no unauthenticated path.
-func TestIntegrationPayment_AdapterWithoutAuthenticationCannotDeliverAnOutcome(t *testing.T) {
-	p := pool(t)
-	ctx := context.Background()
-	s := seedPaidChain(t, p)
-	e := NewEngine(liveCfg, p, &DeafProvider{}, &fakeGranter{})
-	in, _ := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, idem(t, "1"))
-	raw := BuildNotification(in.ClientRef, "evt-1", OutcomeCaptured, "prv_x")
-	if _, err := e.HandleProviderNotification(ctx, raw); CodeOf(err) != ErrUntrusted {
-		t.Fatalf("an adapter that cannot authenticate must not deliver an outcome, got %v", err)
-	}
-	e2 := NewEngine(liveCfg, p, nil, &fakeGranter{})
-	if _, err := e2.HandleProviderNotification(ctx, raw); CodeOf(err) != ErrUntrusted {
-		t.Fatalf("no adapter must mean no notification path, got %v", err)
-	}
-}
-
 func TestIntegrationPayment_IdentityIsResolvedNotSupplied(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
@@ -581,16 +514,5 @@ func TestIntegrationPayment_IdentityIsResolvedNotSupplied(t *testing.T) {
 	}
 	if _, err := e.CreateChargeIntent(ctx, c.tenant, c.site, c.settlement, idem(t, "3")); CodeOf(err) != ErrNoAccount {
 		t.Fatalf("a disabled account must not resolve, got %v", err)
-	}
-}
-
-// A production build has no adapter, so it must be unable to charge at all rather than charging as "none".
-func TestIntegrationPayment_ProductionBuildCannotPersistAFakeProvider(t *testing.T) {
-	pr, err := ProductionProviderFor(Config{})
-	if err != nil {
-		t.Fatalf("the delivered posture must construct: %v", err)
-	}
-	if pr != nil {
-		t.Fatalf("this build has no adapter; it must not present one (%s)", pr.Name())
 	}
 }

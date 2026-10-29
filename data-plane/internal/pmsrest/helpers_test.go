@@ -23,7 +23,9 @@ func testOptions(t *testing.T, tz string, rec *sleepRecorder) Options {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return Options{HTTP: &http.Client{Timeout: 5 * time.Second}, Now: func() time.Time { return fixedNow },
+	// The contract tests talk to a loopback test server, so they bring their own transport; the production dial guard
+	// (AD-40) is exercised in dialguard_test.go.
+	return Options{HTTP: &http.Client{Timeout: 5 * time.Second, Transport: http.DefaultTransport.(*http.Transport).Clone()}, Now: func() time.Time { return fixedNow },
 		Location: loc, Sleep: rec.sleep}
 }
 

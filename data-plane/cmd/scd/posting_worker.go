@@ -108,7 +108,7 @@ func (s *server) postingLoop(ctx context.Context, w *postingWorker) {
 				out, err := w.engine.RunOnce(ctx, s.tenID, s.siteID, iface)
 				if out.Claimed {
 					slog.Info("posting worker: attempt concluded", "posting", out.PostingID, "attempt", out.AttemptNo,
-						"result", out.Result, "as", out.ASStatus, "code", string(out.RefusedFor), "not_sent_reason", out.NotSentReason)
+						"result", out.Result, "as", out.ASStatus, "code", string(out.RefusedFor), "not_sent_reason", out.NotSentReason, "parked", out.Parked)
 				}
 				if err != nil && out.Result != "UNKNOWN" && out.Result != "DECLINED" {
 					slog.Warn("posting worker: lane pass failed", "interface", iface, "err", err)
@@ -153,8 +153,13 @@ func (l *laneScheduler) start(lane string, fn func()) bool {
 func (l *laneScheduler) wait() { l.wg.Wait() }
 
 func (s *server) queuedLanes(ctx context.Context, w *postingWorker) []string {
-	rows, err := w.pool.Query(ctx, `SELECT DISTINCT pms_interface_id::text FROM iam_v2.posting_outbox
-		WHERE tenant_id=$1 AND site_id=$2 AND state='QUEUED'`, s.tenID, s.siteID)
+	// A lane whose head row is backing off (not_before in the future) has nothing to do yet; its order is the contract,
+	// so rows behind a waiting head are not work either (audit AD-41).
+	rows, err := w.pool.Query(ctx, `SELECT DISTINCT o.pms_interface_id::text FROM iam_v2.posting_outbox o
+		WHERE o.tenant_id=$1 AND o.site_id=$2 AND o.state='QUEUED' AND o.not_before <= now()
+		  AND NOT EXISTS (SELECT 1 FROM iam_v2.posting_outbox h
+		                   WHERE h.pms_interface_id = o.pms_interface_id AND h.state='QUEUED' AND (h.enqueued_at, h.id) < (o.enqueued_at, o.id)
+		                     AND h.not_before > now())`, s.tenID, s.siteID)
 	if err != nil {
 		return nil
 	}

@@ -61,6 +61,7 @@ func runApplierSupervisorObserved(ctx context.Context, a Assignment, repo Repo, 
 			want[i.ID] = struct{}{}
 		}
 		expireDueReviews(ctx, a, repo, deps)
+		supersedeResyncCopies(ctx, a, repo, deps)
 
 		mu.Lock()
 		defer mu.Unlock()

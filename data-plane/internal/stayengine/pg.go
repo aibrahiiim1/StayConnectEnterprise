@@ -252,6 +252,21 @@ func applyDecision(ctx context.Context, tx pgx.Tx, tenant, site, iface string, e
 		return stayID, "APPLIED", "", nil
 
 	case OpUpdateStay:
+		// AD-37 step 2: a record that changes nothing only re-stamps the occupancy evidence (freshness) and is applied with
+		// its lineage pinned by finishEvent; it does not rewrite the stay or its occupants.
+		if d.NewStatus == "" {
+			same, uerr := recordUnchanged(ctx, tx, cur.ID, ev)
+			if uerr != nil {
+				return "", "", "", uerr
+			}
+			if same {
+				if serr := stampOccupancyEvidence(ctx, tx, cur.ID, occ); serr != nil {
+					return "", "", "", serr
+				}
+				fastPathApplied.Add(1)
+				return cur.ID, "APPLIED", "", nil
+			}
+		}
 		if _, err = tx.Exec(ctx, `UPDATE iam_v2.stays SET
 			status = CASE WHEN $2<>'' THEN $2 ELSE status END,
 			arrival = COALESCE($3, arrival), departure = COALESCE($4, departure)

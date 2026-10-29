@@ -112,14 +112,6 @@ func (s *server) licenseInstall(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *server) pmsAdminReload(w http.ResponseWriter, r *http.Request) {
-	if err := s.reloadPMS(r.Context()); err != nil {
-		httpErr(w, http.StatusInternalServerError, "reload failed: "+err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "reloaded"})
-}
-
 func (s *server) gardenReload(w http.ResponseWriter, r *http.Request) {
 	n, err := s.reconcileWalledGarden(r.Context())
 	if err != nil {

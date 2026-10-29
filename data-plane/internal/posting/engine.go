@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -108,6 +109,8 @@ type Outcome struct {
 	NotSentReason string
 	ASStatus      string
 	RefusedFor    Code
+	// Parked is true when this refusal was the one that moved the row to HELD_RECOVERY (AD-41).
+	Parked bool
 }
 
 // RunOnce executes at most one queued posting for one PMS interface. A lane is (tenant, site, interface): it
@@ -305,9 +308,13 @@ func (e *Engine) abortBeforeSend(ctx context.Context, tx pgx.Tx, out *Outcome, c
 }
 
 func (e *Engine) decline(ctx context.Context, tx pgx.Tx, out *Outcome, claim *Claim, cause error) (Outcome, error) {
-	if rerr := e.repo.ReleaseClaim(ctx, tx, claim.OutboxID); rerr != nil {
+	// A refusal backs the row off (2 s doubling to 5 min) and, at the site's N-th refusal of the same row, parks it so the
+	// lane moves on (audit AD-41). Nothing was sent, so no P# was consumed for it.
+	state, rerr := e.repo.Defer(ctx, tx, claim.OutboxID, "DECLINED", string(CodeOf(cause)))
+	if rerr != nil {
 		return *out, rerr
 	}
+	out.Parked = state == "PARKED"
 	out.Result, out.RefusedFor = "DECLINED", CodeOf(cause)
 	if cerr := tx.Commit(ctx); cerr != nil {
 		return *out, fail(ErrRepo, "could not commit the decline")
@@ -372,7 +379,15 @@ func (e *Engine) settle(ctx context.Context, claim *Claim, attemptID string, out
 	if err := e.repo.AppendAttemptEvent(ctx, tx, claim.Pinned, attemptID, event, string(detail)); err != nil {
 		return out, err
 	}
-	if err := e.repo.FinishClaim(ctx, tx, claim.OutboxID, outboxState); err != nil {
+	if outcome == "NOT_SENT" && !strings.HasPrefix(reason, "ROOM_CHANGED") {
+		// Provably not sent: back off instead of re-claiming on the next tick (it would burn a P# and an attempt row
+		// every two seconds for as long as the link is down). Never parks: the link is not this row's fault.
+		// A room move is the exception: the stale command was refused because the guest really moved, and the very next
+		// attempt carries the new room, so it is not retried against an unchanged condition.
+		if _, err := e.repo.Defer(ctx, tx, claim.OutboxID, "NOT_SENT", reason); err != nil {
+			return out, err
+		}
+	} else if err := e.repo.FinishClaim(ctx, tx, claim.OutboxID, outboxState); err != nil {
 		return out, err
 	}
 	if err := tx.Commit(ctx); err != nil {

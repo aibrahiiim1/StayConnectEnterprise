@@ -156,6 +156,13 @@ func (o *Options) defaults() {
 		hc.CheckRedirect = noRedirect
 		o.HTTP = &hc
 	}
+	// A client with no transport of its own is the production one: it may not connect to loopback or link-local
+	// addresses, whatever name led there (audit AD-40). A caller that supplies a transport (a test server) owns it.
+	if o.HTTP.Transport == nil {
+		hc := *o.HTTP
+		hc.Transport = guardedTransport()
+		o.HTTP = &hc
+	}
 	if o.Now == nil {
 		o.Now = time.Now
 	}
