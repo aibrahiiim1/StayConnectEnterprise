@@ -344,7 +344,7 @@
   "next_authorized_action": "Work normal missions under the PRODUCT-OWNER-LED DELIVERY model D42 (2026-09-26): implement, target-test, deploy routine software to the test appliance 172.21.96.97 under its standing deployment authorization (current_state_facts.standing_test_appliance_deployment_authorization) (the production Central only when a mission names it), stop at READY FOR PRODUCT OWNER TESTING, and merge only after explicit Product Owner acceptance (po-merge-approved). The comprehensive validation runs only on 'FULL CHECK THE WHOLE CODE'. Retired hosts (current_state_facts.retired_hosts) are never contacted.",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase7-Plan.md",
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
-  "latest_accepted_po_decision": "D80",
+  "latest_accepted_po_decision": "D81",
   "current_state_facts": {
     "_note": "MACHINE-READABLE CURRENT STATE. Every current-state surface in this repository is validated against these fields by tools/validate-current-state-parity.py, which runs in the Project Governance gate. They exist because prose alone let a contradiction survive a green gate: current_maturity still said an authorization was awaited and iam_v2 was 49/0 while this file already recorded 63 tables and an executed Live Increment 9. A fact that is only asserted in sentences cannot be diffed; a fact recorded here can be.",
     "phase": "7",
@@ -1357,11 +1357,12 @@
     "audit_backlog": {
       "record": "docs/AUDIT_BACKLOG.md",
       "decisions": "docs/AUDIT_DECISIONS.md",
-      "as_of": "T0266",
-      "note": "Backend 258 rows: FIXED 143, ALREADY-FIXED 6, PARTIAL 48, NOT-REPRODUCIBLE 2, OPEN-DECISION 40, OPEN 19 (before: OPEN 229, OPEN-DECISION 22, PARTIAL 4, FIXED 3). Performance 82 rows: FIXED 27, ALREADY-FIXED 1, PARTIAL 12, OPEN-DECISION 24, OPEN 18 (before: OPEN 71, OPEN-DECISION 11). The audits are NOT closed: decisions remain."
+      "as_of": "T0267",
+      "note": "Backend 258 rows: FIXED 143, ALREADY-FIXED 6, PARTIAL 48, NOT-REPRODUCIBLE 2, OPEN-DECISION 40, OPEN 19 (before: OPEN 229, OPEN-DECISION 22, PARTIAL 4, FIXED 3). Performance 82 rows: FIXED 27, ALREADY-FIXED 1, PARTIAL 12, OPEN-DECISION 24, OPEN 18 (before: OPEN 71, OPEN-DECISION 11). The audits are NOT closed: decisions remain. After T0267 every decision AD-1 to AD-68 has a disposition in docs/AUDIT_DECISION_DISPOSITIONS.md (implemented, accepted risk, documentation only, or evidence-dependent); the per-row statuses above are those of T0266 and were not individually rewritten.",
+      "dispositions": "docs/AUDIT_DECISION_DISPOSITIONS.md"
     }
   },
-  "latest_transition_id": "T0266",
+  "latest_transition_id": "T0267",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1857,16 +1858,16 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "AUDIT_REMEDIATION",
-    "decision": "D80 (Product-Owner mission of 2026-10-28: remediate the backend, performance and security audit findings end to end; finish the PR #263 clean-up).",
-    "decision_note": "Every finding evaluated; fixes in code with tests; decision-dependent findings consolidated in docs/AUDIT_DECISIONS.md; statuses in docs/AUDIT_BACKLOG.md. Additive appliance migrations 0159-0161 and Central migrations 0057-0058. Nothing deployed: the delivery environment cannot reach the test appliance or Central.",
-    "manifest": "docs/manifests/AuditRemediation2-change-manifest.md",
-    "base": "55c01890f02d28063b5fb72fcbd56de4126ecbc8",
-    "base_note": "Master after the merge of PR #263.",
-    "transition": "T0266",
-    "previous_delivery": "T0265",
-    "branch": "claude/vigilant-keller-sag14r",
-    "note": "T0266. Go-Live not authorised."
+    "kind": "AUDIT_DECISIONS_IMPLEMENTATION",
+    "decision": "D81 (Product-Owner mission of 2026-10-29: implement audit decisions AD-1 to AD-68 end to end).",
+    "decision_note": "Disposition of every item in docs/AUDIT_DECISION_DISPOSITIONS.md. Appliance migrations 0162-0178, Central migrations 0059-0062, Go 1.26.10. Not yet deployed at this receipt.",
+    "manifest": "docs/manifests/AuditDecisions-change-manifest.md",
+    "base": "3b0b47cc442429d08c2eba9642c0441fc5bcf4f7",
+    "base_note": "Master after the merge of PR #264.",
+    "transition": "T0267",
+    "previous_delivery": "T0266",
+    "branch": "delivery/audit-decisions-ad1-68",
+    "note": "T0267. Go-Live not authorised."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
