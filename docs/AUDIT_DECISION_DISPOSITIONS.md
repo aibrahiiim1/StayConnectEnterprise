@@ -170,9 +170,9 @@ simultaneous sign-in attempts without a busy answer (AD-26).
 **Still not verified, and why**
 
 * 2,000 real devices moving counters through the whole path (AD-50 S1) and the 2 vCPU / 4 GB reference machine: no such generator or machine was available; the test appliance has 1 vCPU. The database half (S10 insert, roll-up and purge rates at 2,000 devices) was measured in a scratch database on the test appliance.
-* An offline *activation package* (first activation of a waiting appliance): the test appliance is already activated and a second waiting appliance is not available.
+* A first activation *by package* that succeeds: it needs a second, waiting appliance, which is not available. What was done: the appliance's offline-request is refused on the activated appliance (409), a forged package is refused (403, signature invalid), and the Central and scd package tests pass (Central offline accept matrix and golden vector; scd, on Linux, verify-before-adopt and the revoked-assignment refusal).
 * The room-and-reservation Post-stay flow against a real PMS feed: the PMS interface is not enabled on the test appliance and live PMS traffic was not to be started for evidence; it is covered by the isolated database tests and scd's end-to-end test.
-* The Admin Console pages in a browser against the test appliance (the image upload page, the new Client access protection and licence clock pages): the pages are covered by their UI tests and every API they call was exercised; no browser session was driven.
+* The image upload page in a browser (its API and optimiser were exercised). Driven in a browser on 2026-10-29: Client access protection (a wrong password was refused with 401 and changed nothing; the right one saved, showed version and operator, and was restored), Appliance and licence with the licence clock card, Sign-in methods, and Central's Team page with the registration limits: each rendered with no console error and no failed API call.
 
 ## 11. Central least privilege (P3 M1, P3 L2): Central migration 0063
 

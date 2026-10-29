@@ -1125,6 +1125,9 @@ appliance `onegate-appliance-02d20f96c54b` then `…-9613fb52679d` (all eight bi
 | Behaviour | cut-off 2.7 s after a 3 MB allowance was spent; no conntrack flow left; image optimiser 3200×1800 → 2560×1440, 1.05 MB refused; offline licence file imported once and refused on replay; netd on its hardened unit; 500 and 300 simultaneous sign-in attempts without a busy answer; client journey 12 of 12 on the first and the final release |
 | Restore drills (Linux containers) | ledger restore drill 16 of 16, phase-4 restore drill 38 of 38 |
 
-Not exercised: an offline activation *package* (the test appliance is already activated), the Post-stay flow against a real PMS feed, the 2,000-device load run, and the new
-console pages in a browser.
+Added later the same day: the new console pages were driven in a browser (enforcement form with a wrong and a right password, Appliance and licence, Central Team); the
+offline activation request and a forged package were refused on the activated appliance; and the database half of the 2,000-device load was measured in a scratch database
+(the roll-up window defect it found is fixed in acctd, see `docs/runbooks/DB_BUDGET_MEASUREMENT_PLAN.md`).
+
+Not exercised: a first activation by package that succeeds (needs a second waiting appliance), the Post-stay flow against a real PMS feed, and 2,000 real devices on the network.
 
