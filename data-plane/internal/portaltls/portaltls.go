@@ -45,7 +45,7 @@ var (
 	ErrBadHostname  = errors.New("not a valid portal hostname")
 	// ErrKeyGroupMissing: portald could not read a key installed without its group, so a certificate installed
 	// anyway would never be served. The install fails instead (audit AD-66).
-	ErrKeyGroupMissing = errors.New("portal-tls: the key group does not exist, so portald could not read the key; create the group (stayconnect-portal-tls) and retry")
+	ErrKeyGroupMissing = errors.New("portal-tls: the key group does not exist, so portald could not read the key; create the group (stayconnect-portald) and retry")
 )
 
 // hostnameRE matches migration 0116's custom_domain shape and makes a hostname safe as a file name: no slash, "..", upper case or trailing dot.
