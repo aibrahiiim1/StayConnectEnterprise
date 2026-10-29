@@ -64,6 +64,8 @@ type kernelFake struct {
 	failNFT func(op string) error
 	// perExec is a simulated fork cost, applied to wall time only when set.
 	perExec time.Duration
+	// opLog is every committed nft element operation in order: "add|del set key".
+	opLog []string
 }
 
 func newKernelFake(now time.Time) *kernelFake {
@@ -504,6 +506,13 @@ func (k *kernelFake) nftScript(script string) ([]byte, error) {
 		}
 		delete(m, e.key)
 	}
+	for _, e := range edits {
+		op := "del"
+		if e.add {
+			op = "add"
+		}
+		k.opLog = append(k.opLog, op+" "+e.set+" "+e.key)
+	}
 	for set, m := range stage {
 		k.sets[set] = m
 	}
@@ -515,12 +524,14 @@ func (k *kernelFake) nftScript(script string) ([]byte, error) {
 type nopFlusher struct {
 	mu      sync.Mutex
 	flushed int
+	calls   int
 }
 
 func (f *nopFlusher) FlushAddrs(ctx context.Context, ips []net.IP) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.flushed += len(ips)
+	f.calls++
 	return len(ips), nil
 }
 

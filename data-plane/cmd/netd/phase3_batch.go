@@ -82,6 +82,13 @@ type batchSetOps interface {
 	RevokeBatch(ctx context.Context, reqs []nft.AddrReq, requireMAC bool) []error
 }
 
+func (p *phase3Shaping) routineReserveOrDefault() time.Duration {
+	if p.routineReserve > 0 {
+		return p.routineReserve
+	}
+	return phase3RoutineReserve
+}
+
 func (p *phase3Shaping) batching() bool {
 	if p.noBatch {
 		return false
@@ -301,7 +308,7 @@ func (p *phase3Shaping) denyBatch(ctx context.Context, reqs []gateAddr) []error 
 	if p.gate == nil {
 		return make([]error, len(reqs))
 	}
-	if bg, ok := p.gate.(batchGate); ok {
+	if bg, ok := p.gate.(batchGate); ok && !p.noBatch {
 		return bg.RevokeBatch(ctx, reqs)
 	}
 	errs := make([]error, len(reqs))
@@ -315,7 +322,7 @@ func (p *phase3Shaping) authorizeBatch(ctx context.Context, reqs []gateLease) []
 	if p.gate == nil {
 		return make([]error, len(reqs))
 	}
-	if bg, ok := p.gate.(batchGate); ok {
+	if bg, ok := p.gate.(batchGate); ok && !p.noBatch {
 		return bg.AuthorizeBatch(ctx, reqs)
 	}
 	errs := make([]error, len(reqs))
@@ -664,7 +671,7 @@ func (p *phase3Shaping) provisionBridgeBatched(ctx context.Context, bridge strin
 		return
 	}
 	for idx, c := range steady {
-		if dl, ok := ctx.Deadline(); ctx.Err() != nil || (ok && time.Until(dl) < phase3RoutineReserve) {
+		if dl, ok := ctx.Deadline(); ctx.Err() != nil || (ok && time.Until(dl) < p.routineReserveOrDefault()) {
 			left := len(steady) - idx
 			slog.Warn("netd: pass budget nearly exhausted; routine renewal of unchanged sessions deferred to the next pass", "bridge", bridge, "sessions", left)
 			res.Failed++

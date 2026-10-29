@@ -147,6 +147,7 @@ type scaleEnv struct {
 	org      *countingOrigins
 	leases   *scaleLeases
 	gate     *flushingGate
+	flows    *nopFlusher
 	gens     *fakeGenerations
 	sessions []shapeplan.Session
 	gen      int64
@@ -158,7 +159,8 @@ func newScaleEnv(t *testing.T, k kern) *scaleEnv {
 	p := liveWriter(k.shapeClient())
 	e.gens = &fakeGenerations{}
 	p.generations = e.gens
-	e.gate = newFlushingGate(&nftGate{c: k.nftClient()}, &nopFlusher{})
+	e.flows = &nopFlusher{}
+	e.gate = newFlushingGate(&nftGate{c: k.nftClient()}, e.flows)
 	p.gate = e.gate
 	p.enforcement = e.enf
 	p.origins = e.org
@@ -223,6 +225,14 @@ func (e *scaleEnv) pass() passStat {
 	return passStat{res: res, wall: wall, cnt: e.k.counts().sub(c0), db: e.enf.db() + e.org.n + len(e.gens.issued) - d0, leases: r1 - r0}
 }
 
+// tick moves the kernel's clock (element expiry) and the boot clock the activation bound is measured on forward together.
+func (e *scaleEnv) tick(d time.Duration) {
+	e.k.advance(d)
+	if c, ok := e.p.secClock.(*fixedSecurityClock); ok {
+		c.ms += d.Milliseconds()
+	}
+}
+
 func (e *scaleEnv) activeCount() int {
 	n := 0
 	for _, s := range e.sessions {
@@ -284,27 +294,31 @@ func TestScaleTable(t *testing.T) {
 			logScale(t, kind, "admit", n, st, fmt.Sprintf("active=%d", e.activeCount()))
 			// pending sessions (if the pass did not finish) are driven to completion so the later scenarios start from n active
 			for i := 0; i < 20 && e.activeCount() < n; i++ {
-				e.k.advance(5 * time.Second)
+				e.tick(5 * time.Second)
 				e.pass()
 			}
 			if got := e.activeCount(); got != n {
 				t.Fatalf("only %d of %d sessions became active", got, n)
 			}
 			// 2. one steady pass: n active, nothing changed
-			e.k.advance(5 * time.Second)
+			e.tick(5 * time.Second)
 			st = e.pass()
 			logScale(t, kind, "steady", n, st, "")
 			// 3. a pass when every lease is due for renewal (remaining < 60 s of 90 s)
-			e.k.advance(35 * time.Second)
+			e.tick(35 * time.Second)
 			st = e.pass()
 			logScale(t, kind, "renew_due", n, st, "")
+			// 3b. the durable proof of every session is due again (60-90 s after it was given)
+			e.tick(60 * time.Second)
+			st = e.pass()
+			logScale(t, kind, "reprove_due", n, st, "")
 			// 4. 300 new sessions arrive on top of n active ones
 			e.addSessions(n, n+300)
-			e.k.advance(5 * time.Second)
+			e.tick(5 * time.Second)
 			st = e.pass()
 			logScale(t, kind, "arrive300", n, st, fmt.Sprintf("new_active=%d/300", e.activeCount()-n))
 			for i := 0; i < 20 && e.activeCount() < n+300; i++ {
-				e.k.advance(5 * time.Second)
+				e.tick(5 * time.Second)
 				e.pass()
 			}
 			if got := e.activeCount(); got != n+300 {

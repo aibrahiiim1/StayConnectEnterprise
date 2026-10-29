@@ -84,6 +84,8 @@ func (p *phase3Shaping) renewDue(ctx context.Context, now time.Time) int {
 	}
 	view := p.snapshotGate(ctx)
 	renewed := 0
+	var due []renewSession
+	var reqs []gateLease
 	for _, r := range p.memo.renewable {
 		want, ok, _ := leaseFor(shapeplan.Session{AccessEndsAt: r.accessEnds}, now)
 		if !ok {
@@ -105,9 +107,14 @@ func (p *phase3Shaping) renewDue(ctx context.Context, now time.Time) int {
 		if known && present && !needsRenewal(el.Expires, want) {
 			continue
 		}
-		if err := p.gate.Authorize(ctx, r.bridge, r.ip, want); err != nil {
+		due = append(due, r)
+		reqs = append(reqs, gateLease{Bridge: r.bridge, IP: r.ip, TTL: want})
+	}
+	// One transaction for every due lease (a gate that cannot batch is asked one by one, as before).
+	for i, err := range p.authorizeBatch(ctx, reqs) {
+		if err != nil {
 			// The next full walk (at most phase3FullWalkEvery away) re-derives and fails closed if need be.
-			slog.Warn("netd: lease renewal between walks failed", "session", r.sessionID, "bridge", r.bridge, "err", err)
+			slog.Warn("netd: lease renewal between walks failed", "session", due[i].sessionID, "bridge", due[i].bridge, "err", err)
 			continue
 		}
 		renewed++

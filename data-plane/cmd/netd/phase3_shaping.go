@@ -124,6 +124,8 @@ type phase3Shaping struct {
 	pb *passBatch
 	// provenAt remembers, per class, the generation and boot time at which the Session was last proven durably active.
 	provenAt map[string]provenMark
+	// routineReserve overrides phase3RoutineReserve (tests only).
+	routineReserve time.Duration
 }
 
 type passLeases struct {
