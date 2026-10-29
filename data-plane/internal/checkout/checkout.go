@@ -135,7 +135,15 @@ func (c *Converter) convertTx(ctx context.Context, tx pgx.Tx, tenant, site, ifac
 		evSeq, evNorm = seq, norm
 		res.BoundaryClockSuspect = suspect
 		res.BoundaryReason = reason
-		if suspect {
+		if suspect && !b.IsZero() {
+			// A clamped boundary (AD-45): the PMS time was before the stay could have begun, so the floor stands in for
+			// it. Recorded clock-suspect with the reason; it is never later than the server clock.
+			if err := tx.QueryRow(ctx, `UPDATE iam_v2.stays SET status='CHECKED_OUT', posting_allowed=false, effective_checkout_at=$4
+				WHERE id=$1 AND tenant_id=$2 AND site_id=$3 AND status='IN_HOUSE' RETURNING effective_checkout_at`,
+				stayID, tenant, site, b).Scan(&boundary); err != nil {
+				return Result{}, err
+			}
+		} else if suspect {
 			if err := tx.QueryRow(ctx, `UPDATE iam_v2.stays SET status='CHECKED_OUT', posting_allowed=false, effective_checkout_at=now()
 				WHERE id=$1 AND tenant_id=$2 AND site_id=$3 AND status='IN_HOUSE' RETURNING effective_checkout_at`,
 				stayID, tenant, site).Scan(&boundary); err != nil {
@@ -348,7 +356,55 @@ func deriveBoundary(ctx context.Context, tx pgx.Tx, tenant, site, iface, stayID 
 	if future {
 		return time.Time{}, true, "PMS_TIME_IMPLAUSIBLE_FUTURE", &seq, &norm, nil
 	}
+	// An old PMS check-out time is not trusted blindly (audit AD-45): the boundary decides when paid access ends, so a time
+	// before the stay could have begun, or before the stay's own last applied event, is clamped up to that floor and the
+	// boundary is recorded clock-suspect with the reason.
+	floor, floorReason, err := boundaryFloor(ctx, tx, tenant, site, stayID, eventID, seq)
+	if err != nil {
+		return time.Time{}, false, "", nil, nil, err
+	}
+	if floor != nil && ts.Before(*floor) {
+		return *floor, true, floorReason, &seq, &norm, nil
+	}
 	return *ts, false, "TRUSTED_PMS_CHECKOUT_TS", &seq, &norm, nil
+}
+
+// arrivalTolerance covers the gap between the PMS's local arrival date and UTC (stays.arrival is a date with no zone), so a
+// legitimate same-day check-out is never called suspect.
+const arrivalTolerance = 24 * time.Hour
+
+// boundaryFloor is the earliest instant a check-out can honestly carry: the later of the stay's arrival (less the zone
+// tolerance) and the PMS time of the stay's last applied non-check-out event that came before this one. It is capped at
+// the server clock. nil means there is nothing to compare against.
+func boundaryFloor(ctx context.Context, tx pgx.Tx, tenant, site, stayID, eventID string, seq int64) (*time.Time, string, error) {
+	var arrival, prior *time.Time
+	if err := tx.QueryRow(ctx, `SELECT (arrival::timestamp AT TIME ZONE 'UTC') FROM iam_v2.stays
+		WHERE id=$1 AND tenant_id=$2 AND site_id=$3`, stayID, tenant, site).Scan(&arrival); err != nil {
+		return nil, "", err
+	}
+	if err := tx.QueryRow(ctx, `SELECT max(pms_timestamp_utc) FROM iam_v2.stay_events
+		WHERE tenant_id=$1 AND site_id=$2 AND stay_id=$3 AND id<>$4 AND processing_status='APPLIED' AND event_type<>'GO'
+		  AND clock_suspect=false AND sequence_version < $5 AND pms_timestamp_utc <= now()`,
+		tenant, site, stayID, eventID, seq).Scan(&prior); err != nil {
+		return nil, "", err
+	}
+	var floor *time.Time
+	reason := ""
+	if arrival != nil {
+		a := arrival.Add(-arrivalTolerance)
+		floor, reason = &a, "PMS_TIME_BEFORE_ARRIVAL"
+	}
+	if prior != nil && (floor == nil || prior.After(*floor)) {
+		floor, reason = prior, "PMS_TIME_BEFORE_LAST_EVENT"
+	}
+	if floor == nil {
+		return nil, "", nil
+	}
+	var capped time.Time
+	if err := tx.QueryRow(ctx, `SELECT LEAST($1::timestamptz, now())`, *floor).Scan(&capped); err != nil {
+		return nil, "", err
+	}
+	return &capped, reason, nil
 }
 
 type eligibility struct {
