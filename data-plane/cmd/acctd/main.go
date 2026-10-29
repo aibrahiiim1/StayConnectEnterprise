@@ -15,7 +15,6 @@ import (
 
 	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
-	"github.com/stayconnect/enterprise/data-plane/internal/livez"
 	"github.com/stayconnect/enterprise/data-plane/internal/shape"
 	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
 	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
@@ -168,33 +167,9 @@ func main() {
 		"phase6_fallback_accounting", aggOwner != nil,
 		"accounting_owner", map[bool]string{true: "phase3", false: "legacy"}[p3.ownsAccounting()])
 
-	tick := time.NewTicker(time.Duration(c.TickSeconds) * time.Second)
-	defer tick.Stop()
-
-	slog.Info("acctd started", "tick_s", c.TickSeconds)
-	for {
-		select {
-		case <-rootCtx.Done():
-			return
-		case <-tick.C:
-			// Phase 3 (phase3.accountingPass) is the sole accounting writer, so two writers can never disagree
-			// about one guest's usage. Order matters: measure first so this tick's usage is attributed before anything is closed out,
-			// then enforce expiry, then submit the plan to netd. All are no-ops while dark.
-			now := time.Now()
-			if n := p3.accountingPass(rootCtx, a.shp, netdShaping, c.LegacyBridge, now); n > 0 {
-				slog.Debug("phase3: accounting samples ingested", "count", n)
-			}
-			// Session limits run before the expiry sweep so an ended session accrues no more online time. Idle is
-			// judged only after a clean accounting pass: an unread meter is not an idle guest.
-			p3.enforceSessionLimits(rootCtx, now)
-			p3.enforceExpiries(rootCtx)
-			p3.purgeAccountingDetail(rootCtx, now)
-			aggOwner.sweep(rootCtx)
-			p3.reconcileShaping(rootCtx, netdShaping, c.LegacyBridge)
-			// The heartbeat proves the loop is progressing; the report says why it is degraded, since a loop
-			// whose every observation is refused is not healthy.
-			livez.Touch("acctd")
-			livez.Report("acctd", p3.degradedSummary())
-		}
-	}
+	// Phase 3 (phase3.accountingPass) is the sole accounting writer, so two writers can never disagree about one guest's
+	// usage. Three tickers (loops.go): accounting, expiry and the newest-plan submitter, at the stored cut-off period. All
+	// are no-ops while dark. Before the setting has been read the period is the environment's, default 1 s (the earlier behaviour).
+	clock := newCutoffClock(time.Duration(c.TickSeconds) * time.Second)
+	a.runLoops(rootCtx, c, clock, netdShaping, a.shp, netdShaping, aggOwner)
 }

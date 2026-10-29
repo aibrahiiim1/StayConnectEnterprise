@@ -23,6 +23,7 @@ const (
 	reasonObservationRefused = "an observation was refused by the accounting boundary"
 	reasonNoRecentPass       = "no accounting pass has completed within the freshness window"
 	reasonExpiryStuck        = "an entitlement's expiry has failed in several consecutive sweeps"
+	reasonSubmitterStalled   = "the shaping plan has not been delivered to netd within the plan's validity"
 )
 
 type phase3Session struct {
