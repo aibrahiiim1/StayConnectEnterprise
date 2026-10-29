@@ -1362,7 +1362,7 @@
       "dispositions": "docs/AUDIT_DECISION_DISPOSITIONS.md"
     }
   },
-  "latest_transition_id": "T0270",
+  "latest_transition_id": "T0271",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1858,16 +1858,16 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "AUDIT_CLOSURE_ROUND_IMPLEMENTATION",
+    "kind": "CENTRAL_DB_LEAST_PRIVILEGE_IMPLEMENTATION",
     "decision": "D82 (Product-Owner continuation of 2026-10-29: close the AD-1 to AD-68 mission).",
-    "decision_note": "Root CA pin against a fingerprint, the missing console screens, post-stay window (migration 0179), platform-migration hardening, netd hardening, live evidence. Not yet deployed at this receipt.",
-    "manifest": "docs/manifests/AuditClosure-change-manifest.md",
-    "base": "d5137b1890da2e8d4bb7e1c9f34976dd7702003a",
-    "base_note": "Master after the merge of PR #267.",
-    "transition": "T0270",
-    "previous_delivery": "T0269",
-    "branch": "delivery/audit-closure",
-    "note": "T0270. Go-Live not authorised."
+    "decision_note": "Central migration 0063: ctrlapi connects as a least-privilege database role; central_forget_actor no longer scans audit_log in the delete. Not yet deployed at this receipt.",
+    "manifest": "docs/manifests/CentralLeastPrivilege-change-manifest.md",
+    "base": "02d20f96c54bba90eea86d4d8cf0b829948d132d",
+    "base_note": "Master after the merge of PR #268 (or later).",
+    "transition": "T0271",
+    "previous_delivery": "T0270",
+    "branch": "delivery/central-least-privilege",
+    "note": "T0271. Go-Live not authorised."
   },
   "onboarding_reconciliation": {
     "decision": "D37",

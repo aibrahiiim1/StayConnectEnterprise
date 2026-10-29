@@ -1,0 +1,31 @@
+{
+  "transition_id": "T0271",
+  "seq": 271,
+  "timestamp": "2026-10-29T08:43:43Z",
+  "timestamp_derivation": "Computed from the session clock after the branch was validated, before the commit that introduces this receipt.",
+  "record_type": "CENTRAL_DB_LEAST_PRIVILEGE_IMPLEMENTATION",
+  "authorisation": "D82, the Product Owner's continuation of the mission of 2026-10-29 (Central least privilege, audit P3 M1 and P3 L2).",
+  "implementation": "Central migration 0063 adds the runtime role ctrlapi_rt (no password in the migration), SELECT and INSERT only on the append-only history tables, SECURITY DEFINER history functions, owner-only guards on audit_log and portal_tls_events, and central_apply_runtime_grants(); central_forget_actor no longer scans audit_log in the delete (P3 L2). central-install.sh and central-deploy.sh generate the role's password, prove a login and only then switch CTRLAPI_DB_URL, keeping the previous env file. The migrations, backups, restores and first-admin seeding keep using the owner.",
+  "migrations": "Central 0063 (up and down, idempotent). No appliance migration in this delivery.",
+  "verification": "The control-plane suites pass as the owner and as the runtime role (scripts/ci/central-restricted-role-tests.sh); TestRuntimeRoleHasOnlyTheLeastPrivilege asserts 29 refused statements; central-migrate and central-scripts self-tests; go vet.",
+  "deployment": "At the time of this receipt: NOT deployed. The Central deployment follows the merge and is recorded by its own receipt.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "02d20f96c54bba90eea86d4d8cf0b829948d132d",
+  "previous_delivery": "T0270",
+  "decision": "D82",
+  "go_live": "NOT authorised."
+}

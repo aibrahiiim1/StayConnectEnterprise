@@ -129,7 +129,7 @@ Product-Owner overrides of the list's recommendations are marked **PO**. Test na
 | P5 L11 index, P6 M1, P6 M3, D1-L3 fillfactor, P3 L6/CC3 checksum | M1 and M3 IMPLEMENTED (AD-41, AD-42); the rest not done |
 | Provider and guest-device settings step-up (P9 M2, L16) | IMPLEMENTED (password step-up) |
 | Restore checks (P9 M3, P4 CC4) | IMPLEMENTED (schema comparison before swap); restore drills run on Linux containers, see section 10 |
-| Central least privilege (P3 M1, P3 L2) | see section 11 |
+| Central least privilege (P3 M1, P3 L2) | IMPLEMENTED, section 11 |
 | Enforcement-core redesign (D4-*, D5-M1, D6-H1 step 3, D6-M2 step 2) | partly addressed by AD-47 and AD-53; the rest is not done |
 | Measurements first (D2-M4, D2-L3, P3 M6) | measured on the test appliance for AD-50 and AD-59 (section 10, rows 50 and 59); the 2,000-device generator run is not done |
 
@@ -169,6 +169,19 @@ simultaneous sign-in attempts without a busy answer (AD-26).
 * An offline *activation package* (first activation of a waiting appliance): the test appliance is already activated and a second waiting appliance is not available.
 * The room-and-reservation Post-stay flow against a real PMS feed: the PMS interface is not enabled on the test appliance and live PMS traffic was not to be started for evidence; it is covered by the isolated database tests and scd's end-to-end test.
 * The Admin Console pages in a browser against the test appliance (the image upload page, the new Client access protection and licence clock pages): the pages are covered by their UI tests and every API they call was exercised; no browser session was driven.
+
+## 11. Central least privilege (P3 M1, P3 L2): Central migration 0063
+
+| Item | Disposition | What was done |
+|---|---|---|
+| P3 M1 | IMPLEMENTED | ctrlapi no longer connects as the database superuser that owns every table. Migration 0063 adds the role `ctrlapi_rt` (LOGIN, no superuser, no create-database, no create-role, no replication, no bypass of row security; **no password in the migration**): connect and `USAGE` on the schema, no `CREATE` on `public`, `SELECT/INSERT/UPDATE/DELETE` on the application tables and `USAGE/SELECT/UPDATE` on sequences, **`SELECT` and `INSERT` only** on the append-only history tables (`audit_log`, `portal_tls_events`, `appliance_lifecycle_events`, `appliance_certificate_events`, `appliance_certificate_revocations`, `appliance_assignments`, `appliance_assignment_history`, `appliance_history_archive`, `retired_appliance_identities`, `appliance_ca_versions`) and `SELECT` only on `schema_migrations`. The migration owner (`stayconnect`) keeps running migrations, `pg_dump`/`pg_restore` and first-admin seeding. The only way the role changes append-only history is four `SECURITY DEFINER` functions owned by the migration owner (retention, forget actor, forget audit, correct email); the guards on `audit_log` and `portal_tls_events` now need the owner as current user, so setting `central.retention = 'on'` does nothing for the role. |
+| P3 L2 | IMPLEMENTED | `central_forget_actor` rewrites only the small history columns in the delete and queues the email in an owner-only table; `central_forget_audit_apply()` scrubs `audit_log` case-insensitively, one week per statement, outside the delete (ctrlapi calls it after a removal and on each housekeeping pass). |
+| Upgrade | IMPLEMENTED | `central-deploy.sh` and `central-install.sh`: generate `ctrlapi_db_password` (0600, only if absent, never printed), apply the grants, set the role password, **prove a login** (non-superuser, can read, cannot create), and only then rewrite `CTRLAPI_DB_URL`, keeping `ctrlapi.env.bak-dbrole-<stamp>`. If any step fails the old DSN is kept and the deploy says `DATABASE LEAST PRIVILEGE IS NOT ACTIVE`; a fresh install aborts instead. Rollback: copy the backup env file back and restart ctrlapi ([`runbooks/CENTRAL_DB_LEAST_PRIVILEGE.md`](runbooks/CENTRAL_DB_LEAST_PRIVILEGE.md)). |
+| Tests | IMPLEMENTED | The control-plane suites pass as the owner and as the role (`scripts/ci/central-restricted-role-tests.sh`); `TestRuntimeRoleHasOnlyTheLeastPrivilege` asserts 29 refused statements by SQLSTATE and message (CREATE/ALTER/DROP TABLE, TRUNCATE, disabling or dropping a trigger, UPDATE/DELETE on audit rows, CREATE ROLE, reading `pg_authid`, `COPY ... PROGRAM`, server-file reads, setting the retention flag). |
+
+Residual, stated plainly: a **future table defaults to full DML for the role** (fail-open) and a migration that adds an append-only table must list it in
+`central_apply_runtime_grants()`; the role can still call the four definer functions with arbitrary arguments (that is the sanctioned maintenance path);
+after a binary-only rollback to a release older than this one, queued emails stay in old audit payloads until the new binary runs again. Live result: see section 10.
 
 ## 12. Review of the platform-migration mechanism (PR #266), 2026-10-29
 

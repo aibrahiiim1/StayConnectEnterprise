@@ -434,6 +434,8 @@ func (b *Base) removeUser(w http.ResponseWriter, r *http.Request, customerID, id
 	}
 	audit.Op(r.Context(), b.DB, r, "user.removed", "operator", id, map[string]any{
 		"_tenant_id": customerID, "role": cur[0].Role, "sessions_ended": true})
+	// The history columns were rewritten by the delete; the audit payloads are scrubbed now, outside that transaction.
+	ForgetQueuedAuditEmails(ctx, b)
 	w.WriteHeader(http.StatusNoContent)
 }
 

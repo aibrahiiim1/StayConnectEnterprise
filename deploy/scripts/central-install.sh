@@ -200,6 +200,7 @@ gen_secret() {
   say "generated secret $1"
 }
 gen_secret db_password
+gen_secret ctrlapi_db_password       # the runtime role's password (migration 0063); db_password stays the owner's
 gen_secret redis_password
 
 # ================================================================= 4. keep the release on the host
@@ -351,7 +352,8 @@ restore_database() {
   pg_q -c "SELECT timescaledb_pre_restore()" >/dev/null
   # post_restore MUST run even if pg_restore fails part-way, or the database stays in restore mode.
   local rc=0
-  docker exec -i "$CENTRAL_PG_CONTAINER" pg_restore -U "$CENTRAL_DB_USER" -d "$CENTRAL_DB" --no-password \
+  # --no-acl: the dump names the old host's runtime role in its GRANTs; central_runtime_role_apply (step 7) re-asserts them here.
+  docker exec -i "$CENTRAL_PG_CONTAINER" pg_restore -U "$CENTRAL_DB_USER" -d "$CENTRAL_DB" --no-password --no-acl \
     < "$dump" 2> "$WORK/pg_restore.err" || rc=$?
   pg_q -c "SELECT timescaledb_post_restore()" >/dev/null
   if [ "$rc" != 0 ]; then
@@ -478,6 +480,9 @@ else
   "${MIG[@]}" up
   "${MIG[@]}" verify
 fi
+# The runtime role (0063): grants re-asserted (a restored database comes back without them), password set from the
+# generated secret file, and a real login proved. A fresh install must END with ctrlapi on this role, so a failure stops here.
+central_runtime_role_apply || die "the ctrlapi database role ($CENTRAL_RUNTIME_DB_USER) could not be set up or verified (above)"
 
 # ================================================================= 8. configuration
 step "8/14 configuration (ctrlapi.env, central-endpoint.env, install settings)"
@@ -501,9 +506,9 @@ if [ -f "$CTRLAPI_ENV_PATH" ]; then
   say "$CTRLAPI_ENV_PATH exists — kept as is"
   grep -qE "^[^#]*CHANGE_ME" "$CTRLAPI_ENV_PATH" && die "$CTRLAPI_ENV_PATH still contains CHANGE_ME placeholders"
 else
-  DBPW="$(cat "$CENTRAL_SECRETS_DIR/db_password" 2>/dev/null || echo DRYRUN)"
+  DBPW="$(cat "$CENTRAL_SECRETS_DIR/ctrlapi_db_password" 2>/dev/null || echo DRYRUN)"
   RDPW="$(cat "$CENTRAL_SECRETS_DIR/redis_password" 2>/dev/null || echo DRYRUN)"
-  sed -e "s|CHANGE_ME_DB_PASSWORD|$DBPW|" -e "s|CHANGE_ME_REDIS_PASSWORD|$RDPW|" \
+  sed -e "s|CHANGE_ME_DB_RUNTIME_PASSWORD|$DBPW|" -e "s|CHANGE_ME_REDIS_PASSWORD|$RDPW|" \
       -e "s|^CTRLAPI_ALLOW_ORIGINS=.*|CTRLAPI_ALLOW_ORIGINS=$ORIGINS|" \
       -e "s|^CTRLAPI_APPLIANCE_BASE=.*|CTRLAPI_APPLIANCE_BASE=$APPLIANCE_BASE|" \
       "$REL/deploy/env/ctrlapi.env.example" > "$WORK/ctrlapi.env"
@@ -524,6 +529,9 @@ else
   write_file "$CTRLAPI_ENV_PATH" 0600 < "$WORK/ctrlapi.env"
   say "wrote $CTRLAPI_ENV_PATH"
 fi
+# An env file kept from an earlier install may still name the owner; it is pointed at the runtime role (role already
+# verified in step 7) with the previous file kept as a timestamped backup. A fresh file already names the role.
+central_runtime_dsn_switch || die "CTRLAPI_DB_URL could not be pointed at $CENTRAL_RUNTIME_DB_USER"
 run env DEPLOY="$REL/deploy" bash "$T/install-central-endpoint.sh" "$ENDPOINT_SRC"
 
 write_file "$CENTRAL_INSTALL_ENV" 0644 <<EOF
@@ -644,7 +652,8 @@ if [ "$MODE" = new ] && [ "$SKIP_ADMIN" = 0 ]; then
       fi
       [ "${#CENTRAL_ADMIN_PASSWORD}" -ge 10 ] || die "admin password must be at least 10 characters"
       # The password goes in on stdin, never on the command line where `ps` would show it.
-      printf '%s\n' "$CENTRAL_ADMIN_PASSWORD" | CTRLAPI_DB_URL="$(envfile_get "$CTRLAPI_ENV_PATH" CTRLAPI_DB_URL)" \
+      # Seeding the first administrator runs as the database OWNER, not as the runtime role ctrlapi serves with.
+      printf '%s\n' "$CENTRAL_ADMIN_PASSWORD" | CTRLAPI_DB_URL="$(central_owner_dsn)" \
         "$CTRLAPI_BIN_PATH" seed-admin --email "$ADMIN_EMAIL" >/dev/null
       unset CENTRAL_ADMIN_PASSWORD
       say "seeded platform admin $ADMIN_EMAIL"

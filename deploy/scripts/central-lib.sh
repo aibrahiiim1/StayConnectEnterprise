@@ -273,6 +273,100 @@ verify_trust_set() {
 # ---------------------------------------------------------------- Postgres (always through the container)
 pg_q()   { docker exec "$CENTRAL_PG_CONTAINER" psql -v ON_ERROR_STOP=1 -U "$CENTRAL_DB_USER" -d "$CENTRAL_DB" -tA "$@" </dev/null; }
 pg_in()  { docker exec -i "$CENTRAL_PG_CONTAINER" psql -v ON_ERROR_STOP=1 -U "$CENTRAL_DB_USER" -d "$CENTRAL_DB" -tA "$@"; }
+# ---------------------------------------------------------------- the runtime database role (migration 0063, audit P3 M1)
+# ctrlapi connects as CENTRAL_RUNTIME_DB_USER (ctrlapi_rt): SELECT/INSERT/UPDATE/DELETE on the application tables, no
+# DDL, no ownership, no superuser. Migrations, pg_dump/pg_restore and the first-admin seeding keep using
+# CENTRAL_DB_USER (the owner). docs/runbooks/CENTRAL_DB_LEAST_PRIVILEGE.md.
+CENTRAL_RUNTIME_DB_USER="${CENTRAL_RUNTIME_DB_USER:-ctrlapi_rt}"
+CENTRAL_RUNTIME_PW_FILE="${CENTRAL_RUNTIME_PW_FILE:-$CENTRAL_SECRETS_DIR/ctrlapi_db_password}"
+
+# central_gen_secret <name> — a random 0600 secret under CENTRAL_SECRETS_DIR, created only when absent, never printed.
+central_gen_secret() {
+  local f="$CENTRAL_SECRETS_DIR/$1"
+  if [ -s "$f" ] || { [ "$DRY_RUN" = 1 ] && [ -e "$f" ]; }; then say "secret $1 exists — kept"; return 0; fi
+  openssl rand -hex 32 | tr -d '\r\n' | write_file "$f" 0600
+  say "generated secret $1"
+}
+
+# central_runtime_role_apply — owner-side convergence of the runtime role, run after every migrate/restore:
+#   1. the password file exists (generated if absent);  2. central_apply_runtime_grants() (role, grants, defaults);
+#   3. ALTER ROLE ... PASSWORD from the file (stdin, never argv);  4. the role really logs in over TCP with that
+#   password, is not a superuser, can read and cannot create a table.
+# Returns non-zero (and says why) if any step fails; the caller decides whether to switch CTRLAPI_DB_URL.
+central_runtime_role_apply() {
+  local pw rc
+  central_gen_secret ctrlapi_db_password || return 1
+  if [ "$DRY_RUN" = 1 ]; then
+    say "DRY-RUN would run central_apply_runtime_grants(), set the $CENTRAL_RUNTIME_DB_USER password from the secret file and verify a login"
+    return 0
+  fi
+  pw="$(cat "$CENTRAL_RUNTIME_PW_FILE")"
+  printf '%s' "$pw" | grep -Eq '^[0-9a-f]{32,128}$' \
+    || { warn "$CENTRAL_RUNTIME_PW_FILE does not hold a hex secret — not using it"; return 1; }
+  pg_q -c "SELECT central_apply_runtime_grants()" >/dev/null \
+    || { warn "central_apply_runtime_grants() failed (is migration 0063 applied?)"; return 1; }
+  printf "ALTER ROLE %s PASSWORD '%s';\n" "$CENTRAL_RUNTIME_DB_USER" "$pw" | pg_in -q >/dev/null \
+    || { warn "could not set the $CENTRAL_RUNTIME_DB_USER password"; return 1; }
+  rc=0
+  # PGPASSWORD is exported for this one command and handed to docker by NAME (-e PGPASSWORD): the value is not on any command line.
+  # The connection goes to the container's own address, not 127.0.0.1: the image trusts loopback, which would not test the password.
+  PGPASSWORD="$pw" docker exec -e PGPASSWORD -i "$CENTRAL_PG_CONTAINER" sh -c \
+      'h=$(hostname -i 2>/dev/null | cut -d" " -f1); exec psql -v ON_ERROR_STOP=1 -h "${h:-127.0.0.1}" -U "$1" -d "$2" -tA' \
+      _ "$CENTRAL_RUNTIME_DB_USER" "$CENTRAL_DB" >"${WORK:-/tmp}/.rt-verify.$$" 2>&1 <<'SQL' || rc=$?
+SELECT 'super=' || rolsuper::text FROM pg_roles WHERE rolname = current_user;
+SELECT 'read=' || (SELECT count(*) FROM operators)::text;
+SELECT 'ddl=' || has_schema_privilege(current_user, 'public', 'CREATE')::text;
+SQL
+  if [ "$rc" != 0 ] || ! grep -qx 'super=false' "${WORK:-/tmp}/.rt-verify.$$" \
+     || ! grep -Eqx 'read=[0-9]+' "${WORK:-/tmp}/.rt-verify.$$" || ! grep -qx 'ddl=false' "${WORK:-/tmp}/.rt-verify.$$"; then
+    warn "the $CENTRAL_RUNTIME_DB_USER login check FAILED (it must log in with the generated password, be a non-superuser, read, and not create):"
+    sed 's/^/        /' "${WORK:-/tmp}/.rt-verify.$$" | head -8 >&2
+    rm -f "${WORK:-/tmp}/.rt-verify.$$"; return 1
+  fi
+  rm -f "${WORK:-/tmp}/.rt-verify.$$"
+  say "$CENTRAL_RUNTIME_DB_USER can log in and read, is not a superuser, and cannot create objects"
+}
+
+# central_runtime_dsn_switch — point CTRLAPI_DB_URL at the runtime role. ONLY called after central_runtime_role_apply
+# succeeded. The previous env file is kept as <env>.bak-dbrole-<stamp> (0600): rollback = copy it back and restart ctrlapi.
+# Host, port, database and query parameters of the existing URL are kept; only the credentials change. Idempotent.
+central_runtime_dsn_switch() {
+  local cur new pw cur_pw
+  cur="$(envfile_get "$CTRLAPI_ENV_PATH" CTRLAPI_DB_URL || true)"
+  [ -n "$cur" ] || { warn "no CTRLAPI_DB_URL in $CTRLAPI_ENV_PATH — nothing to switch"; return 1; }
+  # Already the runtime role: nothing to do ONLY if the password in the URL is the one in the secret file. A regenerated or
+  # rotated secret has just been set on the role (central_runtime_role_apply), so a URL still carrying the old one would be
+  # rejected by PostgreSQL and ctrlapi would start with credentials that no longer work.
+  case "$cur" in
+    "postgres://$CENTRAL_RUNTIME_DB_USER:"*)
+      pw="$(cat "$CENTRAL_RUNTIME_PW_FILE" 2>/dev/null || true)"
+      cur_pw="${cur#postgres://$CENTRAL_RUNTIME_DB_USER:}"; cur_pw="${cur_pw%%@*}"
+      if [ -n "$pw" ] && [ "$cur_pw" = "$pw" ]; then say "CTRLAPI_DB_URL already names $CENTRAL_RUNTIME_DB_USER with the current password"; return 0; fi
+      say "CTRLAPI_DB_URL names $CENTRAL_RUNTIME_DB_USER with a different password than the secret file: rewriting it"
+      ;;
+  esac
+  if [ "$DRY_RUN" = 1 ]; then
+    say "DRY-RUN would back up $CTRLAPI_ENV_PATH and set CTRLAPI_DB_URL to the $CENTRAL_RUNTIME_DB_USER role"; return 0
+  fi
+  pw="$(cat "$CENTRAL_RUNTIME_PW_FILE")"
+  new="$(printf '%s' "$cur" | sed -E "s#^(postgres(ql)?://)[^@/]*@#\\1$CENTRAL_RUNTIME_DB_USER:$pw@#")"
+  case "$new" in "postgres://$CENTRAL_RUNTIME_DB_USER:"*@*) ;; *) warn "CTRLAPI_DB_URL has an unexpected shape — not rewritten"; return 1 ;; esac
+  cp -p "$CTRLAPI_ENV_PATH" "$CTRLAPI_ENV_PATH.bak-dbrole-${STAMP:-$(date -u +%Y%m%dT%H%M%SZ)}"
+  chmod 0600 "$CTRLAPI_ENV_PATH.bak-dbrole-${STAMP:-$(date -u +%Y%m%dT%H%M%SZ)}" 2>/dev/null || true
+  envfile_set "$CTRLAPI_ENV_PATH" CTRLAPI_DB_URL "$new"
+  say "CTRLAPI_DB_URL now names $CENTRAL_RUNTIME_DB_USER (previous env file kept as $CTRLAPI_ENV_PATH.bak-dbrole-${STAMP:-…})"
+}
+
+# central_owner_dsn — the owner's DSN, for the few commands that must run as the owner (first-admin seeding).
+# Built from the db_password secret and the host/port/database of CTRLAPI_DB_URL; printed to the caller's substitution only.
+central_owner_dsn() {
+  local cur rest
+  cur="$(envfile_get "$CTRLAPI_ENV_PATH" CTRLAPI_DB_URL || true)"
+  rest="${cur#*@}"
+  [ -n "$cur" ] && [ "$rest" != "$cur" ] || rest="127.0.0.1:5432/$CENTRAL_DB?sslmode=disable"
+  printf 'postgres://%s:%s@%s' "$CENTRAL_DB_USER" "$(cat "$CENTRAL_SECRETS_DIR/db_password")" "$rest"
+}
+
 pg_table_exists() { [ "$(pg_q -c "SELECT to_regclass('public.$1') IS NOT NULL")" = "t" ]; }
 pg_public_table_count() {
   pg_q -c "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'"

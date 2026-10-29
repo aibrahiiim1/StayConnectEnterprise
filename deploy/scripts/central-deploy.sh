@@ -273,6 +273,16 @@ else
   fi
 fi
 
+# The runtime role (0063, audit P3 M1). ctrlapi is stopped, so the switch cannot race a running process. The order is
+# the safety: grants -> password -> a proven login -> only then CTRLAPI_DB_URL. If any step fails the env file is left
+# untouched and ctrlapi keeps starting with the DSN it had; that is reported loudly because the database is then
+# NOT least-privilege. Rollback: cp -p $CTRLAPI_ENV_PATH.bak-dbrole-<stamp> $CTRLAPI_ENV_PATH; systemctl restart stayconnect-ctrlapi.
+if central_runtime_role_apply && central_runtime_dsn_switch; then
+  say "ctrlapi will connect as $CENTRAL_RUNTIME_DB_USER"
+else
+  warn "DATABASE LEAST PRIVILEGE IS NOT ACTIVE: ctrlapi keeps its previous CTRLAPI_DB_URL. Fix the cause above and re-run this deploy, or run docs/runbooks/CENTRAL_DB_LEAST_PRIVILEGE.md §Upgrade by hand."
+fi
+
 step "5/8 ctrlapi"
 STORED="$SC_OPT/releases/central/$NAME"
 [ -d "$STORED" ] || { run install -d -m 0755 "$STORED"; run cp -a "$REL/RELEASE.json" "$REL/SHA256SUMS" "$REL/deploy" "$REL/control-plane" "$STORED/"; }

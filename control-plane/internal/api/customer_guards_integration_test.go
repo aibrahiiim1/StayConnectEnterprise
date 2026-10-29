@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/stayconnect/enterprise/control-plane/internal/testdb"
 )
 
 // Audit Phase 1 L14: a site code follows the slug rule, and a site of an archived customer cannot be restored.
@@ -49,7 +51,7 @@ func TestCreateCustomerMapsOnlyDuplicatesToConflict(t *testing.T) {
 		t.Fatalf("a duplicate slug is a conflict: %v", err)
 	}
 	// A failure that is not a duplicate (the table cannot be written) must not read as "already exists".
-	if _, err := f.pool.Exec(f.ctx, `ALTER TABLE tenants ADD CONSTRAINT test_no_insert CHECK (name <> 'Boom')`); err != nil {
+	if _, err := testdb.OwnerPool(t, f.pool).Exec(f.ctx, `ALTER TABLE tenants ADD CONSTRAINT test_no_insert CHECK (name <> 'Boom')`); err != nil {
 		t.Fatal(err)
 	}
 	_, _, err = createCustomer(f.ctx, f.pool, "Boom", "boom")

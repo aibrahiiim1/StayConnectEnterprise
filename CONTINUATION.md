@@ -39,21 +39,27 @@ proxy refuses them), so deployments run from the workstation.
 * Card payment and room charge execute only with their execution switches, each a separate PO authorisation (manual C.12).
 * A blank-VM install of the current release was not repeated after #256; rebuild with the same identity (manual E.4
   Case 2) is self-tested but not run on a VM.
-* Audit decisions (D81): **accepted risks**, not fixed: AD-25 (IPv6 forwarding kept), AD-29 (voucher format kept; guessable
-  short digit vouchers behind a MAC-rotating device), AD-37 step 4 (hotel-wide feed rule), AD-8 (three parts). **Evidence
-  still to gather** on a test appliance: the 5-second cut-off and plan fast path under load (AD-47, AD-53), the conntrack
-  flush (AD-24), the room-and-reservation Post-stay flow (AD-36, dark), the image optimiser through the Admin Console
-  (AD-58), Linux restore drills (AD-3), offline activation (AD-18), the DB budget measurement (AD-50, AD-59), Central
-  least privilege (role split, a Central deployment). **Not built**: an Admin Console screen for the enforcement policy
-  (private-network allow-list, MAC binding, cut-off — set today with `enforcement_policy_set()`), a Central screen for the
-  waiting-appliance cap, a button for the licence clock reset.
+* Audit decisions (D81, closed out by D82): **accepted risks**, not fixed: AD-25 (IPv6 forwarding kept), AD-29 (voucher format
+  kept; guessable short digit vouchers behind a MAC-rotating device), AD-37 step 4 (hotel-wide feed rule), AD-8 (three parts);
+  AD-65 (archive of a deleted appliance's history, not RESTRICT plus soft delete) was **accepted by the Product Owner**. AD-59
+  was measured and decided (keep the Node hop). The per-item answer, with the live evidence, is
+  [`docs/AUDIT_DECISION_DISPOSITIONS.md`](docs/AUDIT_DECISION_DISPOSITIONS.md). **Evidence that does not exist yet:** the
+  2,000-device generator run on a 2 vCPU / 4 GB machine (AD-48 delete throughput, AD-50 S1/S10); an offline *activation
+  package* (first activation of a waiting appliance); the Post-stay flow against a real PMS feed; the new console pages driven
+  in a browser. **Central's database** is reached by ctrlapi as the least-privilege role `ctrlapi_rt` (migration 0063,
+  [`docs/runbooks/CENTRAL_DB_LEAST_PRIVILEGE.md`](docs/runbooks/CENTRAL_DB_LEAST_PRIVILEGE.md)); a migration that adds an
+  append-only Central table must list it in `central_apply_runtime_grants()`.
+* Central silence only raises the `CloudStale` warning once the licence's `offline_grace_days` (default 30) pass; 48 hours is
+  the clock-rollback tolerance. The Product Owner's wording was "more than 48 hours"; the contract in
+  [`docs/LICENSING_AND_ENTITLEMENTS.md`](docs/LICENSING_AND_ENTITLEMENTS.md) and the code say 30 days, and no 48-hour Central warning exists.
+  Nothing was changed; say if a 48-hour warning is wanted (a new licensing semantic).
 * `appliance-install.sh` (fresh and `--upgrade`) pins the appliance Root CA (AD-2) only against a fingerprint: `--root-ca-sha256 <fp>` from
   Central's `FINGERPRINTS.txt`, or the trust directory's `FINGERPRINTS.txt`. It never adopts a certificate nothing vouches for and never
   replaces a pin.
 * Migrations marked `-- edge-migrate: platform` change the platform schema and run as the platform role
   (`edge-migrate.sh --platform-migration`); every other migration runs as `iam_v2_owner`. A new migration that touches
   `public` needs the marker. Test it with `FULLSCHEMA_BASELINE_FILE`, `FULLSCHEMA_BASELINE_TOP` and `FULLSCHEMA_APPLY_ROLE=iam_v2_owner`.
-* PRE-LIVE `172.21.60.25` was not touched (retired trust universe; a Product-Owner decision).
+* The former PRE-LIVE appliance `172.21.60.25` and the former Centrals are retired (Product-Owner records of 2026-10-28) and were not contacted.
 * High availability and white label are licence keys with no implementation.
 * PO decisions still open (handbook §24.2): the off-host copy destination for Central dumps; whether Ubuntu 24.04 is
   supported; Go-Live, LIVE card payments and further PMS postings; high availability (§16.5).

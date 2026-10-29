@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stayconnect/enterprise/control-plane/internal/licensing"
+	"github.com/stayconnect/enterprise/control-plane/internal/testdb"
 )
 
 func TestCanonicalMAC(t *testing.T) {
@@ -73,7 +74,7 @@ func TestDeleteMarksTheApplianceAndAFailureClearsIt(t *testing.T) {
 	}
 
 	// A step that fails (here the licence revocation) leaves the appliance in place and not flagged.
-	if _, err := f.pool.Exec(f.ctx, `CREATE FUNCTION test_refuse() RETURNS trigger LANGUAGE plpgsql AS $$
+	if _, err := testdb.OwnerPool(t, f.pool).Exec(f.ctx, `CREATE FUNCTION test_refuse() RETURNS trigger LANGUAGE plpgsql AS $$
         BEGIN RAISE EXCEPTION 'refused by test'; END $$;
         CREATE TRIGGER test_refuse BEFORE UPDATE ON licenses FOR EACH STATEMENT EXECUTE FUNCTION test_refuse()`); err != nil {
 		t.Fatal(err)
@@ -85,7 +86,7 @@ func TestDeleteMarksTheApplianceAndAFailureClearsIt(t *testing.T) {
 	if n := f.count(`SELECT count(*) FROM appliances WHERE id=$1 AND deletion_started_at IS NULL`, app); n != 1 {
 		t.Fatal("a failed delete must leave the appliance in place and unflagged")
 	}
-	if _, err := f.pool.Exec(f.ctx, `DROP TRIGGER test_refuse ON licenses`); err != nil {
+	if _, err := testdb.OwnerPool(t, f.pool).Exec(f.ctx, `DROP TRIGGER test_refuse ON licenses`); err != nil {
 		t.Fatal(err)
 	}
 	rec = f.operatorCall(f.base.deleteAppliance, http.MethodDelete, app, map[string]any{"confirm_serial": "SC-TEST-M8-1", "reason": "gone"})
