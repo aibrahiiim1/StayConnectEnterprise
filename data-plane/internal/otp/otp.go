@@ -23,11 +23,48 @@ const (
 	IssueCooldown      = 60 * time.Second
 	IssueHourlyCap     = 5
 	IPHourlyCap        = 20
+	// DestinationHourlyCap is the ceiling for one destination across every device (AD-30). It is higher than the
+	// per-device cap, so one device cannot use up another device's codes, but a number still cannot be flooded.
+	DestinationHourlyCap = 15
 )
+
+// Limits are the issue-side limits. They are site settings (iam_v2.site_signin_capacity_settings); a zero field means
+// its default, so a caller with no settings gets exactly the previous behaviour.
+type Limits struct {
+	Lifetime             time.Duration
+	MaxAttempts          int
+	DeviceHourlyCap      int // codes per destination AND device per hour
+	DestinationHourlyCap int // codes per destination, all devices, per hour
+	SourceHourlyCap      int // codes per source address per hour, all destinations
+}
+
+func (l Limits) WithDefaults() Limits {
+	if l.Lifetime <= 0 {
+		l.Lifetime = DefaultTTL
+	}
+	if l.MaxAttempts <= 0 {
+		l.MaxAttempts = DefaultMaxAttempts
+	}
+	if l.DeviceHourlyCap <= 0 {
+		l.DeviceHourlyCap = IssueHourlyCap
+	}
+	if l.DestinationHourlyCap <= 0 {
+		l.DestinationHourlyCap = DestinationHourlyCap
+	}
+	if l.DestinationHourlyCap < l.DeviceHourlyCap {
+		l.DestinationHourlyCap = l.DeviceHourlyCap
+	}
+	if l.SourceHourlyCap <= 0 {
+		l.SourceHourlyCap = IPHourlyCap
+	}
+	return l
+}
 
 var (
 	ErrCooldown         = errors.New("otp: cooldown — wait before requesting another code")
 	ErrHourlyCap        = errors.New("otp: too many requests this hour")
+	// ErrDestinationCap: this destination has been sent its ceiling of codes this hour, from all devices together.
+	ErrDestinationCap   = errors.New("otp: too many codes sent to this destination this hour")
 	ErrIPRateLimited    = errors.New("otp: too many requests from your network")
 	ErrNotFound         = errors.New("otp: challenge not found")
 	ErrExpired          = errors.New("otp: code expired")
@@ -49,6 +86,8 @@ type IssueParams struct {
 	UserAgent   string
 	// DeviceMAC binds the challenge to that device (iam_v2.otp_device_bindings); VerifyFrom refuses any other.
 	DeviceMAC string
+	// Limits are the site's settings; the zero value means the defaults.
+	Limits Limits
 }
 
 // bindDevice failing fails the issue: an unbound code would be verifiable from anywhere. Old bindings are pruned by scd's periodic job
@@ -78,6 +117,8 @@ func Issue(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, p IssuePara
 		return nil, fmt.Errorf("otp: tenant/channel/destination required")
 	}
 	dest := strings.ToLower(strings.TrimSpace(p.Destination))
+	lim := p.Limits.WithDefaults()
+	devMAC := strings.TrimSpace(p.DeviceMAC)
 
 	tx, err := db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -95,21 +136,30 @@ func Issue(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, p IssuePara
 		}
 	}
 
+	// AD-30: the cooldown and the hourly cap are counted per destination AND device, so one device cannot use up the
+	// codes of the guest who owns the number from another device; a higher destination-wide ceiling still stops a number
+	// being flooded by many devices. A request with no device (none reaches here in production) is counted destination-wide.
 	var lastAt *time.Time
-	var hourCount int
+	var devHour, destHour int
 	if err := tx.QueryRow(ctx, `
-        SELECT max(issued_at),
-               count(*) FILTER (WHERE issued_at > now() - interval '1 hour')
-          FROM auth_otps
-         WHERE tenant_id = $1 AND channel = $2 AND lower(destination) = $3
-    `, p.TenantID, p.Channel, dest).Scan(&lastAt, &hourCount); err != nil {
+        SELECT max(o.issued_at) FILTER (WHERE $4 = '' OR b.device_mac = NULLIF($4,'')::macaddr),
+               count(*) FILTER (WHERE o.issued_at > now() - interval '1 hour'
+                                  AND ($4 = '' OR b.device_mac = NULLIF($4,'')::macaddr)),
+               count(*) FILTER (WHERE o.issued_at > now() - interval '1 hour')
+          FROM auth_otps o
+          LEFT JOIN iam_v2.otp_device_bindings b ON b.challenge_id = o.id
+         WHERE o.tenant_id = $1 AND o.channel = $2 AND lower(o.destination) = $3
+    `, p.TenantID, p.Channel, dest, devMAC).Scan(&lastAt, &devHour, &destHour); err != nil {
 		return nil, fmt.Errorf("otp: rate-limit lookup: %w", err)
 	}
 	if lastAt != nil && time.Since(*lastAt) < IssueCooldown {
 		return nil, ErrCooldown
 	}
-	if hourCount >= IssueHourlyCap {
+	if devHour >= lim.DeviceHourlyCap {
 		return nil, ErrHourlyCap
+	}
+	if destHour >= lim.DestinationHourlyCap {
+		return nil, ErrDestinationCap
 	}
 
 	// Per-source-IP limit across all destinations and channels (anti-enumeration).
@@ -123,13 +173,13 @@ func Issue(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, p IssuePara
         `, p.TenantID, p.IP).Scan(&ipHour); err != nil {
 			return nil, fmt.Errorf("otp: ip rate-limit lookup: %w", err)
 		}
-		if ipHour >= IPHourlyCap {
+		if ipHour >= lim.SourceHourlyCap {
 			return nil, ErrIPRateLimited
 		}
 	}
 
 	code := generate6()
-	expires := time.Now().Add(DefaultTTL)
+	expires := time.Now().Add(lim.Lifetime)
 
 	var id string
 	if ring == nil {
@@ -146,7 +196,7 @@ func Issue(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, p IssuePara
            NULLIF($9,''))
         RETURNING id
     `, p.TenantID, p.ApplianceID, p.Channel, dest,
-			salt+":"+hash, expires, DefaultMaxAttempts, p.IP, p.UserAgent).Scan(&id); err != nil {
+			salt+":"+hash, expires, lim.MaxAttempts, p.IP, p.UserAgent).Scan(&id); err != nil {
 			return nil, fmt.Errorf("otp: insert: %w", err)
 		}
 	} else {
@@ -170,7 +220,7 @@ func Issue(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, p IssuePara
            CASE WHEN $10 = '' THEN NULL ELSE $10::inet END,
            NULLIF($11,''))
     `, id, p.TenantID, p.ApplianceID, p.Channel, dest,
-			digestHex, gen, expires, DefaultMaxAttempts, p.IP, p.UserAgent); err != nil {
+			digestHex, gen, expires, lim.MaxAttempts, p.IP, p.UserAgent); err != nil {
 			return nil, fmt.Errorf("otp: insert: %w", err)
 		}
 	}

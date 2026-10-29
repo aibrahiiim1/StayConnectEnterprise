@@ -129,7 +129,7 @@ func loadCfg() cfg {
 		MTLSBase: os.Getenv("SCD_MTLS_BASE"),
 
 		SecretsDir:      envOr("SCD_SECRETS_DIR", "/etc/stayconnect/secrets"),
-		DurableThrottle: os.Getenv("SCD_DURABLE_THROTTLE") == "true",
+		DurableThrottle: durableThrottleEnabled(os.Getenv("SCD_DURABLE_THROTTLE")),
 		OTPHMAC:         os.Getenv("SCD_OTP_HMAC") == "true",
 
 		PortalTLSDir:        envOr("SCD_PORTAL_TLS_DIR", "/etc/stayconnect/portal-tls"),
@@ -180,6 +180,10 @@ type server struct {
 	// socialPortal reports HTTPS state and canonical hostname for social sign-in; nil or noPortalHTTPS{} means the HTTP fallback (no real provider offered).
 	socialPortal portalHosts
 	loginRL      *loginLimiter // layered throttling for guest username/password logins (optional fast in-memory layer)
+	// settings caches the sign-in-path settings for a few seconds, cleared by database notification (AD-52); nil = no cache.
+	settings *ttlCache
+	// waiters wakes the last sign-in step when netd activates a session (AD-52); nil = poll only.
+	waiters *sessionWaiters
 
 	// Dark-auth machinery, inert unless enabled: authThrottle (durable DB throttle; nil = in-memory only), otpRing
 	// (keyed-HMAC OTPs; nil = legacy), iamv2Auth (all method flags OFF, never touches its nil repository).
@@ -534,7 +538,12 @@ func main() {
 			"does not register and does not contact Central until it is factory-reset", "since", removedRec.At)
 	}
 	// The site database is opened before registration, which reports whose customer data it still holds (held_customer.go). pgxpool.New does not connect.
-	pool, err := pgxpool.New(rootCtx, c.DBURL)
+	poolCfg, err := scdPoolConfig(c.DBURL)
+	if err != nil {
+		slog.Error("db config", "err", err)
+		os.Exit(1)
+	}
+	pool, err := pgxpool.NewWithConfig(rootCtx, poolCfg)
 	if err != nil {
 		slog.Error("db open", "err", err)
 		os.Exit(1)
@@ -635,6 +644,8 @@ func main() {
 		whatsapp:     whatsapp.NewStub(c.WhatsAppLogPath),
 		socialBase:   socialBase,
 		loginRL:      newLoginLimiter(),
+		settings:     newTTLCache(settingsCacheTTL),
+		waiters:      newSessionWaiters(),
 		pmsReg:       pmsReg,
 		pmsBuilt:     pmsBuilt,
 		db:           pool,
@@ -1028,6 +1039,9 @@ func main() {
 		go s.p3auth.attempts.RunPurge(rootCtx, time.Hour)
 	}
 
+	// Settings-change and session-active notifications; the TTL and the poll remain the fallback (AD-52).
+	go s.runNotifications(rootCtx, c.DBURL)
+
 	// Hourly anonymisation of guest data that outlived the site's retention settings.
 	go s.dataRetentionLoop(rootCtx)
 	go s.ledgerLoop(rootCtx)
@@ -1174,4 +1188,11 @@ func main() {
 	if metricsSrv != nil {
 		_ = metricsSrv.Shutdown(shutCtx)
 	}
+}
+
+// durableThrottleEnabled: the durable guest rate limit is always on in a production build (AD-32); the env value can only
+// switch it on in a development build, where a test script has no throttle.key and sets it deliberately. Production fails
+// closed at start when the key is missing (authsec.go) rather than running with no limit.
+func durableThrottleEnabled(env string) bool {
+	return buildprofile.Production || env == "true"
 }

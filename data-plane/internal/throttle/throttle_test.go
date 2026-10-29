@@ -240,3 +240,42 @@ func TestCleanupNeverRemovesActiveBlock(t *testing.T) {
 		t.Fatalf("cleanup should remove expired block (n=%d err=%v)", n, err)
 	}
 }
+
+// AD-51: the one-round-trip charge and the multi-statement fallback decide identically, step by step, including the
+// hard block, the retry time and the rule that a refused client does not charge the appliance-wide damper.
+func TestOneTripChargeMatchesTheMultiStatementPath(t *testing.T) {
+	db := testDB(t)
+	fast, _ := New(db, tkey, time.Minute)
+	slow, _ := New(db, tkey, time.Minute)
+	slow.noCharge.Store(true)
+	ctx := context.Background()
+	clk := time.Date(2026, 10, 29, 12, 0, 10, 0, time.UTC)
+	fast.SetClock(func() time.Time { return clk })
+	slow.SetClock(func() time.Time { return clk })
+	rules := func(who string, endpointVal string) []Rule {
+		return []Rule{
+			{Kind: ScopeEndpoint, Value: endpointVal, Method: MethodAny, Limit: 6, Global: true},
+			{Kind: ScopeDevice, Value: who, Method: "voucher", Limit: 2, Block: 15 * time.Minute},
+			{Kind: ScopeIP, Value: who, Method: "voucher", Limit: 3, Block: 15 * time.Minute},
+		}
+	}
+	for step := 0; step < 6; step++ {
+		a, errA := fast.Allow(ctx, rules("fast-client", "fast-endpoint")...)
+		b, errB := slow.Allow(ctx, rules("slow-client", "slow-endpoint")...)
+		if errA != nil || errB != nil {
+			t.Fatalf("step %d: errors %v / %v", step, errA, errB)
+		}
+		if a.Allowed != b.Allowed || a.Reason != b.Reason || a.RetryAfter != b.RetryAfter {
+			t.Fatalf("step %d: one trip %+v, multi-statement %+v", step, a, b)
+		}
+	}
+	// A refused client left the endpoint damper where only the allowed attempts put it.
+	var fastCount, slowCount int
+	_ = db.QueryRow(ctx, `SELECT COALESCE(sum(attempt_count),0) FROM public.auth_throttle_buckets WHERE scope_kind='endpoint' AND scope_key=$1`,
+		fast.scopeKey(ScopeEndpoint, "fast-endpoint")).Scan(&fastCount)
+	_ = db.QueryRow(ctx, `SELECT COALESCE(sum(attempt_count),0) FROM public.auth_throttle_buckets WHERE scope_kind='endpoint' AND scope_key=$1`,
+		slow.scopeKey(ScopeEndpoint, "slow-endpoint")).Scan(&slowCount)
+	if fastCount != slowCount {
+		t.Fatalf("endpoint damper charged %d times by the one-trip path, %d by the multi-statement path", fastCount, slowCount)
+	}
+}

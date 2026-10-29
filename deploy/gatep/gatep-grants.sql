@@ -342,6 +342,8 @@ GRANT EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) TO svc_acctd;
 \ir svc-signin-network-pause-grants.sql
 -- Disabled staff accounts are anonymised after a set period; staff addresses follow the activity log (0138).
 \ir svc-staff-retention-grants.sql
+-- Sign-in limits and capacity settings, device retention, settings/session change notifications (0170; AD-30/31/34/51/52/58).
+\ir svc-signin-capacity-grants.sql
 
 -- EXECUTE on the CANONICAL audited, versioned publication boundary. This is the only function the product
 -- calls to change checkout grace policy: it requires an active operator as actor, a bounded machine reason

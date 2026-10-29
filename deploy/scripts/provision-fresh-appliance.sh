@@ -392,6 +392,7 @@ SCD_POSTING_DB_URL=${SCD_POSTING_DB_URL}
 # sign-in was throttled only in memory (lost on every scd restart) although the contracts rely on the durable
 # throttle (ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE.md "Throttles"). Both fail closed if their key is missing.
 SCD_SECRETS_DIR=${ETC}/secrets
+# SCD_DURABLE_THROTTLE is always on in a production build (AD-32); the line below only states it.
 SCD_DURABLE_THROTTLE=true
 SCD_OTP_HMAC=true
 EOF

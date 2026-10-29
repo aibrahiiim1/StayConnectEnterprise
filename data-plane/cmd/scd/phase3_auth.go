@@ -1056,6 +1056,8 @@ const (
 	enforcementReserve     = 150 * time.Millisecond
 	// enforcementPoll stays short relative to the producer's one-second cadence.
 	enforcementPoll = 100 * time.Millisecond
+	// enforcementPollWithNotify is the safety-net poll while the activation notification is connected (AD-52).
+	enforcementPollWithNotify = time.Second
 )
 
 // enforcementDeadlineFor derives the wait from the caller's budget.
@@ -1074,6 +1076,18 @@ func enforcementDeadlineFor(ctx context.Context, now time.Time) time.Time {
 // needing no privileged channel.
 func (p *phase3Auth) awaitEnforced(ctx context.Context, sessionID string) (bool, error) {
 	deadline := enforcementDeadlineFor(ctx, time.Now())
+	// AD-52: wake when the database says the session became active; the poll is the fallback and the only mechanism while the
+	// notification connection is down. Registered BEFORE the first read, so an activation between the read and the wait is not missed.
+	var wake <-chan struct{}
+	poll := enforcementPoll
+	if w := p.srv.waiters; w != nil {
+		ch, release := w.wait(sessionID)
+		defer release()
+		wake = ch
+		if w.up.Load() {
+			poll = enforcementPollWithNotify
+		}
+	}
 	for {
 		var state string
 		var ended *time.Time
@@ -1095,7 +1109,8 @@ func (p *phase3Auth) awaitEnforced(ctx context.Context, sessionID string) (bool,
 		select {
 		case <-ctx.Done():
 			return false, ctx.Err()
-		case <-time.After(enforcementPoll):
+		case <-wake:
+		case <-time.After(poll):
 		}
 	}
 }
