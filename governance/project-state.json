@@ -1357,12 +1357,12 @@
     "audit_backlog": {
       "record": "docs/AUDIT_BACKLOG.md",
       "decisions": "docs/AUDIT_DECISIONS.md",
-      "as_of": "T0267",
-      "note": "Backend 258 rows: FIXED 143, ALREADY-FIXED 6, PARTIAL 48, NOT-REPRODUCIBLE 2, OPEN-DECISION 40, OPEN 19 (before: OPEN 229, OPEN-DECISION 22, PARTIAL 4, FIXED 3). Performance 82 rows: FIXED 27, ALREADY-FIXED 1, PARTIAL 12, OPEN-DECISION 24, OPEN 18 (before: OPEN 71, OPEN-DECISION 11). The audits are NOT closed: decisions remain. After T0267 every decision AD-1 to AD-68 has a disposition in docs/AUDIT_DECISION_DISPOSITIONS.md (implemented, accepted risk, documentation only, or evidence-dependent); the per-row statuses above are those of T0266 and were not individually rewritten.",
+      "as_of": "T0273",
+      "note": "Backend 258 rows: FIXED 143, ALREADY-FIXED 6, PARTIAL 48, NOT-REPRODUCIBLE 2, OPEN-DECISION 40, OPEN 19 (before: OPEN 229, OPEN-DECISION 22, PARTIAL 4, FIXED 3). Performance 82 rows: FIXED 27, ALREADY-FIXED 1, PARTIAL 12, OPEN-DECISION 24, OPEN 18 (before: OPEN 71, OPEN-DECISION 11). The audits are NOT closed: decisions remain. After T0267 every decision AD-1 to AD-68 has a disposition in docs/AUDIT_DECISION_DISPOSITIONS.md (implemented, accepted risk, documentation only, or evidence-dependent); the per-row statuses above are those of T0266 and were not individually rewritten. Closure round (D82, T0270 to T0273): the remaining actionable items are worked and deployed; docs/AUDIT_DECISION_DISPOSITIONS.md lists what is still not evidenced.",
       "dispositions": "docs/AUDIT_DECISION_DISPOSITIONS.md"
     }
   },
-  "latest_transition_id": "T0272",
+  "latest_transition_id": "T0273",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1858,16 +1858,16 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "BACKUP_SWEEP_ORDER_FIX",
+    "kind": "AUDIT_CLOSURE_DEPLOYMENT",
     "decision": "D82 (Product-Owner continuation of 2026-10-29: close the AD-1 to AD-68 mission).",
-    "decision_note": "The retention sweep keeps the newest copy of a config backup (found on Central). Not yet deployed at this receipt.",
-    "manifest": "docs/manifests/BackupSweepOrder-change-manifest.md",
-    "base": "20df43313f43520d52d5d27ce152c61a68e8fb4f",
-    "base_note": "Master after the merge of PR #269.",
-    "transition": "T0272",
-    "previous_delivery": "T0271",
-    "branch": "delivery/backup-sweep-order",
-    "note": "T0272. Go-Live not authorised."
+    "decision_note": "Deployment record: Central and the test appliance run the closure round (9613fb52679d); verification in installation manual A3.11.",
+    "manifest": "docs/manifests/AuditClosureDeployment-change-manifest.md",
+    "base": "9613fb52679d904ca0320c5cd9eeac23f06350b1",
+    "base_note": "Master after the merge of PR #270.",
+    "transition": "T0273",
+    "previous_delivery": "T0272",
+    "branch": "delivery/audit-closure-deployment-record",
+    "note": "T0273. Go-Live not authorised."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
