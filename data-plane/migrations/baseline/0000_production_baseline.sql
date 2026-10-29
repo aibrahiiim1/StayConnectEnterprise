@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0179, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0180, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -2858,18 +2858,32 @@ CREATE FUNCTION iam_v2.entitlement_usage_bytes(p_ent uuid, p_at timestamp with t
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
-  SELECT COALESCE(sum(ar.bytes_up),0)::bigint, COALESCE(sum(ar.bytes_down),0)::bigint,
-         count(*)::bigint, max(ar.sampled_at)
-  FROM iam_v2.accounting_records ar
-  JOIN iam_v2.sessions s ON s.id = ar.session_id
-  WHERE ar.sampled_at <= p_at
-    AND (
-      EXISTS (SELECT 1 FROM iam_v2.session_entitlement_bindings b
-              WHERE b.session_id = ar.session_id AND b.entitlement_id = p_ent
-                AND b.bound_from <= ar.sampled_at AND (b.bound_until IS NULL OR b.bound_until > ar.sampled_at))
-      OR (s.entitlement_id = p_ent
-          AND NOT EXISTS (SELECT 1 FROM iam_v2.session_entitlement_bindings b2 WHERE b2.session_id = ar.session_id))
-    );
+  WITH folded AS (
+    SELECT sum(a.bytes_up) AS up, sum(a.bytes_down) AS down, sum(a.records) AS n, max(a.latest_sampled_at) AS latest
+      FROM iam_v2.accounting_usage_entitlement a
+     WHERE a.entitlement_id = p_ent AND a.arm IN (0, 2)
+       AND (a.bucket + interval '1 hour' <= p_at OR a.latest_sampled_at <= p_at)),
+  live AS (
+    SELECT sum(r.bytes_up) AS up, sum(r.bytes_down) AS down, count(*) AS n, max(r.sampled_at) AS latest
+      FROM (
+        SELECT ar.bytes_up, ar.bytes_down, ar.sampled_at
+          FROM iam_v2.session_entitlement_bindings b
+          JOIN iam_v2.accounting_records ar ON ar.session_id = b.session_id
+           AND ar.sampled_at >= b.bound_from AND (b.bound_until IS NULL OR ar.sampled_at < b.bound_until)
+          JOIN iam_v2.sessions s ON s.id = ar.session_id
+         WHERE b.entitlement_id = p_ent AND ar.sampled_at <= p_at
+        UNION ALL
+        SELECT ar.bytes_up, ar.bytes_down, ar.sampled_at
+          FROM iam_v2.sessions s
+          JOIN iam_v2.accounting_records ar ON ar.session_id = s.id
+         WHERE s.entitlement_id = p_ent AND ar.sampled_at <= p_at
+           AND NOT EXISTS (SELECT 1 FROM iam_v2.session_entitlement_bindings b2 WHERE b2.session_id = s.id)
+      ) r)
+  SELECT (COALESCE(f.up, 0) + COALESCE(l.up, 0))::bigint,
+         (COALESCE(f.down, 0) + COALESCE(l.down, 0))::bigint,
+         (COALESCE(f.n, 0) + COALESCE(l.n, 0))::bigint,
+         greatest(f.latest, l.latest)
+    FROM folded f, live l;
 $$;
 
 
@@ -2877,7 +2891,7 @@ $$;
 -- Name: FUNCTION entitlement_usage_bytes(p_ent uuid, p_at timestamp with time zone); Type: COMMENT; Schema: iam_v2; Owner: -
 --
 
-COMMENT ON FUNCTION iam_v2.entitlement_usage_bytes(p_ent uuid, p_at timestamp with time zone) IS 'Bytes attributed to ONE Entitlement up to ONE instant, by binding interval, with the no-binding fallback for sessions that predate the binding table. SECURITY DEFINER so a caller can obtain the aggregate without holding SELECT on iam_v2.accounting_records -- svc_pmsd needs the number at a checkout boundary and Gate-P forbids it the table. It returns four aggregate numbers about an entitlement the caller must already be able to name; it exposes no guest, Stay, reservation, folio, payment or PMS data, and it writes nothing.';
+COMMENT ON FUNCTION iam_v2.entitlement_usage_bytes(p_ent uuid, p_at timestamp with time zone) IS 'Bytes attributed to ONE Entitlement up to ONE instant, by binding interval, with the no-binding fallback for sessions that predate the binding table. SECURITY DEFINER so a caller can obtain the aggregate without holding SELECT on iam_v2.accounting_records -- svc_pmsd needs the number at a checkout boundary and Gate-P forbids it the table. Since 0180 it adds the samples the purge has already folded into iam_v2.accounting_usage_entitlement to the raw samples still present, so the answer does not shrink when raw is purged. It returns four aggregate numbers about an entitlement the caller must already be able to name; it exposes no guest, Stay, reservation, folio, payment or PMS data, and it writes nothing.';
 
 
 --
@@ -5870,27 +5884,27 @@ CREATE FUNCTION iam_v2.p3_entitlement_data_usage(p_entitlement uuid) RETURNS big
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
-  SELECT COALESCE(sum(ar.bytes_up + ar.bytes_down), 0)::bigint
-    FROM iam_v2.accounting_records ar
-    JOIN iam_v2.session_entitlement_bindings b
-      ON b.session_id = ar.session_id
-     AND b.entitlement_id = p_entitlement
-     AND b.bound_from <= ar.sampled_at
-     AND (
-           -- the ordinary half-open interval, unchanged
-           b.bound_until IS NULL
-        OR b.bound_until > ar.sampled_at
-           -- ...and the closing instant, ONLY when nothing else owns the sample. At most one binding per
-           -- session can close at a given instant, and this arm is unreachable whenever a successor binding
-           -- covers it, so a sample is still attributed EXACTLY ONCE.
-        OR ( b.bound_until = ar.sampled_at
-             AND NOT EXISTS (
-                   SELECT 1
-                     FROM iam_v2.session_entitlement_bindings b2
-                    WHERE b2.session_id = ar.session_id
-                      AND b2.bound_from <= ar.sampled_at
-                      AND (b2.bound_until IS NULL OR b2.bound_until > ar.sampled_at)) )
-         )
+  SELECT (COALESCE((SELECT sum(a.bytes_up + a.bytes_down) FROM iam_v2.accounting_usage_entitlement a
+                     WHERE a.entitlement_id = p_entitlement AND a.arm IN (0, 1)), 0)
+        + COALESCE((SELECT sum(ar.bytes_up + ar.bytes_down)
+                      FROM iam_v2.session_entitlement_bindings b
+                      JOIN iam_v2.accounting_records ar
+                        ON ar.session_id = b.session_id
+                       AND b.bound_from <= ar.sampled_at
+                       AND (
+                             -- the ordinary half-open interval, unchanged
+                             b.bound_until IS NULL
+                          OR b.bound_until > ar.sampled_at
+                             -- ...and the closing instant, ONLY when nothing else owns the sample (0062)
+                          OR ( b.bound_until = ar.sampled_at
+                               AND NOT EXISTS (
+                                     SELECT 1
+                                       FROM iam_v2.session_entitlement_bindings b2
+                                      WHERE b2.session_id = ar.session_id
+                                        AND b2.bound_from <= ar.sampled_at
+                                        AND (b2.bound_until IS NULL OR b2.bound_until > ar.sampled_at)) )
+                           )
+                     WHERE b.entitlement_id = p_entitlement), 0))::bigint
 $$;
 
 
@@ -5898,7 +5912,7 @@ $$;
 -- Name: FUNCTION p3_entitlement_data_usage(p_entitlement uuid); Type: COMMENT; Schema: iam_v2; Owner: -
 --
 
-COMMENT ON FUNCTION iam_v2.p3_entitlement_data_usage(p_entitlement uuid) IS 'Authoritative bytes attributed to an Entitlement across every Session and Device bound to it. Attribution follows the half-open binding interval, plus the closing instant itself when no other binding for that session covers it - which is the terminal case, where the sample that exhausted the quota would otherwise be attributed to nothing. A Phase-5 rebinding always has a successor covering the boundary, so that arm cannot fire there and no sample is counted twice. entitlements.consumed_data_bytes must equal this.';
+COMMENT ON FUNCTION iam_v2.p3_entitlement_data_usage(p_entitlement uuid) IS 'Authoritative bytes attributed to an Entitlement across every Session and Device bound to it. Attribution follows the half-open binding interval, plus the closing instant itself when no other binding for that session covers it - which is the terminal case, where the sample that exhausted the quota would otherwise be attributed to nothing. A Phase-5 rebinding always has a successor covering the boundary, so that arm cannot fire there and no sample is counted twice. entitlements.consumed_data_bytes must equal this. Since 0180 the samples the raw purge has already folded into iam_v2.accounting_usage_entitlement are added to the raw samples still present.';
 
 
 --
@@ -9849,6 +9863,7 @@ CREATE FUNCTION iam_v2.p6_advance_data_crossing(p_tenant uuid, p_site uuid) RETU
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
 DECLARE e record; b record; v_new bigint; v_max bigint; v_est numeric; v_exact timestamptz; n int := 0;
+        v_folded bigint; v_first uuid;
 BEGIN
   FOR e IN
     SELECT en.id, COALESCE(en.data_quota_bytes, spr.data_quota_bytes) AS quota
@@ -9902,6 +9917,11 @@ BEGIN
       IF v_exact IS NULL THEN
         -- The checkpoint overstated (an attribution interval shrank after it counted). Recount every binding of
         -- this entitlement exactly, so the estimate is honest again and this branch is not taken every tick.
+        -- The samples the purge has already folded are no longer raw: they are carried by the first checkpoint row.
+        SELECT COALESCE(sum(a.bytes_up + a.bytes_down), 0) INTO v_folded
+          FROM iam_v2.accounting_usage_entitlement a WHERE a.entitlement_id = e.id AND a.arm = 0;
+        SELECT p2.binding_id INTO v_first FROM iam_v2.data_crossing_progress p2
+         WHERE p2.entitlement_id = e.id ORDER BY p2.binding_id LIMIT 1;
         UPDATE iam_v2.data_crossing_progress pr
            SET counted_bytes = COALESCE((
                  SELECT sum(ar.bytes_up + ar.bytes_down)
@@ -9909,7 +9929,8 @@ BEGIN
                    JOIN iam_v2.session_entitlement_bindings sb ON sb.id = pr.binding_id
                   WHERE ar.session_id = pr.session_id AND ar.sample_seq <= pr.examined_seq
                     AND sb.bound_from <= ar.sampled_at
-                    AND (sb.bound_until IS NULL OR sb.bound_until > ar.sampled_at)), 0),
+                    AND (sb.bound_until IS NULL OR sb.bound_until > ar.sampled_at)), 0)
+                 + CASE WHEN pr.binding_id = v_first THEN v_folded ELSE 0 END,
                updated_at = now()
          WHERE pr.entitlement_id = e.id;
       END IF;
@@ -9927,7 +9948,7 @@ END $$;
 -- Name: FUNCTION p6_advance_data_crossing(p_tenant uuid, p_site uuid); Type: COMMENT; Schema: iam_v2; Owner: -
 --
 
-COMMENT ON FUNCTION iam_v2.p6_advance_data_crossing(p_tenant uuid, p_site uuid) IS 'Advances the data-crossing checkpoint of every live, quota-bearing entitlement of a site by the accounting records that arrived since the last call (0122), and establishes the exact crossing instant once the running total reaches the quota. Called by acctd before the expiry sweep. Deletes nothing.';
+COMMENT ON FUNCTION iam_v2.p6_advance_data_crossing(p_tenant uuid, p_site uuid) IS 'Advances the data-crossing checkpoint of every live, quota-bearing entitlement of a site by the accounting records that arrived since the last call (0122), and establishes the exact crossing instant once the running total reaches the quota. Since 0180 the recount of an overstated checkpoint keeps the bytes the raw purge has folded. Called by acctd before the expiry sweep. Deletes nothing.';
 
 
 --
@@ -10006,20 +10027,30 @@ CREATE FUNCTION iam_v2.p6_data_crossing_full(p_entitlement uuid) RETURNS timesta
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
-  SELECT min(x.sampled_at)
-    FROM iam_v2.entitlements e
-    LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id
-    CROSS JOIN LATERAL (
-      SELECT ar.sampled_at,
-             sum(ar.bytes_up + ar.bytes_down) OVER (ORDER BY ar.sampled_at, ar.id) AS running
-        FROM iam_v2.accounting_records ar
-        JOIN iam_v2.session_entitlement_bindings b ON b.session_id = ar.session_id
-         AND b.entitlement_id = e.id AND b.bound_from <= ar.sampled_at
-         AND (b.bound_until IS NULL OR b.bound_until > ar.sampled_at)
-    ) x
-   WHERE e.id = p_entitlement
-     AND COALESCE(e.data_quota_bytes, spr.data_quota_bytes) IS NOT NULL
-     AND x.running >= COALESCE(e.data_quota_bytes, spr.data_quota_bytes);
+  WITH q AS (
+    SELECT COALESCE(e.data_quota_bytes, spr.data_quota_bytes) AS quota
+      FROM iam_v2.entitlements e
+      LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id
+     WHERE e.id = p_entitlement
+       AND COALESCE(e.data_quota_bytes, spr.data_quota_bytes) IS NOT NULL),
+  fb AS (
+    SELECT a.latest_sampled_at AS t,
+           sum(a.bytes_up + a.bytes_down) OVER (ORDER BY a.bucket) AS cum
+      FROM iam_v2.accounting_usage_entitlement a
+     WHERE a.entitlement_id = p_entitlement AND a.arm = 0),
+  base AS (SELECT COALESCE(max(fb.cum), 0) AS folded FROM fb),
+  lr AS (
+    SELECT ar.sampled_at,
+           base.folded + sum(ar.bytes_up + ar.bytes_down) OVER (ORDER BY ar.sampled_at, ar.id) AS running
+      FROM base,
+           iam_v2.session_entitlement_bindings b
+      JOIN iam_v2.accounting_records ar ON ar.session_id = b.session_id AND b.bound_from <= ar.sampled_at
+       AND (b.bound_until IS NULL OR b.bound_until > ar.sampled_at)
+     WHERE b.entitlement_id = p_entitlement)
+  SELECT min(c.t)
+    FROM (SELECT fb.t FROM fb, q WHERE fb.cum >= q.quota
+          UNION ALL
+          SELECT lr.sampled_at FROM lr, q WHERE lr.running >= q.quota) c;
 $$;
 
 
@@ -10027,7 +10058,7 @@ $$;
 -- Name: FUNCTION p6_data_crossing_full(p_entitlement uuid); Type: COMMENT; Schema: iam_v2; Owner: -
 --
 
-COMMENT ON FUNCTION iam_v2.p6_data_crossing_full(p_entitlement uuid) IS 'The exact data-quota crossing by full derivation over every attributed accounting record (the pre-0122 p6_data_crossing). Called only once the checkpointed running total says the quota may have been reached.';
+COMMENT ON FUNCTION iam_v2.p6_data_crossing_full(p_entitlement uuid) IS 'The exact data-quota crossing by full derivation over every attributed accounting record (the pre-0122 p6_data_crossing). Since 0180 it also counts the samples the raw purge folded into iam_v2.accounting_usage_entitlement: exact while the crossing sample is raw, the latest sample time of its hour once it has been folded. Called only once the checkpointed running total says the quota may have been reached.';
 
 
 --
@@ -12822,7 +12853,9 @@ BEGIN
   SELECT watermark INTO v_wm FROM iam_v2.site_usage_rollup_state WHERE tenant_id = p_tenant AND site_id = p_site;
   PERFORM set_config('iam_v2.accounting_purge', 'retention', true);
 
-  -- Tier 1: raw samples that have been rolled up.
+  -- Tier 1: raw samples that have been rolled up. The delete and the fold into the per-entitlement accumulator are ONE statement:
+  -- the rows that are deleted are exactly the rows folded (RETURNING), so a repeat or an interrupted run cannot count a sample
+  -- twice or lose one.
   IF v_wm IS NOT NULL THEN
     v_cut := least(now() - make_interval(days => v_set.raw_retention_days), v_wm);
     v_tier := 0;
@@ -12830,9 +12863,41 @@ BEGIN
       WITH doomed AS (
         SELECT ar.id FROM iam_v2.accounting_records ar
          WHERE ar.tenant_id = p_tenant AND ar.site_id = p_site AND ar.ingested_at < v_cut
-         LIMIT p_batch)
-      DELETE FROM iam_v2.accounting_records ar USING doomed WHERE ar.id = doomed.id;
-      GET DIAGNOSTICS v_n = ROW_COUNT;
+         LIMIT p_batch),
+      del AS (
+        DELETE FROM iam_v2.accounting_records ar USING doomed WHERE ar.id = doomed.id
+        RETURNING ar.session_id, ar.sampled_at, ar.bytes_up, ar.bytes_down),
+      att AS (
+        -- arm 0: the half-open binding interval
+        SELECT b.entitlement_id, 0::smallint AS arm, d.sampled_at, d.bytes_up, d.bytes_down
+          FROM del d JOIN iam_v2.session_entitlement_bindings b
+            ON b.session_id = d.session_id AND b.bound_from <= d.sampled_at
+           AND (b.bound_until IS NULL OR b.bound_until > d.sampled_at)
+        UNION ALL
+        -- arm 1: the closing instant, only when no other binding of the session covers it (0062)
+        SELECT b.entitlement_id, 1::smallint, d.sampled_at, d.bytes_up, d.bytes_down
+          FROM del d JOIN iam_v2.session_entitlement_bindings b
+            ON b.session_id = d.session_id AND b.bound_from <= d.sampled_at AND b.bound_until = d.sampled_at
+         WHERE NOT EXISTS (SELECT 1 FROM iam_v2.session_entitlement_bindings b2
+                            WHERE b2.session_id = d.session_id AND b2.bound_from <= d.sampled_at
+                              AND (b2.bound_until IS NULL OR b2.bound_until > d.sampled_at))
+        UNION ALL
+        -- arm 2: a session with no binding row at all, to its current entitlement (0065)
+        SELECT s.entitlement_id, 2::smallint, d.sampled_at, d.bytes_up, d.bytes_down
+          FROM del d JOIN iam_v2.sessions s ON s.id = d.session_id
+         WHERE NOT EXISTS (SELECT 1 FROM iam_v2.session_entitlement_bindings b3 WHERE b3.session_id = d.session_id)),
+      fold AS (
+        INSERT INTO iam_v2.accounting_usage_entitlement AS t
+               (tenant_id, site_id, entitlement_id, arm, bucket, bytes_up, bytes_down, records, latest_sampled_at)
+        SELECT p_tenant, p_site, a.entitlement_id, a.arm, date_trunc('hour', a.sampled_at),
+               sum(a.bytes_up)::bigint, sum(a.bytes_down)::bigint, count(*), max(a.sampled_at)
+          FROM att a GROUP BY a.entitlement_id, a.arm, date_trunc('hour', a.sampled_at)
+        ON CONFLICT (entitlement_id, bucket, arm) DO UPDATE
+           SET bytes_up = t.bytes_up + EXCLUDED.bytes_up, bytes_down = t.bytes_down + EXCLUDED.bytes_down,
+               records = t.records + EXCLUDED.records,
+               latest_sampled_at = greatest(t.latest_sampled_at, EXCLUDED.latest_sampled_at)
+        RETURNING 1)
+      SELECT count(*) INTO v_n FROM del;
       v_tier := v_tier + v_n;
       EXIT WHEN v_n < p_batch OR clock_timestamp() - v_t0 > v_budget;
     END LOOP;
@@ -12863,7 +12928,9 @@ BEGIN
     END IF;
   END IF;
 
-  -- Tier 3: hourly totals, under the site's usage-detail retention.
+  -- Tier 3: hourly totals, under the site's usage-detail retention; and the per-entitlement accumulator rows (0180) under the
+  -- same cut-off: only an entitlement that is TERMINATED and whose every session (by binding or by current pointer) ended before
+  -- the cut-off loses them, so an entitlement that can still be charged, quota-tested or checked out never loses its total.
   SELECT g.detail_retention_days INTO v_days FROM iam_v2.accounting_retention_get(p_tenant, p_site) g;
   IF v_days IS NOT NULL AND clock_timestamp() - v_t0 <= v_budget THEN
     v_cut := now() - make_interval(days => v_days);
@@ -12887,6 +12954,29 @@ BEGIN
       v_tier := v_tier + v_n;
       EXIT WHEN v_n < p_batch OR clock_timestamp() - v_t0 > v_budget;
     END LOOP;
+    IF clock_timestamp() - v_t0 <= v_budget THEN
+      LOOP
+        DELETE FROM iam_v2.accounting_usage_entitlement a
+         USING (SELECT x.entitlement_id, x.bucket, x.arm
+                  FROM iam_v2.accounting_usage_entitlement x
+                  JOIN iam_v2.entitlements en ON en.id = x.entitlement_id
+                 WHERE x.tenant_id = p_tenant AND x.site_id = p_site
+                   AND x.bucket < v_cut
+                   AND en.status = 'TERMINATED'
+                   AND NOT EXISTS (SELECT 1 FROM iam_v2.session_entitlement_bindings b
+                                     JOIN iam_v2.sessions se ON se.id = b.session_id
+                                    WHERE b.entitlement_id = x.entitlement_id
+                                      AND (se.ended IS NULL OR se.ended >= v_cut))
+                   AND NOT EXISTS (SELECT 1 FROM iam_v2.sessions se
+                                    WHERE se.entitlement_id = x.entitlement_id
+                                      AND (se.ended IS NULL OR se.ended >= v_cut))
+                 LIMIT p_batch) d
+         WHERE a.entitlement_id = d.entitlement_id AND a.bucket = d.bucket AND a.arm = d.arm;
+        GET DIAGNOSTICS v_n = ROW_COUNT;
+        v_tier := v_tier + v_n;
+        EXIT WHEN v_n < p_batch OR clock_timestamp() - v_t0 > v_budget;
+      END LOOP;
+    END IF;
     IF v_tier > 0 THEN
       INSERT INTO iam_v2.accounting_purge_runs (tenant_id, site_id, retention_days, cutoff, records_deleted)
       VALUES (p_tenant, p_site, v_days, v_cut, v_tier);
@@ -12903,7 +12993,7 @@ END $$;
 -- Name: FUNCTION purge_accounting_detail(p_tenant uuid, p_site uuid, p_batch integer); Type: COMMENT; Schema: iam_v2; Owner: -
 --
 
-COMMENT ON FUNCTION iam_v2.purge_accounting_detail(p_tenant uuid, p_site uuid, p_batch integer) IS 'The accounting retention purge (0122; 0131; 0175 AD-48): rolled-up raw samples past raw_retention_days, per-minute rows past minute_retention_days, and hourly totals past the usage-detail retention (ended sessions, every entitlement TERMINATED), within purge_budget_seconds. Totals on entitlements and sessions are not touched.';
+COMMENT ON FUNCTION iam_v2.purge_accounting_detail(p_tenant uuid, p_site uuid, p_batch integer) IS 'The accounting retention purge (0122; 0131; 0175 AD-48; 0180): rolled-up raw samples past raw_retention_days (folded into iam_v2.accounting_usage_entitlement in the same statement), per-minute rows past minute_retention_days, and hourly totals past the usage-detail retention (ended sessions, every entitlement TERMINATED) with the accumulator rows of finished entitlements, within purge_budget_seconds. Totals on entitlements and sessions are not touched.';
 
 
 --
@@ -17467,6 +17557,42 @@ CREATE TABLE iam_v2.accounting_retention_changes (
     CONSTRAINT arc_actor CHECK ((length(btrim(changed_by)) > 0)),
     CONSTRAINT arc_reason CHECK (((length(btrim(change_reason)) >= 4) AND (length(btrim(change_reason)) <= 500)))
 );
+
+
+--
+-- Name: accounting_usage_entitlement; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.accounting_usage_entitlement (
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    entitlement_id uuid NOT NULL,
+    arm smallint NOT NULL,
+    bucket timestamp with time zone NOT NULL,
+    bytes_up bigint DEFAULT 0 NOT NULL,
+    bytes_down bigint DEFAULT 0 NOT NULL,
+    records bigint DEFAULT 0 NOT NULL,
+    latest_sampled_at timestamp with time zone NOT NULL,
+    exact boolean DEFAULT true NOT NULL,
+    CONSTRAINT aue_arm CHECK ((arm = ANY (ARRAY[0, 1, 2]))),
+    CONSTRAINT aue_down CHECK ((bytes_down >= 0)),
+    CONSTRAINT aue_records CHECK ((records >= 0)),
+    CONSTRAINT aue_up CHECK ((bytes_up >= 0))
+);
+
+
+--
+-- Name: TABLE accounting_usage_entitlement; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.accounting_usage_entitlement IS 'Per Entitlement and hour of sampled_at: the usage of raw accounting samples that purge_accounting_detail has DELETED, folded in the same statement as the delete (0180). Raw samples still present are NOT in here; readers add the two. arm 0 = half-open binding interval, arm 1 = the closing-instant sample (0062), arm 2 = session without any binding row (0065). exact = false only for rows backfilled by 0180 from the per-session hour tier where a binding boundary fell inside the hour. Kept as long as the entitlement''s sessions'' hourly totals (never while the entitlement is not TERMINATED).';
+
+
+--
+-- Name: COLUMN accounting_usage_entitlement.exact; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.accounting_usage_entitlement.exact IS 'false = best effort (backfilled by 0180 from accounting_usage_hour, attributed by the first binding overlapping the hour); true = folded sample by sample.';
 
 
 --
@@ -23865,6 +23991,14 @@ ALTER TABLE ONLY iam_v2.accounting_retention_changes
 
 
 --
+-- Name: accounting_usage_entitlement accounting_usage_entitlement_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.accounting_usage_entitlement
+    ADD CONSTRAINT accounting_usage_entitlement_pkey PRIMARY KEY (entitlement_id, bucket, arm);
+
+
+--
 -- Name: accounting_usage_hour accounting_usage_hour_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -26634,6 +26768,13 @@ CREATE INDEX aps_changes_lookup ON iam_v2.appliance_product_setting_changes USIN
 --
 
 CREATE INDEX arc_site ON iam_v2.accounting_retention_changes USING btree (tenant_id, site_id, changed_at DESC);
+
+
+--
+-- Name: aue_site_bucket; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX aue_site_bucket ON iam_v2.accounting_usage_entitlement USING btree (tenant_id, site_id, bucket);
 
 
 --
