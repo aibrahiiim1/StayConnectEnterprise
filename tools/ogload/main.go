@@ -125,15 +125,27 @@ func cmdSetup() {
 	n := flag.Int("n", 100, "clients")
 	iface := flag.String("iface", "eth0", "LAN-side interface of this container")
 	par := flag.Int("parallel", 24, "concurrent DHCP clients")
+	offset := flag.Int("offset", 0, "first client index (clients are numbered offset..offset+n-1)")
+	vlan := flag.Int("vlan", 0, "tag the clients with this VLAN id (a lan0.<id> sub-interface is created)")
+	appendState := flag.Bool("append", false, "add to the clients already in the state file")
 	flag.Parse()
 	_ = os.MkdirAll("/var/lib/ogload/leases", 0o755)
+	if *vlan > 0 {
+		sub := fmt.Sprintf("%s.%d", *iface, *vlan)
+		_, _ = sh("ip", "link", "add", "link", *iface, "name", sub, "type", "vlan", "id", strconv.Itoa(*vlan))
+		if o, err := sh("ip", "link", "set", sub, "up"); err != nil {
+			fatal("vlan %s: %s", sub, o)
+		}
+		*iface = sub
+	}
 	cs := make([]*Client, *n)
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, *par)
 	var ok, failed int64
 	t0 := time.Now()
 	for i := 0; i < *n; i++ {
-		c := &Client{Idx: i, NS: fmt.Sprintf("cl%04d", i), MAC: fmt.Sprintf("02:0d:ab:%02x:%02x:%02x", (i>>16)&255, (i>>8)&255, i&255)}
+		gi := i + *offset
+		c := &Client{Idx: gi, NS: fmt.Sprintf("cl%04d", gi), MAC: fmt.Sprintf("02:0d:ab:%02x:%02x:%02x", (gi>>16)&255, (gi>>8)&255, gi&255)}
 		cs[i] = c
 		wg.Add(1)
 		sem <- struct{}{}
@@ -152,6 +164,9 @@ func cmdSetup() {
 	}
 	wg.Wait()
 	var good []*Client
+	if *appendState {
+		good = load()
+	}
 	for _, c := range cs {
 		if c.IP != "" {
 			good = append(good, c)
