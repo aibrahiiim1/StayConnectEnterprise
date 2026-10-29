@@ -109,12 +109,15 @@ iam_v2.sessions.mac
 iam_v2.sign_in_attempts.device_mac
 iam_v2.sign_in_attempts.room_in_mirror
 iam_v2.sign_in_attempts.submitted_room
+iam_v2.signin_capacity_settings_changes.change_reason
 iam_v2.site_card_payment_setting_changes.change_reason
 iam_v2.site_card_recheck_setting_changes.reason
 iam_v2.site_data_retention.inactive_identity_days
 iam_v2.site_data_retention.staff_note_days
 iam_v2.site_module_changes.change_reason
 iam_v2.site_payment_domain_changes.change_reason
+iam_v2.site_signin_capacity_settings.otp_destination_hourly_cap
+iam_v2.site_usage_rollup_changes.change_reason
 iam_v2.stay_events.external_event_identity
 iam_v2.stay_guests.display_name
 iam_v2.stay_guests.external_guest_id
@@ -159,6 +162,8 @@ public.backup_key_holder_events.reason
 public.backup_key_holders.label
 public.backup_key_holders.remove_reason
 public.dhcp_reservations.mac
+public.enforcement_policy.mac_binding_enabled
+public.enforcement_policy_changes.reason
 public.guest_networks.name
 public.guest_networks.ssid_label
 public.network_config_revisions.failure_reason

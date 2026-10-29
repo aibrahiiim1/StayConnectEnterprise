@@ -32,6 +32,21 @@ COMMENT ON TABLE iam_v2.ledger_mac_key IS
 INSERT INTO iam_v2.ledger_mac_key (key) SELECT public.gen_random_bytes(32)
  WHERE NOT EXISTS (SELECT 1 FROM iam_v2.ledger_mac_key);
 
+-- A baseline-built appliance (every new install) carries the schema but not the rows the migrations inserted, so the key is also
+-- made on first use, under the ledger's own lock. Nothing is lost by that: a database with no key has no MACed entry (an entry is
+-- MACed in the transaction that makes it), and ledger_mac_key_install can still put an escrowed key back while none exists.
+CREATE OR REPLACE FUNCTION iam_v2.ledger_mac_key_ensure() RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM iam_v2.ledger_mac_key) THEN
+    PERFORM pg_advisory_xact_lock(hashtext('stayconnect-erasure-ledger'));
+    INSERT INTO iam_v2.ledger_mac_key (key) SELECT public.gen_random_bytes(32)
+     WHERE NOT EXISTS (SELECT 1 FROM iam_v2.ledger_mac_key);
+  END IF;
+END $$;
+
 ALTER TABLE iam_v2.erasure_ledger ADD COLUMN IF NOT EXISTS mac text;
 DO $c$
 BEGIN
@@ -99,9 +114,15 @@ $$;
 
 -- scd reads the key to MAC the head note of the secondary storage and to issue receipts; edged cannot.
 CREATE OR REPLACE FUNCTION iam_v2.ledger_mac_key_get() RETURNS text
-    LANGUAGE sql STABLE SECURITY DEFINER
+    LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'iam_v2', 'pg_temp'
-    AS $$ SELECT encode(k.key, 'hex') FROM iam_v2.ledger_mac_key k $$;
+    AS $$
+DECLARE v text;
+BEGIN
+  PERFORM iam_v2.ledger_mac_key_ensure();
+  SELECT encode(k.key, 'hex') INTO v FROM iam_v2.ledger_mac_key k;
+  RETURN v;
+END $$;
 
 -- A restored database that predates this migration has a NEW key, which cannot check entries MACed with the old one. scd puts
 -- the old key back (from the live database it is replacing, or from the key holders' escrow), but only while no entry here
@@ -142,6 +163,7 @@ BEGIN
     RAISE EXCEPTION 'unknown ledger entry kind %', p_kind USING ERRCODE = 'invalid_parameter_value';
   END IF;
   PERFORM pg_advisory_xact_lock(hashtext('stayconnect-erasure-ledger'));
+  PERFORM iam_v2.ledger_mac_key_ensure();
   SELECT * INTO m FROM ledger_meta;
   SELECT l.seq, l.hash INTO v_seq, v_prev FROM erasure_ledger l ORDER BY l.seq DESC LIMIT 1;
   v_seq := COALESCE(v_seq, 0) + 1;
@@ -351,6 +373,7 @@ REVOKE ALL ON iam_v2.ledger_mac_key FROM PUBLIC;
 REVOKE ALL ON FUNCTION iam_v2.ledger_mac_of(text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION iam_v2.ledger_receipt_of(text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION iam_v2.ledger_mac_ok(text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION iam_v2.ledger_mac_key_ensure() FROM PUBLIC;
 REVOKE ALL ON FUNCTION iam_v2.ledger_mac_key_get() FROM PUBLIC;
 REVOKE ALL ON FUNCTION iam_v2.ledger_mac_key_install(text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION iam_v2.ledger_seal_legacy(uuid,uuid) FROM PUBLIC;
@@ -363,6 +386,7 @@ BEGIN
     EXECUTE 'ALTER FUNCTION iam_v2.ledger_mac_of(text) OWNER TO iam_v2_owner';
     EXECUTE 'ALTER FUNCTION iam_v2.ledger_receipt_of(text) OWNER TO iam_v2_owner';
     EXECUTE 'ALTER FUNCTION iam_v2.ledger_mac_ok(text,text) OWNER TO iam_v2_owner';
+    EXECUTE 'ALTER FUNCTION iam_v2.ledger_mac_key_ensure() OWNER TO iam_v2_owner';
     EXECUTE 'ALTER FUNCTION iam_v2.ledger_mac_key_get() OWNER TO iam_v2_owner';
     EXECUTE 'ALTER FUNCTION iam_v2.ledger_mac_key_install(text) OWNER TO iam_v2_owner';
     EXECUTE 'ALTER FUNCTION iam_v2.ledger_seal_legacy(uuid,uuid) OWNER TO iam_v2_owner';

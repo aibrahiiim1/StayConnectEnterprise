@@ -142,6 +142,7 @@ END $function$;
 DROP FUNCTION IF EXISTS iam_v2.ledger_confirm_checked(text[], text[]);
 DROP FUNCTION IF EXISTS iam_v2.ledger_seal_legacy(uuid, uuid);
 DROP FUNCTION IF EXISTS iam_v2.ledger_mac_key_install(text);
+DROP FUNCTION IF EXISTS iam_v2.ledger_mac_key_ensure();
 DROP FUNCTION IF EXISTS iam_v2.ledger_mac_key_get();
 DROP FUNCTION IF EXISTS iam_v2.ledger_mac_ok(text, text);
 DROP FUNCTION IF EXISTS iam_v2.ledger_receipt_of(text);
