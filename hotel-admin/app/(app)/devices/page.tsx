@@ -24,6 +24,7 @@ import { useToast } from "@/components/ui/toast";
 import { Smartphone } from "lucide-react";
 import { formatRelative } from "@/lib/utils";
 import { DeviceDetailDialog } from "@/components/devices/device-detail";
+import { SigninLimitsCard } from "@/components/devices/signin-limits-card";
 import { REASON_HINT, REASON_MAX_CHARS, reasonOk } from "@/lib/reason";
 import { useEditFocus } from "@/lib/use-edit-focus";
 
@@ -108,6 +109,7 @@ export default function DevicesPage() {
       />
 
       {maySeeSettings && <DeviceChangesCard canEdit={mayConfigure} />}
+      {maySeeSettings && <SigninLimitsCard canEdit={mayConfigure} />}
 
       <Card className="overflow-hidden">
         <FilterBar

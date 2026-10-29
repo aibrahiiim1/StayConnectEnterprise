@@ -360,6 +360,11 @@ func main() {
 				r.Use(s.resourcePermission("auth-methods"))
 				r.Mount("/", s.deviceSettingsRoutes())
 			})
+			// One-time-code caps, the sign-in ceiling, the room-pause exemption, device retention and the uploaded-image limits (0170).
+			r.Route("/signin-capacity-settings", func(r chi.Router) {
+				r.Use(s.resourcePermission("auth-methods"))
+				r.Mount("/", s.signinCapacityRoutes())
+			})
 			// Retention removes history when shortened, so it sits under the "backups" key (site administrators write).
 			r.Route("/accounting-retention", func(r chi.Router) {
 				r.Use(s.resourcePermission("backups"))
