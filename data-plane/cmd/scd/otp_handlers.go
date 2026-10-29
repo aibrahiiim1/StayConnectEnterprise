@@ -218,7 +218,9 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 			return otp.Issue(ctx, s.db, s.otpRing, p)
 		}
 	}
+	otpLimits := s.signinCapacity(r.Context()).OTP
 	issued, err := issue(r.Context(), otp.IssueParams{
+		Limits:      otpLimits,
 		TenantID:    s.tenID,
 		ApplianceID: s.applID,
 		TemplateID:  method.TemplateID,
@@ -233,6 +235,8 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, otp.ErrCooldown):
 			httpErr(w, http.StatusTooManyRequests, "wait before requesting another code")
 		case errors.Is(err, otp.ErrHourlyCap):
+			httpErr(w, http.StatusTooManyRequests, "too many requests this hour")
+		case errors.Is(err, otp.ErrDestinationCap):
 			httpErr(w, http.StatusTooManyRequests, "too many requests this hour")
 		case errors.Is(err, otp.ErrIPRateLimited):
 			httpErr(w, http.StatusTooManyRequests, "too many requests from your network")
@@ -256,7 +260,7 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 	var sendErr error
 	switch channelLabel {
 	case "sms":
-		shortText := fmt.Sprintf("Wi-Fi code: %s (expires in %dm)", issued.Code, int(otp.DefaultTTL.Minutes()))
+		shortText := fmt.Sprintf("Wi-Fi code: %s (expires in %dm)", issued.Code, int(otpLimits.Lifetime.Minutes()))
 		if link != "" {
 			shortText += " " + link
 		}
@@ -272,7 +276,7 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 			sendErr = waSender.Send(r.Context(), whatsapp.Message{
 				To:         dest,
 				Code:       issued.Code,
-				TTLMinutes: int(otp.DefaultTTL.Minutes()),
+				TTLMinutes: int(otpLimits.Lifetime.Minutes()),
 			})
 		}
 	}
@@ -318,7 +322,8 @@ func (s *server) authorizeOTP(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, "bad mac")
 		return
 	}
-	if ok, retry := s.throttleGuard(r.Context(), "otp", ip, mac, ""); !ok {
+	// The appliance-wide ceiling was charged when the code was issued; verifying it is the same guest (AD-51).
+	if ok, retry := s.throttleGuardNoCeiling(r.Context(), "otp", ip, mac, ""); !ok {
 		w.Header().Set("Retry-After", strconv.Itoa(int(retry.Seconds())))
 		writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "TOO_MANY_ATTEMPTS"})
 		return
