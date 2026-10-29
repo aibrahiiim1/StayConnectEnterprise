@@ -23,9 +23,9 @@ const authWindow = time.Minute
 // Abuse dampers behind the operator-visible sign-in protection settings; deliberately not settings themselves.
 const (
 	throttleEndpointPerWindow = signinCeilingFloor // the floor of the appliance-wide ceiling; the effective value is signinCeiling (AD-51)
-	throttleClientPerWindow   = 30               // one source IP, or one device, for one method
-	throttleIdentityPerWindow = 10               // one identity from one client, for one method
-	throttleBlock             = 15 * time.Minute // a client-scoped cap, once exceeded, blocks this long
+	throttleClientPerWindow   = 30                 // one source IP, or one device, for one method
+	throttleIdentityPerWindow = 10                 // one identity from one client, for one method
+	throttleBlock             = 15 * time.Minute   // a client-scoped cap, once exceeded, blocks this long
 )
 
 // identityPerClient scopes the identity throttle to the identity plus the client making the attempt; the store HMACs it.

@@ -61,8 +61,8 @@ func (l Limits) WithDefaults() Limits {
 }
 
 var (
-	ErrCooldown         = errors.New("otp: cooldown — wait before requesting another code")
-	ErrHourlyCap        = errors.New("otp: too many requests this hour")
+	ErrCooldown  = errors.New("otp: cooldown — wait before requesting another code")
+	ErrHourlyCap = errors.New("otp: too many requests this hour")
 	// ErrDestinationCap: this destination has been sent its ceiling of codes this hour, from all devices together.
 	ErrDestinationCap   = errors.New("otp: too many codes sent to this destination this hour")
 	ErrIPRateLimited    = errors.New("otp: too many requests from your network")

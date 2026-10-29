@@ -61,9 +61,12 @@ func envOr(k, d string) string {
 }
 
 type server struct {
-	db        *pgxpool.Pool
-	propsOnce sync.Once
-	props     *proposalStore
+	db *pgxpool.Pool
+	// assetOpt turns an uploaded portal image into its stored form in the background (AD-58); created on first use.
+	assetOptOnce sync.Once
+	assetOpt     *assetOptimiser
+	propsOnce    sync.Once
+	props        *proposalStore
 	// dbDefaultPassword warns while the database accepts its default superuser password.
 	dbDefaultPassword *defaultDBPasswordCheck
 	scd               *scdClient
