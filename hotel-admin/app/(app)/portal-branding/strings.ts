@@ -184,6 +184,8 @@ export const PORTAL_STRINGS: PortalString[] = [
   { group: "Messages", key: "err.device.reconnect", english: "We couldn't detect your device. Please reconnect to the Wi-Fi and try again." },
   { group: "Messages", key: "err.attempts.moment", english: "Too many attempts. Please wait a moment and try again." },
   { group: "Messages", key: "err.free.used", english: "You've used your free access here, and no other package is available for you right now. Please contact the site team." },
+  { group: "Messages", key: "err.busy", english: "The service is busy right now. Please try again in a moment." },
+  { group: "Messages", key: "busy.moment", english: "One moment…" },
   { group: "Messages", key: "err.poststay", english: "We could not verify your stay. Please check your details or contact the site team for assistance.", module: "hospitality" },
   { group: "Messages", key: "err.timeout.title", english: "This is taking longer than expected" },
   { group: "Messages", key: "err.timeout", english: "We did not get an answer in time. If you were connecting, check whether your device is online before you try again." },
