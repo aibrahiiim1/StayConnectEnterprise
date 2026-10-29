@@ -1201,6 +1201,19 @@
       "authorization_evidence": "The Product Owner's mission of 2026-10-28 (GOAL: complete the remaining cleanup from PR #263 and comprehensively remediate the backend, performance and security audit findings in one end-to-end mission).",
       "does_not_authorize": "A production Central deployment, active PKI changes, destructive migrations, financial transactions, PMS posting, history rewriting, Go-Live, contacting retired servers, or weakening validation. New product, architecture, security, licensing, networking, PMS or financial semantics stay Product-Owner decisions (docs/AUDIT_DECISIONS.md).",
       "implementation": "Branch claude/vigilant-keller-sag14r, recorded by T0266: eight remediation workstreams merged; appliance migrations 0159-0161 and Central migrations 0057-0058 (additive); installer creates a new Central's CA with ctrlapi init-ca; docs/AUDIT_BACKLOG.md and docs/AUDIT_DECISIONS.md."
+    },
+    {
+      "id": "D81",
+      "decided_on": "2026-10-29",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-10-29",
+      "status": "ACTIVE",
+      "title": "AUDIT DECISIONS AD-1 TO AD-68 (2026-10-29). The Product Owner approved the remediation of every audit decision with explicit overrides: independent appliances; secure activation, assignment, online and offline licensing without TPM2; the voucher format kept and its residual risk documented (AD-29); the Post-stay PIN replaced by room number plus reservation number bound to the original stay, with extra verification for a new device (AD-36); client isolation with audited exceptions and no IPv6 redesign (AD-22, AD-25); 300-500 simultaneously connecting clients (AD-26); uploaded portal images optimised in the background with a 1 MB limit (AD-58); unencrypted database backups refused for download (AD-9); administrator, audit, credential and retention hardening.",
+      "authorization_evidence": "The Product Owner's mission of 2026-10-29 (GOAL: complete the approved remediation of audit decisions AD-1 through AD-68 end to end, using current master as the baseline).",
+      "does_not_authorize": "Go-Live, real-money transactions, live payment-provider calls, PMS financial posting, contacting retired environments, changes to unnamed environments, or weakening validation. Deployment targets are OneGate Central 41.128.240.133 (private 172.21.96.96) and the test appliance 172.21.96.97 only.",
+      "implementation": "Branch delivery/audit-decisions-ad1-68, recorded by T0267: seven workstreams merged; appliance migrations 0162-0178 and Central migrations 0059-0062; Go 1.26.10; docs/AUDIT_DECISION_DISPOSITIONS.md records each item's disposition."
     }
   ]
 }
