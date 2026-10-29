@@ -127,6 +127,7 @@ describe("Client accounts — disconnecting an account's devices", () => {
     await chooseInRow(document.body, /password/i);
     const dialog = await screen.findByRole("dialog");
     await user.type(passwordBox(dialog), "fresh-three");
+    await user.type(within(dialog).getByLabelText(/reason/i), "forgot it at the desk");
     await user.click(within(dialog).getByLabelText(/disconnect this account’s devices now/i));
     await user.click(within(dialog).getByRole("button", { name: "Set password" }));
 
