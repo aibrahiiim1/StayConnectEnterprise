@@ -219,6 +219,8 @@ type enforcementPatch struct {
 	MACBindingEnabled           *bool     `json:"mac_binding_enabled"`
 	CutoffSeconds               *int      `json:"cutoff_seconds"`
 	Reason                      string    `json:"reason"`
+	// Password is the operator's own, asked again: this policy decides what every client may reach.
+	Password string `json:"password"`
 }
 
 // diffEnforcementPatch validates the patch and returns only the fields that differ from the current policy.
@@ -255,6 +257,18 @@ func diffEnforcementPatch(cur enforcementPolicy, in enforcementPatch) ([]enforce
 	return ch, nil
 }
 
+// enforcementStepUp asks for the operator's password again before the policy changes.
+func (s *server) enforcementStepUp(w http.ResponseWriter, r *http.Request, password string) (string, bool) {
+	if s.enforcementPasswordOK == nil {
+		return s.stepUp(w, r, password)
+	}
+	if !s.enforcementPasswordOK(password) {
+		s.reauthRefused(w, r, "password confirmation required")
+		return "", false
+	}
+	return protectionActor(sessFrom(r.Context())), true
+}
+
 func (s *server) patchEnforcementPolicy(w http.ResponseWriter, r *http.Request) {
 	var in enforcementPatch
 	if err := decodeJSON(r, &in); err != nil {
@@ -266,9 +280,8 @@ func (s *server) patchEnforcementPolicy(w http.ResponseWriter, r *http.Request) 
 		jsonErr(w, http.StatusBadRequest, "reason_required", "A reason is required: "+reasonBoundsMessage)
 		return
 	}
-	operator := protectionActor(sessFrom(r.Context()))
-	if operator == "" {
-		jsonErr(w, http.StatusForbidden, "forbidden", "the change could not be attributed to an operator")
+	operator, ok := s.enforcementStepUp(w, r, in.Password)
+	if !ok {
 		return
 	}
 	ctx, cancel := dbCtx(r)

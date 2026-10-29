@@ -101,12 +101,13 @@ describe("enforcement policy page", () => {
     const save = screen.getByRole("button", { name: "Save settings" }) as HTMLButtonElement;
     expect(save.disabled).toBe(true);
     await user.click(screen.getByRole("switch", { name: /Bind a guest's access/ }));
-    expect(save.disabled).toBe(true); // changed but no reason yet
+    expect(save.disabled).toBe(true); // changed but no reason or password yet
     await user.type(screen.getByLabelText(/Reason for the change/), "Prove AD-23 on the test appliance");
+    await user.type(screen.getByLabelText(/Your password/), "pw-1234567890");
     expect(save.disabled).toBe(false);
     await user.click(save);
     await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
-    expect(patch).toHaveBeenCalledWith("/network/enforcement-policy", { reason: "Prove AD-23 on the test appliance", mac_binding_enabled: true });
+    expect(patch).toHaveBeenCalledWith("/network/enforcement-policy", { reason: "Prove AD-23 on the test appliance", password: "pw-1234567890", mac_binding_enabled: true });
   });
 
   it("refuses a bad allow-list entry and an out-of-range cut-off before sending anything", async () => {
@@ -120,6 +121,7 @@ describe("enforcement policy page", () => {
     await user.type(cutoff, "61");
     expect(screen.getByText(/between 1 and 60/, { selector: "p" })).toBeTruthy();
     await user.type(screen.getByLabelText(/Reason for the change/), "A valid reason");
+    await user.type(screen.getByLabelText(/Your password/), "pw-1234567890");
     expect((screen.getByRole("button", { name: "Save settings" }) as HTMLButtonElement).disabled).toBe(true);
     expect(patch).not.toHaveBeenCalled();
   });
@@ -131,6 +133,7 @@ describe("enforcement policy page", () => {
     await renderPage();
     await user.click(screen.getByRole("switch", { name: /Deny guests the hotel's private networks/ }));
     await user.type(screen.getByLabelText(/Reason for the change/), "Legacy kiosk needs the old subnet");
+    await user.type(screen.getByLabelText(/Your password/), "pw-1234567890");
     await user.click(screen.getByRole("button", { name: "Save settings" }));
     // Nothing is sent until the dialog is confirmed.
     expect(patch).not.toHaveBeenCalled();
@@ -142,7 +145,7 @@ describe("enforcement policy page", () => {
     await user.type(screen.getByLabelText(/Type/), "TURN OFF");
     expect((confirm as HTMLButtonElement).disabled).toBe(false);
     await user.click(confirm);
-    await waitFor(() => expect(patch).toHaveBeenCalledWith("/network/enforcement-policy", { reason: "Legacy kiosk needs the old subnet", private_deny_enabled: false }));
+    await waitFor(() => expect(patch).toHaveBeenCalledWith("/network/enforcement-policy", { reason: "Legacy kiosk needs the old subnet", password: "pw-1234567890", private_deny_enabled: false }));
   });
 
   it("shows the server's validation message when the save is refused", async () => {
@@ -153,6 +156,7 @@ describe("enforcement policy page", () => {
     await renderPage();
     await user.click(screen.getByRole("switch", { name: /Bind a guest's access/ }));
     await user.type(screen.getByLabelText(/Reason for the change/), "Prove AD-23");
+    await user.type(screen.getByLabelText(/Your password/), "pw-1234567890");
     await user.click(screen.getByRole("button", { name: "Save settings" }));
     expect(await screen.findByText(/at most 64 networks may be allowed/)).toBeTruthy();
   });

@@ -72,7 +72,8 @@ func enfDo(t *testing.T, h http.Handler, method, cookie, body string) (int, stri
 }
 
 func newEnfServer(st *fakeEnforcementStore) *server {
-	return &server{sessions: newSessionStore(time.Hour), enforcementStoreOverride: st}
+	return &server{sessions: newSessionStore(time.Hour), enforcementStoreOverride: st,
+		enforcementPasswordOK: func(p string) bool { return p == "right-password" }}
 }
 
 func TestEnforcementPolicy_GetReturnsValuesBoundsDefaultsAndHistory(t *testing.T) {
@@ -111,7 +112,7 @@ func TestEnforcementPolicy_PatchAppliesOnlyChangedFieldsAtomicallyWithOperatorAn
 	h := enforcementRouter(s)
 	cookie := loginAs(t, s, []string{"hotel_it_manager"})
 	code, body := enfDo(t, h, http.MethodPatch, cookie,
-		`{"private_deny_enabled":true,"mac_binding_enabled":true,"cutoff_seconds":10,"private_allow_cidrs":["192.168.50.0/24","192.168.50.0/24","10.9.0.5/32"],"reason":"enable AD-23 on the test appliance"}`)
+		`{"private_deny_enabled":true,"mac_binding_enabled":true,"cutoff_seconds":10,"private_allow_cidrs":["192.168.50.0/24","192.168.50.0/24","10.9.0.5/32"],"reason":"enable AD-23 on the test appliance","password":"right-password"}`)
 	if code != 200 {
 		t.Fatalf("code %d: %s", code, body)
 	}
@@ -135,17 +136,17 @@ func TestEnforcementPolicy_PatchRefusesBadInputWith400AndNeverWrites(t *testing.
 	}
 	longJSON, _ := json.Marshal(long)
 	cases := []struct{ name, body, msg string }{
-		{"no reason", `{"mac_binding_enabled":true}`, "reason is required"},
-		{"blank reason", `{"mac_binding_enabled":true,"reason":"   "}`, "reason is required"},
-		{"cutoff low", `{"cutoff_seconds":0,"reason":"because"}`, "between 1 and 60"},
-		{"cutoff high", `{"cutoff_seconds":61,"reason":"because"}`, "between 1 and 60"},
-		{"too wide", `{"private_allow_cidrs":["10.0.0.0/7"],"reason":"because"}`, "between /8 and /32"},
-		{"ipv6", `{"private_allow_cidrs":["fd00::/8"],"reason":"because"}`, "IPv4"},
-		{"junk", `{"private_allow_cidrs":["nonsense"],"reason":"because"}`, "IPv4"},
-		{"host bits", `{"private_allow_cidrs":["192.168.1.7/24"],"reason":"because"}`, "192.168.1.0/24"},
-		{"too many", `{"private_allow_cidrs":` + string(longJSON) + `,"reason":"because"}`, "at most 64"},
-		{"unknown field", `{"mac_bindin":true,"reason":"because"}`, "could not be read"},
-		{"nothing changed", `{"private_deny_enabled":true,"reason":"because"}`, "already in effect"},
+		{"no reason", `{"mac_binding_enabled":true,"password":"right-password"}`, "reason is required"},
+		{"blank reason", `{"mac_binding_enabled":true,"reason":"   ","password":"right-password"}`, "reason is required"},
+		{"cutoff low", `{"cutoff_seconds":0,"reason":"because","password":"right-password"}`, "between 1 and 60"},
+		{"cutoff high", `{"cutoff_seconds":61,"reason":"because","password":"right-password"}`, "between 1 and 60"},
+		{"too wide", `{"private_allow_cidrs":["10.0.0.0/7"],"reason":"because","password":"right-password"}`, "between /8 and /32"},
+		{"ipv6", `{"private_allow_cidrs":["fd00::/8"],"reason":"because","password":"right-password"}`, "IPv4"},
+		{"junk", `{"private_allow_cidrs":["nonsense"],"reason":"because","password":"right-password"}`, "IPv4"},
+		{"host bits", `{"private_allow_cidrs":["192.168.1.7/24"],"reason":"because","password":"right-password"}`, "192.168.1.0/24"},
+		{"too many", `{"private_allow_cidrs":` + string(longJSON) + `,"reason":"because","password":"right-password"}`, "at most 64"},
+		{"unknown field", `{"mac_bindin":true,"reason":"because","password":"right-password"}`, "could not be read"},
+		{"nothing changed", `{"private_deny_enabled":true,"reason":"because","password":"right-password"}`, "already in effect"},
 	}
 	for _, c := range cases {
 		st := &fakeEnforcementStore{pol: shippedPolicy()}
@@ -163,12 +164,12 @@ func TestEnforcementPolicy_PatchRefusesBadInputWith400AndNeverWrites(t *testing.
 func TestEnforcementPolicy_DatabaseValidationSurfacesAs400(t *testing.T) {
 	st := &fakeEnforcementStore{pol: shippedPolicy(), applyErr: &pgconn.PgError{Code: "22023", Message: "cutoff_seconds must be between 1 and 60"}}
 	s := newEnfServer(st)
-	code, body := enfDo(t, enforcementRouter(s), http.MethodPatch, loginAs(t, s, []string{"site_admin"}), `{"mac_binding_enabled":true,"reason":"because"}`)
+	code, body := enfDo(t, enforcementRouter(s), http.MethodPatch, loginAs(t, s, []string{"site_admin"}), `{"mac_binding_enabled":true,"reason":"because","password":"right-password"}`)
 	if code != 400 || !strings.Contains(body, "must be between 1 and 60") {
 		t.Errorf("code %d body %s", code, body)
 	}
 	st.applyErr = errors.New("connection reset")
-	code, _ = enfDo(t, enforcementRouter(s), http.MethodPatch, loginAs(t, s, []string{"site_admin"}), `{"mac_binding_enabled":true,"reason":"because"}`)
+	code, _ = enfDo(t, enforcementRouter(s), http.MethodPatch, loginAs(t, s, []string{"site_admin"}), `{"mac_binding_enabled":true,"reason":"because","password":"right-password"}`)
 	if code != 500 {
 		t.Errorf("an infrastructure failure must be 500, got %d", code)
 	}
@@ -193,7 +194,7 @@ func TestEnforcementPolicy_RolesAndAnonymous(t *testing.T) {
 		if code, _ := enfDo(t, h, http.MethodGet, cookie, ""); code != c.read {
 			t.Errorf("%s read = %d, want %d", c.role, code, c.read)
 		}
-		if code, _ := enfDo(t, h, http.MethodPatch, cookie, `{"mac_binding_enabled":true,"reason":"because"}`); code != c.write {
+		if code, _ := enfDo(t, h, http.MethodPatch, cookie, `{"mac_binding_enabled":true,"reason":"because","password":"right-password"}`); code != c.write {
 			t.Errorf("%s write = %d, want %d", c.role, code, c.write)
 		}
 	}
@@ -232,15 +233,15 @@ func clockDo(t *testing.T, h http.Handler, cookie, body string) (int, string) {
 func TestLicenseClockReset_RequiresReasonAndWritePermission(t *testing.T) {
 	s := &server{sessions: newSessionStore(time.Hour), scd: &scdClient{http: &http.Client{Transport: scdStub{200, `{"status":"reset"}`}}}}
 	h := clockResetRouter(s)
-	if code, _ := clockDo(t, h, loginAs(t, s, []string{"hotel_it_manager"}), `{"reason":"  "}`); code != 403 {
+	if code, _ := clockDo(t, h, loginAs(t, s, []string{"hotel_it_manager"}), `{"reason":"  ","password":"right-password"}`); code != 403 {
 		// hotel_it_manager holds license READ only: the button must not be offered to it either.
 		t.Errorf("hotel_it_manager = %d, want 403", code)
 	}
 	cookie := loginAs(t, s, []string{"site_admin"})
-	if code, _ := clockDo(t, h, cookie, `{"reason":"  "}`); code != 400 {
+	if code, _ := clockDo(t, h, cookie, `{"reason":"  ","password":"right-password"}`); code != 400 {
 		t.Errorf("blank reason = %d, want 400", code)
 	}
-	if code, body := clockDo(t, h, cookie, `{"reason":"Clock was set wrong after the power cut"}`); code != 200 || !strings.Contains(body, "reset") {
+	if code, body := clockDo(t, h, cookie, `{"reason":"Clock was set wrong after the power cut","password":"right-password"}`); code != 200 || !strings.Contains(body, "reset") {
 		t.Errorf("code %d body %s", code, body)
 	}
 }
@@ -248,8 +249,25 @@ func TestLicenseClockReset_RequiresReasonAndWritePermission(t *testing.T) {
 func TestLicenseClockReset_PassesCentralsRefusalThroughVerbatim(t *testing.T) {
 	msg := `{"error":"the local clock still disagrees with Central by 3h; correct the clock first"}`
 	s := &server{sessions: newSessionStore(time.Hour), scd: &scdClient{http: &http.Client{Transport: scdStub{409, msg}}}}
-	code, body := clockDo(t, clockResetRouter(s), loginAs(t, s, []string{"site_admin"}), `{"reason":"Clock was set wrong after the power cut"}`)
+	code, body := clockDo(t, clockResetRouter(s), loginAs(t, s, []string{"site_admin"}), `{"reason":"Clock was set wrong after the power cut","password":"right-password"}`)
 	if code != 409 || !strings.Contains(body, "still disagrees with Central") {
 		t.Errorf("code %d body %s", code, body)
+	}
+}
+
+func TestEnforcementPolicy_PatchNeedsTheOperatorsPasswordAndWritesNothingWithout(t *testing.T) {
+	for name, body := range map[string]string{
+		"no password":    `{"mac_binding_enabled":true,"reason":"enable the binding"}`,
+		"wrong password": `{"mac_binding_enabled":true,"reason":"enable the binding","password":"guess"}`,
+	} {
+		st := &fakeEnforcementStore{pol: shippedPolicy()}
+		s := newEnfServer(st)
+		code, out := enfDo(t, enforcementRouter(s), http.MethodPatch, loginAs(t, s, []string{"hotel_it_manager"}), body)
+		if code != http.StatusUnauthorized || !strings.Contains(out, "reauth_required") {
+			t.Errorf("%s: %d %s, want 401 reauth_required", name, code, out)
+		}
+		if st.applyCall != 0 {
+			t.Errorf("%s: the policy was written without a confirmed password", name)
+		}
 	}
 }

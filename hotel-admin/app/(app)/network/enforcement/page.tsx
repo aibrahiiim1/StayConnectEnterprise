@@ -72,6 +72,7 @@ export default function EnforcementPolicyPage() {
   const [doc, setDoc] = useState<EnforcementDoc | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [reason, setReason] = useState("");
+  const [password, setPassword] = useState("");
   const [err, setErr] = useState<unknown>(null);
   const [saveErr, setSaveErr] = useState<unknown>(null);
   const [saving, setSaving] = useState(false);
@@ -114,7 +115,7 @@ export default function EnforcementPolicyPage() {
     draft.mac !== cur.mac_binding_enabled || cutoffN !== cur.cutoff_seconds || !sameList(entries, cur.private_allow_cidrs);
   const turningDenialOff = cur.private_deny_enabled && !draft.deny;
   const reasonProblem = dirty && !reasonOk(reason) ? "A reason is required: " + REASON_HINT : null;
-  const blocked = !dirty || !!listProblem || !!cutoffProblem || !!reasonProblem || saving;
+  const blocked = !dirty || !!listProblem || !!cutoffProblem || !!reasonProblem || password === "" || saving;
 
   async function save() {
     if (!draft) return;
@@ -123,7 +124,7 @@ export default function EnforcementPolicyPage() {
     setSaved(false);
     try {
       // Only what changed is sent; the server also ignores unchanged fields.
-      const body: Record<string, unknown> = { reason: reason.trim() };
+      const body: Record<string, unknown> = { reason: reason.trim(), password };
       if (draft.deny !== cur.private_deny_enabled) body.private_deny_enabled = draft.deny;
       if (draft.upstream !== cur.allow_upstream_infrastructure) body.allow_upstream_infrastructure = draft.upstream;
       if (draft.mac !== cur.mac_binding_enabled) body.mac_binding_enabled = draft.mac;
@@ -133,6 +134,7 @@ export default function EnforcementPolicyPage() {
       setDoc(next);
       setDraft(draftOf(next));
       setReason("");
+      setPassword("");
       setConfirmOff(false);
       setSaved(true);
       toast.success("Protection settings saved", "The appliance applies them within moments.");
@@ -248,6 +250,10 @@ export default function EnforcementPolicyPage() {
               error={dirty && reason !== "" ? reasonProblem : null}>
               <Input id="enf-reason" value={reason} maxLength={REASON_MAX_CHARS} disabled={!dirty || saving}
                 onChange={(e) => setReason(e.target.value)} placeholder="For example: allow the front-desk printer network" />
+            </Field>
+            <Field label="Your password" required hint="Confirms the change.">
+              <Input type="password" autoComplete="current-password" value={password} disabled={!dirty || saving}
+                onChange={(e) => setPassword(e.target.value)} />
             </Field>
             {saveErr && !confirmOff ? <ErrorBanner err={saveErr} className="mb-0" /> : null}
             <div className="flex justify-end gap-2">
