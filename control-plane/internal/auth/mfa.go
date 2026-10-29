@@ -185,6 +185,14 @@ func (s *MFA) load(ctx context.Context, tx pgx.Tx, operatorID string, confirmed 
 	if r.locked != nil && time.Now().Before(*r.locked) {
 		return r, ErrMFALocked{Until: *r.locked}
 	}
+	// AD-6: a lock started from this address by wrong codes held here.
+	until, err := s.addrLockedUntil(ctx, tx, operatorID)
+	if err != nil {
+		return r, err
+	}
+	if until != nil {
+		return r, ErrMFALocked{Until: *until}
+	}
 	return r, nil
 }
 
@@ -195,15 +203,24 @@ func (s *MFA) load(ctx context.Context, tx pgx.Tx, operatorID string, confirmed 
 // a wrong code. A count written in a separate statement let a burst of parallel wrong codes all be checked before
 // the first failure landed, defeating the limit.
 func (s *MFA) failTx(ctx context.Context, tx pgx.Tx, operatorID string) (lockedUntil *time.Time, err error) {
+	// Per address first (AD-6): signin_lock_failures wrong codes from one address lock that address only.
+	addrUntil, err := s.addrFail(ctx, tx, operatorID)
+	if err != nil {
+		return nil, err
+	}
+	// The account-wide counter is the backstop, at MFAAccountBackstopFactor times the limit across all addresses.
 	err = tx.QueryRow(ctx, `
-		WITH lim AS (SELECT COALESCE(max(signin_lock_failures), 5) AS n, COALESCE(max(signin_lock_minutes), 15) AS mins
+		WITH lim AS (SELECT COALESCE(max(signin_lock_failures), 5) * $2::int AS n, COALESCE(max(signin_lock_minutes), 15) AS mins
 		               FROM central_security_settings WHERE id)
 		UPDATE operator_mfa SET
 		  failed_codes = CASE WHEN failed_codes + 1 >= lim.n THEN 0 ELSE failed_codes + 1 END,
 		  locked_until = CASE WHEN failed_codes + 1 >= lim.n THEN now() + make_interval(mins => lim.mins) ELSE locked_until END
 		  FROM lim
 		 WHERE operator_id = $1::uuid RETURNING CASE WHEN failed_codes = 0 THEN locked_until END`,
-		operatorID).Scan(&lockedUntil)
+		operatorID, MFAAccountBackstopFactor).Scan(&lockedUntil)
+	if lockedUntil == nil {
+		lockedUntil = addrUntil
+	}
 	return lockedUntil, err
 }
 
@@ -283,6 +300,9 @@ func (s *MFA) verifyTx(ctx context.Context, tx pgx.Tx, operatorID, code string, 
 		}
 		_, err = tx.Exec(ctx, `UPDATE operator_mfa SET last_used_step = $2, failed_codes = 0 WHERE operator_id = $1::uuid`,
 			operatorID, step)
+		if err == nil {
+			err = s.addrSucceeded(ctx, tx, operatorID)
+		}
 		return method, err == nil, nil, err
 	}
 	method = "recovery_code"
@@ -295,6 +315,9 @@ func (s *MFA) verifyTx(ctx context.Context, tx pgx.Tx, operatorID, code string, 
 		return wrong()
 	}
 	_, err = tx.Exec(ctx, `UPDATE operator_mfa SET failed_codes = 0 WHERE operator_id = $1::uuid`, operatorID)
+	if err == nil {
+		err = s.addrSucceeded(ctx, tx, operatorID)
+	}
 	return method, err == nil, nil, err
 }
 
@@ -355,6 +378,7 @@ func ResetMFA(ctx context.Context, q interface {
 		return false, err
 	}
 	_, _ = q.Exec(ctx, `DELETE FROM operator_signin_pending WHERE operator_id = $1::uuid`, operatorID)
+	_, _ = q.Exec(ctx, `DELETE FROM operator_mfa_address_locks WHERE operator_id = $1::uuid`, operatorID)
 	return tag.RowsAffected() > 0, nil
 }
 
