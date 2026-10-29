@@ -81,9 +81,12 @@ retain_group() {
   local label="$1" keep="$2" always="$3"; shift 3
   local -a cand=("$@")
   [ "${#cand[@]}" -eq 0 ] && return 0
-  # newest-first
+  # newest-first by CHANGE time, not modification time: a backup made with cp -a or cp -p carries its source's modification
+  # time, so every copy of an unchanged file (the env files, the binaries a release did not change) ties, and the order among
+  # the ties was alphabetical -- the newest-named copy, the one a rollback needs, was the first to go (found on Central,
+  # 2026-10-29, when the sweep removed the env-file backup a deploy had just made). ctime is when the copy was made.
   local sorted
-  sorted="$(ls -1dt "${cand[@]}" 2>/dev/null)"
+  sorted="$(ls -1dtc "${cand[@]}" 2>/dev/null)"
   local kept=0 line
   while IFS= read -r line; do
     [ -z "$line" ] && continue

@@ -53,6 +53,24 @@ n_db_before="$(ls "$DB" | wc -l)"
 echo '{}' > "$DB/db-gone.sql.gz.age.verified"
 # config backups beyond KEEP_CONFIG are still swept (the sandbox has none: only prove the sweep still runs cleanly)
 
+# A backup made with cp -a keeps its source's modification time, so copies of an unchanged file tie on mtime. The newest COPY must
+# still be the one kept (retain_group orders by change time). The function is lifted out of the script and run on its own.
+(
+  R_KEEP=(); R_DEL=(); R_PIN=()
+  is_pinned() { return 1; }
+  eval "$(sed -n '/^retain_group() {/,/^}/p' "$SCRIPT")"
+  d="$T/cfg"; mkdir -p "$d"
+  for i in 1 2 3 4 5; do
+    echo "copy $i" > "$d/ctrlapi.env.bak-$i"; sleep 1.1; touch -d '2020-01-01' "$d/ctrlapi.env.bak-$i"
+  done
+  retain_group "config-backup" 3 "" "$d"/ctrlapi.env.bak-*
+  digits() { for e in "$@"; do e="${e##*ctrlapi.env.bak-}"; printf '%s' "${e%%|*}"; done | fold -w1 | sort | tr -d '\n'; }
+  kept="$(digits "${R_KEEP[@]}")"
+  del="$(digits "${R_DEL[@]}")"
+  if [ "$kept" = 345 ] && [ "$del" = 12 ]; then echo "PASS: of copies that tie on modification time, the newest three are kept"
+  else echo "FAIL: config backups that tie on mtime: kept '$kept', swept '$del' (want 345 / 12)"; exit 1; fi
+) || fail=1
+
 run() {
   SC_CLEANUP_CONF="$T/conf" SC_CLEANUP_ROOT="$ROOT" SC_CLEANUP_PINS="$T/pins" SC_CLEANUP_LOGDIR="$T/log" \
     SC_CLEANUP_SITE_DIR="$SITE" bash "$SCRIPT" "$@" >"$T/out" 2>&1
