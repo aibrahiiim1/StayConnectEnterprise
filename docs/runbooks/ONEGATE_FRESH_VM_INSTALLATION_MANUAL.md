@@ -1088,3 +1088,24 @@ profile added `STAYCONNECT_PHASE4_MASTER/_PAYMENT/_POSTING` to `scd.env`; a re-r
 
 A new Client passed the journey 12/12 on the final release.
 
+### A3.10 The audit-decision release on the test pair (2026-10-29)
+
+Central `central.onegate.getsemantics.com` (`172.21.96.96`) and appliance `172.21.96.97`, identities and data preserved. Releases:
+Central `onegate-central-ee2faf881d89` (ctrlapi `ee2faf881d89`, console build `5Yg6Y-MXBoIGsGISihhnB`; PR #266 changed nothing in `control-plane/`,
+so the Central code equals master `1cd37145`), appliance `onegate-appliance-1cd37145c468` (every binary embeds `1cd37145c4687d337fe922bf9c23ca3e786ec1c3`,
+read back from the installed files; Go `golang:1.26.10`).
+
+| Area | Result |
+|---|---|
+| Central deploy | `central-deploy.sh`: pre-deploy dump taken, migrations 0059–0062 applied (62 applied, 0 pending, unmodified), ctrlapi ready in 2 s, console serving its build, smoke **10 PASS, 0 FAIL** incl. `:9443` verified against the appliance CA. `central-infra.yml` changed (two Postgres logging flags, AD-50) and is not applied by the deploy; it was applied afterwards with `docker compose up -d pg` (database container recreated, healthy, `log_parameter_max_length=0`), then smoke again |
+| Appliance upgrade, first attempt | `--upgrade` with `ee2faf88` **stopped at migration 0162** (`permission denied for table tenants`): 0159–0161 applied, no binary replaced, services untouched. Cause: five new migrations change `public`, which the least-privilege migration role cannot write, and the test harness applied migrations as the superuser. Fixed by PR #266 (platform migrations, selftest case 13, harness `FULLSCHEMA_APPLY_ROLE`) |
+| Appliance upgrade | `--upgrade` with `1cd37145`: 20 migrations applied (0159–0178), the five platform migrations (0163, 0166, 0173, 0174, 0178) applied as the platform role, each after an encrypted, proven-restorable backup; units active (`pmsd` deliberately dormant); 0 `SECURITY DEFINER` functions in `iam_v2` with a wrong owner; the erasure-ledger key present |
+| Trust pin (AD-2) | `--upgrade` does not install `appliance-root-ca.crt`; it was installed with `install-appliance-root-ca.sh` from Central's published `appliance-trust/` (sha256 `10:3C:66:9A:…:F1:B8`, equal to Central's `FINGERPRINTS.txt`), then scd restarted: licence **Active**, mutual-TLS transport verified, licence refreshed from Central |
+| Client journey | `client-journey-netns-test.sh` **12/12** on the new release |
+| Private networks (AD-22) | a signed-in Client reaches the Internet and Central's public name, and cannot reach `10.0.0.1`, `192.168.1.1`, `100.64.0.1`, `169.254.169.254` or Central's private address; `guest_private_ranges` is loaded; the default policy row is on with no allow-list |
+| MAC binding (AD-23) | set on with `enforcement_policy_set`: the Client keeps access, the same IP with another MAC is refused, off again restores IP-only; the shipped setting is **off** and was left off. (A first run looked like a failure; the cause was the test namespace losing its default route when its link was cycled) |
+| Sign-in burst (AD-26) | `signin-burst-test.sh` 300 and 500 simultaneous attempts: all answered, **0 busy, 0 timeouts**, p95 48 ms. In the second run 200 of 500 were refused 429 because the appliance-wide per-minute ceiling (600) was spent by the first run, as designed |
+
+Not verified live here (the dispositions file lists each): the 5-second cut-off after a used-up allowance, the conntrack flush of a lapsed address,
+the Post-stay room-and-reservation flow (dark), the image optimiser through the Admin Console, the Linux restore drills, offline activation.
+

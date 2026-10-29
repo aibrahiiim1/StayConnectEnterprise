@@ -1,0 +1,34 @@
+{
+  "transition_id": "T0269",
+  "seq": 269,
+  "timestamp": "2026-10-29T05:04:44Z",
+  "timestamp_derivation": "Computed from the session clock after the deployments were verified, before the commit that introduces this receipt.",
+  "record_type": "AUDIT_DECISIONS_DEPLOYMENT",
+  "authorisation": "D81, the Product Owner's mission of 2026-10-29 (deployment to OneGate Central 41.128.240.133 and the test appliance 172.21.96.97).",
+  "deployment": {
+    "central": "central.onegate.getsemantics.com (41.128.240.133, private 172.21.96.96): onegate-central-ee2faf881d89 by central-deploy.sh; migrations 0059-0062; smoke 10 PASS; central-infra.yml (two Postgres logging flags) applied afterwards with docker compose; PR #266 changed nothing under control-plane/, so the Central code equals master 1cd37145.",
+    "test_appliance": "172.21.96.97: onegate-appliance-1cd37145c468 by appliance-install.sh --upgrade; migrations 0159-0178 applied (the five platform migrations as the platform role); the appliance Root CA pinned from Central's published trust directory; all six installed binaries embed 1cd37145c4687d337fe922bf9c23ca3e786ec1c3.",
+    "first_attempt": "The first upgrade (release ee2faf88) stopped at migration 0162 and changed nothing beyond 0159-0161; recorded by T0268 and fixed by PR #266."
+  },
+  "verification": "Read back from the installed artifacts, not from the build host. Live: licence Active over mutual TLS with the pinned root; client journey 12/12; a signed-in client cannot reach the private ranges and still reaches the Internet (AD-22); MAC binding on, off and against a spoof (AD-23, left off); 300 and 500 simultaneous sign-in attempts answered with no busy answer and p95 48 ms (AD-26). Not verified live: the 5-second cut-off, the conntrack flush, the room-and-reservation Post-stay flow, the image optimiser through the console, Linux restore drills, offline activation; listed in docs/AUDIT_DECISION_DISPOSITIONS.md.",
+  "not_touched": "PRE-LIVE 172.21.60.25 (retired trust universe), every retired host, production users, live payment providers, PMS posting.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "1cd37145c4687d337fe922bf9c23ca3e786ec1c3",
+  "previous_delivery": "T0268",
+  "decision": "D81",
+  "go_live": "NOT authorised."
+}

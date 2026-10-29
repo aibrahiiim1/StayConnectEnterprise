@@ -133,7 +133,17 @@ Product-Owner overrides of the list's recommendations are marked **PO**. Test na
 | Enforcement-core redesign (D4-*, D5-M1, D6-H1 step 3, D6-M2 step 2) | partly addressed by AD-47 and AD-53; the rest is not done |
 | Measurements first (D2-M4, D2-L3, P3 M6) | EVIDENCE-DEPENDENT |
 
-## 10. Deployment and verification
+## 10. Deployment and verification (2026-10-29)
 
-See the delivery report and `CONTINUATION.md`. The state of each environment is recorded there with the commit read back from
-the installed artifact, not asserted here.
+Deployed to the two authorised environments and read back from the installed artifacts; the full record is installation manual A3.10.
+
+| Environment | Release | Read back |
+|---|---|---|
+| OneGate Central `41.128.240.133` (private `172.21.96.96`) | `onegate-central-ee2faf881d89` | `DEPLOYED.json`: ctrlapi and console source commit `ee2faf881d89`; migrations 0059–0062; smoke 10 PASS |
+| Test OneGate Appliance `172.21.96.97` | `onegate-appliance-1cd37145c468` | `RELEASE.json` and all six binaries: `1cd37145c4687d337fe922bf9c23ca3e786ec1c3`; migrations through 0178 |
+
+Verified live: the appliance upgrade (after a safe stop at 0162 that PR #266 fixed), the licence over mutual TLS with the pinned Root CA,
+the client journey (12/12), private-network denial (AD-22), MAC binding on, off and against a spoof (AD-23), 300 and 500 simultaneous
+sign-in attempts without a busy answer (AD-26). **Not** verified live: the 5-second cut-off (AD-47) and plan fast path (AD-53) under
+load, the conntrack flush (AD-24), the room-and-reservation Post-stay flow (AD-36, dark), the image optimiser through the Admin Console
+(AD-58), Linux restore drills (AD-3), offline activation (AD-18), and every EVIDENCE-DEPENDENT row above.

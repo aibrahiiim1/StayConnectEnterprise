@@ -43,14 +43,19 @@ echo "sending $CLIENTS simultaneous sign-in attempts to $SOCK ..."
 seq 1 "$CLIENTS" | xargs -P "$CLIENTS" -I{} bash -c 'one {}' > "$W/out.txt" 2>/dev/null
 
 answered="$(grep -c '^[0-9]' "$W/out.txt" || true)"
+# Portable awk (mawk on Ubuntu has no asort): the latencies are sorted by sort(1) and the percentiles read by position.
 awk -v n="$CLIENTS" -v a="$answered" '
-  { code[$1]++; ms[NR] = $2 * 1000 }
+  { code[$1]++ }
   END {
     printf "answered %d of %d\n", a, n
     for (c in code) printf "  HTTP %s: %d\n", c, code[c]
-    m = asort(ms)
-    if (m > 0) printf "latency ms: p50 %.0f  p95 %.0f  max %.0f\n", ms[int(m*0.5)+1 > m ? m : int(m*0.5)+1], ms[int(m*0.95)+1 > m ? m : int(m*0.95)+1], ms[m]
   }' "$W/out.txt"
+awk '/^[0-9]/ { printf "%.0f\n", $2 * 1000 }' "$W/out.txt" | sort -n > "$W/ms.txt"
+m="$(wc -l < "$W/ms.txt" | tr -d ' ')"
+if [ "${m:-0}" -gt 0 ]; then
+  p50=$(( (m * 50 + 99) / 100 )); p95=$(( (m * 95 + 99) / 100 ))
+  echo "latency ms: p50 $(sed -n "${p50}p" "$W/ms.txt")  p95 $(sed -n "${p95}p" "$W/ms.txt")  max $(tail -1 "$W/ms.txt")"
+fi
 busy="$(grep -c '^503' "$W/out.txt" || true)"
 timeouts=$(( CLIENTS - answered ))
 echo "busy answers: $busy   no answer (timeout/connection error): $timeouts"
