@@ -235,23 +235,8 @@ func (s *Store) Execute(ctx context.Context, req Request) (Result, error) {
 	}
 
 	// The landing package: zero-price, no-posting, chosen inside the transaction.
-	var pkgRev, planRev string
-	if err := tx.QueryRow(ctx, `
-		SELECT ipr.id::text, ipr.service_plan_revision_id::text
-		  FROM iam_v2.internet_package_revisions ipr
-		  JOIN iam_v2.internet_packages ip
-		    ON ip.tenant_id=ipr.tenant_id AND ip.site_id=ipr.site_id AND ip.id=ipr.package_id
-		 WHERE ipr.tenant_id=$1 AND ipr.site_id=$2 AND ip.active
-		   AND ip.current_revision_id = ipr.id
-		   AND ipr.price_minor = 0
-		   AND ipr.settlement_methods = ARRAY['NOT_REQUIRED']::text[]
-		   AND ipr.package_type IN ('CHECKOUT_GRACE','FREE_STAY','GENERAL')
-		 ORDER BY CASE ipr.package_type WHEN 'CHECKOUT_GRACE' THEN 0 WHEN 'FREE_STAY' THEN 1 ELSE 2 END,
-		          ip.code, ipr.id -- audit P6 L11: a deterministic choice among equals
-		 LIMIT 1`, req.Tenant, req.Site).Scan(&pkgRev, &planRev); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return Result{}, ErrNoGracePackage
-		}
+	pkgRev, planRev, err := s.landingPackage(ctx, tx, req.Tenant, req.Site, toIface)
+	if err != nil {
 		return Result{}, err
 	}
 
@@ -337,9 +322,10 @@ func (s *Store) Execute(ctx context.Context, req Request) (Result, error) {
 	}
 	var transferID string
 	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.entitlement_transfers
-		(tenant_id, site_id, from_entitlement_id, to_entitlement_id, from_stay_id, to_stay_id, actor)
-		VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id::text`,
-		req.Tenant, req.Site, fromEnt, toEnt, req.FromStay, req.ToStay, req.Operator).Scan(&transferID); err != nil {
+		(tenant_id, site_id, from_entitlement_id, to_entitlement_id, from_stay_id, to_stay_id, actor, operator_reason)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id::text`,
+		req.Tenant, req.Site, fromEnt, toEnt, req.FromStay, req.ToStay, req.Operator,
+		boundedReason(req.Reason)).Scan(&transferID); err != nil {
 		return Result{}, err
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.stay_links

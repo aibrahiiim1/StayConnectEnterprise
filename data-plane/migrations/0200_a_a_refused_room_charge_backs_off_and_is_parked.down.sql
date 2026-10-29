@@ -1,5 +1,6 @@
 -- Reverses 0200. A row parked in HELD_RECOVERY by repeated refusals stays HELD_RECOVERY (it is still held work an
 -- operator must decide about); only the backoff bookkeeping goes.
+DELETE FROM iam_v2.scrub_registry WHERE table_name IN ('iam_v2.posting_lane_settings_changes','iam_v2.posting_outbox_park_events');
 DROP FUNCTION IF EXISTS iam_v2.posting_outbox_requeue_parked(uuid,uuid,uuid,text,text);
 DROP FUNCTION IF EXISTS iam_v2.posting_outbox_defer(uuid,text,text);
 DROP FUNCTION IF EXISTS iam_v2.posting_lane_settings_set(uuid,uuid,bigint,integer,text,text);

@@ -36,6 +36,7 @@ iam_v2.entitlement_devices.disconnected_reason
 iam_v2.entitlement_state_transitions.reason
 iam_v2.entitlement_termination_evidence.terminal_reason
 iam_v2.entitlement_transfers.actor
+iam_v2.entitlement_transfers.operator_reason
 iam_v2.entitlement_transfers.reason
 iam_v2.entitlements.terminal_reason
 iam_v2.financial_epochs.reason
@@ -91,6 +92,10 @@ iam_v2.pms_roster_reconciliation_runs.rooms_expected
 iam_v2.portal_profiles.name
 iam_v2.post_stay_profiles.revoke_reason
 iam_v2.posting_attempts.g_number
+iam_v2.posting_lane_settings_changes.reason
+iam_v2.posting_outbox.parked_reason
+iam_v2.posting_outbox_park_events.actor
+iam_v2.posting_outbox_park_events.reason
 iam_v2.posting_presend_aborts.reason
 iam_v2.posting_review_actions.actor
 iam_v2.posting_review_actions.reason

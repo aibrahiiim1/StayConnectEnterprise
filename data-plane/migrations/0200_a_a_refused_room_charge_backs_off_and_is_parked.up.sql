@@ -249,6 +249,33 @@ BEGIN
   END IF;
 END $own$;
 
+-- What an operator typed or who acted is staff text with a retention period (migration 0147): the new columns are registered,
+-- and the scrub guard is installed on the two append-only tables exactly as 0147 installs it, so the staff-notes run and
+-- erasure can blank them. posting_outbox.parked_reason is a decline CODE, not staff text, and is not registered.
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES
+  ('iam_v2.posting_lane_settings_changes', 'reason',     'note',  'changed_at', false, NULL),
+  ('iam_v2.posting_lane_settings_changes', 'changed_by', 'label', NULL,         false, NULL),
+  ('iam_v2.posting_outbox_park_events',    'reason',     'note',  'at',         false, NULL),
+  ('iam_v2.posting_outbox_park_events',    'actor',      'label', NULL,         false, NULL)
+ON CONFLICT (table_name, column_name) DO NOTHING;
+
+DO $inst$
+DECLARE t text; trg record; def text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['iam_v2.posting_lane_settings_changes', 'iam_v2.posting_outbox_park_events'] LOOP
+    FOR trg IN SELECT g.oid, g.tgname FROM pg_trigger g
+                WHERE g.tgrelid = to_regclass(t) AND NOT g.tgisinternal AND g.tgconstraint = 0
+                  AND (g.tgtype & 2) = 2 AND (g.tgtype & 24) <> 0 AND g.tgname <> 'zz_scrub_guard' LOOP
+      def := pg_get_triggerdef(trg.oid);
+      IF def LIKE '%iam_v2.scrub%' THEN CONTINUE; END IF;
+      EXECUTE format('DROP TRIGGER %I ON %s', trg.tgname, t);
+      EXECUTE replace(def, ' EXECUTE FUNCTION', ' WHEN (current_setting(''iam_v2.scrub'', true) IS DISTINCT FROM ''on'') EXECUTE FUNCTION');
+    END LOOP;
+    EXECUTE format('DROP TRIGGER IF EXISTS zz_scrub_guard ON %s', t);
+    EXECUTE format('CREATE TRIGGER zz_scrub_guard BEFORE UPDATE OR DELETE ON %s FOR EACH ROW WHEN (current_setting(''iam_v2.scrub'', true) = ''on'') EXECUTE FUNCTION iam_v2.scrub_guard()', t);
+  END LOOP;
+END $inst$;
+
 -- Grants are mirrored in deploy/gatep (svc_edged) so a reconcile keeps them; sc_posting_runtime is a group role the
 -- numbered migrations grant directly (as 0097 did).
 DO $g$
