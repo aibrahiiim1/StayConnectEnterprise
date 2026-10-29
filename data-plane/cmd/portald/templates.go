@@ -250,6 +250,8 @@ const landingHTML = `<!doctype html>
   </div>
 
   <main class="card">
+    <!-- AD-35: shown only when a request has been slow for a moment; portald has already retried once on the guest's behalf. -->
+    <p id="busy-moment" class="hint" role="status" aria-live="polite" hidden><span data-i18n="busy.moment" data-i18n-en="One moment…">{{index .T "busy.moment"}}</span></p>
     <div class="sc-brandblock">
       <!-- BRANDING. Rendered from the published design so the first paint is already the hotel's, and applied
            again from /api/branding (which is how the admin preview shows unsaved changes). The defaults are
@@ -545,6 +547,27 @@ const landingHTML = `<!doctype html>
   </main>
   </div>
 
+  <script nonce="{{.Nonce}}">
+    // A sign-in that takes more than a moment says so, once: any form submit starts the timer, any finished fetch or
+    // the page leaving stops it. It adds no request and changes nothing about the sign-in itself.
+    (function () {
+      var note = document.getElementById('busy-moment'), timer = null;
+      if (!note) return;
+      function stop() { if (timer) { clearTimeout(timer); timer = null; } note.hidden = true; }
+      document.addEventListener('submit', function () {
+        stop();
+        timer = setTimeout(function () { note.hidden = false; }, 1500);
+      }, true);
+      if (window.fetch) {
+        var f = window.fetch;
+        window.fetch = function () {
+          var p = f.apply(this, arguments);
+          p.then(stop, stop);
+          return p;
+        };
+      }
+    })();
+  </script>
   <script nonce="{{.Nonce}}">
     // THE REFERENCE DESIGN PRESENTS TWO DOORS, NOT SIX. Every enabled method lands in one of two groups --
     // "am I staying here, or do I have a code?" -- and the group is only shown when it has something in it.

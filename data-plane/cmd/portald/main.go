@@ -108,7 +108,7 @@ func newHandler(c cfg) (*handler, error) {
 	}
 	h := &handler{
 		cfg:         c,
-		scd:         &http.Client{Transport: tr, Timeout: 5 * time.Second},
+		scd:         &http.Client{Transport: &busyRetry{next: tr}, Timeout: 8 * time.Second},
 		tmplLand:    tland,
 		tmplSucc:    tsucc,
 		arpCache:    defaultArp,
@@ -261,6 +261,8 @@ func (h *handler) authVoucher(w http.ResponseWriter, r *http.Request) {
 			msg = guestCapacityMessage
 		case e.Error == "METHOD_DISABLED" || isLicenceRefusal(e.Error):
 			msg = guestLicenseRefusedMessage
+		case e.Error == "BUSY":
+			msg = msgServiceBusy
 		case resp.StatusCode >= 500:
 			msg = "Service unavailable. Please try again."
 		}
