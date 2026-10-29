@@ -62,12 +62,17 @@ func (r *Repo) ClaimNext(ctx context.Context, tx pgx.Tx, tenantID, siteID, inter
 	var c Claim
 	err := tx.QueryRow(ctx, `
 WITH claimed AS (
-  SELECT o.id
-    FROM iam_v2.posting_outbox o
-   WHERE o.tenant_id = $1 AND o.site_id = $2 AND o.pms_interface_id = $3 AND o.state = 'QUEUED'
-   ORDER BY o.id
-     FOR UPDATE SKIP LOCKED
-   LIMIT 1)
+  -- The lane's HEAD is its oldest QUEUED row, and the order is the contract: while the head backs off (a NOT_SENT or a
+  -- decline set not_before), nothing behind it is claimed. A head that keeps being refused is parked by
+  -- posting_outbox_defer, which is what lets the lane move on (audit AD-41).
+  SELECT h.id
+    FROM (SELECT o.id, o.not_before
+            FROM iam_v2.posting_outbox o
+           WHERE o.tenant_id = $1 AND o.site_id = $2 AND o.pms_interface_id = $3 AND o.state = 'QUEUED'
+           ORDER BY o.enqueued_at, o.id
+             FOR UPDATE SKIP LOCKED
+           LIMIT 1) h
+   WHERE h.not_before <= now())
 UPDATE iam_v2.posting_outbox o
    SET state = 'IN_FLIGHT'
   FROM claimed, iam_v2.pms_postings p
@@ -114,6 +119,17 @@ SELECT pu.package_revision_id::text, coalesce(pu.settlement_mapping_id::text,'')
 func (r *Repo) ReleaseClaim(ctx context.Context, tx pgx.Tx, outboxID string) error {
 	_, err := tx.Exec(ctx, `UPDATE iam_v2.posting_outbox SET state='QUEUED' WHERE id=$1`, outboxID)
 	return classify(err)
+}
+
+// Defer returns a claimed row to the queue with backoff, or parks it in HELD_RECOVERY after the site's N declines.
+// kind is "NOT_SENT" (the link was down: backoff only) or "DECLINED". It runs in the claim's own transaction or in
+// the settlement's, so the row is never visible half-moved. It returns the row's state afterwards.
+func (r *Repo) Defer(ctx context.Context, tx pgx.Tx, outboxID, kind, reason string) (string, error) {
+	var state string
+	if err := tx.QueryRow(ctx, `SELECT iam_v2.posting_outbox_defer($1, $2, $3)`, outboxID, kind, reason).Scan(&state); err != nil {
+		return "", classify(err)
+	}
+	return state, nil
 }
 
 // FinishClaim marks an outbox row terminal (DONE) or parks it for recovery (HELD_RECOVERY).

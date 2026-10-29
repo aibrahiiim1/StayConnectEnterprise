@@ -278,6 +278,7 @@ func (s *server) pmsFinancialOnboardingRoutes() http.Handler {
 	r.With(s.requireRole("pms-financial-onboarding", permWrite), requireSiteAdmin).Post("/stays/{stay}/admin-block", s.stayAdminBlock)
 	// Financial mirror maximum age: per-interface setting, site_admin with step-up.
 	r.With(s.requireRole("pms-financial-onboarding", permWrite), requireSiteAdmin).Post("/{id}/financial-mirror-max-age", s.setFinancialMirrorMaxAge)
+	s.mountPostingLaneRoutes(r)
 	return r
 }
 
