@@ -45,6 +45,8 @@ func (s *server) networkRoutes() http.Handler {
 	r.Put("/guest-networks/{id}/sign-in", s.putNetworkSignin)
 	r.Get("/sign-in-overrides", s.listNetworkSigninOverrides)
 	r.Get("/guest-networks/{id}/diagnostics", s.networkDiagnostics)
+	r.Get("/enforcement-policy", s.getEnforcementPolicy)
+	r.Patch("/enforcement-policy", s.patchEnforcementPolicy)
 	r.Get("/overview", s.networkOverview)
 	r.Get("/factory", s.getFactory)
 	r.Post("/factory/activate", s.activateFactory)
