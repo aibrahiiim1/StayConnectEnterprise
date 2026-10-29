@@ -1,0 +1,4 @@
+commit 0e3da816e9c895bee6b99def6ecad5948f761eb6
+Date:   Thu Oct 29 12:28:39 2026 +0300
+
+    Governance: T0273 closure deployment receipt, state render and manifest
