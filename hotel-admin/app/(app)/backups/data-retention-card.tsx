@@ -18,6 +18,13 @@ type Key = "pms_stay_days" | "client_activity_days" | "inactive_identity_days" |
 type Bound = { min: number; max: number; default: number; unit: string };
 type Run = { ran_at: string; category: string; rows_anonymised: number };
 type Resp = { settings: Record<Key, number>; bounds: Record<Key, Bound>; runs?: Run[] };
+// What a shortening would remove, as the appliance counted it with the retention rules themselves (audit AD-67).
+type Impact = { total: number; byCategory: Record<string, number>; message: string };
+
+const CATEGORY_LABELS: Record<string, string> = {
+  pms_stays: "Hotel stay data", client_activity: "Devices and sessions", inactive_identities: "Inactive guest identities",
+  expired_records: "Expired one-time records", audit_log: "Audit log details", staff_notes: "Staff notes", sign_in_attempts: "Sign-in attempts",
+};
 
 export const RETENTION_ROWS: { key: Key; label: string; what: string }[] = [
   { key: "pms_stay_days", label: "Hotel stay data", what: "Guest names, room and reservation from the PMS, counted from checkout." },
@@ -40,6 +47,7 @@ export function DataRetentionCard({ writable }: { writable: boolean }) {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<unknown>(null);
+  const [impact, setImpact] = useState<Impact | null>(null);
   const { triggerRef, panelRef } = useEditFocus(editing);
 
   const load = useCallback(async () => {
@@ -62,16 +70,24 @@ export function DataRetentionCard({ writable }: { writable: boolean }) {
   };
   const valid = !!data && RETENTION_ROWS.every((x) => inBounds(x.key)) && reason.trim().length >= 4 && password !== "";
 
-  async function save() {
+  // confirm is the number of additional records the appliance showed for a shortening; sending it back is the second confirmation.
+  async function save(confirm?: number) {
     setBusy(true); setErr(null);
     try {
       const settings = Object.fromEntries(RETENTION_ROWS.map((x) => [x.key, Number(draft[x.key])]));
-      await api.put("/data-retention/", { settings, reason: reason.trim(), password });
+      await api.put("/data-retention/", {
+        settings, reason: reason.trim(), password, ...(confirm !== undefined ? { confirm_records: confirm } : {}),
+      });
       toast.success("Saved. The next hourly run uses the new periods.");
-      setEditing(false); setPassword(""); setReason("");
+      setEditing(false); setPassword(""); setReason(""); setImpact(null);
       await load();
     } catch (e) {
-      setErr(e instanceof ApiError && e.code === "reauth_required" ? new Error("Your password was not accepted.") : e);
+      if (e instanceof ApiError && e.code === "impact_confirmation_required") {
+        setImpact({ total: Number(e.body?.additional_records ?? 0), byCategory: e.body?.additional_by_category ?? {}, message: e.message });
+      } else {
+        setImpact(null);
+        setErr(e instanceof ApiError && e.code === "reauth_required" ? new Error("Your password was not accepted.") : e);
+      }
     } finally { setBusy(false); }
   }
 
@@ -129,9 +145,30 @@ export function DataRetentionCard({ writable }: { writable: boolean }) {
               A shorter period anonymises older data on the next hourly run. A longer one cannot restore data that
               was already anonymised.
             </p>
+            {impact && (
+              <div role="alert" className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm sm:col-span-2">
+                <p className="font-medium">
+                  These shorter periods will remove {impact.total} more record{impact.total === 1 ? "" : "s"} on the next hourly run.
+                </p>
+                <ul className="mt-1 list-disc pl-5 text-caption text-muted-foreground">
+                  {Object.entries(impact.byCategory).map(([c, n]) => (
+                    <li key={c}>{CATEGORY_LABELS[c] ?? c}: {n}</li>
+                  ))}
+                </ul>
+                <p className="mt-1 text-caption text-muted-foreground">
+                  This cannot be undone. System logs are removed by the appliance separately and are not in this count.
+                </p>
+                <div className="mt-2 flex gap-2">
+                  <Button size="sm" variant="danger" disabled={busy} onClick={() => void save(impact.total)}>
+                    {busy ? "Saving…" : `Remove ${impact.total} record${impact.total === 1 ? "" : "s"} and save`}
+                  </Button>
+                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => setImpact(null)}>Go back</Button>
+                </div>
+              </div>
+            )}
             <div className="flex gap-2 sm:col-span-2">
-              <Button size="sm" variant="primary" disabled={busy || !valid} onClick={() => void save()}>{busy ? "Saving…" : "Save"}</Button>
-              <Button size="sm" variant="ghost" disabled={busy} onClick={() => setEditing(false)}>Cancel</Button>
+              <Button size="sm" variant="primary" disabled={busy || !valid || impact !== null} onClick={() => void save()}>{busy ? "Saving…" : "Save"}</Button>
+              <Button size="sm" variant="ghost" disabled={busy} onClick={() => { setEditing(false); setImpact(null); }}>Cancel</Button>
             </div>
           </div>
         )}

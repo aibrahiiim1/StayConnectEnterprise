@@ -38,3 +38,16 @@ BEGIN
     GRANT SELECT (id, tenant_id, timezone) ON public.sites TO iam_v2_owner;
   END IF;
 END $g$;
+
+-- Migration 0221 (a retention period can be previewed before it is shortened, audit AD-67): edged asks what the proposed periods would
+-- remove. The function counts with the retention functions inside a rolled-back sub-transaction and writes nothing.
+DO $g$
+BEGIN
+  IF to_regprocedure('public.data_retention_preview(uuid,uuid,integer,integer,integer,integer,integer,integer,integer,integer)') IS NULL THEN
+    RAISE NOTICE 'migration 0221 is not applied; retention preview grants skipped';
+    RETURN;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_edged') THEN
+    GRANT EXECUTE ON FUNCTION public.data_retention_preview(uuid,uuid,integer,integer,integer,integer,integer,integer,integer,integer) TO svc_edged;
+  END IF;
+END $g$;

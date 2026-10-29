@@ -64,6 +64,27 @@ describe("Guest data retention", () => {
     await screen.findByText("60 days");
   });
 
+  it("asks for a second confirmation of what a shortening removes, then sends that number", async () => {
+    const { ApiError } = await import("@/lib/api");
+    put.mockReset();
+    put.mockImplementationOnce(() => Promise.reject(new ApiError(409, {
+      error: "impact_confirmation_required", message: "These shorter periods will anonymise or delete 12 more records.",
+      additional_records: 12, additional_by_category: { pms_stays: 9, sign_in_attempts: 3 },
+    })));
+    put.mockImplementation((_p: string, body: any) => { settings = body.settings; return Promise.resolve({}); });
+    await renderCard(true);
+    fireEvent.click(screen.getByRole("button", { name: /change/i }));
+    fireEvent.change(screen.getByLabelText(/hotel stay data/i), { target: { value: "7" } });
+    fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: "hotel policy" } });
+    fireEvent.change(screen.getByLabelText(/your password/i), { target: { value: "pw" } });
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    expect(await screen.findByText(/will remove 12 more records/i)).toBeTruthy();
+    expect(screen.getByText(/Hotel stay data: 9/)).toBeTruthy();
+    expect((screen.getByRole("button", { name: /^save$/i }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: /remove 12 records and save/i }));
+    await waitFor(() => expect(put).toHaveBeenLastCalledWith("/data-retention/", expect.objectContaining({ confirm_records: 12, password: "pw" })));
+  });
+
   it("shows nothing on an appliance without the setting", async () => {
     get.mockImplementation(() => Promise.reject(new Error("404")));
     const { DataRetentionCard } = await import("@/app/(app)/backups/data-retention-card");
