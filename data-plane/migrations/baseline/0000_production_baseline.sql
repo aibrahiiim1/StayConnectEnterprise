@@ -12645,13 +12645,19 @@ BEGIN
     RAISE EXCEPTION 'batch must be 1-5000' USING ERRCODE = 'invalid_parameter_value';
   END IF;
   SELECT g.device_retention_days INTO v_days FROM iam_v2.signin_capacity_settings_get(p_tenant, p_site) g;
+  -- Every foreign key to devices, single-column or composite ((tenant_id, site_id, device_id) is the usual shape): the
+  -- referencing row matches the device on ALL the key's columns, each paired with the column it references.
   FOR r IN
-    SELECT c.conrelid::regclass::text AS tbl, a.attname AS col
+    SELECT c.conrelid::regclass::text AS tbl,
+           string_agg(format('x.%I = d.%I', ra.attname, pa.attname), ' AND ' ORDER BY k.ord) AS cond
       FROM pg_constraint c
-      JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = c.conkey[1]
-     WHERE c.contype = 'f' AND c.confrelid = 'iam_v2.devices'::regclass AND array_length(c.conkey, 1) = 1
+      CROSS JOIN LATERAL unnest(c.conkey, c.confkey) WITH ORDINALITY AS k(refing, refed, ord)
+      JOIN pg_attribute ra ON ra.attrelid = c.conrelid AND ra.attnum = k.refing
+      JOIN pg_attribute pa ON pa.attrelid = c.confrelid AND pa.attnum = k.refed
+     WHERE c.contype = 'f' AND c.confrelid = 'iam_v2.devices'::regclass
+     GROUP BY c.oid, c.conrelid
   LOOP
-    v_not := v_not || format(' AND NOT EXISTS (SELECT 1 FROM %s x WHERE x.%I = d.id)', r.tbl, r.col);
+    v_not := v_not || format(' AND NOT EXISTS (SELECT 1 FROM %s x WHERE %s)', r.tbl, r.cond);
   END LOOP;
   v_sql := format($q$
     WITH doomed AS (
