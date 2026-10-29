@@ -259,10 +259,12 @@ type passBatch struct {
 	ends []pendingEnd
 	// activations are promotion results fetched concurrently ahead of the sequential state machine that consumes them.
 	activations map[string]activationResult
+	// renewed are the leases this pass has already written.
+	renewed map[string]bool
 }
 
 func newPassBatch() *passBatch {
-	return &passBatch{renew: map[string]pendingRenew{}, activations: map[string]activationResult{}}
+	return &passBatch{renew: map[string]pendingRenew{}, activations: map[string]activationResult{}, renewed: map[string]bool{}}
 }
 
 func urgentCtx(ctx context.Context) (context.Context, context.CancelFunc) {
@@ -476,6 +478,7 @@ func (p *phase3Shaping) flushRenewals(ctx context.Context, res *shapingPlanRespo
 	}
 	for i, err := range p.authorizeBatch(uctx, reqs) {
 		if err == nil {
+			p.pb.renewed[gateKey(items[i].bridge, items[i].ip)] = true
 			continue
 		}
 		verb := "authorize "
@@ -667,7 +670,7 @@ type batchCand struct {
 // provisionBridgeBatched is step 3 of the pass for one bridge, in priority order.
 func (p *phase3Shaping) provisionBridgeBatched(ctx context.Context, bridge string, byMinor map[int]shapeplan.Session, view gateView, now time.Time, res *shapingPlanResponse) {
 	minors := sortedIntKeys(byMinor)
-	var steady, admit []batchCand
+	var steady, admit, indiv []batchCand
 	// 1. Decide every session from memory and the DHCP evidence (no kernel work); the ones that fail closed queue their denial, individual ones run now.
 	for idx, minor := range minors {
 		if ctx.Err() != nil {
@@ -686,12 +689,14 @@ func (p *phase3Shaping) provisionBridgeBatched(ctx context.Context, bridge strin
 		case workAdmit:
 			admit = append(admit, batchCand{minor, s, pc})
 		default:
-			p.provisionTail(ctx, bridge, minor, s, view, now, res, pc)
+			// Changed, unproven, held or SHARED: the per-session path, but not yet: it can wait on the database, and the leases below cannot.
+			indiv = append(indiv, batchCand{minor, s, pc})
 		}
 	}
 	p.mark("precheck")
 	p.count("n_admit", len(admit))
 	p.count("n_steady", len(steady))
+	p.count("n_individual", len(indiv))
 	// 2. Fail closed first: the sessions whose access must be withdrawn.
 	p.flushDenies(ctx, res)
 	p.mark("deny_flush")
@@ -704,9 +709,13 @@ func (p *phase3Shaping) provisionBridgeBatched(ctx context.Context, bridge strin
 	p.flushRenewals(ctx, res)
 	p.flushDenies(ctx, res)
 	p.mark("renew")
-	// 4. New sessions.
+	// 4. New sessions, then the ones that need the per-session path. Their promotions are asked of the database a few at a time first.
 	p.admitBatch(ctx, bridge, admit, view, now, res)
 	p.mark("admit")
+	p.runIndividual(ctx, bridge, indiv, view, now, res)
+	p.mark("individual")
+	p.renewAgain(ctx, bridge, steady, view, res)
+	p.mark("renew_again")
 	p.flushRenewals(ctx, res)
 	p.flushDenies(ctx, res)
 	p.mark("urgent_flush")
@@ -732,6 +741,12 @@ func (p *phase3Shaping) admitBatch(ctx context.Context, bridge string, cands []b
 		if ctx.Err() != nil {
 			res.Failed++
 			res.Problems = append(res.Problems, fmt.Sprintf("pass budget exhausted on %s: %d new sessions were not admitted and are retried next pass", bridge, len(cands)-start))
+			return
+		}
+		if start > 0 && p.pastSoftBudget() {
+			// Not a failure: what this pass did not reach is first in line in the next one (it is still pending, still listed). A pass that is allowed to run
+			// for as long as its database is slow starves the plans behind it, and with them every session that signed in after it began.
+			p.count("admit_deferred", len(cands)-start)
 			return
 		}
 		end := start + shape.BatchChunk

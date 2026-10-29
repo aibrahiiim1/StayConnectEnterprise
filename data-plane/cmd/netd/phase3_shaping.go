@@ -132,6 +132,11 @@ type phase3Shaping struct {
 	routineReserve time.Duration
 	// trace times the stages of the pass in progress (phase3_trace.go).
 	trace *passTrace
+	// softEnd is when the pass in progress stops taking on new work (phase3SoftBudget after it began); indivCursor remembers, per bridge, where the
+	// previous pass stopped in the sessions that need the per-session path.
+	softEnd     time.Time
+	passStart   time.Time
+	indivCursor map[string]int
 	// arrivedGen is the newest plan generation that has reached the handler, whether or not it has the lock yet; supersededN counts the plans it overtook.
 	arrivedGen  atomic.Int64
 	supersededN atomic.Int64
@@ -306,7 +311,10 @@ func (p *phase3Shaping) submit(ctx context.Context, env shapeplan.Envelope, now 
 		atLock = time.Until(dl).Milliseconds()
 	}
 	p.trace = newPassTrace()
+	p.passStart = time.Now()
+	p.softEnd = p.passStart.Add(phase3SoftBudget)
 	res := p.reconcileLocked(ctx, env, now)
+	p.softEnd, p.passStart = time.Time{}, time.Time{}
 	left := int64(-1)
 	if dl, ok := ctx.Deadline(); ok {
 		left = time.Until(dl).Milliseconds()

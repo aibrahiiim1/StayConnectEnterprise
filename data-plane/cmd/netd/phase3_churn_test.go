@@ -11,6 +11,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"sort"
 	"strings"
@@ -468,6 +469,83 @@ func TestAHandedOverSessionIsRecordedAsEndedOnceNotEveryPass(t *testing.T) {
 		}
 		if e.enf.ended > 1 {
 			t.Fatalf("noBatch=%v: the handed-over session was recorded as ended %d times in 5 passes", noBatch, e.enf.ended)
+		}
+	}
+}
+
+// A pass that has run long renews the unchanged sessions a second time, judging their leases by what is left now: the renewal at its start leaves alone
+// a lease with more than a minute left, which a long enough pass would otherwise let run out.
+func TestALongPassRenewsTheLeasesItLeftAloneAtItsStart(t *testing.T) {
+	e, k := newFakeScale(t, 30, false)
+	e.tick(20 * time.Second) // 70 s left of 90: not due at the start of a pass
+	e.p.mu.Lock()
+	defer e.p.mu.Unlock()
+	e.p.pb = newPassBatch()
+	defer func() { e.p.pb, e.p.passStart = nil, time.Time{} }()
+	view := e.p.snapshotGate(context.Background())
+	var steady []batchCand
+	for i := 0; i < 30; i++ {
+		s := scaleSession(i)
+		ip := net.ParseIP(s.IP)
+		steady = append(steady, batchCand{minor: 0x1000 + 2 + i, s: s, pc: provCtx{ip: ip, key: classKey(scaleBridge, s.SessionID), lease: phase3LeaseTTL}})
+	}
+	var res shapingPlanResponse
+	// a pass that has only just begun leaves them alone
+	e.p.passStart = time.Now()
+	e.p.renewAgain(context.Background(), scaleBridge, steady, view, &res)
+	if k.counts().NFTScript != 0 && res.Failed != 0 {
+		t.Fatal("renewed at the start of a pass")
+	}
+	c0 := k.counts()
+	// 20 s into the pass: the 70 s they had are 50 s now, which is due
+	e.p.passStart = time.Now().Add(-20 * time.Second)
+	e.p.renewAgain(context.Background(), scaleBridge, steady, view, &res)
+	if res.Failed != 0 {
+		t.Fatalf("%v", res.Problems)
+	}
+	if got := k.counts().sub(c0); got.NFTScript != 1 {
+		t.Fatalf("second renewal used %d transactions, want 1", got.NFTScript)
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	for key, el := range k.sets["phase3_auth_ipv4"] {
+		if left := el.expires.Sub(k.now); left > 71*time.Second || left < 69*time.Second {
+			t.Fatalf("%s has %s left; a lease renewed 20 s into a pass must be the pass's lease less those 20 s, never longer than before", key, left)
+		}
+	}
+}
+
+// A pass stops taking on new work after its soft budget; what it did not reach is not a failure and is first in line next time.
+func TestAPassDefersWhatItDidNotReachWithoutFailingIt(t *testing.T) {
+	old := phase3SoftBudget
+	phase3SoftBudget = 20 * time.Millisecond
+	defer func() { phase3SoftBudget = old }()
+	e, k := newFakeScale(t, 20, false)
+	e.addSessions(20, 160)
+	k.mu.Lock()
+	k.perExec = 3 * time.Millisecond
+	k.mu.Unlock()
+	e.tick(5 * time.Second)
+	st := e.pass()
+	got := e.activeCount() - 20
+	if st.res.Failed != 0 {
+		t.Fatalf("deferral reported as failure: %v", st.res.Problems)
+	}
+	if got == 0 || got >= 140 {
+		t.Fatalf("promoted %d of 140 in the first pass; want the first chunk(s) but not all", got)
+	}
+	for n := 0; n < 20 && e.activeCount() < 160; n++ {
+		e.tick(5 * time.Second)
+		if st := e.pass(); st.res.Failed != 0 {
+			t.Fatalf("pass %d: %v", n, st.res.Problems)
+		}
+	}
+	if e.activeCount() != 160 {
+		t.Fatalf("only %d of 160 active after repeated passes", e.activeCount())
+	}
+	for i := 0; i < 20; i++ {
+		if !hasAuth(k, i) {
+			t.Fatalf("long session %d lost its authorization while admissions were deferred", i)
 		}
 	}
 }

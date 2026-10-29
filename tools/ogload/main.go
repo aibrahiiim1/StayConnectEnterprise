@@ -468,6 +468,7 @@ func cmdTraffic() {
 	nbytes := flag.Int("bytes", 262144, "bytes each moving client downloads per round")
 	every := flag.Duration("every", 5*time.Second, "round period")
 	dur := flag.Duration("duration", time.Minute, "total duration")
+	spread := flag.Duration("spread", 0, "spread the requests of a round evenly at random over this long instead of starting them all at once")
 	from := flag.Int("from", 0, "first client index")
 	to := flag.Int("to", 1<<30, "client index to stop before")
 	flag.Parse()
@@ -495,6 +496,9 @@ func cmdTraffic() {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
+				if *spread > 0 {
+					time.Sleep(time.Duration(rand.Int63n(int64(*spread))))
+				}
 				t := time.Now()
 				resp, err := hcs[c.Idx].Get(fmt.Sprintf("%s/blob?n=%d", *sink, *nbytes))
 				if err != nil {

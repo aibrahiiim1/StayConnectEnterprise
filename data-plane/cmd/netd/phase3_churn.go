@@ -17,6 +17,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 
 	"sync"
 	"sync/atomic"
@@ -36,7 +37,7 @@ const (
 
 // phase3DBCallTimeout bounds one database call of the pass. A call that waits longer is a failure of that session, retried next pass, not a stall of
 // every session behind it. A variable only so a test can shorten it.
-var phase3DBCallTimeout = 8 * time.Second
+var phase3DBCallTimeout = 3 * time.Second
 
 // fanout runs fn(0..n-1) with at most width calls at once and returns when all are done. fn must not touch netd state: it is for database calls.
 func fanout(n, width int, fn func(i int)) {
@@ -144,7 +145,7 @@ func (p *phase3Shaping) finishEnds(ctx context.Context, res *shapingPlanResponse
 	}
 	items := p.pb.ends
 	p.pb.ends = nil
-	if dl, ok := ctx.Deadline(); ctx.Err() != nil || (ok && time.Until(dl) < phase3EndBookkeepingReserve) {
+	if dl, ok := ctx.Deadline(); ctx.Err() != nil || p.pastSoftBudget() || (ok && time.Until(dl) < phase3EndBookkeepingReserve) {
 		// Left for the next pass: the plan lists these sessions until their window closes, and an unrecorded end is simply recorded then.
 		p.count("ends_deferred", len(items))
 		return
@@ -201,11 +202,53 @@ func (p *phase3Shaping) steadyLease(ctx context.Context, bridge string, c batchC
 	p.noteRenewable(pc.key, bridge, pc.ip, c.s, pc.ev.Until, now)
 }
 
+// phase3MidPassRenewAfter: a pass that has run longer than this renews the leases of the unchanged sessions a second time before it takes on more, judging
+// them by the time they have left NOW. The renewal at the start of a pass leaves alone a lease with more than phase3LeaseRenewBelow left, which is
+// safe only while a pass is shorter than phase3LeaseTTL - phase3LeaseRenewBelow; this keeps it safe when the database makes a pass longer.
+const phase3MidPassRenewAfter = 8 * time.Second
+
+// renewAgain is steadyLease's second look: it only asserts the lease, against the snapshot aged by the time the pass has taken, and skips the
+// sessions this pass already renewed.
+func (p *phase3Shaping) renewAgain(ctx context.Context, bridge string, steady []batchCand, view gateView, res *shapingPlanResponse) {
+	if len(steady) == 0 || p.passStart.IsZero() || time.Since(p.passStart) < phase3MidPassRenewAfter {
+		return
+	}
+	aged := view
+	aged.aged = time.Since(p.passStart)
+	nowBoot, _ := p.bootNow()
+	n := 0
+	for _, c := range steady {
+		if p.pb.renewed[gateKey(bridge, c.pc.ip)] {
+			continue
+		}
+		want := c.pc.lease
+		if !p.proofFresh(c.pc.key, p.epochs[c.pc.key], nowBoot) {
+			want = provisionalOrLess(want)
+		}
+		// the lease the pass computed at its start has run down by the time the pass has taken
+		if want -= aged.aged; want < time.Second {
+			continue // the access boundary is closer than the pass is long: nothing to extend
+		}
+		before := len(p.pb.renew)
+		p.assertLease(ctx, bridge, c.pc.ip, want.Truncate(time.Second), aged, res, c.s.SessionID)
+		if len(p.pb.renew) > before {
+			n++
+		}
+	}
+	p.count("renewed_again", n)
+	p.flushRenewals(ctx, res)
+	p.flushDenies(ctx, res)
+}
+
 // reproveSteady asks durable state, with plain reads a few at a time, whether the sessions whose last proof has aged are still active. A session that
 // is confirmed is proven again; one that is not (ended, unreadable) goes through the full per-session path, which withdraws or holds its access by the
 // activation rules. The leases of these sessions were already written before this ran.
 func (p *phase3Shaping) reproveSteady(ctx context.Context, bridge string, steady []batchCand, view gateView, now time.Time, res *shapingPlanResponse) {
 	if p.enforcement == nil {
+		return
+	}
+	if p.pastSoftBudget() {
+		p.count("reprove_deferred", len(steady))
 		return
 	}
 	nowBoot, err := p.bootNow()
@@ -238,6 +281,55 @@ func (p *phase3Shaping) reproveSteady(ctx context.Context, bridge string, steady
 		// Not confirmed: the per-session path decides (it asks the promotion call and applies the grace and quarantine rules).
 		p.provisionTail(ctx, bridge, c.minor, c.s, view, now, res, c.pc)
 	}
+}
+
+// runIndividual runs the per-session path for the sessions that cannot be batched. Those that already have a class and are only waiting for their
+// durable ACTIVE are promoted by a few concurrent calls first (their answers are consumed in order by proveActive), so one that waits on a lock held
+// elsewhere costs its own timeout, not the sum of them.
+func (p *phase3Shaping) runIndividual(ctx context.Context, bridge string, indiv []batchCand, view gateView, now time.Time, res *shapingPlanResponse) {
+	if len(indiv) == 0 {
+		return
+	}
+	var asks []activationAsk
+	for _, c := range indiv {
+		epoch, active := p.epochs[c.pc.key]
+		if _, held := p.classes[c.pc.key]; active && held && p.enforcement != nil {
+			asks = append(asks, activationAsk{key: c.pc.key, sessionID: c.s.SessionID, bridge: bridge, minor: c.minor, epoch: epoch})
+		}
+	}
+	p.prefetchActivations(ctx, asks)
+	// Resume where the previous pass stopped, so a few sessions that always wait on the database cannot take every pass's time and starve the rest.
+	start := 0
+	if p.indivCursor != nil {
+		start = p.indivCursor[bridge] % len(indiv)
+	}
+	done := 0
+	for n := 0; n < len(indiv); n++ {
+		c := indiv[(start+n)%len(indiv)]
+		if ctx.Err() != nil {
+			res.Failed++
+			res.Problems = append(res.Problems, fmt.Sprintf("pass budget exhausted on %s: %d sessions were not handled and are retried next pass", bridge, len(indiv)-n))
+			break
+		}
+		if done > 0 && p.pastSoftBudget() {
+			p.count("individual_deferred", len(indiv)-n)
+			break
+		}
+		p.provisionTail(ctx, bridge, c.minor, c.s, view, now, res, c.pc)
+		done++
+	}
+	if p.indivCursor == nil {
+		p.indivCursor = map[string]int{}
+	}
+	p.indivCursor[bridge] = start + done
+}
+
+// phase3SoftBudget is how much work a pass takes on after it has done the urgent part (denials, lease renewal, the first batch of admissions): past
+// it, what is left waits for the next pass. A variable only so a test can shorten it.
+var phase3SoftBudget = 15 * time.Second
+
+func (p *phase3Shaping) pastSoftBudget() bool {
+	return !p.softEnd.IsZero() && time.Now().After(p.softEnd)
 }
 
 // admissionAllocs allocates the class generations a chunk of new sessions needs, a few at a time. An allocation that fails leaves its session out of
