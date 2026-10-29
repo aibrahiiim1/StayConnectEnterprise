@@ -42,7 +42,7 @@ func TestMissingPolicyTableIsTheOldBehaviour(t *testing.T) {
 	a, _ := policyApplier(t, &fakePolicyStore{found: false})
 	a.refreshEnforcementPolicy(context.Background())
 	if a.renderTopo().PrivateReach.Deny {
-		t.Fatal("a schema without migration 0190 must keep the previous ruleset")
+		t.Fatal("a schema without migration 0166 must keep the previous ruleset")
 	}
 }
 

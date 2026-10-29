@@ -75,7 +75,7 @@ type Store struct {
 	window time.Duration
 	now    func() time.Time
 	// noCharge is set once the database reports it has no public.auth_throttle_charge (a database that predates
-	// migration 0171); Allow then uses the multi-statement path below. Any other error denies.
+	// migration 0163); Allow then uses the multi-statement path below. Any other error denies.
 	noCharge atomic.Bool
 }
 
@@ -195,7 +195,7 @@ func (s *Store) Allow(ctx context.Context, rules ...Rule) (Decision, error) {
 			return Decision{Reason: ScopeEndpoint}, err
 		}
 		s.noCharge.Store(true)
-		slog.Warn("throttle: auth_throttle_charge is missing (database predates migration 0171); using the multi-statement path")
+		slog.Warn("throttle: auth_throttle_charge is missing (database predates migration 0163); using the multi-statement path")
 	}
 	allowed := true
 	var reason ScopeKind
@@ -269,7 +269,7 @@ func (s *Store) Allow(ctx context.Context, rules ...Rule) (Decision, error) {
 	return Decision{Allowed: allowed, RetryAfter: worstRetry, Reason: reason}, nil
 }
 
-// allowOneTrip charges every rule in one database round trip (AD-51; migration 0171), a port of the loop below.
+// allowOneTrip charges every rule in one database round trip (AD-51; migration 0163), a port of the loop below.
 func (s *Store) allowOneTrip(ctx context.Context, entries []chargeable, now, ws time.Time, wl int) (Decision, error) {
 	n := len(entries)
 	kinds, keys, methods := make([]string, n), make([]string, n), make([]string, n)

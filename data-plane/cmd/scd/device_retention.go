@@ -32,7 +32,7 @@ func (s *server) pruneIdleDevices(ctx context.Context) {
 		if err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "42883" {
-				slog.Warn("device retention unavailable: this database predates migration 0170")
+				slog.Warn("device retention unavailable: this database predates migration 0162")
 			} else if ctx.Err() == nil {
 				slog.Warn("device retention run failed", "err", err)
 			}

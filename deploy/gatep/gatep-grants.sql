@@ -322,7 +322,7 @@ GRANT EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) TO svc_acctd;
 \ir svc-pmsd-iamv2-connector-grants.sql
 -- The HTTPS portal and sealed social secrets (0116).
 \ir svc-portal-https-grants.sql
--- Enforcement policy: private-network reach, MAC binding, cut-off (0190).
+-- Enforcement policy: private-network reach, MAC binding, cut-off (0166).
 \ir svc-enforcement-policy-grants.sql
 -- Email accounts: self-service registration, verification and reset (0117).
 \ir svc-self-service-grants.sql
@@ -332,7 +332,7 @@ GRANT EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) TO svc_acctd;
 \ir svc-client-accounts-grants.sql
 -- Plan controls (idle / maximum session / DISCONNECT_OLDEST / time allowance) and accounting retention (0122).
 \ir svc-plan-controls-grants.sql
--- Usage rollup and purge budget (0240).
+-- Usage rollup and purge budget (0175).
 \ir svc-usage-rollup-grants.sql
 -- Guest-data retention: the hourly anonymisation run and its setting (0127).
 \ir svc-data-retention-grants.sql
@@ -346,7 +346,7 @@ GRANT EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) TO svc_acctd;
 \ir svc-signin-network-pause-grants.sql
 -- Disabled staff accounts are anonymised after a set period; staff addresses follow the activity log (0138).
 \ir svc-staff-retention-grants.sql
--- Sign-in limits and capacity settings, device retention, settings/session change notifications (0170; AD-30/31/34/51/52/58).
+-- Sign-in limits and capacity settings, device retention, settings/session change notifications (0162; AD-30/31/34/51/52/58).
 \ir svc-signin-capacity-grants.sql
 
 -- EXECUTE on the CANONICAL audited, versioned publication boundary. This is the only function the product

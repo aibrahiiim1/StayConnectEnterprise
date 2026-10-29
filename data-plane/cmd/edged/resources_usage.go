@@ -504,7 +504,7 @@ func (s *server) listSessionSamples(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "the accounting samples could not be read")
 		return
 	}
-	// Raw samples are kept only a couple of days once rolled up (migration 0240, AD-48); an older session shows its
+	// Raw samples are kept only a couple of days once rolled up (migration 0175, AD-48); an older session shows its
 	// per-minute totals instead, labelled as such, until those too pass their retention.
 	grain := "sample"
 	if len(out) == 0 {

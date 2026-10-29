@@ -90,7 +90,7 @@ BEGIN
   END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_edged') THEN
     GRANT EXECUTE ON FUNCTION iam_v2.ledger_pending() TO svc_edged;
-    -- 0220 (audit AD-3): edged confirms with scd's receipt (ledger_confirm_checked), never with a bare hash; ledger_confirm stays scd's.
+    -- 0173 (audit AD-3): edged confirms with scd's receipt (ledger_confirm_checked), never with a bare hash; ledger_confirm stays scd's.
     GRANT EXECUTE ON FUNCTION iam_v2.ledger_head() TO svc_edged;
   END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_scd') THEN
@@ -109,13 +109,13 @@ BEGIN
   END IF;
 END $g$;
 
--- Migration 0220 (the erasure ledger is authenticated by a key the external copy never holds, audit AD-3): edged confirms an entry only
+-- Migration 0173 (the erasure ledger is authenticated by a key the external copy never holds, audit AD-3): edged confirms an entry only
 -- with scd's durability receipt; scd reads the key, checks entries, installs the key into a restored database and seals the entries
 -- written before the MAC existed. ledger_confirm(text[]) is NOT granted to edged.
 DO $g$
 BEGIN
   IF to_regprocedure('iam_v2.ledger_confirm_checked(text[],text[])') IS NULL THEN
-    RAISE NOTICE 'migration 0220 is not applied; ledger authentication grants skipped';
+    RAISE NOTICE 'migration 0173 is not applied; ledger authentication grants skipped';
     RETURN;
   END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_edged') THEN

@@ -858,7 +858,7 @@ func (b *Base) deleteAppliance(w http.ResponseWriter, r *http.Request) {
 		failInternal(w, r, "delete failed", err)
 		return
 	}
-	// AD-65: the history the cascade would remove is kept (migration 0072), in this transaction, so a delete that
+	// AD-65: the history the cascade would remove is kept (migration 0062), in this transaction, so a delete that
 	// finds the appliance changed rolls the archive row back with it.
 	if _, err := tx.Exec(ctx, archiveApplianceHistorySQL, id, operatorID); err != nil {
 		failInternal(w, r, "delete failed", err)
@@ -913,7 +913,7 @@ func PruneAssignmentFetchLog(ctx context.Context, b *Base) (int64, error) {
 	return tag.RowsAffected(), nil
 }
 
-// archiveApplianceHistorySQL copies the history a delete would cascade away ($1 appliance, $2 operator; AD-65, 0072).
+// archiveApplianceHistorySQL copies the history a delete would cascade away ($1 appliance, $2 operator; AD-65, 0062).
 const archiveApplianceHistorySQL = `
         INSERT INTO appliance_history_archive (appliance_id, serial, tenant_id, site_id, lifecycle_state, deleted_by,
                lifecycle_events, certificates, certificate_requests, assignment_moves)

@@ -1,6 +1,6 @@
 package main
 
-// Sign-in limits and capacity settings (migration 0170; audit decisions AD-30/31/34/51/58): one-time-code caps and
+// Sign-in limits and capacity settings (migration 0162; audit decisions AD-30/31/34/51/58): one-time-code caps and
 // lifetime, the appliance-wide sign-in ceiling, the room sign-in pause exemption, device retention and the uploaded-image
 // limits. Read through iam_v2.signin_capacity_settings_get and changed only through ..._set, which validates the bounds,
 // names the operator and writes the append-only change log. Same permission key as the other sign-in settings

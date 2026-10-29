@@ -303,12 +303,12 @@ BEGIN
   GRANT EXECUTE ON FUNCTION iam_v2.pms_review_expire_due(uuid, uuid, integer)            TO svc_pmsd;
 END $g0123p$;
 
--- 0204 (audit AD-38): the superseded-roster-copy reducer pmsd runs on a cadence. A definer that can only empty the payload of
+-- 0171 (audit AD-38): the superseded-roster-copy reducer pmsd runs on a cadence. A definer that can only empty the payload of
 -- a middle copy of a record that also exists earlier and later, through the owner-only retention path.
 DO $g0204p$
 BEGIN
   IF to_regprocedure('iam_v2.pms_resync_supersede_payloads(uuid,uuid,integer)') IS NULL THEN
-    RAISE NOTICE 'migration 0204 is not applied -- superseded-copy grant skipped';
+    RAISE NOTICE 'migration 0171 is not applied -- superseded-copy grant skipped';
     RETURN;
   END IF;
   GRANT EXECUTE ON FUNCTION iam_v2.pms_resync_supersede_payloads(uuid, uuid, integer) TO svc_pmsd;

@@ -32,7 +32,7 @@ const (
 )
 
 func NetworkDefaults() NetworkPolicy {
-	// 60 since migration 0170 (AD-31): a busy network of ordinary typing mistakes should not pause room sign-in for everyone.
+	// 60 since migration 0162 (AD-31): a busy network of ordinary typing mistakes should not pause room sign-in for everyone.
 	return NetworkPolicy{MaxFailures: 60, WindowSeconds: 600, PauseSeconds: 900}
 }
 

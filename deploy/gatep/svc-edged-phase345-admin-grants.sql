@@ -533,12 +533,12 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON iam_v2.guest_network_pms_policy TO svc_e
 -- 0157: removing a PMS connection that was never used (the only path that deletes one).
 GRANT EXECUTE ON FUNCTION iam_v2.delete_unused_pms_interface(uuid,uuid,uuid) TO svc_edged;
 
--- 0200 (audit AD-41): the posting-lane setting (read, versioned write) and the operator's release of a row parked by
+-- 0167 (audit AD-41): the posting-lane setting (read, versioned write) and the operator's release of a row parked by
 -- repeated refusals. Definers only; edged reads and writes no table.
 DO $g0200e$
 BEGIN
   IF to_regprocedure('iam_v2.posting_outbox_requeue_parked(uuid,uuid,uuid,text,text)') IS NULL THEN
-    RAISE NOTICE 'migration 0200 is not applied -- posting-lane grants skipped';
+    RAISE NOTICE 'migration 0167 is not applied -- posting-lane grants skipped';
     RETURN;
   END IF;
   GRANT EXECUTE ON FUNCTION iam_v2.posting_lane_settings_get(uuid,uuid) TO svc_edged;
@@ -546,11 +546,11 @@ BEGIN
   GRANT EXECUTE ON FUNCTION iam_v2.posting_outbox_requeue_parked(uuid,uuid,uuid,text,text) TO svc_edged;
 END $g0200e$;
 
--- 0205 (audit AD-43): the late-capture re-query window (read, versioned write). Definers only; the change log is read through nothing.
+-- 0172 (audit AD-43): the late-capture re-query window (read, versioned write). Definers only; the change log is read through nothing.
 DO $g0205e$
 BEGIN
   IF to_regprocedure('iam_v2.card_recheck_settings_set(uuid,uuid,bigint,integer,text,text)') IS NULL THEN
-    RAISE NOTICE 'migration 0205 is not applied -- late-capture setting grants skipped';
+    RAISE NOTICE 'migration 0172 is not applied -- late-capture setting grants skipped';
     RETURN;
   END IF;
   GRANT EXECUTE ON FUNCTION iam_v2.card_recheck_settings_get(uuid,uuid) TO svc_edged;

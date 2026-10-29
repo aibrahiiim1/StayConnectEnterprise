@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// maxReasonRunes bounds the operator's text as stored (migration 0202 holds 4..500).
+// maxReasonRunes bounds the operator's text as stored (migration 0169 holds 4..500).
 const maxReasonRunes = 500
 
 // boundedReason is what is stored with the transfer: the operator's text, trimmed and cut to the stored bound. Execute has

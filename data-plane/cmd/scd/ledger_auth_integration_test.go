@@ -21,7 +21,7 @@ func TestIntegrationLedger_SealingAndAnUnauthenticExternalEntry(t *testing.T) {
 	ctx := context.Background()
 	key := r.s.ledgerKey(ctx)
 	if len(key) == 0 {
-		t.Skip("the database has no ledger key (migration 0220 is not applied)")
+		t.Skip("the database has no ledger key (migration 0173 is not applied)")
 	}
 	if st := r.reconcile(); st.State != "ok" {
 		t.Fatalf("reconcile = %+v", st)

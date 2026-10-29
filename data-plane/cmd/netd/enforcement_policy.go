@@ -1,10 +1,10 @@
 package main
 
-// The enforcement policy (public.enforcement_policy, migration 0190) is read here and folded into the topology the ruleset
+// The enforcement policy (public.enforcement_policy, migration 0166) is read here and folded into the topology the ruleset
 // is rendered from. A change in the table changes the render fingerprint, so the periodic re-assertion (nft_watch.go)
 // installs it within one tick without a revision.
 //
-// FAIL STATIC. A policy that has never been read (database down at boot, schema older than 0190) renders as the previous
+// FAIL STATIC. A policy that has never been read (database down at boot, schema older than 0166) renders as the previous
 // release did: nothing is newly denied. A policy that was read stays in force when a later read fails. Only a successful
 // read of the table moves the ruleset.
 

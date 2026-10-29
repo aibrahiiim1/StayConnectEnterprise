@@ -79,7 +79,7 @@ func (s *server) assetOptimiser() *assetOptimiser {
 	return s.assetOpt
 }
 
-// portalImageParams reads the site's image settings (migration 0170); the defaults apply when they cannot be read.
+// portalImageParams reads the site's image settings (migration 0162); the defaults apply when they cannot be read.
 func (s *server) portalImageParams() optimiseParams {
 	p := defaultOptimiseParams()
 	if s.db == nil || s.tenantID == "" || s.siteID == "" {

@@ -140,7 +140,7 @@ func (p *phase3) enforceSessionLimits(ctx context.Context, now time.Time) {
 // The purge runs in bounded batches so a site that shortens its retention catches up over hours without a long
 // transaction on the table every tick writes to.
 const (
-	// rollupInterval: how often the per-minute / per-hour usage tables catch up (migration 0240). The purge deletes
+	// rollupInterval: how often the per-minute / per-hour usage tables catch up (migration 0175). The purge deletes
 	// only samples the rollup has read, so a stopped rollup stops reclaiming space.
 	rollupInterval  = time.Minute
 	purgeInterval   = 10 * time.Minute

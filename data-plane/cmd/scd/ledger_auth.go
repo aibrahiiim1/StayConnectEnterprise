@@ -1,6 +1,6 @@
 package main
 
-// Authentication of the erasure ledger (audit AD-3, migration 0220; internal/ledger/mac.go). The key lives in the appliance
+// Authentication of the erasure ledger (audit AD-3, migration 0173; internal/ledger/mac.go). The key lives in the appliance
 // database; scd reads it (never edged) to issue durability receipts, to MAC the secondary storage's head note and to check
 // a ledger before a restore or a recovery applies it. A copy of the key is kept sealed to the backup key holders so a
 // replacement appliance can still tell its own history from a forgery.
@@ -34,7 +34,7 @@ func (s *server) ledgerCachedKey() ledger.MACKey {
 }
 
 // ledgerKey returns the database's ledger key, loading it once. nil means the database has no key (it predates migration
-// 0220), in which case the ledger works as it did before.
+// 0173), in which case the ledger works as it did before.
 func (s *server) ledgerKey(ctx context.Context) ledger.MACKey {
 	if k := s.ledgerCachedKey(); len(k) > 0 {
 		return k
@@ -212,7 +212,7 @@ func (s *server) restoreLedgerKey(ctx context.Context, entries []ledger.Entry, a
 }
 
 // installRestoreKey puts the key the ledger copies were written with into the staging database, so the database's own check
-// (ledger_apply) agrees with ours. A backup older than migration 0220 has no such function and needs nothing.
+// (ledger_apply) agrees with ours. A backup older than migration 0173 has no such function and needs nothing.
 func (s *server) installRestoreKey(ctx context.Context, staging string, key ledger.MACKey) (string, bool) {
 	if len(key) == 0 {
 		return "", true

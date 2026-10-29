@@ -1,6 +1,6 @@
 package auth
 
-// Second-step locks per (operator, client address) with an account-wide backstop (AD-6, migration 0070).
+// Second-step locks per (operator, client address) with an account-wide backstop (AD-6, migration 0060).
 //
 // A wrong code is counted for the operator and the address it came from; signin_lock_failures of them lock the
 // second step for that address only, so someone who merely knows a password cannot lock the real user out from

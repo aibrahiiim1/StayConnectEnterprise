@@ -311,7 +311,7 @@ func TestIntegrationLedger_ADivergentPrimaryCopyBlocksErasure(t *testing.T) {
 	forged[last].Body = `{"forged":true}`
 	forged[last].Hash = forged[last].ComputeHash()
 	// Two AUTHENTIC copies that disagree (AD-3: the forger has the key, which an outsider writing the file does not) block erasure
-	// until support looks. Since migration 0220 an entry changed without the key no longer reads as a disagreement at all: it is
+	// until support looks. Since migration 0173 an entry changed without the key no longer reads as a disagreement at all: it is
 	// an inauthentic copy, set aside and rebuilt from the database (the next test).
 	if key := r.s.ledgerCachedKey(); len(key) > 0 {
 		forged[last].Mac = key.EntryMAC(forged[last].Hash)

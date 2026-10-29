@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// AD-49 (migration 0243): only rows the retention has already scrubbed, and whose expiry is older than the period,
+// AD-49 (migration 0178): only rows the retention has already scrubbed, and whose expiry is older than the period,
 // are removed.
 func TestIntegration_EventTableTrim_RemovesOnlyScrubbedExpiredRows(t *testing.T) {
 	p := pool(t)

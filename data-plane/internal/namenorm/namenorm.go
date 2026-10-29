@@ -5,7 +5,7 @@
 // Unicode normal form (AD-33): every value is brought to NFC before and after the case fold, so a name the PMS stored
 // decomposed ("e" + combining acute) matches the precomposed form a guest's keyboard produces, and the reverse. NFC
 // only unifies canonically equivalent spellings of the SAME text; it does not strip accents or loosen anything.
-// iam_v2.norm_identity_text (migration 0172) is the SQL twin and must stay identical.
+// iam_v2.norm_identity_text (migration 0164) is the SQL twin and must stay identical.
 //
 // Deliberately not done: accent stripping, transliteration, fuzzy or prefix matching, collapsing internal
 // whitespace. Those change who can authenticate and need a Product-Owner decision.

@@ -79,7 +79,7 @@ type Config struct {
 	// Cipher returns the recipients for the external copy, or nil for none. Called on every push.
 	Cipher func(ctx context.Context) (*Cipher, error)
 	Now    func() time.Time
-	// MACKey returns the ledger key, or nil when the appliance has none (its database predates migration 0220). With a key,
+	// MACKey returns the ledger key, or nil when the appliance has none (its database predates migration 0173). With a key,
 	// Commit refuses an entry that is not authentic and the head note is MACed and checked.
 	MACKey func() MACKey
 }

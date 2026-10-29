@@ -13,7 +13,7 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/auth"
 )
 
-// Defaults and bounds of the two settings in central_security_settings (migration 0071, AD-54; the table's CHECK
+// Defaults and bounds of the two settings in central_security_settings (migration 0061, AD-54; the table's CHECK
 // constraints are the authority).
 const (
 	DefaultReplacementWindowHours = 72

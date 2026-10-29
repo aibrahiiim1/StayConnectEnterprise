@@ -21,7 +21,7 @@
 |---|---|---|
 | S1 steady state, 1 hour | Postgres RSS, `pg_stat_database` (xact_commit, blks_hit ratio), `pg_stat_activity` connections by role, slow statements (temporary `log_min_duration_statement=250ms`, with the two parameter settings above) | `shared_buffers`, `work_mem`, per-service pool size |
 | S2 sign-in burst, 500 connecting at once | per-role connection high-water mark, pool wait time, error rate | per-role `CONNECTION LIMIT` (the roles now add up to 85 against 50 allowed), pool sizes |
-| S10 disk and purge | table sizes after 24 h; `iam_v2.accounting_records` insert rate; time one `iam_v2.purge_accounting_detail` run takes at that rate | `purge_budget_seconds`, `raw_retention_days` defaults (migration 0240); whether `accounting_records` must become a hypertable |
+| S10 disk and purge | table sizes after 24 h; `iam_v2.accounting_records` insert rate; time one `iam_v2.purge_accounting_detail` run takes at that rate | `purge_budget_seconds`, `raw_retention_days` defaults (migration 0175); whether `accounting_records` must become a hypertable |
 | Longest legitimate statement / transaction per role | `max(now()-xact_start)` sampled every second, migration and backup windows included | `statement_timeout` and `idle_in_transaction_session_timeout` per role (never global) |
 | Memory by service | RSS of every systemd unit at S1 and S2 | `MemoryMax` and OOM kill order |
 

@@ -70,7 +70,7 @@ func (e *Enforcer) PurgeAccountingDetail(ctx context.Context, tenant, site strin
 }
 
 // RollupAccountingUsage adds the next window of raw accounting samples to the per-minute and per-hour usage tables
-// (migration 0240, AD-48) and returns the samples read. A no-op on a database without the migration. The purge never
+// (migration 0175, AD-48) and returns the samples read. A no-op on a database without the migration. The purge never
 // removes a raw sample the rollup has not read, so this must keep running for detail to be reclaimed.
 func (e *Enforcer) RollupAccountingUsage(ctx context.Context, tenant, site string) (int64, error) {
 	present, err := e.procPresent(ctx, "iam_v2.rollup_accounting_usage(uuid,uuid,interval)")

@@ -1,6 +1,6 @@
 # OneGate post-stay sign-in: room number and reservation number
 
-Status: current contract (audit decision AD-36, Product-Owner replacement, migration 0173). It replaces the Post-Stay PIN
+Status: current contract (audit decision AD-36, Product-Owner replacement, migration 0165). It replaces the Post-Stay PIN
 contract of `StayConnect-IAM-Phase5-Plan.md` for everything that concerns how a guest proves themselves. The profile,
 auth-context and conversion rules of that plan (episode binding, zero-price packages, one-time context, enforced session)
 are unchanged.
@@ -69,7 +69,7 @@ ability to set or change a PIN (`p5_post_stay_profile_guard` refuses it).
 
 Kept as **historical evidence**, never read for a decision: `post_stay_profiles.pin_hash`, `pin_generation`,
 `pin_set_at`, `pin_revealed_at`, `issued_via` (`GUEST_AUTHENTICATED_SESSION`, `OPERATOR_RESET`) and
-`issued_by_operator` on every profile issued before 0173. Nothing was dropped, rewritten or deleted. `pin_hash` became
+`issued_by_operator` on every profile issued before 0165. Nothing was dropped, rewritten or deleted. `pin_hash` became
 nullable so a profile created by the new route can exist. The audit-log rows `poststay.pin_reset` remain readable.
 
 Retained operator action: **End access** (revoke), password step-up, reason, audit, terminal for the stay episode.

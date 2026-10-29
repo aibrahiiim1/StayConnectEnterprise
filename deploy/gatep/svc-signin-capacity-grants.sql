@@ -1,4 +1,4 @@
--- Sign-in limits and capacity settings (migration 0170; audit decisions AD-30/31/34/51/52/58). Idempotent;
+-- Sign-in limits and capacity settings (migration 0162; audit decisions AD-30/31/34/51/52/58). Idempotent;
 -- included by gatep-grants.sql after its revoke, so a Gate-P reconcile reproduces what the migration granted.
 --   svc_scd    reads the effective values; prunes idle devices through the definer (no table privilege).
 --   svc_edged  reads and changes them through the definers (operator and reason required) and reads the change log.
@@ -6,7 +6,7 @@
 DO $g0170$
 BEGIN
   IF to_regprocedure('iam_v2.signin_capacity_settings_get(uuid,uuid)') IS NULL THEN
-    RAISE NOTICE 'migration 0170 is not applied; sign-in capacity grants skipped';
+    RAISE NOTICE 'migration 0162 is not applied; sign-in capacity grants skipped';
     RETURN;
   END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_scd') THEN
@@ -20,12 +20,12 @@ BEGIN
   END IF;
 END $g0170$;
 
--- Migration 0171 (AD-51): the durable throttle charge in one round trip. SECURITY INVOKER over the bucket table scd
+-- Migration 0163 (AD-51): the durable throttle charge in one round trip. SECURITY INVOKER over the bucket table scd
 -- already writes; the function itself must be granted because the Gate-P revoke covers every function in public.
 DO $g0171$
 BEGIN
   IF to_regprocedure('public.auth_throttle_charge(text[],text[],text[],integer[],integer[],boolean[],timestamptz,timestamptz,integer)') IS NULL THEN
-    RAISE NOTICE 'migration 0171 is not applied; throttle charge grant skipped';
+    RAISE NOTICE 'migration 0163 is not applied; throttle charge grant skipped';
     RETURN;
   END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_scd') THEN

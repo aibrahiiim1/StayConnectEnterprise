@@ -19,7 +19,7 @@ import (
 type ledgerClient interface {
 	Prepare(ctx context.Context) error
 	// Commit returns scd's durability receipts, one per entry (AD-3): the database confirms an entry only against its receipt.
-	// An empty list means the appliance's ledger has no key (its database predates migration 0220).
+	// An empty list means the appliance's ledger has no key (its database predates migration 0173).
 	Commit(ctx context.Context, entries []ledger.Entry) ([]string, error)
 	// Abort takes entries back out of both copies after Commit when the transaction then failed.
 	Abort(ctx context.Context, entries []ledger.Entry) error
@@ -150,7 +150,7 @@ func (s *server) ledgerQuery(ctx context.Context, dest any, sql string, args ...
 		hashes[i] = e.Hash
 	}
 	// The database confirms an entry only against scd's receipt (AD-3); edged has no grant to confirm a bare hash. With no
-	// receipts the appliance's database has no ledger key yet (it predates migration 0220) and the old confirmation applies.
+	// receipts the appliance's database has no ledger key yet (it predates migration 0173) and the old confirmation applies.
 	confirm := func() error {
 		if len(receipts) > 0 {
 			_, err := tx.Exec(ctx, `SELECT iam_v2.ledger_confirm_checked($1,$2)`, hashes, receipts)

@@ -1,6 +1,6 @@
 package main
 
-// The site's sign-in limits and capacity settings (migration 0170), read through iam_v2.signin_capacity_settings_get and
+// The site's sign-in limits and capacity settings (migration 0162), read through iam_v2.signin_capacity_settings_get and
 // kept for settingsCacheTTL (cleared at once by the database's notification, AD-52). A database that cannot answer yields
 // the defaults, which are the previous fixed values: an unreadable setting never loosens a limit.
 

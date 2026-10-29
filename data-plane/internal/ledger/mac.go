@@ -1,6 +1,6 @@
 package ledger
 
-// Authentication of the ledger (audit AD-3, migration 0220). The hash chain proves an entry was not changed; it cannot prove
+// Authentication of the ledger (audit AD-3, migration 0173). The hash chain proves an entry was not changed; it cannot prove
 // who wrote it, so anyone able to write the secondary storage could append a well-formed entry that a later restore would
 // obey. Every entry is therefore also MACed with a per-appliance key that lives in the appliance database (and, sealed to the
 // backup key holders, in the escrow scd writes). Entries written before the key existed carry no MAC; they are accepted only

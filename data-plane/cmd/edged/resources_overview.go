@@ -724,7 +724,7 @@ func (s *server) overviewGuests(ctx context.Context, win overviewWindow, cands [
 	return g
 }
 
-// overviewUsageTable picks the rollup a window is read from (migration 0240, AD-48): per-minute totals cover the
+// overviewUsageTable picks the rollup a window is read from (migration 0175, AD-48): per-minute totals cover the
 // recent days, per-hour totals everything older. The raw samples are not read: they are kept only a couple of days
 // once rolled up, and summing them is what made this block scale with history. The choice and the date_trunc unit
 // are compile-time strings, never request input.

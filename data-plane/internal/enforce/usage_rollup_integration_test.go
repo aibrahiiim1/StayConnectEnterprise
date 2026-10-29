@@ -2,7 +2,7 @@
 
 package enforce
 
-// AD-48 (migration 0240): per-minute and per-hour usage rolled up from the raw samples, and a purge that works in
+// AD-48 (migration 0175): per-minute and per-hour usage rolled up from the raw samples, and a purge that works in
 // three tiers. This replaces TestIntegration_Retention_PurgesOnlyOldFinishedDetail, which encoded the superseded
 // single-tier behaviour (raw samples kept for the whole usage-detail retention, a purge that needed no rollup).
 
