@@ -1293,7 +1293,7 @@
       "name": "central.onegate.getsemantics.com",
       "recorded": "Product-Owner record, 2026-10-28: this is the current production Central; 172.21.96.196 is retired and must not be contacted.",
       "trust_universe": "Installed fresh by central-install.sh, so it has its own vendor key, assignment key, registry root, appliance CA and internal TLS CA (installation manual Appendix 3). Appliances provisioned against the retired Central, PRE-LIVE among them, do not trust it.",
-      "release": "onegate-central-05481cb57334 (installation manual A3.7)",
+      "release": "onegate-central-ee2faf881d89 (2026-10-29, read back from DEPLOYED.json; installation manual A3.10)",
       "retired_host": {
         "address": "172.21.96.196",
         "name": "sc-central.echofusion.com",
@@ -1339,9 +1339,9 @@
       "_note": "The current test appliance (Product-Owner record, 2026-10-28, D78/T0264). Activated on the production Central, in its trust universe.",
       "host": "172.21.96.97",
       "central": "central.onegate.getsemantics.com (41.128.240.133)",
-      "release": "onegate-appliance-d25999781b1a (master code of PR #261), as recorded in CONTINUATION.md and the installation manual Appendix 3; not re-read in this delivery",
+      "release": "onegate-appliance-1cd37145c468 (2026-10-29, source commit 1cd37145c4687d337fe922bf9c23ca3e786ec1c3 read back from RELEASE.json and the six installed binaries; installation manual A3.10)",
       "status": "TEST. Go-Live not authorised. Routine software deployments are covered by the standing authorization D79.",
-      "deployed_note": "The audit-remediation release (T0266) is NOT deployed: the delivery environment has no route to 172.21.96.97 (its egress proxy refuses the project's hosts) and no Remote Control computer was connected. Deploy from the workstation under D79."
+      "deployed_note": "The audit-decision release (T0267, upgrade-path fix T0268) is deployed and verified on this appliance (T0269): migrations through 0178, units active, licence Active over mutual TLS, client journey 12/12. The first upgrade attempt stopped safely at migration 0162 and was fixed by PR #266."
     },
     "standing_test_appliance_deployment_authorization": "STANDING PRODUCT-OWNER AUTHORIZATION, 2026-10-28 (D79/T0265), CONTINUING UNTIL REVOKED OR CHANGED: routine software deployments to the test appliance 172.21.96.97 within approved work, without separate deployment approval each time. COVERED: build and package, install, service restart, deployment verification, retry and rollback, and recording the exact deployed commit read back from the installed artifact. NOT COVERED, each a separate Product-Owner decision: the production Central; a new product, architecture or security decision; destructive or historical data mutation; a new migration or schema decision; networking or topology changes; PMS configuration, posting or traffic; financial or payment-provider activity; Guest activation or Go-Live; Root-CA or trust changes. The deployed source may run ahead of master; it is never master state.",
     "legacy_pki_custody": {
@@ -1362,7 +1362,7 @@
       "dispositions": "docs/AUDIT_DECISION_DISPOSITIONS.md"
     }
   },
-  "latest_transition_id": "T0268",
+  "latest_transition_id": "T0269",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1858,16 +1858,16 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "AUDIT_DECISIONS_UPGRADE_PATH_FIX",
+    "kind": "AUDIT_DECISIONS_DEPLOYMENT",
     "decision": "D81 (Product-Owner mission of 2026-10-29: implement audit decisions AD-1 to AD-68 end to end).",
-    "decision_note": "Upgrade-path fix found by deploying T0267 to the test appliance: platform migrations are applied as the platform role (edge-migrate.sh --platform-migration).",
-    "manifest": "docs/manifests/AuditDecisionsUpgradePath-change-manifest.md",
-    "base": "ee2faf881d89ca95091e16e893cd11bd245ed347",
-    "base_note": "Master after the merge of PR #265.",
-    "transition": "T0268",
-    "previous_delivery": "T0267",
-    "branch": "delivery/audit-decisions-upgrade-path",
-    "note": "T0268. Go-Live not authorised."
+    "decision_note": "Deployment record: Central and the test appliance run the audit-decision release; verification in installation manual A3.10.",
+    "manifest": "docs/manifests/AuditDecisionsDeployment-change-manifest.md",
+    "base": "1cd37145c4687d337fe922bf9c23ca3e786ec1c3",
+    "base_note": "Master after the merge of PR #266.",
+    "transition": "T0269",
+    "previous_delivery": "T0268",
+    "branch": "delivery/audit-decisions-deployment-record",
+    "note": "T0269. Go-Live not authorised."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
