@@ -27,6 +27,7 @@ import { useQueryState } from "@/lib/use-query-state";
 import { ACTIVATION, ACTIVATION_ORDER, CONNECTION, CONNECTION_ORDER, LICENSE, LICENSE_ORDER } from "@/lib/status";
 import { cn } from "@/lib/utils";
 
+const PAGE_SIZE = 100;
 const FILTER_SELECT = "w-auto min-w-36 max-w-56";
 
 const FILTERS = ["activation", "connection", "license", "customer_id", "site_id", "q"] as const;
@@ -54,15 +55,26 @@ function Appliances() {
   const [importing, setImporting] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
-  const query = qs({
+  // The list is paged by the server, 100 to a page (AD-55); a changed filter starts again at page 1.
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState<number | null>(null);
+  const [nextPage, setNextPage] = useState<number | null>(null);
+  const filterKey = qs({
     customer_id: f.customer_id, site_id: f.site_id, activation: f.activation,
     connection: f.connection, license: f.license, q: f.q,
+  });
+  useEffect(() => { setPage(1); }, [filterKey]);
+  const query = qs({
+    customer_id: f.customer_id, site_id: f.site_id, activation: f.activation,
+    connection: f.connection, license: f.license, q: f.q, limit: PAGE_SIZE, page,
   });
 
   const load = useCallback(async (opts?: RequestOptions) => {
     setRefreshing(true);
     try {
-      const r = await api.get<Items<ApplianceRow>>(`/cloud/v1/appliances${query}`, opts);
+      const r = await api.get<Items<ApplianceRow> & { total?: number; next_page?: number | null }>(`/cloud/v1/appliances${query}`, opts);
+      setTotal(typeof r?.total === "number" ? r.total : null);
+      setNextPage(typeof r?.next_page === "number" ? r.next_page : null);
       // Unchanged rows keep their objects, so only changed rows re-render (performance audit D8-M2).
       const next = sortAppliances(itemsOf(r));
       setRows((prev) => keepUnchanged(prev, next));
@@ -262,6 +274,17 @@ function Appliances() {
           <div className={cn(refreshing && refreshingClass)}>
             <ApplianceTable rows={rows ?? []} onActivate={can["appliances.activate"] ? setActivate : undefined} />
           </div>
+          {(page > 1 || nextPage !== null) && (
+            <div className="flex items-center justify-between gap-2 border-t border-border px-4 py-3 text-sm text-muted-foreground">
+              <span>
+                Page {page}{total !== null ? ` of ${Math.max(1, Math.ceil(total / PAGE_SIZE))} (${total} appliances)` : ""}
+              </span>
+              <span className="flex gap-2">
+                <Button variant="secondary" size="sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>Previous</Button>
+                <Button variant="secondary" size="sm" disabled={nextPage === null} onClick={() => setPage(nextPage ?? page)}>Next</Button>
+              </span>
+            </div>
+          )}
         </ListState>
       </Card>
 
