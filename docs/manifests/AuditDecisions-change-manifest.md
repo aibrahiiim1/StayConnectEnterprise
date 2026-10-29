@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `3b0b47cc442429d08c2eba9642c0441fc5bcf4f7`
-- **HEAD commit:** `924a52d5d0d2a206c9982ca8958918237afd292f`
-- **Provenance (generation HEAD = inventory_head):** `924a52d5d0d2a206c9982ca8958918237afd292f`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `5b3f68782b1716d69520d1448216f44c54618f8e`
+- **Provenance (generation HEAD = inventory_head):** `5b3f68782b1716d69520d1448216f44c54618f8e`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/audit-decisions-ad1-68`
 - **Remote branch:** `origin/delivery/audit-decisions-ad1-68`
 - **Changed files:** 439
@@ -388,20 +388,20 @@
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: D81 and T0267 for the audit-decision implementation |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: D81 and T0267 for the audit-decision implementation |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: D81 and T0267 for the audit-decision implementation |
-| `docs/manifests/AuditDecisions-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Governance: manifest covers the export packs |
+| `docs/manifests/AuditDecisions-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Governance: T0267 change manifest (review fixes) |
 | `docs/runbooks/AUDIT_APPLIANCE_ADMIN_SECURITY.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Renumber the audit migrations contiguously (appliance 0162-0178, Central 0059-0062) |
 | `docs/runbooks/DB_BUDGET_MEASUREMENT_PLAN.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Renumber the audit migrations contiguously (appliance 0162-0178, Central 0059-0062) |
 | `docs/runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Docs: audit decision dispositions AD-1..68, upgrade notes, Go 1.26, post-stay sign-in |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0267 |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0267 |
-| `exports/chatgpt/phase-evidence/GIT_STAT_1f124380.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Governance: export packs at T0267 |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0267 (review fixes) |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0267 (review fixes) |
+| `exports/chatgpt/phase-evidence/GIT_STAT_07073942.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Governance: export packs at T0267 (review fixes) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_a173f418.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Governance: export packs at T0267 |
 | `exports/chatgpt/phase-evidence/MIGRATION_CHECKSUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0267 |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0267 |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0267 |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0267 (review fixes) |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0267 (review fixes) |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0267 |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: D81 and T0267 for the audit-decision implementation |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0267 |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0267 (review fixes) |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: D81 and T0267 for the audit-decision implementation |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0267 |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: export packs at T0267 |
@@ -830,13 +830,13 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |    4 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |    4 +-
  docs/context/StayConnect-IAM-Handoff.md            |    4 +-
- docs/manifests/AuditDecisions-change-manifest.md   |  993 ++++++++
+ docs/manifests/AuditDecisions-change-manifest.md   |  995 ++++++++
  docs/runbooks/AUDIT_APPLIANCE_ADMIN_SECURITY.md    |   63 +
  docs/runbooks/DB_BUDGET_MEASUREMENT_PLAN.md        |   28 +
  .../ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md        |   20 +-
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 352140 -> 354564 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 172550 -> 173701 bytes
- .../chatgpt/phase-evidence/GIT_STAT_1f124380.txt   |    4 +
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 352140 -> 354561 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 172550 -> 173714 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_07073942.txt   |    4 +
  .../chatgpt/phase-evidence/GIT_STAT_a173f418.txt   |    4 -
  .../chatgpt/phase-evidence/MIGRATION_CHECKSUMS.txt |   20 +-
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |    8 +-
@@ -893,7 +893,7 @@
  scripts/edge-migrate.sh                            |   20 +-
  scripts/lifecycle-regression.sh                    |    1 +
  scripts/signin-burst-test.sh                       |   58 +
- 439 files changed, 22263 insertions(+), 5995 deletions(-)
+ 439 files changed, 22265 insertions(+), 5995 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -903,6 +903,8 @@ M  docs/manifests/AuditDecisions-change-manifest.md
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 5b3f6878 Governance: export packs at T0267 (review fixes)
+HISTORICAL: 07073942 Governance: T0267 change manifest (review fixes)
 HISTORICAL: 924a52d5 Test: device retention keeps composite-key-referenced devices
 HISTORICAL: 25ec4434 Regenerate the production baseline
 HISTORICAL: 614ad889 Review fixes: device retention honours composite foreign keys; each portal upload resolves to its own optimised asset
