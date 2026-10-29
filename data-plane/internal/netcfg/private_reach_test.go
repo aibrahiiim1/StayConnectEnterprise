@@ -50,8 +50,8 @@ func TestPolicyOffRendersExactlyWhatItRenderedBefore(t *testing.T) {
 	// The old order is kept: mgmt, isolation, internet-disabled, authorized accepts, then the garden.
 	f := fwdLines(t, out)
 	if !(indexOfLine(f, "guest -> mgmt blocked") < indexOfLine(f, "inter-guest isolation") &&
-		indexOfLine(f, "inter-guest isolation") < indexOfLine(f, "authenticated guests") &&
-		indexOfLine(f, "authenticated guests") < indexOfLine(f, "@walled_garden_ip accept")) {
+		indexOfLine(f, "inter-guest isolation") < indexOfLine(f, "phase-3 authorized guests") &&
+		indexOfLine(f, "phase-3 authorized guests") < indexOfLine(f, "@walled_garden_ip accept")) {
 		t.Fatalf("legacy forward order changed:\n%s", strings.Join(f, "\n"))
 	}
 }
@@ -76,7 +76,7 @@ func TestPolicyOnDropsEveryPrivateRangeAfterTheGardenAndBeforeAuthorization(t *t
 	gardenTCP := indexOfLine(f, "@walled_garden_tcp accept")
 	gardenUDP := indexOfLine(f, "@walled_garden_udp accept")
 	drop := indexOfLine(f, "@guest_private_ranges")
-	auth := indexOfLine(f, "authenticated guests")
+	auth := indexOfLine(f, "phase-3 authorized guests")
 	p3 := indexOfLine(f, "phase-3 authorized guests")
 	if drop < 0 || garden < 0 || gardenTCP < 0 || gardenUDP < 0 || auth < 0 || p3 < 0 || est < 0 {
 		t.Fatalf("missing rule(s):\n%s", strings.Join(f, "\n"))

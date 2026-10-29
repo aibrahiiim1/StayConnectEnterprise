@@ -259,7 +259,8 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 		b.WriteString("\t\tiifname @guest_interfaces ip daddr @guest_subnets drop comment \"inter-guest isolation\"\n")
 		internetDisabled()
 	}
-	fmt.Fprintf(&b, "\t\toifname \"%s\" iifname . ip saddr @auth_ipv4 accept comment \"authenticated guests\"\n", topo.WANInterface)
+	// auth_ipv4 is RETIRED (AD-23 b): no rule accepts on it any more, so a stray element authorizes nothing. The set stays
+	// declared, empty and inert, for the drain sweeper, scd's tenant-transition flush and the converge carry-over.
 	// The Phase-3 gate. While the set is empty this rule can never match, so a dark appliance is unaffected.
 	fmt.Fprintf(&b, "\t\toifname \"%s\" iifname . ip saddr @phase3_auth_ipv4 accept comment \"phase-3 authorized guests\"\n", topo.WANInterface)
 	if !topo.PrivateReach.Deny {
