@@ -43,7 +43,7 @@ import (
 )
 
 func main() { fmt.Println(norm.NFC.String("x")) }'
-(cd "$T/vuln" && GOFLAGS=-mod=mod GOTOOLCHAIN="${GOCHECKS_TOOLCHAIN:-go1.25.12}" go get golang.org/x/text@v0.35.0 >/dev/null 2>&1)
+(cd "$T/vuln" && GOFLAGS=-mod=mod GOTOOLCHAIN="${GOCHECKS_TOOLCHAIN:-go1.26.10}" go get golang.org/x/text@v0.35.0 >/dev/null 2>&1)
 if GOCHECKS_SKIP="vet staticcheck" bash "$HERE/go-checks.sh" "$T/vuln" > "$T/vuln.log" 2>&1; then
   bad "a module reaching golang.org/x/text v0.35.0 passed govulncheck"
 elif grep -q "FAILED: govulncheck" "$T/vuln.log" && grep -q "golang.org/x/text@v0.35.0" "$T/vuln.log"; then

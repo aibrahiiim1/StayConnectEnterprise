@@ -5,12 +5,12 @@
 # for every module. It is a check to run by hand (or from FULL CHECK), never a required merge check (D42).
 #
 # The tools are built at pinned versions into a private directory (nothing installed globally). The analysis
-# itself runs with the toolchain the release images build with (golang:1.25.12), so govulncheck reports what
+# itself runs with the toolchain the release images build with (golang:1.26.10), so govulncheck reports what
 # ships, not what happens to be installed.
 #
 # Usage: scripts/ci/go-checks.sh [module-dir ...]        (default: data-plane control-plane license)
 # Environment:
-#   GOCHECKS_TOOLCHAIN     toolchain for the analysis       (default go1.25.12; keep equal to GO_IMAGE)
+#   GOCHECKS_TOOLCHAIN     toolchain for the analysis       (default go1.26.10; keep equal to GO_IMAGE)
 #   GOCHECKS_TOOLS_DIR     where the pinned tools are built (default: a temp dir, removed on exit)
 #   GOCHECKS_VULN_DB       vulnerability database URL       (default: govulncheck's own, https://vuln.go.dev)
 #   GOCHECKS_SKIP          space-separated subset of "vet staticcheck govulncheck" to skip
@@ -18,7 +18,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 STATICCHECK_VERSION="2026.2.2"
 GOVULNCHECK_VERSION="v1.9.0"
-TOOLCHAIN="${GOCHECKS_TOOLCHAIN:-go1.25.12}"
+TOOLCHAIN="${GOCHECKS_TOOLCHAIN:-go1.26.10}"
 SKIP=" ${GOCHECKS_SKIP:-} "
 
 [ "$#" -gt 0 ] || set -- "$ROOT/data-plane" "$ROOT/control-plane" "$ROOT/license"
