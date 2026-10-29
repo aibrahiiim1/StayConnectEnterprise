@@ -58,6 +58,13 @@ func TestIntegrationDefinerAbuse_TheRuntimeDefinerSurfaceIsExactlyWhatWeThinkItI
 		// Reviewed: read-only; the default account's identifiers and mode (never a credential) and two timing settings.
 		"iam_v2.p4_resolve_payment_account_v2(uuid,uuid)": true,
 		"iam_v2.card_payment_settings_get(uuid,uuid)":     true,
+		// Reviewed (audit AD-43, migration 0205), deliberately added: the late-capture re-query's window (read-only), the list of
+		// failed or unknown charges to ask the provider about (read-only), and a marker that only stamps payment_checkouts.late_checked_at
+		// to space those questions. None can change a charge, a settlement, a purchase or an entitlement; the worst a compromised role
+		// can do with the marker is delay a late-capture check, and the case itself is opened only by the outcome role.
+		"iam_v2.card_recheck_settings_get(uuid,uuid)":                  true,
+		"iam_v2.p4_late_capture_candidates(uuid,uuid,integer,integer)": true,
+		"iam_v2.p4_mark_late_checked(uuid,uuid,uuid)":                  true,
 	}
 	for _, sig := range got {
 		if !want[sig] {
