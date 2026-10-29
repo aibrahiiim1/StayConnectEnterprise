@@ -326,10 +326,22 @@ func TestIntegration_Ledger_TheRuntimeRolesReachOnlyTheFunctions(t *testing.T) {
 			t.Errorf("svc_edged could run: %s", q)
 		}
 	}
-	for _, q := range []string{`SELECT iam_v2.ledger_pending()`, `SELECT iam_v2.ledger_confirm(ARRAY[]::text[])`, `SELECT iam_v2.ledger_head()`} {
+	for _, q := range []string{`SELECT iam_v2.ledger_pending()`, `SELECT iam_v2.ledger_head()`} {
 		if _, err := ep.Exec(ctx, q); err != nil {
 			t.Errorf("svc_edged cannot run %q: %v", q, err)
 		}
+	}
+	// AD-3: edged cannot confirm a bare hash, read the key, install one or seal the legacy entries; it can only present scd's
+	// receipt, and the database refuses a receipt it did not make.
+	for _, q := range []string{`SELECT iam_v2.ledger_confirm(ARRAY[]::text[])`, `SELECT iam_v2.ledger_mac_key_get()`,
+		`SELECT iam_v2.ledger_mac_key_install(repeat('a', 64))`, `SELECT iam_v2.ledger_seal_legacy(gen_random_uuid(),gen_random_uuid())`,
+		`SELECT iam_v2.ledger_mac_ok('x','y')`, `SELECT iam_v2.ledger_receipt_of('x')`, `SELECT iam_v2.ledger_mac_of('x')`} {
+		if _, err := ep.Exec(ctx, q); err == nil {
+			t.Errorf("svc_edged could run: %s", q)
+		}
+	}
+	if _, err := ep.Exec(ctx, `SELECT iam_v2.ledger_confirm_checked(ARRAY['x'], ARRAY['not-a-receipt'])`); err == nil || !strings.Contains(err.Error(), "ledger_receipt_invalid") {
+		t.Errorf("svc_edged confirmed an entry with a receipt scd did not make: %v", err)
 	}
 	// svc_scd: the reconciliation, the replay and the setting; but the replay helpers and the transition reset are reached only
 	// through ledger_apply and the transition itself

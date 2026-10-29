@@ -60,7 +60,8 @@ func newLedgerRig(t *testing.T) *ledgerRig {
 		srvPool = rp
 	}
 	r.s = &server{db: srvPool}
-	r.s.ledgerRT.store = ledger.NewStore(ledger.Config{LocalPath: r.local})
+	r.s.ledgerRT.store = ledger.NewStore(ledger.Config{LocalPath: r.local, MACKey: r.s.ledgerCachedKey})
+	r.s.ledgerKey(ctx) // as scd does on every reconcile: the key is loaded before any copy is read
 	r.setDestination(r.ext)
 	return r
 }
@@ -109,6 +110,19 @@ func (r *ledgerRig) appendCheckpoint() ledger.Entry {
 	if err := tx.Commit(ctx); err != nil {
 		r.t.Fatal(err)
 	}
+	return e
+}
+
+// appendCheckpointUnconfirmed appends an entry and COMMITS it unconfirmed, as an erasure's transaction would before the copies
+// are written (the confirmation comes with scd's receipt).
+func (r *ledgerRig) appendCheckpointUnconfirmed() ledger.Entry {
+	r.t.Helper()
+	var raw []byte
+	if err := r.pool.QueryRow(context.Background(), `SELECT iam_v2.ledger_append('00000000-0000-0000-0000-000000000000','00000000-0000-0000-0000-000000000000','checkpoint','{}'::jsonb)::text`).Scan(&raw); err != nil {
+		r.t.Fatal(err)
+	}
+	var e ledger.Entry
+	_ = json.Unmarshal(raw, &e)
 	return e
 }
 
@@ -296,6 +310,12 @@ func TestIntegrationLedger_ADivergentPrimaryCopyBlocksErasure(t *testing.T) {
 	last := len(forged) - 1
 	forged[last].Body = `{"forged":true}`
 	forged[last].Hash = forged[last].ComputeHash()
+	// Two AUTHENTIC copies that disagree (AD-3: the forger has the key, which an outsider writing the file does not) block erasure
+	// until support looks. Since migration 0220 an entry changed without the key no longer reads as a disagreement at all: it is
+	// an inauthentic copy, set aside and rebuilt from the database (the next test).
+	if key := r.s.ledgerCachedKey(); len(key) > 0 {
+		forged[last].Mac = key.EntryMAC(forged[last].Hash)
+	}
 	b, _ := ledger.Encode(forged)
 	if err := os.WriteFile(r.local, b, 0o600); err != nil {
 		t.Fatal(err)
@@ -303,6 +323,36 @@ func TestIntegrationLedger_ADivergentPrimaryCopyBlocksErasure(t *testing.T) {
 	st := r.reconcile()
 	if st.State != "blocked" || st.ErasureAvailable {
 		t.Fatalf("status = %+v", st)
+	}
+}
+
+// AD-3: a primary copy changed by someone without the ledger key is inauthentic: kept aside for inspection, rebuilt from the
+// database, and nothing is erased on it.
+func TestIntegrationLedger_AnInauthenticPrimaryCopyIsSetAsideAndRebuilt(t *testing.T) {
+	r := newLedgerRig(t)
+	if len(r.s.ledgerCachedKey()) == 0 {
+		t.Skip("the database has no ledger key")
+	}
+	r.reconcile()
+	r.appendCheckpoint()
+	p := ledger.ParseChain(readBytes(t, r.local))
+	forged := append([]ledger.Entry(nil), p.Entries...)
+	last := len(forged) - 1
+	forged[last].Body = `{"forged":true}`
+	forged[last].Hash = forged[last].ComputeHash() // the hash is public arithmetic; the MAC is not
+	b, _ := ledger.Encode(forged)
+	if err := os.WriteFile(r.local, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st := r.reconcile()
+	if st.State != "ok" || !st.ErasureAvailable {
+		t.Fatalf("status = %+v", st)
+	}
+	if m, _ := filepath.Glob(r.local + ".damaged-*"); len(m) != 1 {
+		t.Fatalf("the inauthentic copy was not kept aside: %v", m)
+	}
+	if q := ledger.ParseChain(readBytes(t, r.local)); strings.Contains(q.Entries[len(q.Entries)-1].Body, "forged") {
+		t.Fatal("the forged entry is still in the primary copy")
 	}
 }
 

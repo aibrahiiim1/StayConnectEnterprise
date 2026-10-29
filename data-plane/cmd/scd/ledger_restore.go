@@ -181,6 +181,19 @@ func (s *server) restoreLedgerApply(ctx context.Context, staging, identityText s
 	}
 	applied := 0
 	if len(feed) > 0 {
+		// AD-3: every entry about to be applied must be one this appliance wrote (or that a seal covers). Nothing is applied on
+		// an entry that cannot be vouched for, so a copy written by someone else can never make a restore erase a record.
+		var after int64
+		if !adopt {
+			after = sh.Seq
+		}
+		macKey, why := s.restoreLedgerKey(ctx, entries, after, ident)
+		if why != "" {
+			return why, false
+		}
+		if msg, ok := s.installRestoreKey(ctx, staging, macKey); !ok {
+			return msg, false
+		}
 		doc, _ := json.Marshal(feed)
 		if bytes.Contains(doc, []byte("$led$")) {
 			return "a ledger entry contains an unexpected delimiter", false
@@ -248,6 +261,7 @@ END $do$`, doc)
 // ledgerReconcileAfterRestore returns "" when both copies are in step, else a plain statement of what is not (never an error that undoes the restore).
 func (s *server) ledgerReconcileAfterRestore(ctx context.Context) string {
 	s.resetPool()
+	s.ledgerForgetKey() // the restored database carries its own copy of the key
 	st := s.ledgerReconcile(ctx)
 	switch {
 	case st.State == "ok":
