@@ -18,7 +18,7 @@ Product-Owner overrides of the list's recommendations are marked **PO**. Test na
 | AD | Disposition | What was done |
 |---|---|---|
 | 1 | IMPLEMENTED | Activation code derived from the identity key, shown in the Admin Console, required by Activate and offline import; a waiting row's key is never replaced. TPM2 is not required (PO). |
-| 2 | IMPLEMENTED | The appliance pins the appliance Root CA installed at provisioning. An appliance with no pin file pins the root of the bundle it holds (weaker, until the file is installed). |
+| 2 | IMPLEMENTED | `appliance-install.sh` pins the appliance Root CA on a fresh install and on `--upgrade`, and **only against a fingerprint**: the one the operator reads from Central out of band (`--root-ca-sha256`), or the one in the trust directory's `FINGERPRINTS.txt` (stated to come from the same place as the certificate). A certificate nothing vouches for is never adopted, a pin that exists is never replaced (a different root is a Root CA rotation, a Product-Owner decision), and an upgrade of an appliance provisioned before the pin existed can pin the self-signed root of the bundle it already holds when that root has the named fingerprint. `install-appliance-root-ca.sh --sha256` refuses a mismatch and pins nothing. An appliance with no pin still pins the root of the first bundle it receives (scd warns): the installer now says so loudly instead of leaving it silent. No Root CA was replaced. |
 | 3 | IMPLEMENTED | Per-appliance ledger MAC key (0173) sealed to the backup key holders; `ledger_apply` accepts only checked entries; `ledger_confirm` revoked from edged. Unauthenticated old entries are sealed only when the database and both copies agree. Restore drills on Linux: EVIDENCE-DEPENDENT. |
 | 4 | IMPLEMENTED | Customer users see "OneGate support", with no staff identity, address or reason. |
 | 5 | IMPLEMENTED | Resetting another administrator needs `platform_owner`. |
@@ -30,7 +30,7 @@ Product-Owner overrides of the list's recommendations are marked **PO**. Test na
 | 11 | DOC-ONLY | The replay cache stays in process (single ctrlapi); Redis is required before scaling out. |
 | 12 | IMPLEMENTED | Catalogue test that every `iam_v2` table has tenant and site keys, plus a ratchet on queries without a tenant filter. 150 existing sites are recorded for review, not claimed safe; the list may only shrink. |
 | 13 | IMPLEMENTED | Operators see generic SMTP failure text; the server's words go to the journal. |
-| 14 | DOC-ONLY / EVIDENCE-DEPENDENT | Owner checklist in [`runbooks/AUDIT_APPLIANCE_ADMIN_SECURITY.md`](runbooks/AUDIT_APPLIANCE_ADMIN_SECURITY.md). Whether the old Gmail app password was revoked is an owner action nobody can verify from the repository. |
+| 14 | DOC-ONLY | Owner checklist in [`runbooks/AUDIT_APPLIANCE_ADMIN_SECURITY.md`](runbooks/AUDIT_APPLIANCE_ADMIN_SECURITY.md). **The Product Owner confirmed on 2026-10-29 that the old Gmail application password has been changed.** That is recorded as the owner's statement: nobody can verify an external credential's revocation from the repository, and this mission does not claim to have. Not asked for again. |
 
 ## 2. Licensing and activation
 
@@ -38,23 +38,23 @@ Product-Owner overrides of the list's recommendations are marked **PO**. Test na
 |---|---|---|
 | 15 | IMPLEMENTED | Install refuses unbound v4 licences, uncomparable identity fields and a licence for another customer or site than the signed assignment. A running unbound licence keeps running (no appliance is bricked). Signed offline licences work with no Central contact until their expiry. |
 | 16 | IMPLEMENTED | Revocations are accepted only over mutual TLS. The signed revocation document stays a later protocol change. |
-| 17 | IMPLEMENTED | Audited operator reset of the clock high-water mark to Central's authenticated time (`POST /license/clock-reset`); rollback protection is unchanged. No UI button yet. |
-| 18 | IMPLEMENTED | The offline-package ledger row is written only with a successful install; first activation is refused for any held signed assignment, including a revoked one. |
+| 17 | IMPLEMENTED | Audited operator reset of the clock high-water mark to Central's authenticated time (`POST /license/clock-reset`), now with a **Licence clock** card on Appliance & licence (reason required, `license` write permission, Central's refusal shown as it is). Rollback protection is unchanged. Licensing semantics are unchanged: Central silence only raises the `CloudStale` warning once the licence's `offline_grace_days` (default 30) pass, and never changes the licence state; 48 hours is the clock-rollback tolerance, a different thing ([`LICENSING_AND_ENTITLEMENTS.md`](LICENSING_AND_ENTITLEMENTS.md) §4, §6, §7; `license/grace_period_acceptance_test.go`). |
+| 18 | IMPLEMENTED; verified live (renewal) | The offline-package ledger row is written only with a successful install; first activation is refused for any held signed assignment, including a revoked one. **Live, test pair, 2026-10-29:** a signed offline licence file from Central was imported on the test appliance (200, licence installed, single-use row written, reconciled with Central on the next pass) and the same file was refused the second time (409, already consumed); a file wrapped as Central downloads it, without the console's unwrap, was refused for its signature. A first activation by an offline *activation package* needs an appliance that is not yet activated and was not exercised. |
 | 19 | IMPLEMENTED | New registrations with the constant hardware anchor are refused; existing fingerprints are untouched. |
-| 20 | IMPLEMENTED | Cap on waiting registrations as an audited Central setting (default 200), 503 and one alert. No auto-prune. No console screen for the setting yet (API only). |
+| 20 | IMPLEMENTED | Cap on waiting registrations as an audited Central setting (default 200, 10–5000), 503 and one alert. No auto-prune. The Central console shows it (Team → Appliance registration) with the count waiting now, the bounds and a required reason. |
 | 21 | DOC-ONLY | Hostname kept until retirement; `revocation_delivered_at` means "sent"; 204 kept. |
 
 ## 3. Networking
 
 | AD | Disposition | What was done |
 |---|---|---|
-| 22 | IMPLEMENTED; kernel behaviour EVIDENCE-DEPENDENT | Signed-in guests cannot reach RFC 1918, 100.64/10 or 169.254/16 through the appliance by default; audited allow-list; walled garden, custom DNS, WAN gateway and resolvers stay reachable. No Admin Console screen for the allow-list yet; it is set through `enforcement_policy_set()`. |
-| 23 | IMPLEMENTED (b); (a) ships OFF | The legacy `auth_ipv4` accept is gone. MAC binding of the Phase-3 set exists, off by default (`mac_binding_enabled`) until proven on the test appliance; IP-only is the fallback. |
-| 24 | IMPLEMENTED | Conntrack flows of an address that left the set without a revoke are flushed, scoped to that address (off-switch `NETD_FLUSH_LAPSED=false`). |
+| 22 | IMPLEMENTED; verified live | Signed-in guests cannot reach RFC 1918, 100.64/10 or 169.254/16 through the appliance by default; audited allow-list; walled garden, custom DNS, WAN gateway and resolvers stay reachable. Admin Console: **Network → Client access protection** (the five enforcement settings, bounds, reason and the operator's password required, history; turning the denial off needs the typed confirmation). Verified on the test appliance (installation manual A3.10). |
+| 23 | IMPLEMENTED (b); (a) ships OFF; verified live | The legacy `auth_ipv4` accept is gone. MAC binding of the Phase-3 set exists, off by default (`mac_binding_enabled`); IP-only is the fallback. Verified live on, against a spoofed MAC and off (A3.10). Switched from Client access protection. |
+| 24 | IMPLEMENTED; verified live | Conntrack flows of an address that left the set without a revoke are flushed, scoped to that address (off-switch `NETD_FLUSH_LAPSED=false`). Live, 2026-10-29: after a client's allowance ended, no forwarded flow to or from its address remained in conntrack (only the gateway's own DNS entry, which expires by timeout). |
 | 25 | ACCEPTED-RISK | IPv6 forwarding is left as it is (PO: no IPv6 redesign); recorded in the handbook §10.4. |
-| 26 | IMPLEMENTED; load test EVIDENCE-DEPENDENT | The per-source connection cap stays a protection constant. The global bottleneck found was scd's pool of 4 connections and an instant refusal at 64 in flight: pool 16 and a 2 s queue before "busy". `scripts/signin-burst-test.sh 500` is the load test for 300–500 simultaneous clients. |
+| 26 | IMPLEMENTED; verified live | The per-source connection cap stays a protection constant. The global bottleneck found was scd's pool of 4 connections and an instant refusal at 64 in flight: pool 16 and a 2 s queue before "busy". Live on the 1-vCPU test appliance, 2026-10-29: 500 and 300 simultaneous attempts, all answered, 0 busy, 0 timeouts, p95 66 ms and 57 ms, at most 15 database connections of 100 allowed in total and 7 for scd (limit 20). The attempts used unknown synthetic devices, so they measure the request path and the database, not successful sign-ins (the journey test proves those). |
 | 27 | IMPLEMENTED (label) / deferred | The isolation switch is labelled as depending on the access point. Enforcing isolated bridge ports is not done. |
-| 28 | IMPLEMENTED (a) / EVIDENCE-DEPENDENT (b) | netd honours `revision_id`; verify pings the DHCP-given gateway. Systemd hardening of the netd unit needs a test on the appliance. |
+| 28 | IMPLEMENTED | netd honours `revision_id`; verify pings the DHCP-given gateway. (b) The netd unit is hardened with the directives it provably never needs (`ProtectHome`, `ProtectKernelModules`, `ProtectKernelLogs`, `ProtectClock`, `LockPersonality`, `RestrictRealtime`, `RestrictSUIDSGID`, `SystemCallArchitectures`): systemd exposure 9.6 → 7.8, netd active, no denied operation, the client journey 12/12 on the hardened unit. `NoNewPrivileges` stays off and netd stays root, because it starts helpers; a stricter profile needs the full helper list and is not attempted. |
 
 ## 4. Guest authentication and PMS semantics
 
@@ -67,7 +67,7 @@ Product-Owner overrides of the list's recommendations are marked **PO**. Test na
 | 33 | IMPLEMENTED | NFC on both sides; migration 0164 re-normalises stored names. |
 | 34 | IMPLEMENTED | Device-retention setting with pruning that skips referenced devices. |
 | 35 | IMPLEMENTED | Production stubs report "not delivered"; a "one moment" notice with one retry; "busy" after about 2 s; in all six portal languages. |
-| 36 | IMPLEMENTED (**PO**: replaced) | The Post-stay PIN is replaced by room number plus reservation number bound to the original stay; a new device also gives the last name; lockout by stay and device; one generic refusal. PIN paths removed; historical `pin_*` data kept. [`architecture/ONEGATE_POST_STAY_SIGN_IN.md`](architecture/ONEGATE_POST_STAY_SIGN_IN.md). |
+| 36 | IMPLEMENTED (**PO**: replaced) | The Post-stay PIN is replaced by room number plus reservation number bound to the original stay and its PMS interface. A device that was never on the stay also gives the last name; **the last name is an extra check, not identity proof** ([`architecture/ONEGATE_POST_STAY_SIGN_IN.md`](architecture/ONEGATE_POST_STAY_SIGN_IN.md)). Found and fixed on the way: nothing limited how long after check-out the sign-in worked, so a stay left months ago opened a fresh profile. **New setting `post_stay_signin_days`** (migration 0179; default 7, 1–30, per site, audited, in Hotel Admin → sign-in limits). Isolated tests (throwaway full-schema database, no PMS traffic): lineage sign-in, uniform refusal, no cross-stay guessing, new device needs the name, lockout per stay and device, revoked and orphaned profiles, **a stay past the window, the room's next occupant, and the same room and reservation on another PMS interface**; scd's end-to-end test covers the conversion into an enforced session with its entitlement. Lockout by stay and device; one generic refusal. PIN paths removed; historical `pin_*` data kept. |
 | 37 | IMPLEMENTED (step 2) / ACCEPTED (step 4) | Unchanged GI/GC records only re-stamp the evidence and keep lineage. The hotel-wide feed rule stays; measure after deployment. |
 | 38 | IMPLEMENTED | Middle RESYNC copies keep their hash, not their text (0171); reversible. |
 | 39 | IMPLEMENTED | The legacy PMS provider layer and scd's three admin routes are removed; the plaintext columns drop only if every row is empty (0170). Run the count in the migration comment on each appliance. |
@@ -88,19 +88,19 @@ Product-Owner overrides of the list's recommendations are marked **PO**. Test na
 
 | AD | Disposition | What was done |
 |---|---|---|
-| 47 | IMPLEMENTED | Cut-off within 5 s as a setting; acctd runs accounting, expiry and a newest-plan submitter as separate tickers. |
-| 48 | IMPLEMENTED (partial) | Per-minute (7 days) and hourly roll-ups; purge time budget as a setting (0175–0177). `public.accounting_records` is not retired (still referenced); raw delete throughput at design load is EVIDENCE-DEPENDENT. |
+| 47 | IMPLEMENTED; verified live | Cut-off within 5 s as a setting; acctd runs accounting, expiry and a newest-plan submitter as separate tickers. Live, 2026-10-29: a client with a 3 MB allowance downloaded past it; acctd ended the access 2.7 s after the allowance was spent (`reason: DATA`, effective time recorded), and the next new connection was refused. |
+| 48 | IMPLEMENTED (partial) | Per-minute (7 days) and hourly roll-ups; purge time budget as a setting (0175–0177). `public.accounting_records` is not retired (still referenced). Raw delete throughput at design load was **not** measured: the design inserts about 67 samples a second (2,000 devices), the purge is bounded by its budget (default 10 s per run) and continues on the next run, and the sample tier is kept 2 days; a run at that scale on the reference VM is still to do. |
 | 49 | IMPLEMENTED (partial) | Scrubbed one-time codes, room attempts and redirect states are deleted (0178); purposes documented. The guest export's audit read is not bounded (needs a platform-role index). |
-| 50 | PARTIAL / EVIDENCE-DEPENDENT | `log_parameter_max_length=0` shipped. Timeouts, pools and memory limits wait for the measurement plan ([`runbooks/DB_BUDGET_MEASUREMENT_PLAN.md`](runbooks/DB_BUDGET_MEASUREMENT_PLAN.md)). |
+| 50 | IMPLEMENTED (measured; no change needed) | `log_parameter_max_length=0` shipped. **Per-role timeouts already exist** in Gate-P (`statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout` for scd, edged, acctd, netd, pmsd; 30 s on the payment roles): the measurement plan's assumption that there were none was stale. Measured on the 1-vCPU / 8 GiB test appliance (2026-10-29, burst of 500 then 300): PostgreSQL `max_connections` 100 against per-role limits adding to 85, so the "85 against 50" finding does not hold; at most 15 connections in use; no transaction open longer than the 0.4 s sampling step; resident memory 13–27 MiB for scd, portald and acctd, 25–156 MiB for edged (garbage collection moves it) and 18–90 MiB for netd (restarted in between), PostgreSQL backends about 0.7 GiB with shared buffers 2.5 GiB. No pool, timeout or memory limit is changed: nothing measured is near a limit. `MemoryMax` is deliberately not set (an OOM kill of netd would cut enforcement). The 2,000-device generator run of the plan (S1, S10) is not done. |
 | 51 | IMPLEMENTED | Sign-in ceiling follows the licence guest cap (floor 600/min); one-round-trip throttle; Argon2id 64 MiB kept. |
 | 52 | IMPLEMENTED | 5 s settings cache invalidated by NOTIFY, TTL as fallback. |
-| 53 | IMPLEMENTED | An unchanged plan only refreshes validity; full walk every 30 s (off-switch `NETD_PLAN_FASTPATH=false`). |
+| 53 | IMPLEMENTED | An unchanged plan only refreshes validity; full walk every 30 s (off-switch `NETD_PLAN_FASTPATH=false`). Unit-tested; exercised on every acctd pass during the live tests; no separate latency measurement was made. |
 | 54 | IMPLEMENTED | Replacement window and retirement-ack wait are audited Central settings; not-modified fetches are counted per hour. |
 | 55 | IMPLEMENTED | `/cloud/v1/appliances` pages of 100; callers without `limit` or `page` are unchanged. |
 | 56 | IMPLEMENTED | 30-day default windows for ended sessions and the audit list; older history on request. |
 | 57 | IMPLEMENTED | Per-IP 15 s negative cache of the access-status answer. |
-| 58 | IMPLEMENTED (**PO**) | Portal logo and background: 1 MB upload limit, background optimisation (long edge 2,560 px), quality kept. |
-| 59 | EVIDENCE-DEPENDENT | Decided after the Phase 11 S8 measurement; not started. |
+| 58 | IMPLEMENTED (**PO**); verified live | Portal logo and background: 1 MB upload limit, background optimisation (long edge 2,560 px by default, quality kept, both settings). Live through the operator API that the console page calls, 2026-10-29: a 3200×1800 PNG of 232 KB was accepted (202), resolved by the optimiser, and stored as 2560×1440; a 1.05 MB image was refused (400, "1 MB or smaller"); an SVG was refused. The console page's own behaviour (polling the id its upload returned) is covered by its UI tests; it was not driven in a browser here. |
+| 59 | DECIDED: keep (b) | Measured on the test appliance (1 vCPU), 2026-10-29: a console API call costs about 8–10 ms through Caddy and Node against 3–4 ms straight to edged (one caller), and 16 concurrent callers get about 110 requests a second through Node against about 270 direct, with the load generator on the same single core. A hotel console is a handful of staff; the extra few milliseconds are invisible, and Node carries the session and request checks. A direct Caddy route would be a controlled vhost change for no visible gain. Revisit only if console API load ever grows by orders of magnitude. |
 
 ## 7. Platform and toolchain
 
@@ -116,7 +116,7 @@ Product-Owner overrides of the list's recommendations are marked **PO**. Test na
 | AD | Disposition | What was done |
 |---|---|---|
 | 64 | IMPLEMENTED | `*_DB_URL` is required; the installer backfills and reads back before any restart. |
-| 65 | IMPLEMENTED, **not as decided** | A delete archives the lifecycle events, certificates, certificate requests and assignment moves in the same transaction (Central 0062). `RESTRICT` plus soft delete was not used: it needs a filter in about 60 queries and would block the serial from ever registering again. |
+| 65 | IMPLEMENTED, **not as decided; ACCEPTED by the Product Owner (2026-10-29)** | A delete archives the lifecycle events, certificates, certificate requests and assignment moves in the same transaction (Central 0062), and keeps its historical-security protections and regression tests. `RESTRICT` plus soft delete was not used: it needs a filter in about 60 queries and would block the serial from ever registering again. The archival approach is final; it is not to be replaced. |
 | 66 | IMPLEMENTED | A missing portal key group fails the install and raises an alert. |
 | 67 | IMPLEMENTED | Shortening a retention period shows a dry-run count and needs the number confirmed (0174). |
 | 68 | DOC-ONLY | The 2026-07-11 hardening list is marked superseded by the installation manual. |
@@ -128,22 +128,58 @@ Product-Owner overrides of the list's recommendations are marked **PO**. Test na
 | Migration 0160 up script | already restored in master (PR #264) |
 | P5 L11 index, P6 M1, P6 M3, D1-L3 fillfactor, P3 L6/CC3 checksum | M1 and M3 IMPLEMENTED (AD-41, AD-42); the rest not done |
 | Provider and guest-device settings step-up (P9 M2, L16) | IMPLEMENTED (password step-up) |
-| Restore checks (P9 M3, P4 CC4) | IMPLEMENTED (schema comparison before swap); Linux restore drills EVIDENCE-DEPENDENT |
-| Central least privilege (P3 M1, P3 L2) | EVIDENCE-DEPENDENT (role split and a production Central deployment) |
+| Restore checks (P9 M3, P4 CC4) | IMPLEMENTED (schema comparison before swap); restore drills run on Linux containers, see section 10 |
+| Central least privilege (P3 M1, P3 L2) | see section 11 |
 | Enforcement-core redesign (D4-*, D5-M1, D6-H1 step 3, D6-M2 step 2) | partly addressed by AD-47 and AD-53; the rest is not done |
-| Measurements first (D2-M4, D2-L3, P3 M6) | EVIDENCE-DEPENDENT |
+| Measurements first (D2-M4, D2-L3, P3 M6) | measured on the test appliance for AD-50 and AD-59 (section 10, rows 50 and 59); the 2,000-device generator run is not done |
 
 ## 10. Deployment and verification (2026-10-29)
 
-Deployed to the two authorised environments and read back from the installed artifacts; the full record is installation manual A3.10.
+Two rounds. Round 1 (PRs #265–#267) was deployed to the two authorised environments and read back from the installed artifacts; the full
+record is installation manual A3.10. Round 2 (the closure round, D82) added the items marked here.
 
 | Environment | Release | Read back |
 |---|---|---|
-| OneGate Central `41.128.240.133` (private `172.21.96.96`) | `onegate-central-ee2faf881d89` | `DEPLOYED.json`: ctrlapi and console source commit `ee2faf881d89`; migrations 0059–0062; smoke 10 PASS |
-| Test OneGate Appliance `172.21.96.97` | `onegate-appliance-1cd37145c468` | `RELEASE.json` and all six binaries: `1cd37145c4687d337fe922bf9c23ca3e786ec1c3`; migrations through 0178 |
+| OneGate Central `41.128.240.133` (private `172.21.96.96`) | round 1: `onegate-central-ee2faf881d89` | `DEPLOYED.json`: ctrlapi and console source commit `ee2faf881d89`; migrations 0059–0062; smoke 10 PASS |
+| Test OneGate Appliance `172.21.96.97` | round 1: `onegate-appliance-1cd37145c468` | `RELEASE.json` and all six binaries: `1cd37145c4687d337fe922bf9c23ca3e786ec1c3`; migrations through 0178 |
+| both | round 2 | see the deployment record of the closure round (`governance/transitions/`, installation manual A3.11) |
 
-Verified live: the appliance upgrade (after a safe stop at 0162 that PR #266 fixed), the licence over mutual TLS with the pinned Root CA,
-the client journey (12/12), private-network denial (AD-22), MAC binding on, off and against a spoof (AD-23), 300 and 500 simultaneous
-sign-in attempts without a busy answer (AD-26). **Not** verified live: the 5-second cut-off (AD-47) and plan fast path (AD-53) under
-load, the conntrack flush (AD-24), the room-and-reservation Post-stay flow (AD-36, dark), the image optimiser through the Admin Console
-(AD-58), Linux restore drills (AD-3), offline activation (AD-18), and every EVIDENCE-DEPENDENT row above.
+**Verified live on the test appliance** (round 1): the upgrade (after a safe stop at 0162 that PR #266 fixed), the licence over mutual TLS with the
+pinned Root CA, the client journey (12/12), private-network denial (AD-22), MAC binding on, off and against a spoof (AD-23), 300 and 500
+simultaneous sign-in attempts without a busy answer (AD-26).
+
+**Verified in round 2** (2026-10-29, test pair unless stated):
+
+| Item | Result |
+|---|---|
+| AD-47 cut-off | allowance of 3 MB spent at 07:14:01.6, access ended by acctd at 07:14:04.3 (2.7 s, reason DATA); the next new connection was refused |
+| AD-24 conntrack | no forwarded flow to or from the client's address remained after the cut-off (only the gateway's own DNS entry, which expires) |
+| AD-58 image optimiser | 3200×1800 PNG (232 KB) → stored 2560×1440; 1.05 MB refused with the 1 MB message; SVG refused (through the operator API the console page calls) |
+| AD-18 offline licence | signed offline licence file imported (200, installed, single-use row, reconciled with Central), replay refused (409) |
+| AD-28 (b) | netd on the hardened unit: active, no denied operation, client journey 12/12 |
+| AD-3 restore drills (Linux, disposable PostgreSQL containers) | `scripts/ledger-restore-drill.sh`: 16 of 16 scenarios PASS (older backup, secondary storage unavailable, forked copies, no trustworthy copy, interrupted write, cut-short copy, backup older than the ledger, replacement appliance, retention applied after the backup, retention failure stops the restore, pre-retention backup refused, stale maintenance flag). `scripts/phase4-restore-drill.sh`: 38 of 38 checks PASS |
+| AD-36 post-stay (isolated database, no PMS) | 10 integration cases PASS, three of them new (see row 36) |
+| Migration 0179 on an upgrade | applied as `iam_v2_owner` on a database built from the previous baseline: the column is present and both settings functions are owned by `iam_v2_owner` |
+| Platform-migration mechanism (PR #266) | reviewed and hardened, see section 12 |
+| AD-50 / AD-59 | measured, see rows 50 and 59 and [`runbooks/DB_BUDGET_MEASUREMENT_PLAN.md`](runbooks/DB_BUDGET_MEASUREMENT_PLAN.md) |
+
+**Still not verified, and why**
+
+* The 2,000-device generator run (AD-48 delete throughput, AD-50 S1/S10) and the 2 vCPU / 4 GB reference machine: no such machine or generator run was available; the test appliance has 1 vCPU.
+* An offline *activation package* (first activation of a waiting appliance): the test appliance is already activated and a second waiting appliance is not available.
+* The room-and-reservation Post-stay flow against a real PMS feed: the PMS interface is not enabled on the test appliance and live PMS traffic was not to be started for evidence; it is covered by the isolated database tests and scd's end-to-end test.
+* The Admin Console pages in a browser against the test appliance (the image upload page, the new Client access protection and licence clock pages): the pages are covered by their UI tests and every API they call was exercised; no browser session was driven.
+
+## 12. Review of the platform-migration mechanism (PR #266), 2026-10-29
+
+What it is: a migration whose first 20 lines carry `-- edge-migrate: platform` is applied by `apply-pending-migrations.sh` as the
+site's platform role through `edge-migrate.sh --platform-migration`, instead of as `iam_v2_owner`. Five migrations use it (0163, 0166, 0173,
+0174, 0178), because they change `public`, which the least-privilege migration role cannot write by design.
+
+| Question | Finding |
+|---|---|
+| How wide is the exception? | One gate only: the live-site "apply role is a non-superuser with no `public` CREATE / ledger UPDATE" check, lifted for a run that names exactly one migration (`--only`), whose file carries the marker, with `--expect-sha256` pinning its content, on a `live-site` target that already passed the identity and acknowledgement checks. The pre-change backup (a refusal without one is exit 4), the advisory locks, the gap check and the ledger row are the same as for any migration. Every other migration still runs as `iam_v2_owner`. |
+| Privilege restoration | Nothing is left elevated. The role is applied per `psql` connection with `SET ROLE`; each migration is its own connection, and the Gate-P reconcile that follows re-owns what a platform migration created and re-asserts the grants. |
+| **Defect found: the marker was trusted from the installed tree.** | The hash pinned for a platform migration was computed from the same file that was then run, so it guarded only the moment between hashing and running. A marker added to a pending migration, or a pending migration edited, after the installer had verified the release would have run as the platform role. **Fixed:** `apply-pending-migrations.sh` now requires the file's hash to equal its entry in the installed release's `SHA256SUMS` (written by the release the installer just verified) and refuses, applying nothing, a marked migration that the record does not list or whose content differs. `scripts/ci/apply-pending-migrations-selftest.sh` has three new cases (no record, a different hash, a listed file). |
+| Abuse resistance | Writing the files needs root on the appliance, and root there already holds the platform role, so the check is defence in depth against a damaged or substituted release tree, not against a hostile root. A release that was edited before installation is refused earlier, by `SHA256SUMS` at install time. The marker is only honoured for a pending migration (a migration already in the ledger is never run again). |
+| Not changed | The platform role is still the cluster superuser of a site appliance; no new superuser access was added anywhere else. The marker detection (first 20 lines, exact text) is unchanged. |
