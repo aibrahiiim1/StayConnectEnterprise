@@ -23,8 +23,8 @@ Both environments run the release (installation manual A3.10).
 
 | Role | Host | State |
 |---|---|---|
-| **Production Central** | `central.onegate.getsemantics.com`, public `41.128.240.133`, private `172.21.96.96` | release `onegate-central-ee2faf881d89` (2026-10-29, the audit-decision release; Central code equals master `1cd37145`); its own trust universe. Never a default for tests or drills |
-| **Test appliance** | `172.21.96.97` | release `onegate-appliance-1cd37145c468` (2026-10-29, the audit-decision release, 20 migrations applied 0159–0178, appliance Root CA pinned); activated on the production Central; standing deployment authorization for routine software (D79); Go-Live not authorised |
+| **Production Central** | `central.onegate.getsemantics.com`, public `41.128.240.133`, private `172.21.96.96` | release `onegate-central-9613fb52679d` (2026-10-29, the closure round: ctrlapi runs as the least-privilege role `ctrlapi_rt`, migrations through 0063; the earlier audit-decision release `ee2faf881d89` had Central code equals master `1cd37145`); its own trust universe. Never a default for tests or drills |
+| **Test appliance** | `172.21.96.97` | release `onegate-appliance-9613fb52679d` (2026-10-29, the closure round, migrations through 0179, appliance Root CA pinned against its fingerprint; the earlier audit-decision release was `1cd37145c468`); activated on the production Central; standing deployment authorization for routine software (D79); Go-Live not authorised |
 
 Every other host is retired and never contacted (`current_state_facts.retired_hosts`, enforced by
 `tools/validate-standing-records.py`). The cloud delivery environment cannot reach either current host (its egress

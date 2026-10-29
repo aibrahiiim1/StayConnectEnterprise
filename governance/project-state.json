@@ -1293,7 +1293,7 @@
       "name": "central.onegate.getsemantics.com",
       "recorded": "Product-Owner record, 2026-10-28: this is the current production Central; 172.21.96.196 is retired and must not be contacted.",
       "trust_universe": "Installed fresh by central-install.sh, so it has its own vendor key, assignment key, registry root, appliance CA and internal TLS CA (installation manual Appendix 3). Appliances provisioned against the retired Central, PRE-LIVE among them, do not trust it.",
-      "release": "onegate-central-ee2faf881d89 (2026-10-29, read back from DEPLOYED.json; installation manual A3.10)",
+      "release": "onegate-central-9613fb52679d (2026-10-29, read back from DEPLOYED.json: release_commit 9613fb52679d904ca0320c5cd9eeac23f06350b1; ctrlapi connects as the least-privilege role ctrlapi_rt since migration 0063; installation manual A3.11)",
       "retired_host": {
         "address": "172.21.96.196",
         "name": "sc-central.echofusion.com",
@@ -1339,9 +1339,9 @@
       "_note": "The current test appliance (Product-Owner record, 2026-10-28, D78/T0264). Activated on the production Central, in its trust universe.",
       "host": "172.21.96.97",
       "central": "central.onegate.getsemantics.com (41.128.240.133)",
-      "release": "onegate-appliance-1cd37145c468 (2026-10-29, source commit 1cd37145c4687d337fe922bf9c23ca3e786ec1c3 read back from RELEASE.json and the six installed binaries; installation manual A3.10)",
+      "release": "onegate-appliance-9613fb52679d (2026-10-29, source commit 9613fb52679d904ca0320c5cd9eeac23f06350b1 read back from RELEASE.json and all eight installed binaries via DEPLOYED_BINARIES.sha256; installation manual A3.11)",
       "status": "TEST. Go-Live not authorised. Routine software deployments are covered by the standing authorization D79.",
-      "deployed_note": "The audit-decision release (T0267, upgrade-path fix T0268) is deployed and verified on this appliance (T0269): migrations through 0178, units active, licence Active over mutual TLS, client journey 12/12. The first upgrade attempt stopped safely at migration 0162 and was fixed by PR #266."
+      "deployed_note": "The closure round of the audit-decision mission (T0270 to T0272) is deployed and verified on this appliance (T0273): migrations through 0179, units active, licence Active over mutual TLS, appliance Root CA pinned against its fingerprint, client journey 12/12, 500 simultaneous sign-in attempts answered with no busy answer. The earlier release (T0269) had stopped safely once at migration 0162 and was fixed by PR #266."
     },
     "standing_test_appliance_deployment_authorization": "STANDING PRODUCT-OWNER AUTHORIZATION, 2026-10-28 (D79/T0265), CONTINUING UNTIL REVOKED OR CHANGED: routine software deployments to the test appliance 172.21.96.97 within approved work, without separate deployment approval each time. COVERED: build and package, install, service restart, deployment verification, retry and rollback, and recording the exact deployed commit read back from the installed artifact. NOT COVERED, each a separate Product-Owner decision: the production Central; a new product, architecture or security decision; destructive or historical data mutation; a new migration or schema decision; networking or topology changes; PMS configuration, posting or traffic; financial or payment-provider activity; Guest activation or Go-Live; Root-CA or trust changes. The deployed source may run ahead of master; it is never master state.",
     "legacy_pki_custody": {
