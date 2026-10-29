@@ -21,7 +21,12 @@ services:
       POSTGRES_DB: stayconnect
     # The database's own log keeps no guest data (GDPR audit 2026-10-19, C5): an error is logged without the
     # statement that caused it and without its DETAIL line, which can carry the values of a duplicate key.
-    command: ["postgres", "-c", "log_min_error_statement=panic", "-c", "log_error_verbosity=terse"]
+    # AD-50: no bound parameter value is ever written to the database log, whatever logging is switched on later
+    # (log_parameter_max_length applies to statements logged for any reason, log_parameter_max_length_on_error to
+    # statements logged because they failed; 0 logs no parameter at all). Memory, pool and timeout values wait for the
+    # reference-VM measurement: docs/runbooks/DB_BUDGET_MEASUREMENT_PLAN.md.
+    command: ["postgres", "-c", "log_min_error_statement=panic", "-c", "log_error_verbosity=terse",
+              "-c", "log_parameter_max_length=0", "-c", "log_parameter_max_length_on_error=0"]
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
