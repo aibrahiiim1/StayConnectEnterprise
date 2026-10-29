@@ -1,5 +1,7 @@
 # Product-Owner decision list (audit remediation, 2026-10-28)
 
+> **Decided 2026-10-29.** The Product Owner approved AD-1 to AD-68 with the overrides recorded in [`AUDIT_DECISION_DISPOSITIONS.md`](AUDIT_DECISION_DISPOSITIONS.md), which gives each item's disposition. The text below is the question as it was put, kept as the record.
+
 **What this is.** These are the decisions left open by the 2026-10-28 audit remediation mission. It covers the backend audit (`docs/audit/`), the performance audit (`docs/performance-audit/`) and the 2026-07-11 hardening list.
 - Every item comes from the "Decisions needed" sections of the eight workstream records (Central, scd, portald, acctd, pmsd, netd, edged, DB/tooling) and from the coordinator's overrides.
 - Duplicates are merged into one item.

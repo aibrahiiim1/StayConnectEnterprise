@@ -149,7 +149,7 @@ func TestIntegration_GeneratedPasswordFollowsTheFormat(t *testing.T) {
 		map[string]any{"password_style": "upper_digits", "password_length": 10, "reason": "printed slips"}); st != 200 {
 		t.Fatalf("save = %d %v", st, b)
 	}
-	st, body = f.do(t, "POST", "/guest-accounts/"+id+"/set-password", map[string]any{"generate": true})
+	st, body = f.do(t, "POST", "/guest-accounts/"+id+"/set-password", map[string]any{"reason": "desk reset for the client", "generate": true})
 	if st != 200 {
 		t.Fatalf("set-password = %d %v", st, body)
 	}

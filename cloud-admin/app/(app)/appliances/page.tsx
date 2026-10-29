@@ -8,7 +8,7 @@ import {
 } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Select } from "@/components/ui/input";
+import { Input, Select } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { PageHeader, PageShell } from "@/components/ui/page";
@@ -27,6 +27,7 @@ import { useQueryState } from "@/lib/use-query-state";
 import { ACTIVATION, ACTIVATION_ORDER, CONNECTION, CONNECTION_ORDER, LICENSE, LICENSE_ORDER } from "@/lib/status";
 import { cn } from "@/lib/utils";
 
+const PAGE_SIZE = 100;
 const FILTER_SELECT = "w-auto min-w-36 max-w-56";
 
 const FILTERS = ["activation", "connection", "license", "customer_id", "site_id", "q"] as const;
@@ -52,17 +53,30 @@ function Appliances() {
   const [refreshing, setRefreshing] = useState(false);
   const [activate, setActivate] = useState<ApplianceRow | null>(null);
   const [importing, setImporting] = useState(false);
+  // The code the appliance shows on its own screen; the file alone does not prove the operator is at the box.
+  const [importCode, setImportCode] = useState("");
   const fileRef = useRef<HTMLInputElement | null>(null);
 
-  const query = qs({
+  // The list is paged by the server, 100 to a page (AD-55); a changed filter starts again at page 1.
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState<number | null>(null);
+  const [nextPage, setNextPage] = useState<number | null>(null);
+  const filterKey = qs({
     customer_id: f.customer_id, site_id: f.site_id, activation: f.activation,
     connection: f.connection, license: f.license, q: f.q,
+  });
+  useEffect(() => { setPage(1); }, [filterKey]);
+  const query = qs({
+    customer_id: f.customer_id, site_id: f.site_id, activation: f.activation,
+    connection: f.connection, license: f.license, q: f.q, limit: PAGE_SIZE, page,
   });
 
   const load = useCallback(async (opts?: RequestOptions) => {
     setRefreshing(true);
     try {
-      const r = await api.get<Items<ApplianceRow>>(`/cloud/v1/appliances${query}`, opts);
+      const r = await api.get<Items<ApplianceRow> & { total?: number; next_page?: number | null }>(`/cloud/v1/appliances${query}`, opts);
+      setTotal(typeof r?.total === "number" ? r.total : null);
+      setNextPage(typeof r?.next_page === "number" ? r.next_page : null);
       // Unchanged rows keep their objects, so only changed rows re-render (performance audit D8-M2).
       const next = sortAppliances(itemsOf(r));
       setRows((prev) => keepUnchanged(prev, next));
@@ -97,6 +111,11 @@ function Appliances() {
 
   async function importRequest(file: File | null) {
     if (!file) return;
+    if (!importCode.trim()) {
+      toast.error("Enter the activation code", "Type the activation code shown on the appliance before importing its request.");
+      if (fileRef.current) fileRef.current.value = "";
+      return;
+    }
     setImporting(true);
     try {
       let body: unknown;
@@ -106,7 +125,7 @@ function Appliances() {
         throw new Error("That file is not an activation request. Download it again from the appliance's Admin Console.");
       }
       // Importing creates an appliance, so it needs a password step-up like every appliance action.
-      const row = await withStepUp(() => api.post<ApplianceRow>("/cloud/v1/offline-activation/requests", body));
+      const row = await withStepUp(() => api.post<ApplianceRow>(`/cloud/v1/offline-activation/requests?activation_code=${encodeURIComponent(importCode.trim())}`, body));
       toast.success(`${row.serial} imported`, "Activate it, then download its activation package.");
       router.push(`/appliances/${row.id}`);
     } catch (e) {
@@ -147,6 +166,14 @@ function Appliances() {
         actions={
           can["appliances.activate"] ? (
             <>
+              <Input
+                aria-label="Activation code shown on the appliance"
+                placeholder="Activation code"
+                className="w-40"
+                value={importCode}
+                maxLength={12}
+                onChange={(e) => setImportCode(e.target.value)}
+              />
               <input
                 ref={fileRef}
                 type="file"
@@ -262,6 +289,17 @@ function Appliances() {
           <div className={cn(refreshing && refreshingClass)}>
             <ApplianceTable rows={rows ?? []} onActivate={can["appliances.activate"] ? setActivate : undefined} />
           </div>
+          {(page > 1 || nextPage !== null) && (
+            <div className="flex items-center justify-between gap-2 border-t border-border px-4 py-3 text-sm text-muted-foreground">
+              <span>
+                Page {page}{total !== null ? ` of ${Math.max(1, Math.ceil(total / PAGE_SIZE))} (${total} appliances)` : ""}
+              </span>
+              <span className="flex gap-2">
+                <Button variant="secondary" size="sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>Previous</Button>
+                <Button variant="secondary" size="sm" disabled={nextPage === null} onClick={() => setPage(nextPage ?? page)}>Next</Button>
+              </span>
+            </div>
+          )}
         </ListState>
       </Card>
 

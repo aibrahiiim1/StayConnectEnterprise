@@ -436,7 +436,12 @@ func (s *server) accountGrace(w http.ResponseWriter, r *http.Request) {
 		ssErr(w, http.StatusServiceUnavailable, "IAMV2_UNAVAILABLE")
 		return
 	}
-	a, ok := s.verifySelfServicePassword(r.Context(), email, req.Password)
+	a, ok, busy := s.verifySelfServicePassword(r.Context(), email, req.Password)
+	if busy {
+		w.Header().Set("Retry-After", strconv.Itoa(guestBusyRetryAfter))
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "BUSY", "retry_after": guestBusyRetryAfter})
+		return
+	}
 	if !ok {
 		ssErr(w, http.StatusUnauthorized, "invalid_credentials")
 		return
@@ -472,7 +477,7 @@ func (s *server) accountGrace(w http.ResponseWriter, r *http.Request) {
 }
 
 // Same rules as the ACCOUNT authority (enabled, validity, lockout) and the same constant work for every refusal.
-func (s *server) verifySelfServicePassword(ctx context.Context, email, password string) (selfServiceAccountRow, bool) {
+func (s *server) verifySelfServicePassword(ctx context.Context, email, password string) (selfServiceAccountRow, bool, bool) {
 	var a selfServiceAccountRow
 	var hash string
 	var vf, vu, locked *time.Time
@@ -487,13 +492,16 @@ func (s *server) verifySelfServicePassword(ctx context.Context, email, password 
 			slog.Warn("email accounts: account unreadable", "err", err)
 		}
 		passwordhash.BurnVerify(password)
-		return selfServiceAccountRow{}, false
+		return selfServiceAccountRow{}, false, false
 	}
 	ok, err := passwordhash.Verify(password, hash)
-	if err != nil || !ok {
-		return selfServiceAccountRow{}, false
+	if errors.Is(err, passwordhash.ErrBusy) {
+		return selfServiceAccountRow{}, false, true // neither a match nor a wrong password
 	}
-	return a, true
+	if err != nil || !ok {
+		return selfServiceAccountRow{}, false, false
+	}
+	return a, true, false
 }
 
 // Marks a token used once if it is this site, this purpose, unused, not superseded and unexpired. One empty answer for every reason, so a link reveals nothing.

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -41,10 +42,20 @@ type cfg struct {
 	CookieSecure bool
 }
 
+// requireDBURL refuses to start without EDGED_DB_URL (audit AD-64, P6 L14): the built-in fallback carried a published
+// password and turned TLS off. The installer and the upgrade add a missing value (deploy/scripts/backfill-db-urls.sh)
+// and read it back before any service is restarted.
+func requireDBURL(c cfg) error {
+	if strings.TrimSpace(c.DBURL) == "" {
+		return errors.New("EDGED_DB_URL is not set; edged has no built-in database URL. Run deploy/scripts/backfill-db-urls.sh or set it in /etc/stayconnect/edged.env")
+	}
+	return nil
+}
+
 func loadCfg() cfg {
 	return cfg{
 		Addr:        envOr("EDGED_ADDR", "127.0.0.1:8090"),
-		DBURL:       envOr("EDGED_DB_URL", "postgres://stayconnect:stayconnect@127.0.0.1:5432/stayconnect_site?sslmode=disable"),
+		DBURL:       os.Getenv("EDGED_DB_URL"),
 		SCDSocket:   envOr("EDGED_SCD_SOCKET", "/run/stayconnect/scd.sock"),
 		IdentityDir: envOr("EDGED_IDENTITY_DIR", "/etc/stayconnect/identity"),
 		// Secure unless explicitly switched off: browsers treat http://localhost as secure, so only a deliberate
@@ -61,9 +72,12 @@ func envOr(k, d string) string {
 }
 
 type server struct {
-	db        *pgxpool.Pool
-	propsOnce sync.Once
-	props     *proposalStore
+	db *pgxpool.Pool
+	// assetOpt turns an uploaded portal image into its stored form in the background (AD-58); created on first use.
+	assetOptOnce sync.Once
+	assetOpt     *assetOptimiser
+	propsOnce    sync.Once
+	props        *proposalStore
 	// dbDefaultPassword warns while the database accepts its default superuser password.
 	dbDefaultPassword *defaultDBPasswordCheck
 	scd               *scdClient
@@ -137,6 +151,10 @@ func main() {
 	startupbackoff.Guard("edged")
 
 	c := loadCfg()
+	if err := requireDBURL(c); err != nil {
+		slog.Error("configuration", "err", err)
+		os.Exit(1)
+	}
 	rootCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -334,6 +352,7 @@ func main() {
 			r.With(s.requireAnyWrite("license", "network")).Get("/central/offline-request", s.centralOfflineRequest)
 			r.With(s.requireAnyWrite("license", "network")).Post("/central/offline-package", s.centralOfflinePackage)
 			r.With(s.requireRole("license", permWrite)).Post("/license", s.licenseInstall)
+			r.With(s.requireRole("license", permWrite)).Post("/license/clock-reset", s.licenseClockReset)
 
 			// Authenticated but not role-filtered: the navigation reads it so it never offers a destination that would 404.
 			r.Get("/capabilities", s.capabilities)
@@ -359,6 +378,11 @@ func main() {
 			r.Route("/device-settings", func(r chi.Router) {
 				r.Use(s.resourcePermission("auth-methods"))
 				r.Mount("/", s.deviceSettingsRoutes())
+			})
+			// One-time-code caps, the sign-in ceiling, the room-pause exemption, device retention and the uploaded-image limits (0162).
+			r.Route("/signin-capacity-settings", func(r chi.Router) {
+				r.Use(s.resourcePermission("auth-methods"))
+				r.Mount("/", s.signinCapacityRoutes())
 			})
 			// Retention removes history when shortened, so it sits under the "backups" key (site administrators write).
 			r.Route("/accounting-retention", func(r chi.Router) {

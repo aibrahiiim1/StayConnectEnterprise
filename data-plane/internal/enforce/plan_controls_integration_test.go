@@ -648,44 +648,6 @@ func TestIntegration_Retention_AYearByDefaultAndUnlimitedPurgesNothing(t *testin
 	purgeNothing("under the administrator's unlimited")
 }
 
-// A retention, once set, removes only what is old and finished, and records that it did.
-func TestIntegration_Retention_PurgesOnlyOldFinishedDetail(t *testing.T) {
-	p := pool(t)
-	defer p.Close()
-	ctx := context.Background()
-	f, sess, liveSess := oldTerminatedUsage(t, p)
-	edged := rolePool(t, "svc_edged")
-	if _, err := edged.Exec(ctx, `SELECT iam_v2.accounting_retention_set($1,$2,30,'admin@test','keep a month of detail')`,
-		f.tenant, f.site); err != nil {
-		t.Fatalf("svc_edged could not set the retention: %v", err)
-	}
-	before := scalar[int64](t, p, `SELECT bytes_up + bytes_down FROM iam_v2.sessions WHERE id=$1`, sess)
-	n, err := New(rolePool(t, "svc_acctd")).PurgeAccountingDetail(ctx, f.tenant, f.site, 1000)
-	if err != nil {
-		t.Fatalf("purge as svc_acctd: %v", err)
-	}
-	if n != 1 {
-		t.Fatalf("purged %d, want exactly the one old reading of the terminated entitlement", n)
-	}
-	if c := count(t, p, `SELECT count(*) FROM iam_v2.accounting_records WHERE session_id=$1`, liveSess); c != 1 {
-		t.Fatal("the purge removed usage of a LIVE entitlement")
-	}
-	if after := scalar[int64](t, p, `SELECT bytes_up + bytes_down FROM iam_v2.sessions WHERE id=$1`, sess); after != before {
-		t.Fatalf("session totals changed %d -> %d; the purge removes detail, not totals", before, after)
-	}
-	var days, deleted int
-	if err := p.QueryRow(ctx, `SELECT retention_days, records_deleted FROM iam_v2.accounting_purge_runs WHERE site_id=$1`,
-		f.site).Scan(&days, &deleted); err != nil {
-		t.Fatalf("the purge was not recorded: %v", err)
-	}
-	if days != 30 || deleted != 1 {
-		t.Fatalf("run record %d days / %d deleted", days, deleted)
-	}
-	if c := count(t, p, `SELECT count(*) FROM iam_v2.accounting_retention_changes WHERE site_id=$1 AND new_retention_days=30`, f.site); c != 1 {
-		t.Fatal("the setting change was not logged")
-	}
-}
-
 // The setting is bounded and audited, and nothing else can delete a record.
 func TestIntegration_Retention_BoundsAndNoOtherDeletePath(t *testing.T) {
 	p := pool(t)

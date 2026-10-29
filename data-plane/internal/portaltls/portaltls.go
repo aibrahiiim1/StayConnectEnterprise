@@ -43,6 +43,9 @@ var (
 	ErrKeyMismatch  = errors.New("installed certificate does not match the installed key")
 	ErrNoPendingKey = errors.New("no pending key for this hostname")
 	ErrBadHostname  = errors.New("not a valid portal hostname")
+	// ErrKeyGroupMissing: portald could not read a key installed without its group, so a certificate installed
+	// anyway would never be served. The install fails instead (audit AD-66).
+	ErrKeyGroupMissing = errors.New("portal-tls: the key group does not exist, so portald could not read the key; create the group (stayconnect-portald) and retry")
 )
 
 // hostnameRE matches migration 0116's custom_domain shape and makes a hostname safe as a file name: no slash, "..", upper case or trailing dot.
@@ -446,6 +449,12 @@ func describe(host string, leaf *x509.Certificate) *Installed {
 func (s *Store) Install(host string, chainPEM []byte) (*Installed, error) {
 	if !ValidHostname(host) {
 		return nil, ErrBadHostname
+	}
+	if _, ok := s.keyGID(); !ok {
+		// Alert, then fail: a root-only key beside a certificate portald cannot use is an outage in waiting.
+		s.warn("portal-tls: ALERT: the key group does not exist; the certificate is NOT installed",
+			"host", host, "group", s.groupName())
+		return nil, ErrKeyGroupMissing
 	}
 	keyPEM, err := os.ReadFile(s.PendingKeyPath(host))
 	if err != nil {

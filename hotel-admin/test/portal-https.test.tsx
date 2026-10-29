@@ -241,12 +241,14 @@ describe("Identity providers: derived callback URLs", () => {
     const ticks = within(dlg).getAllByRole("checkbox");
     expect(ticks).toHaveLength(2);
     fireEvent.click(ticks[1]); // the hotel domain
+    fireEvent.change(within(dlg).getByLabelText(/Your password/), { target: { value: "op-pw" } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Add provider" }));
     await waitFor(() => expect(post).toHaveBeenCalled());
     const [path, body] = post.mock.calls[0];
     expect(path).toBe("/social-providers");
     expect(body.callback_hosts).toEqual(["wifi.nilehotel.com"]);
     expect(body).not.toHaveProperty("redirect_uri");
+    expect(body.password).toBe("op-pw"); // audit P9 M2: a sign-in provider changes only on the operator's password
   });
 
   it("edits with the secret write-only and the stored ticks restored", async () => {
@@ -259,6 +261,7 @@ describe("Identity providers: derived callback URLs", () => {
     const ticks = within(dlg).getAllByRole("checkbox") as HTMLInputElement[];
     expect(ticks.map((t) => t.checked)).toEqual([false, true]);
     fireEvent.click(ticks[0]);
+    fireEvent.change(within(dlg).getByLabelText(/Your password/), { target: { value: "op-pw" } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(patch).toHaveBeenCalled());
     const [, body] = patch.mock.calls[0];

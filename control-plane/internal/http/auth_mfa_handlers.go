@@ -90,7 +90,7 @@ func (d authDeps) loginCode(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	method, left, valid, locked, err := d.MFA.Verify(r.Context(), p.OperatorID, in.Code)
+	method, left, valid, locked, err := d.MFA.Verify(auth.WithClientAddr(r.Context(), clientip.From(r)), p.OperatorID, in.Code)
 	var lockedErr auth.ErrMFALocked
 	switch {
 	case errors.As(err, &lockedErr):
@@ -229,7 +229,7 @@ func (d authDeps) mfaRecoveryCodes(w http.ResponseWriter, r *http.Request) {
 			"Enter the 6-digit code your authenticator app shows now. A recovery code cannot be used for this.")
 		return
 	}
-	codes, ok, locked, err := d.MFA.NewRecoveryCodes(r.Context(), s.OperatorID, in.Code)
+	codes, ok, locked, err := d.MFA.NewRecoveryCodes(auth.WithClientAddr(r.Context(), clientip.From(r)), s.OperatorID, in.Code)
 	var lockedErr auth.ErrMFALocked
 	switch {
 	case errors.As(err, &lockedErr):
@@ -295,7 +295,7 @@ func (d authDeps) mfaConfirm(w http.ResponseWriter, r *http.Request) {
 		api.Fail(w, r, http.StatusBadRequest, "code_required", "Enter the 6-digit code your authenticator app shows now.")
 		return
 	}
-	codes, ok, locked, err := d.MFA.Confirm(r.Context(), s.OperatorID, c)
+	codes, ok, locked, err := d.MFA.Confirm(auth.WithClientAddr(r.Context(), clientip.From(r)), s.OperatorID, c)
 	var lockedErr auth.ErrMFALocked
 	switch {
 	case errors.As(err, &lockedErr):
@@ -331,7 +331,7 @@ func (d authDeps) mfaDisable(w http.ResponseWriter, r *http.Request) {
 			"Enter the 6-digit code your authenticator app shows now, or one of your recovery codes.")
 		return
 	}
-	method, ok, locked, err := d.MFA.Disable(r.Context(), s.OperatorID, in.Code)
+	method, ok, locked, err := d.MFA.Disable(auth.WithClientAddr(r.Context(), clientip.From(r)), s.OperatorID, in.Code)
 	var lockedErr auth.ErrMFALocked
 	switch {
 	case errors.As(err, &lockedErr):

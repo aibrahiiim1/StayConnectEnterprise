@@ -300,9 +300,11 @@ func (b *Base) listAudit(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := DBCtx(r)
 	defer cancel()
 	rows, err := b.DB.Query(ctx, `
-        SELECT ts, tenant, actor_type, actor_id, action, target_type, target_id, ip, payload, k FROM (
+        SELECT ts, tenant, actor_type, actor_id, action, target_type, target_id, ip, payload, k, staff FROM (
           SELECT ts, tenant_id::text AS tenant, actor_type, actor_id, action, target_type, target_id, host(ip) AS ip,
-                 payload, `+auditRowKey+` AS k
+                 payload, `+auditRowKey+` AS k,
+                 ($8::text <> '' AND actor_type = 'operator' AND NOT EXISTS (
+                    SELECT 1 FROM operators o WHERE o.id::text = audit_log.actor_id AND o.tenant_id::text = $8::text)) AS staff
             FROM audit_log
            WHERE ($1 = '' OR tenant_id::text = $1)
              AND ($2 = '' OR (target_type = 'appliance' AND target_id = $2) OR payload->>'appliance_id' = $2)
@@ -313,7 +315,7 @@ func (b *Base) listAudit(w http.ResponseWriter, r *http.Request) {
         ) x
          WHERE $5::timestamptz IS NULL OR (x.ts, x.k) < ($5, $7::text)
          ORDER BY x.ts DESC, x.k DESC
-         LIMIT $6`, scope.Filter(q.Get("customer_id")), q.Get("appliance_id"), actions, since, before, limit, beforeKey)
+         LIMIT $6`, scope.Filter(q.Get("customer_id")), q.Get("appliance_id"), actions, since, before, limit, beforeKey, restrictTenant(scope))
 	if err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "query failed")
 		return
@@ -327,8 +329,14 @@ func (b *Base) listAudit(w http.ResponseWriter, r *http.Request) {
 		var tenant, actorID, targetType, targetID, ip *string
 		var actorType, action, key string
 		var payload json.RawMessage
-		if rows.Scan(&ts, &tenant, &actorType, &actorID, &action, &targetType, &targetID, &ip, &payload, &key) != nil {
+		var staff bool
+		if rows.Scan(&ts, &tenant, &actorType, &actorID, &action, &targetType, &targetID, &ip, &payload, &key, &staff) != nil {
 			continue
+		}
+		if staff {
+			label := SupportActorLabel
+			actorID, ip = &label, nil
+			payload = supportSafePayload(payload)
 		}
 		last, lastKey = ts, key
 		out = append(out, map[string]any{"ts": ts, "customer_id": tenant, "actor_type": actorType,

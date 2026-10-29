@@ -1,0 +1,32 @@
+{
+  "transition_id": "T0267",
+  "seq": 267,
+  "timestamp": "2026-10-29T02:18:21Z",
+  "timestamp_derivation": "Computed from the session clock after the branch was integrated and validated, before the commit that introduces this receipt.",
+  "record_type": "AUDIT_DECISIONS_IMPLEMENTATION",
+  "authorisation": "D81, the Product Owner's mission of 2026-10-29.",
+  "implementation": "Seven workstreams (licensing and activation; Central administration; guest sign-in, portal and capacity; networking and enforcement; financial and PMS; appliance administration security, audit, backups and retention; retention, performance and platform) implemented the approved decisions and were integrated on one branch. Each AD item ends in IMPLEMENTED, ACCEPTED-RISK, DOC-ONLY or EVIDENCE-DEPENDENT in docs/AUDIT_DECISION_DISPOSITIONS.md. Accepted risks are not recorded as fixed: AD-25 (IPv6 forwarding kept), AD-29 (voucher format kept, residual risk documented), AD-37 step 4 (hotel-wide feed rule kept), AD-8 parts. Evidence-dependent items are listed with what to run.",
+  "migrations": "Appliance 0162-0178 (renumbered contiguously from the workstreams' reserved ranges): sign-in capacity and limits, one-round-trip throttle charge, NFC names, post-stay by room and reservation, enforcement policy, charge backoff and parking, refused-reversal case, operator transfer reason, retired PMS provider secrets, superseded RESYNC copies, late-capture review, authenticated erasure ledger, retention preview, usage roll-ups, accounting index, hourly export totals, scrubbed event rows. Central 0059-0062 (waiting-appliance cap, second-step locks per address, replacement and retirement settings with fetch counts, deleted-appliance history archive). The production baseline was regenerated through 0178. The authenticated-ledger key is created on first use because a baseline-built appliance carries no migration-inserted rows (found by the integration harness).",
+  "toolchain": "Go 1.26.10 pinned by digest (golang:1.26.10) in all three modules and the build and CI scripts; x/net v0.62.0, x/crypto v0.58.0.",
+  "verification": "Unit suites of license, control-plane and data-plane on Go 1.26.10; the Phase-5 full-schema integration harness (every migration, baseline and Gate-P, with the edged, scd, payment, stayengine, iamv2 and enforce suites) passing apart from two Windows-host file-mode tests that pass on Linux; clean-install reconstruction PASS; migration location and grant durability PASS; cloud-admin 253 and hotel-admin tests and both typechecks. Kernel behaviour of the new nft rules, MAC binding, the 500-client burst and Linux restore drills are EVIDENCE-DEPENDENT and listed in docs/AUDIT_DECISION_DISPOSITIONS.md.",
+  "deployment": "At the time of this receipt: NOT deployed. The deployment to Central 41.128.240.133 and the test appliance 172.21.96.97 follows the merge and is recorded by its own receipt with the commit read back from the installed artifacts.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "3b0b47cc442429d08c2eba9642c0441fc5bcf4f7",
+  "previous_delivery": "T0266",
+  "decision": "D81",
+  "go_live": "NOT authorised."
+}

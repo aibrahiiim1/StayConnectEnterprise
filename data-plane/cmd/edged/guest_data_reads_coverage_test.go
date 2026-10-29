@@ -13,25 +13,10 @@ import (
 // every GET route of the resources that hold guest data and fails for one that is neither recorded nor
 // deliberately classified below, so a new guest-data route cannot be added without a decision.
 
-// guestListsBrowsedUnrecorded are lists with no search: plain browsing is not recorded (file header of
-// guest_data_reads.go). Whether it should be is the open product decision of audit P9 M4.
-var guestListsBrowsedUnrecorded = map[string]bool{
-	"/edge/v1/guest-signin-restrictions":                true,
-	"/edge/v1/guest-signin-restrictions/network-pauses": true,
-	"/edge/v1/guest-data-rights/erasures":               true,
-	"/edge/v1/guest-data-rights/assisted":               true,
-	"/edge/v1/post-stay-profiles":                       true,
-	"/edge/v1/pms-resolutions":                          true,
-	"/edge/v1/pms-reconciliation":                       true,
-	"/edge/v1/pms-reconciliation/past-departure":        true,
-	"/edge/v1/pms-reconciliation/rooms":                 true,
-	"/edge/v1/pms-roster-reconciliation":                true,
-	"/edge/v1/stay-transfers":                           true,
-	"/edge/v1/stay-transfers/review-signals":            true,
-	"/edge/v1/code-requests":                            true, // masked unless the role may reveal
-	"/edge/v1/vouchers":                                 true,
-	"/edge/v1/sessions/aggregate-time":                  true,
-}
+// guestListsBrowsedUnrecorded is EMPTY since audit decision AD-7(a): every list page view is recorded as guest_data.listed (in
+// guestDataReads). The map stays so a list that is deliberately NOT recorded can be classified here, with a reason, rather than
+// slipping through.
+var guestListsBrowsedUnrecorded = map[string]bool{}
 
 // notGuestDataRoutes are GET routes under these resources that show no guest's personal data.
 var notGuestDataRoutes = map[string]bool{

@@ -74,7 +74,7 @@ func TestApplianceEventsUnion(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	ev, err := f.base.applianceEvents(f.ctx, app)
+	ev, err := f.base.applianceEvents(f.ctx, app, Scope{All: true})
 	if err != nil {
 		t.Fatal(err)
 	}

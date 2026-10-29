@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"runtime"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/argon2"
 )
@@ -58,13 +59,31 @@ func maxConcurrent() int {
 	return n
 }
 
+// ErrBusy: every slot stayed taken for MaxSlotWait, so the check was NOT run. It says nothing about the password and a
+// caller must not count it as a wrong one; it answers "busy, try again" (AD-35). Without the bound a hash queued behind a
+// burst could wait up to the handler's 10 s timeout.
+var ErrBusy = errors.New("passwordhash: busy")
+
+// MaxSlotWait is how long a check waits for a slot before it gives up with ErrBusy. A variable so tests can shorten it.
+var MaxSlotWait = 2 * time.Second
+
 // idKey is argon2.IDKey run inside a slot; tests replace argon2Key to observe concurrency.
 var argon2Key = argon2.IDKey
 
-func idKey(pw, salt []byte, t, m uint32, p uint8, keyLen uint32) []byte {
-	slots <- struct{}{}
+func idKey(pw, salt []byte, t, m uint32, p uint8, keyLen uint32) ([]byte, error) {
+	select {
+	case slots <- struct{}{}:
+	default:
+		timer := time.NewTimer(MaxSlotWait)
+		defer timer.Stop()
+		select {
+		case slots <- struct{}{}:
+		case <-timer.C:
+			return nil, ErrBusy
+		}
+	}
 	defer func() { <-slots }()
-	return argon2Key(pw, salt, t, m, p, keyLen)
+	return argon2Key(pw, salt, t, m, p, keyLen), nil
 }
 
 func Hash(pw string) (string, error) {
@@ -75,7 +94,10 @@ func Hash(pw string) (string, error) {
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
 	}
-	key := idKey([]byte(pw), salt, Time, Memory, Threads, KeyLen)
+	key, err := idKey([]byte(pw), salt, Time, Memory, Threads, KeyLen)
+	if err != nil {
+		return "", err
+	}
 	return fmt.Sprintf("$argon2id$v=19$m=%d,t=%d,p=%d$%s$%s", Memory, Time, Threads,
 		base64.RawStdEncoding.EncodeToString(salt), base64.RawStdEncoding.EncodeToString(key)), nil
 }
@@ -108,7 +130,10 @@ func Verify(pw, encoded string) (bool, error) {
 	if len(pw) > MaxPasswordBytes {
 		return false, nil
 	}
-	got := idKey([]byte(pw), salt, t, m, uint8(p), uint32(len(want)))
+	got, err := idKey([]byte(pw), salt, t, m, uint8(p), uint32(len(want)))
+	if err != nil {
+		return false, err
+	}
 	return subtle.ConstantTimeCompare(got, want) == 1, nil
 }
 

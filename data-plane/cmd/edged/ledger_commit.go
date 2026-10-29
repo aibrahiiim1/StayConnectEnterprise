@@ -18,7 +18,9 @@ import (
 // ledgerClient owns the two copies: scd in production, the ledger package itself in tests.
 type ledgerClient interface {
 	Prepare(ctx context.Context) error
-	Commit(ctx context.Context, entries []ledger.Entry) error
+	// Commit returns scd's durability receipts, one per entry (AD-3): the database confirms an entry only against its receipt.
+	// An empty list means the appliance's ledger has no key (its database predates migration 0173).
+	Commit(ctx context.Context, entries []ledger.Entry) ([]string, error)
 	// Abort takes entries back out of both copies after Commit when the transaction then failed.
 	Abort(ctx context.Context, entries []ledger.Entry) error
 }
@@ -35,13 +37,18 @@ func (e *ledgerRefusal) Error() string { return e.Code + ": " + e.Message }
 type scdLedger struct{ c *scdClient }
 
 func (l *scdLedger) call(ctx context.Context, path string, body any) error {
+	_, err := l.callRaw(ctx, path, body)
+	return err
+}
+
+func (l *scdLedger) callRaw(ctx context.Context, path string, body any) ([]byte, error) {
 	st, raw, err := l.c.call(ctx, http.MethodPost, path, body)
 	if err != nil {
-		return &ledgerRefusal{http.StatusServiceUnavailable, "ledger_unreachable",
+		return nil, &ledgerRefusal{http.StatusServiceUnavailable, "ledger_unreachable",
 			"The appliance's ledger service could not be reached, so nothing was erased. Try again in a moment."}
 	}
 	if st/100 == 2 {
-		return nil
+		return raw, nil
 	}
 	var e struct {
 		Error   string `json:"error"`
@@ -49,7 +56,7 @@ func (l *scdLedger) call(ctx context.Context, path string, body any) error {
 		State   string `json:"state"`
 	}
 	_ = json.Unmarshal(raw, &e)
-	return refusalFor(st, e.Error, e.Message, e.State)
+	return nil, refusalFor(st, e.Error, e.Message, e.State)
 }
 
 func refusalFor(status int, code, msg, state string) *ledgerRefusal {
@@ -86,8 +93,16 @@ func refusalFor(status int, code, msg, state string) *ledgerRefusal {
 func (l *scdLedger) Prepare(ctx context.Context) error {
 	return l.call(ctx, "/v1/ledger/prepare", map[string]any{})
 }
-func (l *scdLedger) Commit(ctx context.Context, e []ledger.Entry) error {
-	return l.call(ctx, "/v1/ledger/commit", map[string]any{"entries": e})
+func (l *scdLedger) Commit(ctx context.Context, e []ledger.Entry) ([]string, error) {
+	raw, err := l.callRaw(ctx, "/v1/ledger/commit", map[string]any{"entries": e})
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		Receipts []string `json:"receipts"`
+	}
+	_ = json.Unmarshal(raw, &out)
+	return out.Receipts, nil
 }
 func (l *scdLedger) Abort(ctx context.Context, e []ledger.Entry) error {
 	return l.call(ctx, "/v1/ledger/abort", map[string]any{"entries": e})
@@ -126,14 +141,25 @@ func (s *server) ledgerQuery(ctx context.Context, dest any, sql string, args ...
 	if len(entries) == 0 {
 		return tx.Commit(ctx)
 	}
-	if err := s.ledgerC.Commit(ctx, entries); err != nil {
+	receipts, err := s.ledgerC.Commit(ctx, entries)
+	if err != nil {
 		return err // the deferred rollback undoes the erasure
 	}
 	hashes := make([]string, len(entries))
 	for i, e := range entries {
 		hashes[i] = e.Hash
 	}
-	if _, err := tx.Exec(ctx, `SELECT iam_v2.ledger_confirm($1)`, hashes); err != nil {
+	// The database confirms an entry only against scd's receipt (AD-3); edged has no grant to confirm a bare hash. With no
+	// receipts the appliance's database has no ledger key yet (it predates migration 0173) and the old confirmation applies.
+	confirm := func() error {
+		if len(receipts) > 0 {
+			_, err := tx.Exec(ctx, `SELECT iam_v2.ledger_confirm_checked($1,$2)`, hashes, receipts)
+			return err
+		}
+		_, err := tx.Exec(ctx, `SELECT iam_v2.ledger_confirm($1)`, hashes)
+		return err
+	}
+	if err := confirm(); err != nil {
 		_ = s.ledgerC.Abort(ctx, entries) // before the rollback, while this transaction still holds the ledger lock
 		return err
 	}

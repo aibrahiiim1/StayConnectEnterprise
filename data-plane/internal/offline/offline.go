@@ -80,13 +80,24 @@ func AcceptFor(pub ed25519.PublicKey, p *Package, applianceID, serial, identityF
 	if now.Unix() > p.ExpiresAt {
 		return "package expired"
 	}
+	// AD-15: an empty value on either side is a refusal, never a skipped comparison. (The mTLS key is the exception:
+	// an appliance with no Central contact has no client certificate yet, and an offline package exists for it.)
+	if p.ApplianceID == "" || applianceID == "" {
+		return "the package or this appliance has no appliance id, so the package cannot be matched to it"
+	}
 	if p.ApplianceID != applianceID {
 		return "package bound to a different appliance"
 	}
-	if p.Serial != "" && serial != "" && p.Serial != serial {
+	if p.Serial != "" && serial == "" {
+		return "this appliance's serial is not known, so the package cannot be matched to it"
+	}
+	if p.Serial != "" && p.Serial != serial {
 		return "serial mismatch"
 	}
-	if p.IdentityKeyFpr != "" && identityFpr != "" && p.IdentityKeyFpr != identityFpr {
+	if p.IdentityKeyFpr == "" || identityFpr == "" {
+		return "the package or this appliance has no identity key fingerprint, so the package cannot be matched to it"
+	}
+	if p.IdentityKeyFpr != identityFpr {
 		return "identity key mismatch"
 	}
 	if p.MTLSKeyFpr != "" && mtlsFpr != "" && p.MTLSKeyFpr != mtlsFpr {

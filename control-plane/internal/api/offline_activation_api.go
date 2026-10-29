@@ -16,6 +16,7 @@ import (
 	"mime"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -110,6 +111,18 @@ func (b *OfflineBase) importRequest(w http.ResponseWriter, r *http.Request) {
 			"This appliance identity was retired. Factory-reset the appliance and create a new activation request.")
 		return
 	}
+	// AD-1: the operator reads the code off the appliance's own screen and sends it with the file (X-Activation-Code
+	// header or activation_code query parameter). The file alone proves only possession of the key it carries.
+	code := r.Header.Get("X-Activation-Code")
+	if code == "" {
+		code = r.URL.Query().Get("activation_code")
+	}
+	if ref := activationCodeRefusal(req.PublicKey, code); ref != nil {
+		audit.Op(r.Context(), b.DB, r, "offline_activation.activation_code_refused", "appliance", "",
+			map[string]any{"serial": req.Serial, "supplied": strings.TrimSpace(code) != ""})
+		Fail(w, r, ref.Status, ref.Code, ref.Message)
+		return
+	}
 	var appID, lifecycle, existingPub string
 	err = b.DB.QueryRow(ctx,
 		// Only a live row is this hardware; a retired row with the same serial is history and a new appliance is created.
@@ -130,6 +143,14 @@ func (b *OfflineBase) importRequest(w http.ResponseWriter, r *http.Request) {
 				appID, req.PublicKey, req.WANMAC, req.LANMAC, req.HardwareFpr, req.Hostname, req.Model)
 		}
 	default:
+		if ref := constantAnchorRefusal(req.Serial, req.HardwareFpr); ref != nil { // AD-19
+			Fail(w, r, ref.Status, ref.Code, ref.Message)
+			return
+		}
+		if ref := b.registrationCapRefusal(ctx, r, req.Serial, clientIP(r)); ref != nil { // AD-20
+			Fail(w, r, ref.Status, ref.Code, ref.Message)
+			return
+		}
 		if err := b.DB.QueryRow(ctx, `
             INSERT INTO appliances(serial, lifecycle_state, public_key,
                                    wan_mac, lan_mac, hardware_fingerprint, hostname, model,

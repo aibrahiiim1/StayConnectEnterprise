@@ -18,6 +18,7 @@ type cardCaseOut struct {
 	SettlementID     string     `json:"settlement_id"`
 	ChargeID         string     `json:"charge_transaction_id"`
 	ProviderRef      string     `json:"provider_ref"`
+	Detail           string     `json:"detail,omitempty"`
 	OpenedAt         time.Time  `json:"opened_at"`
 	AmountMinor      int64      `json:"amount_minor"`
 	Currency         string     `json:"currency"`
@@ -41,7 +42,7 @@ func (s *server) listCardCases(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	rows, err := s.db.Query(ctx, `
-	  SELECT c.id::text, c.kind, c.settlement_id::text, c.charge_transaction_id::text, c.provider_ref, c.opened_at,
+	  SELECT c.id::text, c.kind, c.settlement_id::text, c.charge_transaction_id::text, c.provider_ref, COALESCE(c.detail,''), c.opened_at,
 	         t.amount_minor, t.currency, COALESCE(e.status,''), COALESCE(c.resolution,''), c.resolved_at,
 	         COALESCE(c.resolved_by,''), COALESCE(c.resolution_reason,'')
 	    FROM iam_v2.card_reversal_reviews c
@@ -59,7 +60,7 @@ func (s *server) listCardCases(w http.ResponseWriter, r *http.Request) {
 	cases := []cardCaseOut{}
 	for rows.Next() {
 		var c cardCaseOut
-		if err := rows.Scan(&c.ID, &c.Kind, &c.SettlementID, &c.ChargeID, &c.ProviderRef, &c.OpenedAt, &c.AmountMinor,
+		if err := rows.Scan(&c.ID, &c.Kind, &c.SettlementID, &c.ChargeID, &c.ProviderRef, &c.Detail, &c.OpenedAt, &c.AmountMinor,
 			&c.Currency, &c.EntitlementState, &c.Resolution, &c.ResolvedAt, &c.ResolvedBy, &c.ResolutionReason); err != nil {
 			internalErr(w, r, http.StatusInternalServerError, "card_cases_unreadable", err)
 			return

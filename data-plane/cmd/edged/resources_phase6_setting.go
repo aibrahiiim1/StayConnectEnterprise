@@ -20,6 +20,8 @@ type guestDeviceSettingReq struct {
 	// A pointer so "absent" is distinguishable from "false": a PUT that omitted it must not turn the feature off.
 	Enabled *bool  `json:"enabled"`
 	Reason  string `json:"reason"`
+	// The operator's own password (audit P9 L16): a change to how clients manage their devices is re-authenticated like the other settings.
+	Password string `json:"password,omitempty"`
 }
 
 type guestDeviceSettingResp struct {
@@ -50,7 +52,7 @@ func (s *server) setGuestDeviceSetting(w http.ResponseWriter, r *http.Request) {
 	if err := dec.Decode(&in); err != nil {
 		// Unknown fields are refused: silently dropping a tenant_id/operator_id is indistinguishable from honouring it.
 		jsonErr(w, http.StatusBadRequest, "invalid",
-			"body must contain only 'enabled' and an optional 'reason'")
+			"body must contain only 'enabled', 'password' and an optional 'reason'")
 		return
 	}
 	if in.Enabled == nil {
@@ -67,6 +69,10 @@ func (s *server) setGuestDeviceSetting(w http.ResponseWriter, r *http.Request) {
 	sess := sessFrom(r.Context())
 	if sess == nil || sess.OperatorID == "" {
 		jsonErr(w, http.StatusUnauthorized, "unauthorized", "no operator session")
+		return
+	}
+	if !s.reauth(r, in.Password) {
+		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
 	label := strings.TrimSpace(sess.DisplayName)

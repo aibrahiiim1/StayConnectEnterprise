@@ -42,7 +42,7 @@ describe("Appliances", () => {
   it("lists waiting appliances first with an Activate button", async () => {
     nav.reset("/appliances");
     mockFetch([
-      { match: "/api/cloud/v1/appliances", body: { items: [appliance("activated"), { ...appliance("waiting"), id: "a9", serial: "OG-0009" }] } },
+      { match: /\/api\/cloud\/v1\/appliances\?/, body: { items: [appliance("activated"), { ...appliance("waiting"), id: "a9", serial: "OG-0009" }] } },
       { match: "/api/cloud/v1/overview", body: OVERVIEW },
       { match: "/api/cloud/v1/customers?status=all", body: { items: [CUSTOMER] } },
     ]);
@@ -65,13 +65,13 @@ describe("Appliances", () => {
     ]);
     renderAs(PLATFORM_ME, <AppliancesPage />);
     expect(await screen.findByText("No appliances match")).toBeInTheDocument();
-    expect(calls.some((c) => c.url === "/api/cloud/v1/appliances?customer_id=c1&activation=waiting")).toBe(true);
+    expect(calls.some((c) => c.url === "/api/cloud/v1/appliances?customer_id=c1&activation=waiting&limit=100&page=1")).toBe(true);
   });
 
   it("offers a customer's user no activation controls and no customer filter", async () => {
     nav.reset("/appliances");
     mockFetch([
-      { match: "/api/cloud/v1/appliances", body: { items: [appliance("waiting")] } },
+      { match: /\/api\/cloud\/v1\/appliances\?/, body: { items: [appliance("waiting")] } },
       { match: "/api/cloud/v1/overview", body: OVERVIEW },
     ]);
     renderAs(TENANT_ME, <AppliancesPage />);

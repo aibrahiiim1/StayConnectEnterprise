@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -78,6 +79,19 @@ func deref(p *string) string {
 // queryAppliances loads appliance rows with their derived state. customerID "" = every customer;
 // applianceID "" = every appliance.
 func (b *Base) queryAppliances(ctx context.Context, customerID, applianceID string) ([]ApplianceRow, error) {
+	rows, _, err := b.queryAppliancesOpt(ctx, applianceQuery{customerID: customerID, applianceID: applianceID})
+	return rows, err
+}
+
+// applianceQuery narrows queryAppliancesOpt in SQL (AD-55). limit 0 = no paging.
+type applianceQuery struct {
+	customerID, applianceID, siteID, text string
+	limit, offset                         int
+}
+
+// queryAppliancesOpt is queryAppliances with SQL filters on site and text and, when q.limit > 0, a page of the
+// result. total is the number of rows matching the filters before paging.
+func (b *Base) queryAppliancesOpt(ctx context.Context, q applianceQuery) ([]ApplianceRow, int, error) {
 	rows, err := b.DB.Query(ctx, `
         SELECT a.id::text, a.serial, COALESCE(a.hostname,''), COALESCE(a.model,''), COALESCE(a.version,''),
                COALESCE(a.tenant_id::text,''), COALESCE(t.name,''), COALESCE(a.site_id::text,''), COALESCE(s.name,''),
@@ -91,7 +105,8 @@ func (b *Base) queryAppliances(ctx context.Context, customerID, applianceID stri
                COALESCE(a.held_customer_id::text,''), COALESCE(hc.name,''),
                EXISTS (SELECT 1 FROM offline_activation_requests o WHERE o.appliance_id = a.id AND o.consumed_at IS NULL),
                EXISTS (SELECT 1 FROM appliance_certificates c WHERE c.appliance_id = a.id AND c.status = 'revoked'
-                         AND c.revocation_reason LIKE 'reissue:%')
+                         AND c.revocation_reason LIKE 'reissue:%'),
+               count(*) OVER ()
           FROM appliances a
           LEFT JOIN tenants t ON t.id = a.tenant_id
           LEFT JOIN tenants hc ON hc.id = a.held_customer_id
@@ -109,12 +124,17 @@ func (b *Base) queryAppliances(ctx context.Context, customerID, applianceID stri
                  LIMIT 1) l ON true
          WHERE ($1 = '' OR a.tenant_id::text = $1)
            AND ($2 = '' OR a.id::text = $2)
-         ORDER BY (a.lifecycle_state = 'pending_approval') DESC, a.created_at DESC`, customerID, applianceID)
+           AND ($3 = '' OR a.site_id::text = $3)
+           AND ($4 = '' OR position($4 in lower(concat_ws(' ', a.serial, a.hostname, a.model, t.name, s.name, a.last_public_ip))) > 0)
+         ORDER BY (a.lifecycle_state = 'pending_approval') DESC, a.created_at DESC, a.id
+         LIMIT CASE WHEN $5 > 0 THEN $5 END OFFSET $6`, q.customerID, q.applianceID, q.siteID,
+		strings.ToLower(strings.TrimSpace(q.text)), q.limit, q.offset)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 	now := time.Now()
+	total := 0
 	var out []ApplianceRow
 	for rows.Next() {
 		var a ApplianceRow
@@ -130,8 +150,8 @@ func (b *Base) queryAppliances(ctx context.Context, customerID, applianceID stri
 			&a.lifecycle, &a.LastSeenAt, &ip, &a.RegisteredAt, &a.ActivatedAt,
 			&hasCert, &td, &a.terminalDeadline, &a.replacementPending, &a.OpenAlerts,
 			&licID, &licStatus, &licUntil, &licGrace, &licOffline, &licCap, &licVer, &licModules, &heldID, &heldName,
-			&a.OfflineRequestPending, &reissued); err != nil {
-			return nil, err
+			&a.OfflineRequestPending, &reissued, &total); err != nil {
+			return nil, 0, err
 		}
 		a.HoldsCustomerID, a.HoldsCustomerName = strPtr(heldID), strPtr(heldName)
 		a.CustomerID, a.CustomerName, a.SiteID, a.SiteName = strPtr(custID), strPtr(custName), strPtr(siteID), strPtr(siteName)
@@ -169,10 +189,31 @@ func (b *Base) queryAppliances(ctx context.Context, customerID, applianceID stri
 		}
 		out = append(out, a)
 	}
-	return out, rows.Err()
+	if q.limit <= 0 || len(out) > 0 {
+		return out, total, rows.Err()
+	}
+	// An offset past the end returns no rows, so the total is read separately.
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	rows.Close()
+	err = b.DB.QueryRow(ctx, `SELECT count(*) FROM appliances a
+          LEFT JOIN tenants t ON t.id = a.tenant_id LEFT JOIN sites s ON s.id = a.site_id
+         WHERE ($1 = '' OR a.tenant_id::text = $1) AND ($2 = '' OR a.id::text = $2) AND ($3 = '' OR a.site_id::text = $3)
+           AND ($4 = '' OR position($4 in lower(concat_ws(' ', a.serial, a.hostname, a.model, t.name, s.name, a.last_public_ip))) > 0)`,
+		q.customerID, q.applianceID, q.siteID, strings.ToLower(strings.TrimSpace(q.text))).Scan(&total)
+	return out, total, err
 }
 
-// listAppliances: GET /cloud/v1/appliances?customer_id=&site_id=&activation=&connection=&license=&q=
+// ApplianceListPageSize is the page size of the paged fleet list (AD-55).
+const ApplianceListPageSize = 100
+
+// listAppliances: GET /cloud/v1/appliances?customer_id=&site_id=&activation=&connection=&license=&q=[&page=&limit=]
+//
+// Unpaged (no page or limit): the whole filtered list, as before. Paged (AD-55): pages of `limit` (default and
+// maximum 100), `page` starting at 1, with {total, page, limit, next_page}. Customer, site and text filters run in
+// SQL and the page is cut there. The activation, connection and licence filters are derived states (DeriveState),
+// so with any of them the SQL-filtered set is derived in Go, filtered, counted and then cut into the page.
 func (b *Base) listAppliances(w http.ResponseWriter, r *http.Request) {
 	scope, ok := readScope(w, r)
 	if !ok {
@@ -181,13 +222,60 @@ func (b *Base) listAppliances(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	ctx, cancel := DBCtx(r)
 	defer cancel()
-	rows, err := b.queryAppliances(ctx, scope.Filter(q.Get("customer_id")), "")
-	if err != nil {
-		Fail(w, r, http.StatusInternalServerError, CodeInternal, "query failed")
+	customer := scope.Filter(q.Get("customer_id"))
+	if q.Get("page") == "" && q.Get("limit") == "" {
+		rows, _, err := b.queryAppliancesOpt(ctx, applianceQuery{customerID: customer, siteID: q.Get("site_id"), text: q.Get("q")})
+		if err != nil {
+			Fail(w, r, http.StatusInternalServerError, CodeInternal, "query failed")
+			return
+		}
+		WriteJSON(w, http.StatusOK, map[string]any{"items": filterAppliances(rows, "",
+			q.Get("activation"), q.Get("connection"), q.Get("license"), "")})
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"items": filterAppliances(rows, q.Get("site_id"),
-		q.Get("activation"), q.Get("connection"), q.Get("license"), q.Get("q"))})
+	limit := ParseLimit(r, ApplianceListPageSize, ApplianceListPageSize)
+	page := 1
+	if v, err := strconv.Atoi(q.Get("page")); err == nil && v > 1 {
+		page = v
+	}
+	offset := (page - 1) * limit
+	derived := q.Get("activation") != "" || q.Get("connection") != "" || q.Get("license") != ""
+	aq := applianceQuery{customerID: customer, siteID: q.Get("site_id"), text: q.Get("q")}
+	var items []ApplianceRow
+	var total int
+	if derived {
+		rows, _, err := b.queryAppliancesOpt(ctx, aq)
+		if err != nil {
+			Fail(w, r, http.StatusInternalServerError, CodeInternal, "query failed")
+			return
+		}
+		rows = filterAppliances(rows, "", q.Get("activation"), q.Get("connection"), q.Get("license"), "")
+		total = len(rows)
+		if offset > total {
+			offset = total
+		}
+		end := offset + limit
+		if end > total {
+			end = total
+		}
+		items = rows[offset:end]
+	} else {
+		aq.limit, aq.offset = limit, offset
+		var err error
+		items, total, err = b.queryAppliancesOpt(ctx, aq)
+		if err != nil {
+			Fail(w, r, http.StatusInternalServerError, CodeInternal, "query failed")
+			return
+		}
+	}
+	if items == nil {
+		items = []ApplianceRow{}
+	}
+	var next any
+	if offset+len(items) < total {
+		next = page + 1
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"items": items, "total": total, "page": page, "limit": limit, "next_page": next})
 }
 
 func filterAppliances(rows []ApplianceRow, siteID, activation, connection, license, text string) []ApplianceRow {
@@ -290,7 +378,7 @@ func (b *Base) getAppliance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out["licenses"] = lics
-	events, err := b.applianceEvents(ctx, id)
+	events, err := b.applianceEvents(ctx, id, scope)
 	if err != nil {
 		unavailable(err)
 		return
@@ -317,8 +405,12 @@ func (b *Base) getAppliance(w http.ResponseWriter, r *http.Request) {
 // The two conditions are separate branches of a UNION ALL so each can use its own index (migration 0058); with
 // an OR the query walked the whole audit log backwards for a quiet appliance (perf audit D9-L1). A row matching
 // both appears once.
-func (b *Base) applianceEvents(ctx context.Context, id string) ([]map[string]any, error) {
+//
+// AD-4: a customer-scoped caller sees "OneGate support" for any operator who is not one of that customer's own
+// users, and no reason for such an entry. Platform scopes see everything.
+func (b *Base) applianceEvents(ctx context.Context, id string, scope Scope) ([]map[string]any, error) {
 	out := []map[string]any{}
+	restrict := restrictTenant(scope)
 	rows, err := b.DB.Query(ctx, `
         WITH ev AS (
             (SELECT ts, action, actor_type, actor_id, payload FROM audit_log
@@ -329,10 +421,11 @@ func (b *Base) applianceEvents(ctx context.Context, id string) ([]map[string]any
               WHERE payload->>'appliance_id' = $1::text
                 AND NOT (target_type IS NOT DISTINCT FROM 'appliance' AND target_id IS NOT DISTINCT FROM $1::text)
               ORDER BY ts DESC LIMIT 50))
-        SELECT ev.ts, ev.action, COALESCE(o.email, ev.actor_type), COALESCE(ev.payload->>'reason','')
+        SELECT ev.ts, ev.action, COALESCE(o.email, ev.actor_type), COALESCE(ev.payload->>'reason',''),
+               ($2::text <> '' AND ev.actor_type = 'operator' AND o.tenant_id::text IS DISTINCT FROM $2::text)
           FROM ev
           LEFT JOIN operators o ON ev.actor_type = 'operator' AND o.id::text = ev.actor_id
-         ORDER BY ev.ts DESC LIMIT 50`, id)
+         ORDER BY ev.ts DESC LIMIT 50`, id, restrict)
 	if err != nil {
 		return nil, err
 	}
@@ -340,8 +433,12 @@ func (b *Base) applianceEvents(ctx context.Context, id string) ([]map[string]any
 	for rows.Next() {
 		var at time.Time
 		var action, actor, reason string
-		if err := rows.Scan(&at, &action, &actor, &reason); err != nil {
+		var staff bool
+		if err := rows.Scan(&at, &action, &actor, &reason, &staff); err != nil {
 			return nil, err
+		}
+		if staff {
+			actor, reason = SupportActorLabel, ""
 		}
 		out = append(out, map[string]any{"ts": at, "action": action, "actor_email": actor, "reason": strPtr(reason)})
 	}

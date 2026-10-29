@@ -204,6 +204,8 @@ func (h *handler) accountRegister(w http.ResponseWriter, r *http.Request) {
 		h.landing(w, r, "Too many attempts. Please wait a minute and try again.")
 	case "license_capacity_reached":
 		h.landing(w, r, guestCapacityMessage)
+	case "busy":
+		h.landing(w, r, msgServiceBusy)
 	case "method_disabled":
 		h.landing(w, r, guestLicenseRefusedMessage)
 	default:

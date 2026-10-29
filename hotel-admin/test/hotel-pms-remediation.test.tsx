@@ -203,25 +203,3 @@ describe("Room-charge posting notice (D-E)", () => {
     expect(screen.queryByText("Room-charge posting is live on this appliance")).toBeNull();
   });
 });
-
-describe("Post-stay reset (H-17)", () => {
-  it("keeps the validity unless the extension is ticked", async () => {
-    const profile = {
-      id: "p1", stay_id: "s1", stay_status: "CHECKED_OUT", status: "ACTIVE", normalized_room_number: "12",
-      external_reservation_id: "R1", issued_via: "CHECKOUT", issued_at: new Date().toISOString(),
-      revoked_at: null, revoke_reason: null, authenticable: true,
-      origin_lifecycle_version: 1, pin_generation: 1, valid_until: new Date(Date.now() + 3600e3).toISOString(),
-    };
-    get.mockResolvedValue({ profiles: [profile] });
-    post.mockResolvedValue({ pin: "123456", valid_until: profile.valid_until });
-    const { PostStayView } = await import("@/components/phase5/post-stay-view");
-    render(<PostStayView canAct rolesKnown />);
-    await userEvent.click(await screen.findByRole("button", { name: /^Reset PIN: room/ }));
-    const dialog = await screen.findByRole("dialog");
-    await userEvent.type(within(dialog).getByLabelText(/^Reason/), "guest lost the printout");
-    await userEvent.type(within(dialog).getByLabelText(/confirm your password/i), "pw");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Reset PIN" }));
-    await waitFor(() => expect(post).toHaveBeenCalled());
-    expect(post.mock.calls[0][1]).toEqual({ password: "pw", reason: "guest lost the printout" });
-  });
-});

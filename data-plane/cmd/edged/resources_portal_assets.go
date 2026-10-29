@@ -7,8 +7,7 @@ package main
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -26,8 +25,9 @@ import (
 
 const portalAssetDir = "/opt/stayconnect/portal-assets"
 
-// A background photograph is the large case; the file is served to every guest device before sign-in.
-const maxAssetBytes = 8 << 20 // 8 MB
+// The hard upload limit (AD-58): enforced here and stated in the Admin Console. The stored file is then scaled and
+// compressed in the background (portal_asset_optimise.go), so what guests download is usually much smaller.
+const maxAssetBytes = 1 << 20 // 1 MB
 
 var regexpAssetName = regexp.MustCompile(`^[0-9a-f]{16}\.(png|jpg|webp|gif)$`)
 
@@ -55,6 +55,8 @@ func (s *server) portalAssetRoutes() http.Handler {
 	// The bytes for Hotel Admin: the portal serves /assets/<name> on the guest network, which is a different origin
 	// from the admin, so thumbnails and previews read the file back through the authenticated operator API.
 	r.Get("/{name}/raw", s.rawPortalAsset)
+	// What an upload became: the answer to "which of the files I just sent is this one", for a client that sent several.
+	r.Get("/{name}/resolved", s.resolvedPortalAsset)
 	r.Delete("/{name}", s.deletePortalAsset)
 	return r
 }
@@ -65,6 +67,34 @@ type portalAsset struct {
 	SizeBytes int64  `json:"size_bytes"`
 	Uploaded  string `json:"uploaded_at"`
 	InUse     bool   `json:"in_use"`
+	// Status is "ready", "optimising" (stored, not yet selectable: the final name is not known until it is done) or
+	// "failed" (Reason says why). An optimising or failed entry has no URL.
+	Status string `json:"status"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// assetOptimiser returns the background worker, created on first use.
+func (s *server) assetOptimiser() *assetOptimiser {
+	s.assetOptOnce.Do(func() {
+		s.assetOpt = newAssetOptimiser(portalAssetDir, s.portalImageParams)
+	})
+	return s.assetOpt
+}
+
+// portalImageParams reads the site's image settings (migration 0162); the defaults apply when they cannot be read.
+func (s *server) portalImageParams() optimiseParams {
+	p := defaultOptimiseParams()
+	if s.db == nil || s.tenantID == "" || s.siteID == "" {
+		return p
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var edge, q int
+	if err := s.db.QueryRow(ctx, `SELECT portal_image_max_edge_px, portal_image_quality
+	     FROM iam_v2.signin_capacity_settings_get($1::uuid,$2::uuid)`, s.tenantID, s.siteID).Scan(&edge, &q); err == nil {
+		p.MaxEdge, p.Quality = edge, q
+	}
+	return p
 }
 
 func (s *server) listPortalAssets(w http.ResponseWriter, r *http.Request) {
@@ -95,10 +125,39 @@ func (s *server) listPortalAssets(w http.ResponseWriter, r *http.Request) {
 			SizeBytes: fi.Size(),
 			Uploaded:  fi.ModTime().UTC().Format(time.RFC3339),
 			InUse:     used[e.Name()],
+			Status:    "ready",
 		})
+	}
+	pendingIDs, failed := s.assetOptimiser().pending()
+	for _, id := range pendingIDs {
+		a := portalAsset{Name: id, Status: "optimising"}
+		if fi, err := os.Stat(filepath.Join(portalAssetDir, assetPendingDir, id)); err == nil {
+			a.SizeBytes, a.Uploaded = fi.Size(), fi.ModTime().UTC().Format(time.RFC3339)
+		}
+		if why, bad := failed[id]; bad {
+			a.Status, a.Reason = "failed", why
+		}
+		out = append(out, a)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Uploaded > out[j].Uploaded })
 	writeList(w, out)
+}
+
+// resolvedPortalAsset answers for ONE upload (the id the upload returned): "optimising", "failed" with the reason, or "ready"
+// with the stored name and URL. Unknown ids answer 404, so a client never takes another upload's result for its own.
+func (s *server) resolvedPortalAsset(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "name")
+	name, state, why := s.assetOptimiser().resolved(id)
+	switch state {
+	case "ready":
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ready", "name": name, "url": "/assets/" + name})
+	case "failed":
+		writeJSON(w, http.StatusOK, map[string]any{"status": "failed", "reason": why})
+	case "optimising":
+		writeJSON(w, http.StatusOK, map[string]any{"status": "optimising"})
+	default:
+		jsonErr(w, http.StatusNotFound, "not_found", "no such upload")
+	}
 }
 
 func (s *server) uploadPortalAsset(w http.ResponseWriter, r *http.Request) {
@@ -146,22 +205,20 @@ func (s *server) uploadPortalAsset(w http.ResponseWriter, r *http.Request) {
 			"the portal asset directory "+portalAssetDir+" is not writable by the appliance service account")
 		return
 	}
-	// The stored name is derived, never the uploaded one; content-addressing dedupes repeated uploads.
-	sum := sha256.Sum256(data)
-	name := hex.EncodeToString(sum[:8]) + ext
-	dest := filepath.Join(portalAssetDir, name)
-	if err := writeFileAtomically(portalAssetDir, name, data, 0o644); err != nil {
-		// Name the path and reason: edged runs under ProtectSystem=strict, so this directory must be on its allowlist.
-		slog.Error("portal asset not stored", "path", dest, "err", err)
+	// The stored name is derived, never the uploaded one (content-addressing dedupes repeated uploads). The file is
+	// first held aside and optimised in the background; the name it ends up with is known only when that is done.
+	id, err := s.assetOptimiser().enqueue(data, ext)
+	if err != nil {
+		slog.Error("portal asset not stored", "dir", portalAssetDir, "err", err)
 		jsonErr(w, http.StatusInternalServerError, "asset_dir_unavailable",
 			"the image could not be written to "+portalAssetDir+": "+err.Error())
 		return
 	}
-	s.audit(r, "portal_asset.uploaded", "portal_asset", name, map[string]any{
+	s.audit(r, "portal_asset.uploaded", "portal_asset", id, map[string]any{
 		"size_bytes": n, "content_type": mime, "original_name": filepath.Base(hdr.Filename),
 	})
-	writeJSON(w, http.StatusOK, portalAsset{
-		Name: name, URL: "/assets/" + name, SizeBytes: int64(n),
+	writeJSON(w, http.StatusAccepted, portalAsset{
+		Name: id, SizeBytes: int64(n), Status: "optimising",
 		Uploaded: time.Now().UTC().Format(time.RFC3339),
 	})
 }

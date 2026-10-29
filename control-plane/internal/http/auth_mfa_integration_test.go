@@ -191,7 +191,11 @@ func TestConsoleTwoStepSignInIsOptionalAndEnforcedOnceOn(t *testing.T) {
 	if count("auth.mfa_failed", "true") < 5 || count("auth.mfa_locked", "true") != 1 {
 		t.Fatalf("wrong codes audited %d, lockouts %d", count("auth.mfa_failed", "true"), count("auth.mfa_locked", "true"))
 	}
+	// AD-6: the wrong codes above locked this client address (operator_mfa_address_locks), not the whole account.
 	if _, err := pool.Exec(ctx, `UPDATE operator_mfa SET locked_until = NULL WHERE operator_id=$1`, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE operator_mfa_address_locks SET locked_until = NULL WHERE operator_id=$1`, id); err != nil {
 		t.Fatal(err)
 	}
 	if r := call(d.mfaDisable, map[string]string{"code": codes[3].(string)}, "", own); r.code != 200 || r.body["enrolled"] != false {

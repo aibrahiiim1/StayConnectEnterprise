@@ -81,6 +81,11 @@ func (s *server) backupDownloadTicket(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusNotFound, "not_found", "no such backup artifact")
 		return
 	}
+	if ok, _, why := downloadPolicy(name, false); !ok {
+		s.audit(r, "backup.download_refused", "backup", name, map[string]any{"source_ip": clientIP(r)})
+		jsonErr(w, http.StatusForbidden, "download_refused", why)
+		return
+	}
 	if !s.reauth(r, in.Password) {
 		s.reauthRefused(w, r, "Confirm your password to download a backup. It is a complete copy of this site's data.")
 		return
@@ -107,6 +112,11 @@ func (s *server) backupDownloadFile(w http.ResponseWriter, r *http.Request) {
 	path, ok := resolveArtifact(name)
 	if !ok {
 		jsonErr(w, http.StatusNotFound, "not_found", "no such backup artifact")
+		return
+	}
+	// Checked again here: the policy must hold even for a ticket issued before it was tightened.
+	if ok, _, why := downloadPolicy(name, false); !ok {
+		jsonErr(w, http.StatusForbidden, "download_refused", why)
 		return
 	}
 	f, err := os.Open(path)

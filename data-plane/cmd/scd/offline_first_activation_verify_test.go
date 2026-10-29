@@ -128,3 +128,27 @@ func TestOfflineActivationVerifiesAssignmentBeforeAdopting(t *testing.T) {
 		t.Fatalf("the adopted assignment must verify at boot, got %v", r.Outcome)
 	}
 }
+
+// AD-18(b): "already assigned" is decided from the assignment STATE. An appliance holding a signed revoked
+// assignment (which carries no tenant) is refused first activation from a file; it needs a factory reset.
+func TestFirstActivationRefusedWhenARevokedAssignmentIsHeld(t *testing.T) {
+	restartAfterActivation = func() {}
+	rig := newOfflineRig(t)
+	revoked := assignment.Document{AssignmentID: "asg-old", ApplianceID: "appl-old", State: assignment.StateRevoked, Version: 3}
+	b, _ := json.Marshal(revoked)
+	if err := os.MkdirAll(rig.asgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rig.asgDir, "assignment.json"), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	rig.s.centralOfflinePackage(w, httptest.NewRequest(http.MethodPost, "/v1/central/offline-package",
+		bytes.NewReader(rig.pkg(t, rig.asgPriv))))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("an appliance holding a revoked assignment must refuse first activation, got %d %s", w.Code, w.Body)
+	}
+	if id, _ := rig.s.idStore.LoadBound(); id != nil {
+		t.Fatal("a refused package must not bind an appliance id")
+	}
+}

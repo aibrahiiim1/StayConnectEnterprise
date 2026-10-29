@@ -24,6 +24,8 @@ import (
 )
 
 type fixture struct {
+	// header is added to every operatorCall request (the offline import reads X-Activation-Code).
+	header   map[string]string
 	t        *testing.T
 	ctx      context.Context
 	pool     *pgxpool.Pool
@@ -139,6 +141,9 @@ func (f *fixture) operatorCallAs(s *auth.Session, h http.HandlerFunc, method str
 	raw, _ := json.Marshal(body)
 	req := httptest.NewRequest(method, "/cloud/v1/x", bytes.NewReader(raw))
 	req.RemoteAddr = "203.0.113.9:50000"
+	for k, v := range f.header {
+		req.Header.Set(k, v)
+	}
 	rctx := chi.NewRouteContext()
 	for k, v := range params {
 		rctx.URLParams.Add(k, v)
@@ -152,10 +157,29 @@ func (f *fixture) operatorCallAs(s *auth.Session, h http.HandlerFunc, method str
 	return rec
 }
 
+// codeFor is the activation code the appliance would show for its stored identity key (AD-1).
+func (f *fixture) codeFor(appID string) string {
+	f.t.Helper()
+	var pub string
+	if err := f.pool.QueryRow(f.ctx, `SELECT COALESCE(public_key,'') FROM appliances WHERE id=$1`, appID).Scan(&pub); err != nil {
+		f.t.Fatal(err)
+	}
+	return codeOfPub(f.t, pub)
+}
+
+func codeOfPub(t *testing.T, pubB64 string) string {
+	t.Helper()
+	raw, err := base64.RawStdEncoding.DecodeString(pubB64)
+	if err != nil || len(raw) != ed25519.PublicKeySize {
+		t.Fatalf("bad public key %q", pubB64)
+	}
+	return applianceauth.ActivationCode(ed25519.PublicKey(raw))
+}
+
 func (f *fixture) activate(appID, cust, site string, cap int) {
 	f.t.Helper()
 	rec := f.operatorCall(f.base.activate, http.MethodPost, appID, map[string]any{
-		"customer_id": cust, "site_id": site, "reason": "test",
+		"customer_id": cust, "site_id": site, "reason": "test", "activation_code": f.codeFor(appID),
 		"license": map[string]any{"max_concurrent_online_guests": cap, "valid_days": 30}})
 	if rec.Code != http.StatusOK {
 		f.t.Fatalf("activate: %d %s", rec.Code, rec.Body.String())

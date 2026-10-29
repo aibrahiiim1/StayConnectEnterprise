@@ -60,6 +60,8 @@ func parseJSON(raw []byte) ([]Element, error) {
 							s, _ := p.(string)
 							if ip := net.ParseIP(s); ip != nil {
 								el.IP = ip
+							} else if hw, err := net.ParseMAC(s); err == nil && len(hw) == 6 {
+								el.MAC = hw.String()
 							} else if s != "" {
 								el.Iface = s
 							}

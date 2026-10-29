@@ -861,6 +861,8 @@ export type CentralStatus = {
   central: { state: CentralLinkState; last_contact_at: string | null; last_error: string | null };
   details: {
     identity_key_fingerprint: string;
+    /** Shown while waiting; the vendor types it into Central to prove they are activating this box. */
+    activation_code?: string;
     cert_fingerprint: string;
     cert_not_after: string | null;
     assignment_version: number | null;
@@ -1281,6 +1283,8 @@ export type BackupArtifact = {
   size_bytes: number;
   modified_at: string;
   downloadable: boolean;
+  encrypted?: boolean;
+  download_refusal?: string;
 };
 
 export type BackupVerifyResult = {
@@ -1304,7 +1308,12 @@ export type BackupSettings = {
 
 export type PortalAsset = {
   name: string; url: string; size_bytes: number; uploaded_at: string; in_use: boolean;
+  /** "ready" once stored; "optimising" while the appliance scales and compresses it (no url yet); "failed" with a reason. */
+  status?: "ready" | "optimising" | "failed"; reason?: string;
 };
+
+/** The hard upload limit for portal images, enforced by the appliance as well. */
+export const PORTAL_IMAGE_MAX_BYTES = 1024 * 1024;
 
 export type SysNetAudit = {
   at: string;

@@ -36,8 +36,10 @@ iam_v2.entitlement_devices.disconnected_reason
 iam_v2.entitlement_state_transitions.reason
 iam_v2.entitlement_termination_evidence.terminal_reason
 iam_v2.entitlement_transfers.actor
+iam_v2.entitlement_transfers.operator_reason
 iam_v2.entitlement_transfers.reason
 iam_v2.entitlements.terminal_reason
+iam_v2.erasure_ledger.mac
 iam_v2.financial_epochs.reason
 iam_v2.financial_epochs.release_note
 iam_v2.financial_epochs.system_identity
@@ -91,6 +93,10 @@ iam_v2.pms_roster_reconciliation_runs.rooms_expected
 iam_v2.portal_profiles.name
 iam_v2.post_stay_profiles.revoke_reason
 iam_v2.posting_attempts.g_number
+iam_v2.posting_lane_settings_changes.reason
+iam_v2.posting_outbox.parked_reason
+iam_v2.posting_outbox_park_events.actor
+iam_v2.posting_outbox_park_events.reason
 iam_v2.posting_presend_aborts.reason
 iam_v2.posting_review_actions.actor
 iam_v2.posting_review_actions.reason
@@ -103,11 +109,15 @@ iam_v2.sessions.mac
 iam_v2.sign_in_attempts.device_mac
 iam_v2.sign_in_attempts.room_in_mirror
 iam_v2.sign_in_attempts.submitted_room
+iam_v2.signin_capacity_settings_changes.change_reason
 iam_v2.site_card_payment_setting_changes.change_reason
+iam_v2.site_card_recheck_setting_changes.reason
 iam_v2.site_data_retention.inactive_identity_days
 iam_v2.site_data_retention.staff_note_days
 iam_v2.site_module_changes.change_reason
 iam_v2.site_payment_domain_changes.change_reason
+iam_v2.site_signin_capacity_settings.otp_destination_hourly_cap
+iam_v2.site_usage_rollup_changes.change_reason
 iam_v2.stay_events.external_event_identity
 iam_v2.stay_guests.display_name
 iam_v2.stay_guests.external_guest_id
@@ -152,6 +162,8 @@ public.backup_key_holder_events.reason
 public.backup_key_holders.label
 public.backup_key_holders.remove_reason
 public.dhcp_reservations.mac
+public.enforcement_policy.mac_binding_enabled
+public.enforcement_policy_changes.reason
 public.guest_networks.name
 public.guest_networks.ssid_label
 public.network_config_revisions.failure_reason

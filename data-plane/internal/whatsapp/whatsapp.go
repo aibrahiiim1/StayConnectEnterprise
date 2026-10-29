@@ -130,6 +130,13 @@ func (s *Stub) Send(_ context.Context, m Message) error {
 				time.Now().UTC().Format(time.RFC3339), m.To, m.Code, m.TTLMinutes)
 		}
 	}
+	if s.redact {
+		slog.Warn("whatsapp.stub: message not delivered, no WhatsApp provider is configured", "to", Suffix(m.To))
+		return ErrNotDelivered
+	}
 	slog.Info("whatsapp.stub", "to", Suffix(m.To))
 	return nil
 }
+
+// ErrNotDelivered: the message did not and could not leave the appliance (no provider is configured) (AD-35).
+var ErrNotDelivered = errors.New("whatsapp: not delivered, no WhatsApp provider is configured")

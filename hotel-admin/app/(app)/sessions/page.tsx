@@ -70,6 +70,8 @@ export default function SessionsPage() {
   const [tab, setTab] = useState<Tab>("active");
   const [query, setQuery] = useState("");
   const [kind, setKind] = useState<string>("");
+  // Ended sessions: the last 30 days by default, the whole history on request (audit AD-56).
+  const [history, setHistory] = useState<"recent" | "all">("recent");
   const [detail, setDetail] = useState<Session | null>(null);
   const [confirm, setConfirm] = useState<Session | null>(null);
   const [busy, setBusy] = useState(false);
@@ -88,9 +90,10 @@ export default function SessionsPage() {
     const p = new URLSearchParams();
     if (tab === "active") p.set("state", "active");
     if (kind) p.set("kind", kind);
+    if (tab !== "active" && history === "all") p.set("window", "all");
     const s = p.toString();
     return s ? `/sessions?${s}` : "/sessions";
-  }, [tab, kind]);
+  }, [tab, kind, history]);
   const needle = query.trim();
   const headers = useMemo(
     () => (needle ? { "X-Session-Search": encodeURIComponent(needle) } : undefined),
@@ -261,6 +264,17 @@ export default function SessionsPage() {
                 {identity && <option value="guest">Email / social ({kindCounts.guest ?? 0})</option>}
                 <option value="open">Without sign-in ({kindCounts.open ?? 0})</option>
               </Select>
+              {tab !== "active" && (
+                <Select
+                  value={history}
+                  onChange={(e) => setHistory(e.target.value === "all" ? "all" : "recent")}
+                  aria-label="How far back to list ended sessions"
+                  className="w-full sm:w-44"
+                >
+                  <option value="recent">Last 30 days</option>
+                  <option value="all">All history</option>
+                </Select>
+              )}
               {(query || kind) && (
                 <Button variant="ghost" size="sm" onClick={() => { setQuery(""); setKind(""); }}>
                   Clear

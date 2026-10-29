@@ -134,11 +134,11 @@ func TestIntegration_SelfServiceAccounts_ListStateAndPasswordRefusal(t *testing.
 		t.Fatalf("staff account = %v", a)
 	}
 
-	if st, b := f.do(t, "POST", "/guest-accounts/"+suspended+"/set-password", map[string]any{"generate": true}); st != 403 ||
+	if st, b := f.do(t, "POST", "/guest-accounts/"+suspended+"/set-password", map[string]any{"reason": "desk reset for the client", "generate": true}); st != 403 ||
 		b["error"] != "self_service_account" {
 		t.Fatalf("staff re-passworded a self-service account: %d %v", st, b)
 	}
-	if st, b := f.do(t, "POST", "/guest-accounts/"+staff+"/set-password", map[string]any{"password": "desk-pass-1"}); st != 200 {
+	if st, b := f.do(t, "POST", "/guest-accounts/"+staff+"/set-password", map[string]any{"reason": "desk reset for the client", "password": "desk-pass-1"}); st != 200 {
 		t.Fatalf("a staff-created account could not be re-passworded: %d %v", st, b)
 	}
 	if st, b := f.do(t, "POST", "/guest-accounts/"+staff+"/resend-verification", nil); st != 409 {

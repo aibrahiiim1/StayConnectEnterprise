@@ -267,10 +267,19 @@ func (s *server) notifyTest(w http.ResponseWriter, r *http.Request) {
 	}
 	s.recordNotifyOutcome(ctx, row.ID, serr)
 	if serr != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "send_failed", "message": serr.Error()})
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "send_failed", "message": operatorTestMessage(serr)})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "kind": kind})
+}
+
+// operatorTestMessage keeps a non-SMTP provider's words for the administrator who typed the address (as before) but
+// never relays a mail server's own text (audit AD-13).
+func operatorTestMessage(err error) string {
+	if _, ok := mail.OperatorSMTPText(err); ok {
+		return notifyloader.OperatorText(err)
+	}
+	return err.Error()
 }
 
 func (s *server) recordNotifyOutcome(ctx context.Context, id string, serr error) {
@@ -279,6 +288,6 @@ func (s *server) recordNotifyOutcome(ctx context.Context, id string, serr error)
 		return
 	}
 	// The stored text is shown to every role that reads the provider screen, so it holds no recipient; the test's own answer keeps the provider's words for the administrator who typed the address.
-	msg := notifyloader.Truncate(notifyloader.ScrubContacts(serr.Error()), 500)
+	msg := notifyloader.Truncate(notifyloader.OperatorText(serr), 500)
 	_, _ = s.db.Exec(ctx, `UPDATE notification_providers SET last_error = $3, last_error_at = now() WHERE id=$1::uuid AND tenant_id=$2`, id, s.tenID, msg)
 }

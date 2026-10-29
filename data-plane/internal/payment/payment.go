@@ -51,6 +51,9 @@ const (
 	EnvPhase4Master   = "STAYCONNECT_PHASE4_MASTER"
 	EnvPhase4Payment  = "STAYCONNECT_PHASE4_PAYMENT"
 	EnvPhase4Provider = "STAYCONNECT_PHASE4_PAYMENT_PROVIDER" // the ONLY flag that can permit provider calls
+	// EnvPhase4Recheck switches on the slow read-only re-query of failed and unknown card charges for a late capture (AD-43).
+	// Off by default; it permits no provider call unless the provider flag is also on.
+	EnvPhase4Recheck = "STAYCONNECT_PHASE4_PAYMENT_RECHECK"
 
 	// EnvOutcomeDSN is a separate credential from execution: with one, a single theft could start a payment and declare
 	// it captured.
@@ -61,6 +64,8 @@ type Config struct {
 	MasterEnabled   bool
 	PaymentEnabled  bool
 	ProviderEnabled bool
+	// RecheckEnabled: the late-capture re-query may run. Read-only toward the provider, but a new traffic pattern, so it has its own switch.
+	RecheckEnabled bool
 }
 
 func (c Config) DomainOn() bool { return c.MasterEnabled && c.PaymentEnabled }
@@ -70,6 +75,9 @@ func (c Config) ProviderOn() bool { return c.MasterEnabled && c.PaymentEnabled &
 
 func (c Config) Dark() bool { return !c.ProviderOn() }
 
+// RecheckOn: the late-capture re-query needs the provider to be on AND its own switch.
+func (c Config) RecheckOn() bool { return c.ProviderOn() && c.RecheckEnabled }
+
 type Getenv func(string) string
 
 // A malformed boolean is a startup failure, never a default; a child flag set while the master is OFF is refused.
@@ -78,7 +86,7 @@ func LoadConfigFromEnv(get Getenv) (Config, error) {
 	for _, f := range []struct {
 		name string
 		dst  *bool
-	}{{EnvPhase4Master, &c.MasterEnabled}, {EnvPhase4Payment, &c.PaymentEnabled}, {EnvPhase4Provider, &c.ProviderEnabled}} {
+	}{{EnvPhase4Master, &c.MasterEnabled}, {EnvPhase4Payment, &c.PaymentEnabled}, {EnvPhase4Provider, &c.ProviderEnabled}, {EnvPhase4Recheck, &c.RecheckEnabled}} {
 		raw := strings.TrimSpace(get(f.name))
 		if raw == "" {
 			continue
@@ -95,6 +103,9 @@ func LoadConfigFromEnv(get Getenv) (Config, error) {
 	if c.ProviderEnabled && !c.PaymentEnabled {
 		return Config{}, fail(ErrConfig, EnvPhase4Provider+" is enabled while "+EnvPhase4Payment+" is OFF")
 	}
+	if c.RecheckEnabled && !c.ProviderEnabled {
+		return Config{}, fail(ErrConfig, EnvPhase4Recheck+" is enabled while "+EnvPhase4Provider+" is OFF")
+	}
 	return c, nil
 }
 
@@ -102,6 +113,7 @@ func (c Config) SafeFlagSummary() string {
 	return "phase4 payment master=" + strconv.FormatBool(c.MasterEnabled) +
 		" domain=" + strconv.FormatBool(c.PaymentEnabled) +
 		" provider=" + strconv.FormatBool(c.ProviderEnabled) +
+		" recheck=" + strconv.FormatBool(c.RecheckEnabled) +
 		" dark=" + strconv.FormatBool(c.Dark())
 }
 

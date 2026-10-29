@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0158, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0178, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -2193,6 +2193,57 @@ END $$;
 
 
 --
+-- Name: card_recheck_settings_get(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.card_recheck_settings_get(p_tenant uuid, p_site uuid) RETURNS TABLE(window_days integer, config_version bigint, is_default boolean)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+    SELECT COALESCE(s.window_days, 7), COALESCE(s.config_version, 0), (s.tenant_id IS NULL)
+      FROM (SELECT 1) one LEFT JOIN iam_v2.site_card_recheck_settings s ON s.tenant_id = p_tenant AND s.site_id = p_site;
+$$;
+
+
+--
+-- Name: card_recheck_settings_set(uuid, uuid, bigint, integer, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.card_recheck_settings_set(p_tenant uuid, p_site uuid, p_expected_version bigint, p_window_days integer, p_operator text, p_reason text) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_cur bigint; v_old integer; v_ver bigint;
+BEGIN
+    IF p_operator IS NULL OR length(btrim(p_operator)) = 0 THEN
+        RAISE EXCEPTION 'RECHECK_SETTING_ACTOR: an operator identity is required' USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    IF p_reason IS NULL OR length(btrim(p_reason)) < 3 OR length(p_reason) > 500 THEN
+        RAISE EXCEPTION 'RECHECK_SETTING_REASON: a reason of 3 to 500 characters is required' USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    IF p_window_days IS NULL OR p_window_days < 1 OR p_window_days > 30 THEN
+        RAISE EXCEPTION 'RECHECK_SETTING_BOUNDS: the window must be between 1 and 30 days' USING ERRCODE = 'check_violation';
+    END IF;
+    PERFORM pg_advisory_xact_lock(hashtext('card_recheck_settings'), hashtext(p_site::text));
+    SELECT s.config_version, s.window_days INTO v_cur, v_old
+      FROM iam_v2.site_card_recheck_settings s WHERE s.tenant_id = p_tenant AND s.site_id = p_site FOR UPDATE;
+    IF p_expected_version IS NULL OR COALESCE(v_cur, 0) <> p_expected_version THEN
+        RAISE EXCEPTION 'RECHECK_SETTING_VERSION_CONFLICT: the setting changed (now version %); reload and try again', COALESCE(v_cur, 0)
+            USING ERRCODE = 'serialization_failure';
+    END IF;
+    INSERT INTO iam_v2.site_card_recheck_settings AS s (tenant_id, site_id, window_days)
+    VALUES (p_tenant, p_site, p_window_days)
+    ON CONFLICT (tenant_id, site_id) DO UPDATE
+       SET window_days = EXCLUDED.window_days, config_version = s.config_version + 1, updated_at = now()
+    RETURNING s.config_version INTO v_ver;
+    INSERT INTO iam_v2.site_card_recheck_setting_changes
+           (tenant_id, site_id, changed_by, reason, old_window_days, new_window_days, new_config_version)
+    VALUES (p_tenant, p_site, btrim(p_operator), btrim(p_reason), v_old, p_window_days, v_ver);
+    RETURN v_ver;
+END $$;
+
+
+--
 -- Name: card_reversal_reviews_guard(); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -2207,8 +2258,10 @@ BEGIN
   IF OLD.resolution IS NOT NULL THEN
     RAISE EXCEPTION 'a resolved review is final' USING ERRCODE = 'insufficient_privilege';
   END IF;
-  IF (NEW.id, NEW.tenant_id, NEW.site_id, NEW.settlement_id, NEW.charge_transaction_id, NEW.kind, NEW.provider_ref, NEW.opened_at)
-     IS DISTINCT FROM (OLD.id, OLD.tenant_id, OLD.site_id, OLD.settlement_id, OLD.charge_transaction_id, OLD.kind, OLD.provider_ref, OLD.opened_at) THEN
+  IF (NEW.id, NEW.tenant_id, NEW.site_id, NEW.settlement_id, NEW.charge_transaction_id, NEW.kind, NEW.provider_ref, NEW.opened_at,
+      NEW.reversal_kind, NEW.reversal_amount_minor, NEW.detail)
+     IS DISTINCT FROM (OLD.id, OLD.tenant_id, OLD.site_id, OLD.settlement_id, OLD.charge_transaction_id, OLD.kind, OLD.provider_ref, OLD.opened_at,
+      OLD.reversal_kind, OLD.reversal_amount_minor, OLD.detail) THEN
     RAISE EXCEPTION 'only the resolution of a review may be written' USING ERRCODE = 'insufficient_privilege';
   END IF;
   RETURN NEW;
@@ -2778,6 +2831,23 @@ BEGIN
    WHERE id = p_session;
   RETURN 'ENDED';
 END $_$;
+
+
+--
+-- Name: entitlement_transfers_scrub_operator_reason(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.entitlement_transfers_scrub_operator_reason() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+BEGIN
+  IF NEW.reason IS DISTINCT FROM OLD.reason AND NEW.operator_reason IS NOT NULL
+     AND NEW.operator_reason <> 'Removed after the staff-notes period' THEN
+    NEW.operator_reason := 'Removed after the staff-notes period';
+  END IF;
+  RETURN NEW;
+END $$;
 
 
 --
@@ -3426,7 +3496,12 @@ BEGIN
         'bytes_up', se.bytes_up, 'bytes_down', se.bytes_down,
         'usage_samples', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
             'at', ar.sampled_at, 'bytes_up', ar.bytes_up, 'bytes_down', ar.bytes_down) ORDER BY ar.sampled_at), '[]'::jsonb)
-          FROM accounting_records ar WHERE ar.session_id = se.id)) ORDER BY se.started), '[]'::jsonb)
+          FROM accounting_records ar WHERE ar.session_id = se.id),
+        -- Hourly totals (0175, AD-48): the raw samples above are kept only a couple of days once rolled up, the hourly
+        -- totals for the usage-detail retention. A person's export shows both.
+        'usage_by_hour', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+            'hour', h.bucket, 'bytes_up', h.bytes_up, 'bytes_down', h.bytes_down) ORDER BY h.bucket), '[]'::jsonb)
+          FROM accounting_usage_hour h WHERE h.session_id = se.id)) ORDER BY se.started), '[]'::jsonb)
       FROM sessions se WHERE se.id = ANY (se_ids)),
     -- What was tried with the person's own access or from their exclusive device. Attempts to enter a room's
     -- credentials are the typist's, not the reservation holder's, and are never exported with the reservation.
@@ -3941,8 +4016,14 @@ CREATE FUNCTION iam_v2.guest_signin_network_gate(p_tenant uuid, p_site uuid, p_n
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
-  SELECT (p.id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM iam_v2.guest_signin_device_passes d
-                                             WHERE d.pause_id = p.id AND d.device_mac = p_mac)),
+  SELECT (p.id IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM iam_v2.guest_signin_device_passes d
+                           WHERE d.pause_id = p.id AND d.device_mac = p_mac)
+          AND NOT EXISTS (SELECT 1 FROM iam_v2.sign_in_attempts a, iam_v2.signin_capacity_settings_get(p_tenant, p_site) g
+                           WHERE g.network_pause_exempt_hours > 0
+                             AND a.tenant_id = p_tenant AND a.site_id = p_site AND a.device_mac = p_mac
+                             AND a.result = 'VERIFIED'
+                             AND a.occurred_at > now() - make_interval(hours => g.network_pause_exempt_hours))),
          p.id,
          CASE WHEN p.id IS NOT NULL THEN GREATEST(1, CEIL(EXTRACT(EPOCH FROM (p.expires_at - now())))::int) END
     FROM (SELECT 1) one
@@ -4000,7 +4081,7 @@ CREATE FUNCTION iam_v2.guest_signin_network_policy_get(p_tenant uuid, p_site uui
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
-  SELECT COALESCE(s.network_max_failures, 30), COALESCE(s.network_window_seconds, 600),
+  SELECT COALESCE(s.network_max_failures, 60), COALESCE(s.network_window_seconds, 600),
          COALESCE(s.network_pause_seconds, 900), COALESCE(s.config_version, 1), s.updated_at, (s.tenant_id IS NULL)
     FROM (SELECT 1) one
     LEFT JOIN iam_v2.site_guest_signin_network_policy s ON s.tenant_id = p_tenant AND s.site_id = p_site;
@@ -4778,12 +4859,13 @@ CREATE FUNCTION iam_v2.ledger_append(p_tenant uuid, p_site uuid, p_kind text, p_
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
-DECLARE m record; v_seq bigint; v_prev text; v_at bigint; v_body text; v_hash text;
+DECLARE m record; v_seq bigint; v_prev text; v_at bigint; v_body text; v_hash text; v_mac text;
 BEGIN
-  IF p_kind NOT IN ('erase', 'request_answered', 'assisted_closed', 'checkpoint') THEN
+  IF p_kind NOT IN ('erase', 'request_answered', 'assisted_closed', 'checkpoint', 'seal') THEN
     RAISE EXCEPTION 'unknown ledger entry kind %', p_kind USING ERRCODE = 'invalid_parameter_value';
   END IF;
   PERFORM pg_advisory_xact_lock(hashtext('stayconnect-erasure-ledger'));
+  PERFORM iam_v2.ledger_mac_key_ensure();
   SELECT * INTO m FROM ledger_meta;
   SELECT l.seq, l.hash INTO v_seq, v_prev FROM erasure_ledger l ORDER BY l.seq DESC LIMIT 1;
   v_seq := COALESCE(v_seq, 0) + 1;
@@ -4791,10 +4873,14 @@ BEGIN
   v_at := (extract(epoch from clock_timestamp()) * 1000000)::bigint;
   v_body := p_body::text;
   v_hash := ledger_hash(m.ledger_id, v_seq, v_prev, p_kind, p_tenant, p_site, v_at, v_body);
-  INSERT INTO erasure_ledger (seq, ledger_id, tenant_id, site_id, kind, at_us, body, prev_hash, hash, confirmed)
-  VALUES (v_seq, m.ledger_id, p_tenant, p_site, p_kind, v_at, v_body, v_prev, v_hash, false);
+  v_mac := ledger_mac_of(v_hash);
+  IF v_mac IS NULL THEN
+    RAISE EXCEPTION 'the erasure ledger has no key, so nothing can be recorded' USING ERRCODE = 'object_not_in_prerequisite_state';
+  END IF;
+  INSERT INTO erasure_ledger (seq, ledger_id, tenant_id, site_id, kind, at_us, body, prev_hash, hash, confirmed, mac)
+  VALUES (v_seq, m.ledger_id, p_tenant, p_site, p_kind, v_at, v_body, v_prev, v_hash, false, v_mac);
   RETURN jsonb_build_object('ledger', m.ledger_id, 'seq', v_seq, 'prev', v_prev, 'kind', p_kind, 'tenant', p_tenant, 'site', p_site,
-                            'at_us', v_at, 'body', v_body, 'hash', v_hash);
+                            'at_us', v_at, 'body', v_body, 'hash', v_hash, 'mac', v_mac);
 END $$;
 
 
@@ -4836,6 +4922,34 @@ END $$;
 
 
 --
+-- Name: ledger_confirm_checked(text[], text[]); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.ledger_confirm_checked(p_hashes text[], p_receipts text[]) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE n integer := 0; k integer; i integer;
+BEGIN
+  IF p_hashes IS NULL OR p_receipts IS NULL OR cardinality(p_hashes) <> cardinality(p_receipts) OR cardinality(p_hashes) = 0 THEN
+    RAISE EXCEPTION 'ledger_receipt_invalid' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  FOR i IN 1 .. cardinality(p_hashes) LOOP
+    IF p_receipts[i] IS DISTINCT FROM ledger_receipt_of(p_hashes[i]) THEN
+      RAISE EXCEPTION 'ledger_receipt_invalid' USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    UPDATE erasure_ledger SET confirmed = true WHERE NOT confirmed AND hash = p_hashes[i];
+    GET DIAGNOSTICS k = ROW_COUNT;
+    n := n + k;
+  END LOOP;
+  IF n <> cardinality(p_hashes) THEN
+    RAISE EXCEPTION 'ledger_receipt_invalid' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  RETURN n;
+END $$;
+
+
+--
 -- Name: ledger_export(bigint); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -4862,11 +4976,10 @@ BEGIN
     END IF;
     RAISE EXCEPTION 'the erasure ledger is append-only: % refused', TG_OP USING ERRCODE = 'restrict_violation';
   END IF;
-  -- NESTED, not AND-ed: OLD and NEW do not exist for a TRUNCATE, and SQL does not promise to stop at the first false operand.
   IF TG_OP = 'UPDATE' THEN
     IF OLD.confirmed = false AND NEW.confirmed = true
-       AND (NEW.seq, NEW.ledger_id, NEW.tenant_id, NEW.site_id, NEW.kind, NEW.at_us, NEW.body, NEW.prev_hash, NEW.hash)
-           IS NOT DISTINCT FROM (OLD.seq, OLD.ledger_id, OLD.tenant_id, OLD.site_id, OLD.kind, OLD.at_us, OLD.body, OLD.prev_hash, OLD.hash) THEN
+       AND (NEW.seq, NEW.ledger_id, NEW.tenant_id, NEW.site_id, NEW.kind, NEW.at_us, NEW.body, NEW.prev_hash, NEW.hash, NEW.mac)
+           IS NOT DISTINCT FROM (OLD.seq, OLD.ledger_id, OLD.tenant_id, OLD.site_id, OLD.kind, OLD.at_us, OLD.body, OLD.prev_hash, OLD.hash, OLD.mac) THEN
       RETURN NEW;
     END IF;
   ELSIF TG_OP = 'DELETE' THEN
@@ -4900,9 +5013,99 @@ CREATE FUNCTION iam_v2.ledger_head() RETURNS jsonb
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
   SELECT jsonb_build_object('ledger', m.ledger_id, 'seq', COALESCE(h.seq, 0), 'hash', COALESCE(h.hash, ''), 'at_us', COALESCE(h.at_us, 0),
-                            'unconfirmed', (SELECT count(*) FROM erasure_ledger u WHERE NOT u.confirmed))
+                            'unconfirmed', (SELECT count(*) FROM erasure_ledger u WHERE NOT u.confirmed),
+                            'unsealed', (SELECT count(*) FROM erasure_ledger u
+                                          WHERE u.mac IS NULL
+                                            AND u.seq > COALESCE((SELECT max((s.body::jsonb ->> 'legacy_through')::bigint) FROM erasure_ledger s
+                                                                   WHERE s.kind = 'seal' AND ledger_mac_ok(s.hash, s.mac)), 0)))
     FROM ledger_meta m LEFT JOIN LATERAL (SELECT l.seq, l.hash, l.at_us FROM erasure_ledger l WHERE l.confirmed ORDER BY l.seq DESC LIMIT 1) h ON true
 $$;
+
+
+--
+-- Name: ledger_mac_key_ensure(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.ledger_mac_key_ensure() RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM iam_v2.ledger_mac_key) THEN
+    PERFORM pg_advisory_xact_lock(hashtext('stayconnect-erasure-ledger'));
+    INSERT INTO iam_v2.ledger_mac_key (key) SELECT public.gen_random_bytes(32)
+     WHERE NOT EXISTS (SELECT 1 FROM iam_v2.ledger_mac_key);
+  END IF;
+END $$;
+
+
+--
+-- Name: ledger_mac_key_get(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.ledger_mac_key_get() RETURNS text
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v text;
+BEGIN
+  PERFORM iam_v2.ledger_mac_key_ensure();
+  SELECT encode(k.key, 'hex') INTO v FROM iam_v2.ledger_mac_key k;
+  RETURN v;
+END $$;
+
+
+--
+-- Name: ledger_mac_key_install(text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.ledger_mac_key_install(p_hex text) RETURNS boolean
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $_$
+DECLARE v_cur bytea; v_new bytea;
+BEGIN
+  IF p_hex IS NULL OR p_hex !~ '^[0-9a-f]{64}$' THEN
+    RAISE EXCEPTION 'a ledger key is 32 bytes in hex' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtext('stayconnect-erasure-ledger'));
+  v_new := decode(p_hex, 'hex');
+  SELECT key INTO v_cur FROM iam_v2.ledger_mac_key;
+  IF v_cur IS NOT DISTINCT FROM v_new THEN
+    RETURN true;
+  END IF;
+  IF EXISTS (SELECT 1 FROM iam_v2.erasure_ledger WHERE mac IS NOT NULL) THEN
+    RETURN false;
+  END IF;
+  DELETE FROM iam_v2.ledger_mac_key;
+  INSERT INTO iam_v2.ledger_mac_key (key) VALUES (v_new);
+  RETURN true;
+END $_$;
+
+
+--
+-- Name: ledger_mac_of(text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.ledger_mac_of(p_hash text) RETURNS text
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT encode(public.hmac(convert_to('stayconnect-ledger-mac-v1' || E'\x1f' || p_hash, 'UTF8'), k.key, 'sha256'), 'hex')
+    FROM iam_v2.ledger_mac_key k
+$$;
+
+
+--
+-- Name: ledger_mac_ok(text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.ledger_mac_ok(p_hash text, p_mac text) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $_$
+  SELECT p_mac IS NOT NULL AND p_hash IS NOT NULL AND p_mac ~ '^[0-9a-f]{64}$' AND COALESCE(iam_v2.ledger_mac_of(p_hash) = p_mac, false)
+$_$;
 
 
 --
@@ -4914,6 +5117,19 @@ CREATE FUNCTION iam_v2.ledger_pending() RETURNS jsonb
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
   SELECT COALESCE(jsonb_agg(ledger_row_json(l) ORDER BY l.seq), '[]'::jsonb) FROM erasure_ledger l WHERE NOT l.confirmed
+$$;
+
+
+--
+-- Name: ledger_receipt_of(text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.ledger_receipt_of(p_hash text) RETURNS text
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT encode(public.hmac(convert_to('stayconnect-ledger-durable-v1' || E'\x1f' || p_hash, 'UTF8'), k.key, 'sha256'), 'hex')
+    FROM iam_v2.ledger_mac_key k
 $$;
 
 
@@ -4936,8 +5152,10 @@ CREATE TABLE iam_v2.erasure_ledger (
     prev_hash text NOT NULL,
     hash text NOT NULL,
     confirmed boolean DEFAULT false NOT NULL,
+    mac text,
     CONSTRAINT ledger_hash_shape CHECK ((hash ~ '^[0-9a-f]{64}$'::text)),
-    CONSTRAINT ledger_kind CHECK ((kind = ANY (ARRAY['genesis'::text, 'erase'::text, 'request_answered'::text, 'assisted_closed'::text, 'checkpoint'::text]))),
+    CONSTRAINT ledger_kind CHECK ((kind = ANY (ARRAY['genesis'::text, 'erase'::text, 'request_answered'::text, 'assisted_closed'::text, 'checkpoint'::text, 'seal'::text]))),
+    CONSTRAINT ledger_mac_shape CHECK (((mac IS NULL) OR (mac ~ '^[0-9a-f]{64}$'::text))),
     CONSTRAINT ledger_prev CHECK ((prev_hash ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ledger_seq CHECK ((seq >= 1))
 );
@@ -4958,9 +5176,36 @@ CREATE FUNCTION iam_v2.ledger_row_json(l iam_v2.erasure_ledger) RETURNS jsonb
     LANGUAGE sql IMMUTABLE
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
-  SELECT jsonb_build_object('ledger', l.ledger_id, 'seq', l.seq, 'prev', l.prev_hash, 'kind', l.kind, 'tenant', l.tenant_id,
-                            'site', l.site_id, 'at_us', l.at_us, 'body', l.body, 'hash', l.hash)
+  SELECT jsonb_strip_nulls(jsonb_build_object('ledger', l.ledger_id, 'seq', l.seq, 'prev', l.prev_hash, 'kind', l.kind, 'tenant', l.tenant_id,
+                            'site', l.site_id, 'at_us', l.at_us, 'body', l.body, 'hash', l.hash, 'mac', l.mac))
 $$;
+
+
+--
+-- Name: ledger_seal_legacy(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.ledger_seal_legacy(p_tenant uuid, p_site uuid) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_through bigint; v_head text;
+BEGIN
+  PERFORM pg_advisory_xact_lock(hashtext('stayconnect-erasure-ledger'));
+  IF EXISTS (SELECT 1 FROM erasure_ledger WHERE NOT confirmed) THEN
+    RAISE EXCEPTION 'an entry is still waiting to be made durable, so the ledger is not sealed now' USING ERRCODE = 'object_in_use';
+  END IF;
+  SELECT max(l.seq) INTO v_through FROM erasure_ledger l WHERE l.mac IS NULL;
+  IF v_through IS NULL THEN
+    RETURN NULL;
+  END IF;
+  IF EXISTS (SELECT 1 FROM erasure_ledger l WHERE l.kind = 'seal' AND ledger_mac_ok(l.hash, l.mac)
+                AND (l.body::jsonb ->> 'legacy_through')::bigint >= v_through) THEN
+    RETURN NULL;
+  END IF;
+  SELECT l.hash INTO v_head FROM erasure_ledger l WHERE l.seq = v_through;
+  RETURN ledger_append(p_tenant, p_site, 'seal', jsonb_build_object('legacy_through', v_through, 'legacy_head', v_head));
+END $$;
 
 
 --
@@ -5107,7 +5352,7 @@ CREATE FUNCTION iam_v2.norm_identity_text(s text) RETURNS text
     LANGUAGE sql IMMUTABLE PARALLEL SAFE
     AS $_$
   SELECT CASE WHEN s IS NULL THEN NULL
-              ELSE upper(regexp_replace(regexp_replace(s, '^\s+', ''), '\s+$', ''))
+              ELSE normalize(upper(regexp_replace(regexp_replace(normalize(s, NFC), '^\s+', ''), '\s+$', '')), NFC)
          END
 $_$;
 
@@ -5116,7 +5361,33 @@ $_$;
 -- Name: FUNCTION norm_identity_text(s text); Type: COMMENT; Schema: iam_v2; Owner: -
 --
 
-COMMENT ON FUNCTION iam_v2.norm_identity_text(s text) IS 'Canonical form for the *_norm identity columns: Unicode-aware trim then upper-case. Must stay identical to data-plane/internal/namenorm. Introduced by migration 0066.';
+COMMENT ON FUNCTION iam_v2.norm_identity_text(s text) IS 'Canonical form for the *_norm identity columns: NFC, Unicode-aware trim, upper-case, NFC. Must stay identical to data-plane/internal/namenorm. Introduced by migration 0066; NFC added by 0164 (AD-33).';
+
+
+--
+-- Name: notify_session_active(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.notify_session_active() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  PERFORM pg_notify('onegate_session_active', NEW.id::text);
+  RETURN NULL;
+END $$;
+
+
+--
+-- Name: notify_settings_changed(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.notify_settings_changed() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  PERFORM pg_notify('onegate_settings', TG_TABLE_NAME);
+  RETURN NULL;
+END $$;
 
 
 --
@@ -7518,6 +7789,28 @@ END $$;
 
 
 --
+-- Name: p4_late_capture_candidates(uuid, uuid, integer, integer); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p4_late_capture_candidates(p_tenant uuid, p_site uuid, p_days integer, p_limit integer) RETURNS TABLE(transaction_id uuid)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+    SELECT pt.id
+      FROM iam_v2.payment_transactions pt
+      JOIN iam_v2.payment_checkouts pc ON pc.transaction_id = pt.id
+     WHERE pt.tenant_id = p_tenant AND pt.site_id = p_site AND pt.transaction_type = 'CHARGE'
+       AND pt.status IN ('FAILED', 'UNKNOWN')
+       AND pc.created_at > now() - make_interval(days => LEAST(GREATEST(COALESCE(p_days, 7), 1), 30))
+       AND (pc.late_checked_at IS NULL OR pc.late_checked_at < now() - interval '6 hours')
+       AND NOT EXISTS (SELECT 1 FROM iam_v2.card_reversal_reviews r
+                        WHERE r.charge_transaction_id = pt.id AND r.kind = 'LATE_CAPTURE')
+     ORDER BY pc.late_checked_at NULLS FIRST, pc.created_at
+     LIMIT LEAST(GREATEST(COALESCE(p_limit, 25), 1), 200);
+$$;
+
+
+--
 -- Name: p4_lock_posting_stay(uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -7528,6 +7821,19 @@ CREATE FUNCTION iam_v2.p4_lock_posting_stay(p_posting uuid) RETURNS void
 BEGIN
   PERFORM 1 FROM iam_v2.stays s JOIN iam_v2.pms_postings p ON p.stay_id = s.id WHERE p.id = p_posting FOR SHARE OF s;
 END $$;
+
+
+--
+-- Name: p4_mark_late_checked(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p4_mark_late_checked(p_tenant uuid, p_site uuid, p_charge uuid) RETURNS void
+    LANGUAGE sql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+    UPDATE iam_v2.payment_checkouts SET late_checked_at = now()
+     WHERE transaction_id = p_charge AND tenant_id = p_tenant AND site_id = p_site;
+$$;
 
 
 --
@@ -7575,6 +7881,36 @@ BEGIN
   ON CONFLICT (charge_transaction_id, kind, provider_ref) DO NOTHING;
   GET DIAGNOSTICS n = ROW_COUNT;
   RETURN CASE WHEN n = 1 THEN 'OPENED' ELSE 'ALREADY_OPEN' END;
+END $$;
+
+
+--
+-- Name: p4_open_late_capture_review(uuid, uuid, uuid, text, bigint, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p4_open_late_capture_review(p_tenant uuid, p_site uuid, p_charge uuid, p_provider_ref text, p_amount_minor bigint, p_currency text) RETURNS text
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE ch record; n integer;
+BEGIN
+    IF p_provider_ref IS NULL OR length(p_provider_ref) NOT BETWEEN 1 AND 200 THEN
+        RAISE EXCEPTION 'a late capture needs the provider reference' USING ERRCODE = 'check_violation';
+    END IF;
+    SELECT * INTO ch FROM iam_v2.payment_transactions
+     WHERE id = p_charge AND tenant_id = p_tenant AND site_id = p_site AND transaction_type = 'CHARGE'
+       AND status IN ('FAILED', 'UNKNOWN');
+    IF NOT FOUND THEN
+        RETURN 'NOT_A_FAILED_CHARGE';
+    END IF;
+    INSERT INTO iam_v2.card_reversal_reviews
+           (tenant_id, site_id, settlement_id, charge_transaction_id, kind, provider_ref, detail)
+    VALUES (p_tenant, p_site, ch.settlement_id, p_charge, 'LATE_CAPTURE', left(p_provider_ref, 200),
+            left(format('The provider reports a capture of %s %s for a card checkout OneGate recorded as %s. Nothing was granted and nothing was changed. Refund it at the provider, or grant access by hand, then resolve this case.',
+                        COALESCE(p_amount_minor::text, '?'), COALESCE(left(p_currency, 3), '?'), lower(ch.status)), 500))
+    ON CONFLICT (charge_transaction_id, kind, provider_ref) DO NOTHING;
+    GET DIAGNOSTICS n = ROW_COUNT;
+    RETURN CASE WHEN n = 1 THEN 'OPENED' ELSE 'ALREADY_OPEN' END;
 END $$;
 
 
@@ -8373,6 +8709,68 @@ BEGIN
            jsonb_build_object('provider_status','CAPTURED','provider_message','provider-reported ' || lower(p_kind)))
     INTO v_result;
   RETURN v_result;
+END $$;
+
+
+--
+-- Name: p4_record_provider_reversal_v2(uuid, uuid, uuid, text, bigint, boolean, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p4_record_provider_reversal_v2(p_tenant uuid, p_site uuid, p_parent uuid, p_kind text, p_amount_minor bigint, p_cumulative boolean, p_provider_event_id text, p_provider_txn_ref text) RETURNS text
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE par record; v_recorded bigint; v_amount bigint; v_returned bigint; v_res text; v_n int;
+BEGIN
+  IF p_kind NOT IN ('REFUND','CHARGEBACK') THEN
+    RAISE EXCEPTION 'REVERSAL_KIND: %', p_kind USING ERRCODE = 'check_violation';
+  END IF;
+  IF p_amount_minor IS NULL OR p_amount_minor <= 0 THEN
+    RAISE EXCEPTION 'REVERSAL_AMOUNT: must be positive' USING ERRCODE = 'check_violation';
+  END IF;
+  IF p_provider_event_id IS NULL OR btrim(p_provider_event_id) = '' THEN
+    RAISE EXCEPTION 'REVERSAL_EVENT_ID: the provider event id is the deduplication key' USING ERRCODE = 'check_violation';
+  END IF;
+  -- The parent lock first: the recorded total is read under it, so two passes cannot subtract from one stale total.
+  SELECT * INTO par FROM iam_v2.payment_transactions
+   WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_parent AND transaction_type = 'CHARGE' FOR UPDATE;
+  IF par.id IS NULL OR par.status <> 'CAPTURED' THEN
+    RAISE EXCEPTION 'REVERSAL_PARENT: a reversal belongs to a captured charge' USING ERRCODE = 'check_violation';
+  END IF;
+
+  v_amount := p_amount_minor;
+  IF p_cumulative THEN
+    SELECT COALESCE(sum(amount_minor), 0) INTO v_recorded FROM iam_v2.payment_transactions
+     WHERE parent_transaction_id = p_parent AND transaction_type = p_kind AND status = 'CAPTURED';
+    v_amount := p_amount_minor - v_recorded;
+    IF v_amount <= 0 THEN
+      RETURN 'NOTHING_NEW';
+    END IF;
+  END IF;
+
+  BEGIN
+    SELECT iam_v2.p4_record_provider_reversal(p_tenant, p_site, p_parent, p_kind, v_amount, p_provider_event_id, p_provider_txn_ref)
+      INTO v_res;
+    RETURN v_res;
+  EXCEPTION WHEN check_violation THEN
+    IF SQLERRM NOT LIKE 'PAYMENT_REFUND_EXCEEDS_CHARGE%' THEN
+      RAISE;
+    END IF;
+    -- The sub-transaction above is rolled back: nothing was recorded. Finance must see it.
+    SELECT COALESCE(sum(amount_minor), 0) INTO v_returned FROM iam_v2.payment_transactions
+     WHERE parent_transaction_id = p_parent AND transaction_type IN ('REFUND','CHARGEBACK')
+       AND status IN ('CREATED','PENDING','CAPTURED','UNKNOWN');
+    INSERT INTO iam_v2.card_reversal_reviews
+           (tenant_id, site_id, settlement_id, charge_transaction_id, kind, provider_ref,
+            reversal_kind, reversal_amount_minor, detail)
+    VALUES (p_tenant, p_site, par.settlement_id, p_parent, 'REVERSAL_REFUSED', left(p_provider_event_id, 200),
+            p_kind, v_amount,
+            left(format('The provider reported a %s of %s %s minor units; the ledger refused it because %s are already returned against a charge of %s.',
+                        lower(p_kind), v_amount, par.currency, v_returned, par.amount_minor), 500))
+    ON CONFLICT (charge_transaction_id, kind, provider_ref) DO NOTHING;
+    GET DIAGNOSTICS v_n = ROW_COUNT;
+    RETURN CASE WHEN v_n = 1 THEN 'REVIEW_OPENED' ELSE 'REVIEW_ALREADY_OPEN' END;
+  END;
 END $$;
 
 
@@ -9354,7 +9752,12 @@ BEGIN
     -- The minting call returned the plaintext, so the reveal happened. A profile inserted WITHOUT one would
     -- be a credential nobody has ever seen and nobody can ever be given: unusable, and indistinguishable
     -- afterwards from one whose reveal was lost.
-    IF NEW.pin_revealed_at IS NULL THEN
+    IF NEW.pin_hash IS NULL THEN
+      -- 0165: the room + reservation route. There is no PIN, so there is nothing to reveal.
+      IF NEW.pin_revealed_at IS NOT NULL THEN
+        RAISE EXCEPTION 'a post-stay profile without a PIN has nothing to reveal';
+      END IF;
+    ELSIF NEW.pin_revealed_at IS NULL THEN
       RAISE EXCEPTION 'a post-stay profile records its one-time reveal at mint; the plaintext exists only in that response';
     END IF;
     RETURN NEW;
@@ -9374,6 +9777,11 @@ BEGIN
     RAISE EXCEPTION 'a revoked post-stay profile is never reactivated (issue a new one)';
   END IF;
 
+  IF NEW.pin_hash IS DISTINCT FROM OLD.pin_hash OR NEW.pin_generation IS DISTINCT FROM OLD.pin_generation THEN
+    -- 0165: post-stay sign-in is room + reservation. A PIN is not issued or reset any more, and an existing one is
+    -- historical evidence that nothing may rewrite.
+    RAISE EXCEPTION 'post-stay PINs are no longer issued or reset; the PIN columns are historical';
+  END IF;
   IF NEW.pin_hash IS DISTINCT FROM OLD.pin_hash THEN
     -- A NEW GENERATION. It is a different secret, minted and returned by this same statement, so it carries
     -- its OWN reveal. Inheriting the previous generation's timestamp would silently consume the new secret's
@@ -11481,6 +11889,63 @@ $$;
 
 
 --
+-- Name: pms_resync_supersede_payloads(uuid, uuid, integer); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.pms_resync_supersede_payloads(p_tenant uuid, p_site uuid, p_limit integer DEFAULT 2000) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE r record; v_n integer; v_total integer := 0; v_limit integer;
+BEGIN
+    v_limit := LEAST(GREATEST(COALESCE(p_limit, 2000), 1), 20000);
+    PERFORM set_config('iam_v2.anonymise', 'retention', true);
+    PERFORM iam_v2.begin_controlled_operation('stay');
+    FOR r IN SELECT i.pms_interface_id, i.published_resync_generation AS g
+               FROM iam_v2.pms_interface_runtime i
+              WHERE i.tenant_id = p_tenant AND i.site_id = p_site AND i.published_resync_generation > 1 LOOP
+        -- The newest published generation must be completely applied before an older copy is given up.
+        IF EXISTS (SELECT 1 FROM iam_v2.stay_events w
+                    WHERE w.tenant_id = p_tenant AND w.site_id = p_site AND w.pms_interface_id = r.pms_interface_id
+                      AND w.admission_kind = 'RESYNC' AND w.processing_status = 'PENDING' AND w.resync_generation <= r.g) THEN
+            CONTINUE;
+        END IF;
+        WITH cand AS (
+            SELECT e.id,
+                   (SELECT a.id FROM iam_v2.stay_events a
+                     WHERE a.tenant_id = e.tenant_id AND a.site_id = e.site_id AND a.pms_interface_id = e.pms_interface_id
+                       AND a.admission_kind = 'RESYNC' AND md5(a.payload::text) = md5(e.payload::text) AND a.payload = e.payload
+                       AND a.resync_generation < e.resync_generation
+                     ORDER BY a.resync_generation, a.id LIMIT 1) AS first_id
+              FROM iam_v2.stay_events e
+             WHERE e.tenant_id = p_tenant AND e.site_id = p_site AND e.pms_interface_id = r.pms_interface_id
+               AND e.admission_kind = 'RESYNC' AND e.resync_generation < r.g
+               AND e.processing_status IN ('APPLIED', 'SKIPPED_DUPLICATE')
+               AND e.payload <> '{}'::jsonb AND e.payload <> '{"anonymised": true}'::jsonb
+               AND EXISTS (SELECT 1 FROM iam_v2.stay_events b
+                            WHERE b.tenant_id = e.tenant_id AND b.site_id = e.site_id AND b.pms_interface_id = e.pms_interface_id
+                              AND b.admission_kind = 'RESYNC' AND md5(b.payload::text) = md5(e.payload::text) AND b.payload = e.payload
+                              AND b.resync_generation > e.resync_generation)
+             ORDER BY e.resync_generation, e.id
+             LIMIT v_limit),
+        marked AS (
+            INSERT INTO iam_v2.stay_event_payload_reductions (event_id, equals_event_id)
+            SELECT id, first_id FROM cand WHERE first_id IS NOT NULL
+            ON CONFLICT (event_id) DO NOTHING
+            RETURNING event_id),
+        upd AS (
+            UPDATE iam_v2.stay_events s SET payload = '{}'::jsonb
+              FROM marked m WHERE s.id = m.event_id
+            RETURNING 1)
+        SELECT count(*) INTO v_n FROM upd;
+        v_total := v_total + v_n;
+    END LOOP;
+    PERFORM set_config('iam_v2.anonymise', '', true);
+    RETURN v_total;
+END $$;
+
+
+--
 -- Name: pms_review_decide(uuid, uuid, uuid, text, uuid, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -11717,6 +12182,7 @@ CREATE FUNCTION iam_v2.pms_roster_of_generation(p_tenant uuid, p_site uuid, p_if
     SELECT DISTINCT btrim(e.payload->>'reservation')
       FROM iam_v2.stay_events e
      WHERE e.tenant_id = p_tenant AND e.site_id = p_site AND e.pms_interface_id = p_iface
+       AND e.admission_kind = 'RESYNC'
        AND e.resync_generation = p_generation
        AND e.event_type IN ('GI','GC')
        AND btrim(COALESCE(e.payload->>'reservation','')) <> '';
@@ -11765,6 +12231,7 @@ BEGIN
     SELECT max(e.received_at) INTO v_boundary
       FROM iam_v2.stay_events e
      WHERE e.tenant_id = p_tenant AND e.site_id = p_site AND e.pms_interface_id = p_iface
+       AND e.admission_kind = 'RESYNC'
        AND e.resync_generation = p_generation
        AND e.external_event_identity NOT LIKE 'ROSTER_RECONCILIATION:%';
 
@@ -11954,6 +12421,171 @@ $$;
 
 
 --
+-- Name: posting_lane_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.posting_lane_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    RAISE EXCEPTION '% is append-only: % refused', TG_TABLE_NAME, TG_OP USING ERRCODE = 'restrict_violation';
+END;
+$$;
+
+
+--
+-- Name: posting_lane_settings_get(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.posting_lane_settings_get(p_tenant uuid, p_site uuid) RETURNS TABLE(park_after_declines integer, config_version bigint, is_default boolean)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+    SELECT COALESCE(s.park_after_declines, 10), COALESCE(s.config_version, 0), (s.tenant_id IS NULL)
+      FROM (SELECT p_tenant AS t, p_site AS si) k
+      LEFT JOIN iam_v2.posting_lane_settings s ON s.tenant_id = k.t AND s.site_id = k.si;
+$$;
+
+
+--
+-- Name: posting_lane_settings_set(uuid, uuid, bigint, integer, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.posting_lane_settings_set(p_tenant uuid, p_site uuid, p_expected_version bigint, p_park_after integer, p_operator text, p_reason text) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_old jsonb; v_cur bigint; v_ver bigint;
+BEGIN
+    IF p_operator IS NULL OR length(btrim(p_operator)) = 0 THEN
+        RAISE EXCEPTION 'LANE_SETTING_ACTOR: an operator identity is required' USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    IF p_reason IS NULL OR length(btrim(p_reason)) < 3 OR length(p_reason) > 500 THEN
+        RAISE EXCEPTION 'LANE_SETTING_REASON: a reason of 3 to 500 characters is required' USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    IF p_park_after IS NULL OR p_park_after < 1 OR p_park_after > 1000 THEN
+        RAISE EXCEPTION 'LANE_SETTING_BOUNDS: the number of refusals must be between 1 and 1000' USING ERRCODE = 'check_violation';
+    END IF;
+    PERFORM pg_advisory_xact_lock(hashtext('posting_lane_settings'), hashtext(p_site::text));
+    SELECT to_jsonb(s), s.config_version INTO v_old, v_cur
+      FROM iam_v2.posting_lane_settings s WHERE s.tenant_id = p_tenant AND s.site_id = p_site FOR UPDATE;
+    IF p_expected_version IS NULL OR COALESCE(v_cur, 0) <> p_expected_version THEN
+        RAISE EXCEPTION 'LANE_SETTING_VERSION_CONFLICT: the setting changed (now version %); reload and try again', COALESCE(v_cur,0)
+            USING ERRCODE = 'serialization_failure';
+    END IF;
+    INSERT INTO iam_v2.posting_lane_settings AS s (tenant_id, site_id, park_after_declines, config_version, updated_at)
+    VALUES (p_tenant, p_site, p_park_after, 1, now())
+    ON CONFLICT (tenant_id, site_id) DO UPDATE
+       SET park_after_declines = EXCLUDED.park_after_declines, config_version = s.config_version + 1, updated_at = now()
+    RETURNING s.config_version INTO v_ver;
+    INSERT INTO iam_v2.posting_lane_settings_changes
+           (tenant_id, site_id, changed_by, reason, old_values, new_values, new_config_version)
+    VALUES (p_tenant, p_site, btrim(p_operator), btrim(p_reason), v_old,
+            jsonb_build_object('park_after_declines', p_park_after), v_ver);
+    RETURN v_ver;
+END;
+$$;
+
+
+--
+-- Name: posting_outbox_defer(uuid, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.posting_outbox_defer(p_outbox uuid, p_kind text, p_reason text) RETURNS text
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE o record; v_n integer; v_delay integer; v_park integer;
+BEGIN
+    IF p_kind NOT IN ('NOT_SENT','DECLINED') THEN
+        RAISE EXCEPTION 'LANE_DEFER_KIND: unknown kind %', p_kind USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    SELECT * INTO o FROM iam_v2.posting_outbox WHERE id = p_outbox FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'LANE_DEFER_UNKNOWN: no such outbox row' USING ERRCODE = 'no_data_found';
+    END IF;
+    IF o.state NOT IN ('IN_FLIGHT','QUEUED') THEN
+        RETURN o.state;
+    END IF;
+    IF p_kind = 'NOT_SENT' THEN
+        v_n := o.not_sent_count + 1;
+    ELSE
+        v_n := o.decline_count + 1;
+    END IF;
+    v_delay := LEAST(300, 2 * (2 ^ LEAST(v_n - 1, 10))::integer);
+
+    IF p_kind = 'DECLINED' THEN
+        SELECT COALESCE(s.park_after_declines, 10) INTO v_park
+          FROM (SELECT 1) one LEFT JOIN iam_v2.posting_lane_settings s
+            ON s.tenant_id = o.tenant_id AND s.site_id = o.site_id;
+        IF v_n >= v_park THEN
+            UPDATE iam_v2.posting_outbox
+               SET state = 'HELD_RECOVERY', decline_count = v_n,
+                   parked_reason = left(COALESCE(p_reason, 'declined'), 200)
+             WHERE id = o.id;
+            INSERT INTO iam_v2.posting_outbox_park_events
+                   (tenant_id, site_id, outbox_id, posting_id, event, decline_count, reason, actor)
+            VALUES (o.tenant_id, o.site_id, o.id, o.posting_id, 'PARKED', v_n, left(COALESCE(p_reason,'declined'), 200), 'posting worker');
+            RETURN 'PARKED';
+        END IF;
+        UPDATE iam_v2.posting_outbox
+           SET state = 'QUEUED', decline_count = v_n, not_before = now() + make_interval(secs => v_delay)
+         WHERE id = o.id;
+    ELSE
+        UPDATE iam_v2.posting_outbox
+           SET state = 'QUEUED', not_sent_count = v_n, not_before = now() + make_interval(secs => v_delay)
+         WHERE id = o.id;
+    END IF;
+    RETURN 'QUEUED';
+END;
+$$;
+
+
+--
+-- Name: posting_outbox_requeue_parked(uuid, uuid, uuid, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.posting_outbox_requeue_parked(p_tenant uuid, p_site uuid, p_outbox uuid, p_operator text, p_reason text) RETURNS text
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE o record; v_sent integer;
+BEGIN
+    IF p_operator IS NULL OR length(btrim(p_operator)) = 0 THEN
+        RAISE EXCEPTION 'LANE_REQUEUE_ACTOR: an operator identity is required' USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    IF p_reason IS NULL OR length(btrim(p_reason)) < 3 OR length(p_reason) > 500 THEN
+        RAISE EXCEPTION 'LANE_REQUEUE_REASON: a reason of 3 to 500 characters is required' USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    SELECT * INTO o FROM iam_v2.posting_outbox
+     WHERE id = p_outbox AND tenant_id = p_tenant AND site_id = p_site FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'LANE_REQUEUE_UNKNOWN: no such outbox row in this site' USING ERRCODE = 'no_data_found';
+    END IF;
+    IF o.state <> 'HELD_RECOVERY' OR o.parked_reason IS NULL THEN
+        RAISE EXCEPTION 'LANE_REQUEUE_NOT_PARKED: this row was not parked by repeated refusals' USING ERRCODE = 'check_violation';
+    END IF;
+    SELECT count(*) INTO v_sent FROM iam_v2.posting_attempts
+     WHERE internal_posting_id = o.posting_id AND outcome <> 'NOT_SENT';
+    IF v_sent > 0 THEN
+        RAISE EXCEPTION 'LANE_REQUEUE_MAY_HAVE_SENT: an attempt on this posting may have reached the PMS; it needs the audited review decision'
+            USING ERRCODE = 'check_violation';
+    END IF;
+    -- The recovery gate allows leaving HELD_RECOVERY under this transaction-local flag, which only the definer sets.
+    PERFORM set_config('iam_v2.p4_recovery_reconciling', 'on', true);
+    UPDATE iam_v2.posting_outbox
+       SET state = 'QUEUED', decline_count = 0, parked_reason = NULL, not_before = now()
+     WHERE id = o.id;
+    PERFORM set_config('iam_v2.p4_recovery_reconciling', 'off', true);
+    INSERT INTO iam_v2.posting_outbox_park_events
+           (tenant_id, site_id, outbox_id, posting_id, event, decline_count, reason, actor)
+    VALUES (o.tenant_id, o.site_id, o.id, o.posting_id, 'REQUEUED', o.decline_count, btrim(p_reason), btrim(p_operator));
+    RETURN 'QUEUED';
+END;
+$$;
+
+
+--
 -- Name: profile_privacy_notice_stamp(); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -11997,6 +12629,56 @@ EXCEPTION WHEN OTHERS THEN
   RAISE WARNING 'profile privacy notice not recorded for auth context %: % (%)', NEW.id, SQLERRM, SQLSTATE;
   RETURN NEW;
 END $$;
+
+
+--
+-- Name: prune_idle_devices(uuid, uuid, integer); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.prune_idle_devices(p_tenant uuid, p_site uuid, p_batch integer) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $_$
+DECLARE v_days integer; v_sql text; v_not text := ''; r record; v_n integer;
+BEGIN
+  IF p_batch IS NULL OR p_batch < 1 OR p_batch > 5000 THEN
+    RAISE EXCEPTION 'batch must be 1-5000' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  SELECT g.device_retention_days INTO v_days FROM iam_v2.signin_capacity_settings_get(p_tenant, p_site) g;
+  -- Every foreign key to devices, single-column or composite ((tenant_id, site_id, device_id) is the usual shape): the
+  -- referencing row matches the device on ALL the key's columns, each paired with the column it references.
+  FOR r IN
+    SELECT c.conrelid::regclass::text AS tbl,
+           string_agg(format('x.%I = d.%I', ra.attname, pa.attname), ' AND ' ORDER BY k.ord) AS cond
+      FROM pg_constraint c
+      CROSS JOIN LATERAL unnest(c.conkey, c.confkey) WITH ORDINALITY AS k(refing, refed, ord)
+      JOIN pg_attribute ra ON ra.attrelid = c.conrelid AND ra.attnum = k.refing
+      JOIN pg_attribute pa ON pa.attrelid = c.confrelid AND pa.attnum = k.refed
+     WHERE c.contype = 'f' AND c.confrelid = 'iam_v2.devices'::regclass
+     GROUP BY c.oid, c.conrelid
+  LOOP
+    v_not := v_not || format(' AND NOT EXISTS (SELECT 1 FROM %s x WHERE %s)', r.tbl, r.cond);
+  END LOOP;
+  v_sql := format($q$
+    WITH doomed AS (
+      SELECT d.id FROM iam_v2.devices d
+       WHERE d.tenant_id = %L AND d.site_id = %L
+         AND COALESCE(d.last_seen, d.first_seen) < now() - make_interval(days => %s)
+         %s
+       ORDER BY COALESCE(d.last_seen, d.first_seen) LIMIT %s)
+    DELETE FROM iam_v2.devices d USING doomed WHERE d.id = doomed.id$q$,
+    p_tenant, p_site, v_days, v_not, p_batch);
+  EXECUTE v_sql;
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  RETURN v_n;
+END $_$;
+
+
+--
+-- Name: FUNCTION prune_idle_devices(p_tenant uuid, p_site uuid, p_batch integer); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.prune_idle_devices(p_tenant uuid, p_site uuid, p_batch integer) IS 'AD-34: removes devices unseen for device_retention_days that nothing references (every foreign key to iam_v2.devices is consulted from the catalogue). Never removes a device with a session, a slot, a credential or any other dependent row.';
 
 
 --
@@ -12127,39 +12809,93 @@ CREATE FUNCTION iam_v2.purge_accounting_detail(p_tenant uuid, p_site uuid, p_bat
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
-DECLARE v_days integer; v_cutoff timestamptz; v_n integer;
+DECLARE
+  v_set record; v_wm timestamptz; v_days integer; v_cut timestamptz;
+  v_t0 timestamptz := clock_timestamp(); v_budget interval;
+  v_n integer; v_tier integer; v_total integer := 0;
 BEGIN
   IF p_batch IS NULL OR p_batch NOT BETWEEN 1 AND 100000 THEN
     RAISE EXCEPTION 'a batch of 1-100000 records is required' USING ERRCODE = 'invalid_parameter_value';
   END IF;
-  SELECT g.detail_retention_days INTO v_days FROM iam_v2.accounting_retention_get(p_tenant, p_site) g;
-  IF v_days IS NULL THEN
-    RETURN 0;   -- UNLIMITED (the administrator's choice): nothing is read, nothing is deleted, nothing is recorded
-  END IF;
-  v_cutoff := now() - make_interval(days => v_days);
+  SELECT * INTO v_set FROM iam_v2.usage_rollup_settings_get(p_tenant, p_site);
+  v_budget := make_interval(secs => v_set.purge_budget_seconds);
+  SELECT watermark INTO v_wm FROM iam_v2.site_usage_rollup_state WHERE tenant_id = p_tenant AND site_id = p_site;
   PERFORM set_config('iam_v2.accounting_purge', 'retention', true);
-  WITH doomed AS (
-    SELECT ar.id
-      FROM iam_v2.accounting_records ar
-      JOIN iam_v2.sessions se ON se.id = ar.session_id
-      JOIN iam_v2.entitlements cur ON cur.id = se.entitlement_id
-     WHERE ar.tenant_id = p_tenant AND ar.site_id = p_site
-       AND ar.sampled_at < v_cutoff
-       AND se.ended IS NOT NULL AND se.ended < v_cutoff
-       AND cur.status = 'TERMINATED'
-       -- every entitlement the session was ever attributed to has ended: live usage is never touched
-       AND NOT EXISTS (SELECT 1 FROM iam_v2.session_entitlement_bindings b
-                         JOIN iam_v2.entitlements be ON be.id = b.entitlement_id
-                        WHERE b.session_id = ar.session_id AND be.status <> 'TERMINATED')
-     LIMIT p_batch)
-  DELETE FROM iam_v2.accounting_records ar USING doomed WHERE ar.id = doomed.id;
-  GET DIAGNOSTICS v_n = ROW_COUNT;
-  PERFORM set_config('iam_v2.accounting_purge', '', true);
-  IF v_n > 0 THEN
-    INSERT INTO iam_v2.accounting_purge_runs (tenant_id, site_id, retention_days, cutoff, records_deleted)
-    VALUES (p_tenant, p_site, v_days, v_cutoff, v_n);
+
+  -- Tier 1: raw samples that have been rolled up.
+  IF v_wm IS NOT NULL THEN
+    v_cut := least(now() - make_interval(days => v_set.raw_retention_days), v_wm);
+    v_tier := 0;
+    LOOP
+      WITH doomed AS (
+        SELECT ar.id FROM iam_v2.accounting_records ar
+         WHERE ar.tenant_id = p_tenant AND ar.site_id = p_site AND ar.ingested_at < v_cut
+         LIMIT p_batch)
+      DELETE FROM iam_v2.accounting_records ar USING doomed WHERE ar.id = doomed.id;
+      GET DIAGNOSTICS v_n = ROW_COUNT;
+      v_tier := v_tier + v_n;
+      EXIT WHEN v_n < p_batch OR clock_timestamp() - v_t0 > v_budget;
+    END LOOP;
+    IF v_tier > 0 THEN
+      INSERT INTO iam_v2.accounting_purge_runs (tenant_id, site_id, retention_days, cutoff, records_deleted)
+      VALUES (p_tenant, p_site, v_set.raw_retention_days, v_cut, v_tier);
+      v_total := v_total + v_tier;
+    END IF;
   END IF;
-  RETURN v_n;
+
+  -- Tier 2: per-minute rows.
+  IF clock_timestamp() - v_t0 <= v_budget THEN
+    v_cut := now() - make_interval(days => v_set.minute_retention_days);
+    v_tier := 0;
+    LOOP
+      DELETE FROM iam_v2.accounting_usage_minute m
+       USING (SELECT x.session_id, x.bucket FROM iam_v2.accounting_usage_minute x
+               WHERE x.tenant_id = p_tenant AND x.site_id = p_site AND x.bucket < v_cut LIMIT p_batch) d
+       WHERE m.session_id = d.session_id AND m.bucket = d.bucket;
+      GET DIAGNOSTICS v_n = ROW_COUNT;
+      v_tier := v_tier + v_n;
+      EXIT WHEN v_n < p_batch OR clock_timestamp() - v_t0 > v_budget;
+    END LOOP;
+    IF v_tier > 0 THEN
+      INSERT INTO iam_v2.accounting_purge_runs (tenant_id, site_id, retention_days, cutoff, records_deleted)
+      VALUES (p_tenant, p_site, v_set.minute_retention_days, v_cut, v_tier);
+      v_total := v_total + v_tier;
+    END IF;
+  END IF;
+
+  -- Tier 3: hourly totals, under the site's usage-detail retention.
+  SELECT g.detail_retention_days INTO v_days FROM iam_v2.accounting_retention_get(p_tenant, p_site) g;
+  IF v_days IS NOT NULL AND clock_timestamp() - v_t0 <= v_budget THEN
+    v_cut := now() - make_interval(days => v_days);
+    v_tier := 0;
+    LOOP
+      DELETE FROM iam_v2.accounting_usage_hour h
+       USING (SELECT x.session_id, x.bucket
+                FROM iam_v2.accounting_usage_hour x
+                JOIN iam_v2.sessions se ON se.id = x.session_id
+                JOIN iam_v2.entitlements cur ON cur.id = se.entitlement_id
+               WHERE x.tenant_id = p_tenant AND x.site_id = p_site
+                 AND x.bucket < v_cut
+                 AND se.ended IS NOT NULL AND se.ended < v_cut
+                 AND cur.status = 'TERMINATED'
+                 AND NOT EXISTS (SELECT 1 FROM iam_v2.session_entitlement_bindings b
+                                   JOIN iam_v2.entitlements be ON be.id = b.entitlement_id
+                                  WHERE b.session_id = x.session_id AND be.status <> 'TERMINATED')
+               LIMIT p_batch) d
+       WHERE h.session_id = d.session_id AND h.bucket = d.bucket;
+      GET DIAGNOSTICS v_n = ROW_COUNT;
+      v_tier := v_tier + v_n;
+      EXIT WHEN v_n < p_batch OR clock_timestamp() - v_t0 > v_budget;
+    END LOOP;
+    IF v_tier > 0 THEN
+      INSERT INTO iam_v2.accounting_purge_runs (tenant_id, site_id, retention_days, cutoff, records_deleted)
+      VALUES (p_tenant, p_site, v_days, v_cut, v_tier);
+      v_total := v_total + v_tier;
+    END IF;
+  END IF;
+
+  PERFORM set_config('iam_v2.accounting_purge', '', true);
+  RETURN v_total;
 END $$;
 
 
@@ -12167,7 +12903,7 @@ END $$;
 -- Name: FUNCTION purge_accounting_detail(p_tenant uuid, p_site uuid, p_batch integer); Type: COMMENT; Schema: iam_v2; Owner: -
 --
 
-COMMENT ON FUNCTION iam_v2.purge_accounting_detail(p_tenant uuid, p_site uuid, p_batch integer) IS 'The accounting-detail retention purge (0122; 0131: a site that never chose keeps 365 days). Does nothing while the site''s administrator has chosen unlimited. Otherwise removes at most p_batch accounting records older than the retention, of sessions ended before it whose every entitlement is TERMINATED, and records the run. Totals on entitlements and sessions are not touched.';
+COMMENT ON FUNCTION iam_v2.purge_accounting_detail(p_tenant uuid, p_site uuid, p_batch integer) IS 'The accounting retention purge (0122; 0131; 0175 AD-48): rolled-up raw samples past raw_retention_days, per-minute rows past minute_retention_days, and hourly totals past the usage-detail retention (ended sessions, every entitlement TERMINATED), within purge_budget_seconds. Totals on entitlements and sessions are not touched.';
 
 
 --
@@ -12772,6 +13508,79 @@ BEGIN
     VALUES (t,s,p_ent,p_dev,'AUTHORIZED',now(),now());
   RETURN 'AUTHORIZED';
 END; $$;
+
+
+--
+-- Name: rollup_accounting_usage(uuid, uuid, interval); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.rollup_accounting_usage(p_tenant uuid, p_site uuid, p_max_window interval DEFAULT '1 day'::interval) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_from timestamptz; v_next timestamptz; v_cap timestamptz; v_to timestamptz; v_n bigint;
+BEGIN
+  IF p_max_window IS NULL OR p_max_window < interval '1 minute' OR p_max_window > interval '7 days' THEN
+    RAISE EXCEPTION 'a rollup window of 1 minute to 7 days is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF NOT pg_try_advisory_xact_lock(hashtext('usage_rollup'), hashtext(p_site::text)) THEN
+    RETURN 0;   -- another run is rolling this site up
+  END IF;
+  SELECT watermark INTO v_from FROM iam_v2.site_usage_rollup_state WHERE tenant_id = p_tenant AND site_id = p_site;
+  IF v_from IS NULL THEN
+    SELECT min(ar.ingested_at) INTO v_from FROM iam_v2.accounting_records ar
+     WHERE ar.tenant_id = p_tenant AND ar.site_id = p_site;
+  END IF;
+  IF v_from IS NULL THEN RETURN 0; END IF;
+  v_cap := now() - interval '1 minute';        -- a row still being committed is never skipped
+  IF v_from >= v_cap THEN RETURN 0; END IF;
+  -- Skip an empty stretch: start at the first sample at or after the watermark, so a window is never wasted on
+  -- nothing and a return of 0 means "nothing left below the cap".
+  SELECT min(ar.ingested_at) INTO v_next FROM iam_v2.accounting_records ar
+   WHERE ar.tenant_id = p_tenant AND ar.site_id = p_site AND ar.ingested_at >= v_from AND ar.ingested_at < v_cap;
+  IF v_next IS NULL THEN
+    INSERT INTO iam_v2.site_usage_rollup_state (tenant_id, site_id, watermark)
+    VALUES (p_tenant, p_site, v_cap)
+    ON CONFLICT (tenant_id, site_id) DO UPDATE SET watermark = EXCLUDED.watermark, updated_at = now();
+    RETURN 0;
+  END IF;
+  v_from := v_next;
+  v_to := least(v_cap, v_from + p_max_window);
+  WITH src AS MATERIALIZED (
+         SELECT ar.session_id, date_trunc('minute', ar.sampled_at) AS mb,
+                sum(ar.bytes_up)::bigint AS up, sum(ar.bytes_down)::bigint AS down, count(*)::integer AS n
+           FROM iam_v2.accounting_records ar
+          WHERE ar.tenant_id = p_tenant AND ar.site_id = p_site
+            AND ar.ingested_at >= v_from AND ar.ingested_at < v_to
+          GROUP BY 1, 2),
+       m AS (
+         INSERT INTO iam_v2.accounting_usage_minute AS t (tenant_id, site_id, session_id, bucket, bytes_up, bytes_down, samples)
+         SELECT p_tenant, p_site, session_id, mb, up, down, n FROM src
+         ON CONFLICT (session_id, bucket) DO UPDATE
+            SET bytes_up = t.bytes_up + EXCLUDED.bytes_up, bytes_down = t.bytes_down + EXCLUDED.bytes_down,
+                samples = t.samples + EXCLUDED.samples
+         RETURNING 1),
+       h AS (
+         INSERT INTO iam_v2.accounting_usage_hour AS t (tenant_id, site_id, session_id, bucket, bytes_up, bytes_down, samples)
+         SELECT p_tenant, p_site, session_id, date_trunc('hour', mb), sum(up)::bigint, sum(down)::bigint, sum(n)::integer
+           FROM src GROUP BY session_id, date_trunc('hour', mb)
+         ON CONFLICT (session_id, bucket) DO UPDATE
+            SET bytes_up = t.bytes_up + EXCLUDED.bytes_up, bytes_down = t.bytes_down + EXCLUDED.bytes_down,
+                samples = t.samples + EXCLUDED.samples
+         RETURNING 1)
+  SELECT COALESCE(sum(n), 0) INTO v_n FROM src;
+  INSERT INTO iam_v2.site_usage_rollup_state (tenant_id, site_id, watermark)
+  VALUES (p_tenant, p_site, v_to)
+  ON CONFLICT (tenant_id, site_id) DO UPDATE SET watermark = EXCLUDED.watermark, updated_at = now();
+  RETURN v_n;
+END $$;
+
+
+--
+-- Name: FUNCTION rollup_accounting_usage(p_tenant uuid, p_site uuid, p_max_window interval); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.rollup_accounting_usage(p_tenant uuid, p_site uuid, p_max_window interval) IS 'Adds one window (at most p_max_window) of raw accounting samples, read by ingested_at, to the per-minute and per-hour usage tables and advances the watermark (0175, AD-48). Returns the samples read.';
 
 
 --
@@ -13515,6 +14324,95 @@ BEGIN
     UNION ALL SELECT 'ENTITLEMENTS', (SELECT count(*) FROM iam_v2.entitlements e
       WHERE e.tenant_id = p_tenant AND e.site_id = p_site AND e.service_plan_revision_id = ANY (v_revs))
   ) x WHERE x.n > 0;
+END $$;
+
+
+--
+-- Name: signin_capacity_settings_changes_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.signin_capacity_settings_changes_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'iam_v2.signin_capacity_settings_changes is append-only: % refused', TG_OP
+    USING ERRCODE = 'restrict_violation';
+END $$;
+
+
+--
+-- Name: signin_capacity_settings_get(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.signin_capacity_settings_get(p_tenant uuid, p_site uuid) RETURNS TABLE(otp_code_lifetime_minutes integer, otp_max_attempts integer, otp_device_hourly_cap integer, otp_destination_hourly_cap integer, otp_source_hourly_cap integer, signin_ceiling_per_minute integer, network_pause_exempt_hours integer, device_retention_days integer, portal_image_max_edge_px integer, portal_image_quality integer, config_version bigint, updated_at timestamp with time zone, updated_by text)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT COALESCE(s.otp_code_lifetime_minutes, 10), COALESCE(s.otp_max_attempts, 5),
+         COALESCE(s.otp_device_hourly_cap, 5), COALESCE(s.otp_destination_hourly_cap, 15),
+         COALESCE(s.otp_source_hourly_cap, 20), s.signin_ceiling_per_minute,
+         COALESCE(s.network_pause_exempt_hours, 24), COALESCE(s.device_retention_days, 90),
+         COALESCE(s.portal_image_max_edge_px, 2560), COALESCE(s.portal_image_quality, 82),
+         COALESCE(s.config_version, 0), s.updated_at, s.updated_by
+    FROM (SELECT 1) one
+    LEFT JOIN iam_v2.site_signin_capacity_settings s ON s.tenant_id = p_tenant AND s.site_id = p_site;
+$$;
+
+
+--
+-- Name: signin_capacity_settings_set(uuid, uuid, jsonb, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.signin_capacity_settings_set(p_tenant uuid, p_site uuid, p_values jsonb, p_operator text, p_reason text) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_version bigint; v_old jsonb; v_new jsonb; k text;
+BEGIN
+  IF p_operator IS NULL OR btrim(p_operator) = '' THEN
+    RAISE EXCEPTION 'an operator label is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_reason IS NULL OR length(btrim(p_reason)) < 4 OR length(btrim(p_reason)) > 500 THEN
+    RAISE EXCEPTION 'a reason of 4-500 characters is required to change the sign-in limits'
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_values IS NULL OR jsonb_typeof(p_values) <> 'object' OR p_values = '{}'::jsonb THEN
+    RAISE EXCEPTION 'no setting named' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  FOR k IN SELECT jsonb_object_keys(p_values) LOOP
+    IF k NOT IN ('otp_code_lifetime_minutes','otp_max_attempts','otp_device_hourly_cap','otp_destination_hourly_cap',
+                 'otp_source_hourly_cap','signin_ceiling_per_minute','network_pause_exempt_hours',
+                 'device_retention_days','portal_image_max_edge_px','portal_image_quality') THEN
+      RAISE EXCEPTION 'unknown setting %', k USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+  END LOOP;
+  PERFORM pg_advisory_xact_lock(hashtext('signin_capacity_settings'), hashtext(p_site::text));
+  INSERT INTO iam_v2.site_signin_capacity_settings (tenant_id, site_id, updated_by, config_version)
+  VALUES (p_tenant, p_site, btrim(p_operator), 0) ON CONFLICT (tenant_id, site_id) DO NOTHING;
+  SELECT to_jsonb(g) - 'config_version' - 'updated_at' - 'updated_by' INTO v_old
+    FROM iam_v2.signin_capacity_settings_get(p_tenant, p_site) g;
+  UPDATE iam_v2.site_signin_capacity_settings s SET
+      otp_code_lifetime_minutes  = COALESCE((p_values->>'otp_code_lifetime_minutes')::int, s.otp_code_lifetime_minutes),
+      otp_max_attempts           = COALESCE((p_values->>'otp_max_attempts')::int, s.otp_max_attempts),
+      otp_device_hourly_cap      = COALESCE((p_values->>'otp_device_hourly_cap')::int, s.otp_device_hourly_cap),
+      otp_destination_hourly_cap = COALESCE((p_values->>'otp_destination_hourly_cap')::int, s.otp_destination_hourly_cap),
+      otp_source_hourly_cap      = COALESCE((p_values->>'otp_source_hourly_cap')::int, s.otp_source_hourly_cap),
+      signin_ceiling_per_minute  = CASE WHEN p_values ? 'signin_ceiling_per_minute'
+                                        THEN (p_values->>'signin_ceiling_per_minute')::int
+                                        ELSE s.signin_ceiling_per_minute END,
+      network_pause_exempt_hours = COALESCE((p_values->>'network_pause_exempt_hours')::int, s.network_pause_exempt_hours),
+      device_retention_days      = COALESCE((p_values->>'device_retention_days')::int, s.device_retention_days),
+      portal_image_max_edge_px   = COALESCE((p_values->>'portal_image_max_edge_px')::int, s.portal_image_max_edge_px),
+      portal_image_quality       = COALESCE((p_values->>'portal_image_quality')::int, s.portal_image_quality),
+      updated_by = btrim(p_operator), updated_at = now(), config_version = s.config_version + 1
+    WHERE s.tenant_id = p_tenant AND s.site_id = p_site
+    RETURNING s.config_version INTO v_version;
+  SELECT to_jsonb(g) - 'config_version' - 'updated_at' - 'updated_by' INTO v_new
+    FROM iam_v2.signin_capacity_settings_get(p_tenant, p_site) g;
+  INSERT INTO iam_v2.signin_capacity_settings_changes
+    (tenant_id, site_id, changed_by, change_reason, old_values, new_values, new_config_version)
+  VALUES (p_tenant, p_site, btrim(p_operator), btrim(p_reason), v_old, v_new, v_version);
+  RETURN v_version;
 END $$;
 
 
@@ -14271,6 +15169,62 @@ END $$;
 
 
 --
+-- Name: usage_rollup_settings_get(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.usage_rollup_settings_get(p_tenant uuid, p_site uuid) RETURNS TABLE(minute_retention_days integer, raw_retention_days integer, purge_budget_seconds integer, config_version bigint, updated_at timestamp with time zone, updated_by text)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT COALESCE(s.minute_retention_days, 7), COALESCE(s.raw_retention_days, 2), COALESCE(s.purge_budget_seconds, 10),
+         COALESCE(s.config_version, 0), s.updated_at, s.updated_by
+    FROM (SELECT 1) one
+    LEFT JOIN iam_v2.site_usage_rollup_settings s ON s.tenant_id = p_tenant AND s.site_id = p_site;
+$$;
+
+
+--
+-- Name: usage_rollup_settings_set(uuid, uuid, integer, integer, integer, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.usage_rollup_settings_set(p_tenant uuid, p_site uuid, p_minute_days integer, p_raw_days integer, p_budget_seconds integer, p_operator text, p_reason text) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_old jsonb; v_version bigint;
+BEGIN
+  IF p_operator IS NULL OR btrim(p_operator) = '' THEN
+    RAISE EXCEPTION 'an operator label is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_reason IS NULL OR length(btrim(p_reason)) < 4 OR length(btrim(p_reason)) > 500 THEN
+    RAISE EXCEPTION 'a reason of 4-500 characters is required to change the usage rollup settings'
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_minute_days NOT BETWEEN 1 AND 90 OR p_raw_days NOT BETWEEN 1 AND 30 OR p_budget_seconds NOT BETWEEN 1 AND 120 THEN
+    RAISE EXCEPTION 'minute_retention_days 1-90, raw_retention_days 1-30 and purge_budget_seconds 1-120 are required'
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtext('usage_rollup_settings'), hashtext(p_site::text));
+  SELECT to_jsonb(g) - 'config_version' - 'updated_at' - 'updated_by' INTO v_old
+    FROM iam_v2.usage_rollup_settings_get(p_tenant, p_site) g;
+  INSERT INTO iam_v2.site_usage_rollup_settings AS s
+         (tenant_id, site_id, minute_retention_days, raw_retention_days, purge_budget_seconds, updated_by)
+  VALUES (p_tenant, p_site, p_minute_days, p_raw_days, p_budget_seconds, btrim(p_operator))
+  ON CONFLICT (tenant_id, site_id) DO UPDATE
+     SET minute_retention_days = EXCLUDED.minute_retention_days, raw_retention_days = EXCLUDED.raw_retention_days,
+         purge_budget_seconds = EXCLUDED.purge_budget_seconds, updated_by = EXCLUDED.updated_by,
+         config_version = s.config_version + 1, updated_at = now()
+  RETURNING s.config_version INTO v_version;
+  INSERT INTO iam_v2.site_usage_rollup_changes
+         (tenant_id, site_id, changed_by, change_reason, old_values, new_values, new_config_version)
+  VALUES (p_tenant, p_site, btrim(p_operator), btrim(p_reason), v_old,
+          jsonb_build_object('minute_retention_days', p_minute_days, 'raw_retention_days', p_raw_days,
+                             'purge_budget_seconds', p_budget_seconds), v_version);
+  RETURN v_version;
+END $$;
+
+
+--
 -- Name: valid_payment_domain(text); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -14760,6 +15714,70 @@ END $$;
 
 
 --
+-- Name: auth_throttle_charge(text[], text[], text[], integer[], integer[], boolean[], timestamp with time zone, timestamp with time zone, integer); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.auth_throttle_charge(p_kinds text[], p_keys text[], p_methods text[], p_limits integer[], p_blocks_seconds integer[], p_globals boolean[], p_now timestamp with time zone, p_window_start timestamp with time zone, p_window_seconds integer) RETURNS TABLE(allowed boolean, retry_milliseconds bigint, reason text)
+    LANGUAGE plpgsql
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  i integer; n integer := COALESCE(array_length(p_kinds, 1), 0);
+  v_allowed boolean := true; v_worst_ms bigint := 0; v_reason text := NULL;
+  v_max_block timestamptz; v_count integer; v_retry_ms bigint;
+BEGIN
+  IF n <> COALESCE(array_length(p_keys, 1), 0) OR n <> COALESCE(array_length(p_methods, 1), 0)
+     OR n <> COALESCE(array_length(p_limits, 1), 0) OR n <> COALESCE(array_length(p_blocks_seconds, 1), 0)
+     OR n <> COALESCE(array_length(p_globals, 1), 0) THEN
+    RAISE EXCEPTION 'throttle rule arrays must have the same length' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  FOR i IN 1..n LOOP
+    -- A global damper is charged only when every client-scoped rule allowed the attempt.
+    IF p_globals[i] AND NOT v_allowed THEN CONTINUE; END IF;
+
+    SELECT max(b.blocked_until) INTO v_max_block FROM public.auth_throttle_buckets b
+     WHERE b.scope_kind = p_kinds[i] AND b.scope_key = p_keys[i] AND b.method = p_methods[i]
+       AND b.blocked_until > p_now;
+    IF v_max_block IS NOT NULL AND v_max_block > p_now THEN
+      v_allowed := false;
+      v_retry_ms := (EXTRACT(EPOCH FROM (v_max_block - p_now)) * 1000)::bigint;
+      IF v_retry_ms > v_worst_ms OR v_reason IS NULL THEN
+        v_worst_ms := GREATEST(v_retry_ms, v_worst_ms); v_reason := p_kinds[i];
+      END IF;
+      CONTINUE;
+    END IF;
+
+    INSERT INTO public.auth_throttle_buckets (scope_kind, scope_key, method, window_start, window_len_s, attempt_count, updated_at)
+    VALUES (p_kinds[i], p_keys[i], p_methods[i], p_window_start, p_window_seconds, 1, now())
+    ON CONFLICT (scope_kind, scope_key, method, window_start)
+    DO UPDATE SET attempt_count = public.auth_throttle_buckets.attempt_count + 1, updated_at = now()
+    RETURNING attempt_count INTO v_count;
+
+    IF v_count > p_limits[i] THEN
+      v_allowed := false;
+      v_retry_ms := (EXTRACT(EPOCH FROM (p_window_start + make_interval(secs => p_window_seconds) - p_now)) * 1000)::bigint;
+      IF p_blocks_seconds[i] > 0 THEN
+        UPDATE public.auth_throttle_buckets SET blocked_until = p_now + make_interval(secs => p_blocks_seconds[i]), updated_at = now()
+         WHERE scope_kind = p_kinds[i] AND scope_key = p_keys[i] AND method = p_methods[i] AND window_start = p_window_start;
+        v_retry_ms := p_blocks_seconds[i]::bigint * 1000;
+      END IF;
+      IF v_retry_ms > v_worst_ms OR v_reason IS NULL THEN
+        v_worst_ms := GREATEST(v_retry_ms, v_worst_ms); v_reason := p_kinds[i];
+      END IF;
+    END IF;
+  END LOOP;
+  RETURN QUERY SELECT v_allowed, v_worst_ms, v_reason;
+END $$;
+
+
+--
+-- Name: FUNCTION auth_throttle_charge(p_kinds text[], p_keys text[], p_methods text[], p_limits integer[], p_blocks_seconds integer[], p_globals boolean[], p_now timestamp with time zone, p_window_start timestamp with time zone, p_window_seconds integer); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.auth_throttle_charge(p_kinds text[], p_keys text[], p_methods text[], p_limits integer[], p_blocks_seconds integer[], p_globals boolean[], p_now timestamp with time zone, p_window_start timestamp with time zone, p_window_seconds integer) IS 'AD-51: one attempt against every rule of the durable guest throttle in one round trip; a port of internal/throttle Store.Allow. Stores only the HMAC scope keys the caller supplies.';
+
+
+--
 -- Name: backup_key_holder_add(uuid, uuid, text, text, text, boolean, text); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -14911,6 +15929,164 @@ BEGIN
                   WHERE status = 'ACTIVE' AND tenant_id = p_tenant AND site_id = p_site ORDER BY confirmed_at;
   END IF;
 END $$;
+
+
+--
+-- Name: data_retention_dry_run(uuid, uuid, boolean, integer, integer, integer, integer, integer, integer, integer, integer); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.data_retention_dry_run(p_tenant uuid, p_site uuid, p_override boolean, p_pms integer, p_activity integer, p_inactive integer, p_expired integer, p_audit integer, p_attempts integer, p_logs integer, p_notes integer) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $$
+DECLARE r record; n integer; i integer; v_counts jsonb := '{}'::jsonb; v_complete boolean := false; v_days integer; v_k integer;
+        v_detail text;
+BEGIN
+  BEGIN
+    PERFORM set_config('statement_timeout', '45s', true);
+    IF p_override THEN
+      INSERT INTO iam_v2.site_data_retention AS s
+        (tenant_id, site_id, pms_stay_days, client_activity_days, inactive_identity_days, expired_record_days, audit_log_days,
+         sign_in_attempt_days, log_days, staff_note_days, updated_by)
+      VALUES (p_tenant, p_site, p_pms, p_activity, p_inactive, p_expired, p_audit, p_attempts, p_logs, p_notes, 'preview')
+      ON CONFLICT (tenant_id, site_id) DO UPDATE
+         SET pms_stay_days = EXCLUDED.pms_stay_days, client_activity_days = EXCLUDED.client_activity_days,
+             inactive_identity_days = EXCLUDED.inactive_identity_days, expired_record_days = EXCLUDED.expired_record_days,
+             audit_log_days = EXCLUDED.audit_log_days, sign_in_attempt_days = EXCLUDED.sign_in_attempt_days,
+             log_days = EXCLUDED.log_days, staff_note_days = EXCLUDED.staff_note_days;
+    END IF;
+    FOR i IN 1 .. 40 LOOP
+      n := 0;
+      FOR r IN SELECT x.o_category, x.o_anonymised FROM iam_v2.run_data_retention(p_tenant, p_site, 10000) x LOOP
+        v_counts := jsonb_set(v_counts, ARRAY[r.o_category], to_jsonb(COALESCE((v_counts ->> r.o_category)::integer, 0) + r.o_anonymised));
+        n := n + r.o_anonymised;
+      END LOOP;
+      FOR r IN SELECT x.o_category, x.o_anonymised FROM public.run_data_retention_public(p_tenant, p_site, 10000) x LOOP
+        v_counts := jsonb_set(v_counts, ARRAY[r.o_category], to_jsonb(COALESCE((v_counts ->> r.o_category)::integer, 0) + r.o_anonymised));
+        n := n + r.o_anonymised;
+      END LOOP;
+      FOR r IN SELECT x.o_category, x.o_anonymised FROM iam_v2.run_staff_note_retention(p_tenant, p_site, 10000) x LOOP
+        v_counts := jsonb_set(v_counts, ARRAY[r.o_category], to_jsonb(COALESCE((v_counts ->> r.o_category)::integer, 0) + r.o_anonymised));
+        n := n + r.o_anonymised;
+      END LOOP;
+      IF n = 0 THEN
+        v_complete := true;
+        EXIT;
+      END IF;
+    END LOOP;
+    -- Sign-in attempts are deleted by scd's purge with exactly this rule (internal/signinattempt/store.go).
+    SELECT g.sign_in_attempt_days INTO v_days FROM iam_v2.data_retention_get(p_tenant, p_site) g;
+    SELECT count(*) INTO v_k FROM iam_v2.sign_in_attempts a
+     WHERE a.tenant_id = p_tenant AND a.site_id = p_site AND a.occurred_at < now() - make_interval(days => v_days);
+    v_counts := jsonb_set(v_counts, ARRAY['sign_in_attempts'], to_jsonb(v_k));
+    RAISE EXCEPTION 'retention dry run' USING ERRCODE = 'DRYRN', DETAIL = jsonb_build_object('counts', v_counts, 'complete', v_complete)::text;
+  EXCEPTION WHEN SQLSTATE 'DRYRN' THEN
+    GET STACKED DIAGNOSTICS v_detail = PG_EXCEPTION_DETAIL;
+    RETURN v_detail::jsonb;
+  END;
+END $$;
+
+
+--
+-- Name: data_retention_preview(uuid, uuid, integer, integer, integer, integer, integer, integer, integer, integer); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.data_retention_preview(p_tenant uuid, p_site uuid, p_pms integer, p_activity integer, p_inactive integer, p_expired integer, p_audit integer, p_attempts integer, p_logs integer, p_notes integer) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $$
+DECLARE v_now jsonb; v_new jsonb;
+BEGIN
+  -- The same lock the setter takes: a preview never runs against a half-made change.
+  PERFORM pg_advisory_xact_lock(hashtext('data_retention'), hashtext(p_site::text));
+  v_now := public.data_retention_dry_run(p_tenant, p_site, false, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+  v_new := public.data_retention_dry_run(p_tenant, p_site, true, p_pms, p_activity, p_inactive, p_expired, p_audit, p_attempts, p_logs, p_notes);
+  RETURN jsonb_build_object('current', v_now -> 'counts', 'proposed', v_new -> 'counts',
+                            'complete', COALESCE((v_now ->> 'complete')::boolean, false) AND COALESCE((v_new ->> 'complete')::boolean, false),
+                            'not_counted', jsonb_build_array('log_days'));
+END $$;
+
+
+--
+-- Name: FUNCTION data_retention_preview(p_tenant uuid, p_site uuid, p_pms integer, p_activity integer, p_inactive integer, p_expired integer, p_audit integer, p_attempts integer, p_logs integer, p_notes integer); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.data_retention_preview(p_tenant uuid, p_site uuid, p_pms integer, p_activity integer, p_inactive integer, p_expired integer, p_audit integer, p_attempts integer, p_logs integer, p_notes integer) IS 'What the proposed retention periods would remove, by category, counted by the retention functions themselves inside a rolled-back sub-transaction (0174, audit AD-67). Writes nothing.';
+
+
+--
+-- Name: enforcement_policy_changes_append_only(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.enforcement_policy_changes_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$ BEGIN RAISE EXCEPTION 'enforcement_policy_changes is append-only' USING ERRCODE = 'restrict_violation'; END $$;
+
+
+--
+-- Name: enforcement_policy_set(text, text, text, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.enforcement_policy_set(p_field text, p_value text, p_operator text, p_reason text) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $_$
+DECLARE v_old text; v_new text; v_version bigint; v_cidrs text[]; v_c text; v_n cidr;
+BEGIN
+  IF p_operator IS NULL OR btrim(p_operator) = '' THEN
+    RAISE EXCEPTION 'an operator label is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_reason IS NULL OR length(btrim(p_reason)) < 4 OR length(btrim(p_reason)) > 500 THEN
+    RAISE EXCEPTION 'a reason of 4-500 characters is required to change the enforcement policy' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtext('enforcement_policy'));
+  IF NOT EXISTS (SELECT 1 FROM public.enforcement_policy) THEN
+    INSERT INTO public.enforcement_policy (id, updated_by) VALUES (true, 'enforcement_policy_set');
+  END IF;
+
+  IF p_field IN ('private_deny_enabled', 'allow_upstream_infrastructure', 'mac_binding_enabled') THEN
+    IF p_value NOT IN ('true', 'false') THEN
+      RAISE EXCEPTION '% must be true or false', p_field USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    EXECUTE format('SELECT %I::text FROM public.enforcement_policy', p_field) INTO v_old;
+    EXECUTE format('UPDATE public.enforcement_policy SET %I = $1::boolean, updated_by = $2, updated_at = now(), config_version = config_version + 1', p_field)
+      USING p_value, btrim(p_operator);
+    v_new := p_value;
+  ELSIF p_field = 'cutoff_seconds' THEN
+    IF p_value !~ '^[0-9]{1,2}$' OR p_value::int < 1 OR p_value::int > 60 THEN
+      RAISE EXCEPTION 'cutoff_seconds must be between 1 and 60' USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    SELECT cutoff_seconds::text INTO v_old FROM public.enforcement_policy;
+    UPDATE public.enforcement_policy SET cutoff_seconds = p_value::int, updated_by = btrim(p_operator), updated_at = now(), config_version = config_version + 1;
+    v_new := p_value;
+  ELSIF p_field = 'private_allow_cidrs' THEN
+    v_cidrs := ARRAY[]::text[];
+    FOREACH v_c IN ARRAY string_to_array(COALESCE(p_value, ''), ',') LOOP
+      v_c := btrim(v_c);
+      CONTINUE WHEN v_c = '';
+      BEGIN v_n := v_c::cidr; EXCEPTION WHEN OTHERS THEN
+        RAISE EXCEPTION '% is not an IPv4 network in CIDR form', v_c USING ERRCODE = 'invalid_parameter_value';
+      END;
+      IF family(v_n) <> 4 OR masklen(v_n) < 8 THEN
+        RAISE EXCEPTION '% must be an IPv4 network no wider than /8', v_c USING ERRCODE = 'invalid_parameter_value';
+      END IF;
+      IF NOT (v_n::text = ANY (v_cidrs)) THEN v_cidrs := v_cidrs || v_n::text; END IF;
+    END LOOP;
+    IF cardinality(v_cidrs) > 64 THEN
+      RAISE EXCEPTION 'at most 64 networks may be allowed' USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    SELECT array_to_string(private_allow_cidrs, ',') INTO v_old FROM public.enforcement_policy;
+    UPDATE public.enforcement_policy SET private_allow_cidrs = v_cidrs, updated_by = btrim(p_operator), updated_at = now(), config_version = config_version + 1;
+    v_new := array_to_string(v_cidrs, ',');
+  ELSE
+    RAISE EXCEPTION 'unknown enforcement policy field %', p_field USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+
+  SELECT config_version INTO v_version FROM public.enforcement_policy;
+  INSERT INTO public.enforcement_policy_changes (changed_by, reason, field, old_value, new_value, config_version)
+  VALUES (btrim(p_operator), btrim(p_reason), p_field, v_old, v_new, v_version);
+  RETURN v_version;
+END $_$;
 
 
 --
@@ -15157,6 +16333,7 @@ CREATE FUNCTION public.ledger_apply(p_entries jsonb, p_adopt boolean DEFAULT fal
     AS $$
 DECLARE e record; m record; v_head_seq bigint; v_head_hash text; v_applied integer := 0; v_known integer := 0;
         v_failed jsonb := NULL; v_conflict jsonb := NULL; v_hash text; v_first record; v_stored text;
+        v_leg_through bigint := NULL; v_leg_head text := NULL; v_seal record;
 BEGIN
   IF jsonb_typeof(p_entries) IS DISTINCT FROM 'array' THEN
     RAISE EXCEPTION 'a ledger is a list of entries' USING ERRCODE = 'invalid_parameter_value';
@@ -15175,8 +16352,27 @@ BEGIN
   SELECT l.seq, l.hash INTO v_head_seq, v_head_hash FROM iam_v2.erasure_ledger l ORDER BY l.seq DESC LIMIT 1;
   v_head_seq := COALESCE(v_head_seq, 0);
   v_head_hash := COALESCE(v_head_hash, repeat('0', 64));
+
+  -- The strongest valid seal, from the entries given or the ones already held.
+  FOR v_seal IN
+    SELECT s.hash, s.body FROM (
+        SELECT x.hash, x.mac, x.body FROM jsonb_to_recordset(p_entries) AS x(kind text, hash text, mac text, body text) WHERE x.kind = 'seal'
+        UNION ALL
+        SELECT l.hash, l.mac, l.body FROM iam_v2.erasure_ledger l WHERE l.kind = 'seal') s
+     WHERE iam_v2.ledger_mac_ok(s.hash, s.mac)
+  LOOP
+    BEGIN
+      IF v_leg_through IS NULL OR (v_seal.body::jsonb ->> 'legacy_through')::bigint > v_leg_through THEN
+        v_leg_through := (v_seal.body::jsonb ->> 'legacy_through')::bigint;
+        v_leg_head := v_seal.body::jsonb ->> 'legacy_head';
+      END IF;
+    EXCEPTION WHEN OTHERS THEN
+      NULL; -- a seal whose body cannot be read seals nothing
+    END;
+  END LOOP;
+
   FOR e IN SELECT x.* FROM jsonb_to_recordset(p_entries)
-             AS x(ledger uuid, seq bigint, prev text, kind text, tenant uuid, site uuid, at_us bigint, body text, hash text)
+             AS x(ledger uuid, seq bigint, prev text, kind text, tenant uuid, site uuid, at_us bigint, body text, hash text, mac text)
             ORDER BY x.seq LOOP
     IF e.ledger IS DISTINCT FROM m.ledger_id THEN
       v_conflict := jsonb_build_object('seq', e.seq, 'why', 'another ledger');
@@ -15196,6 +16392,18 @@ BEGIN
       v_conflict := jsonb_build_object('seq', e.seq, 'why', 'the entry does not continue the ledger');
       EXIT;
     END IF;
+    -- Checked: its own MAC, or coverage by a valid seal. A MAC that is present and wrong is a forgery, not a legacy entry.
+    IF e.mac IS NOT NULL THEN
+      IF NOT iam_v2.ledger_mac_ok(e.hash, e.mac) THEN
+        v_conflict := jsonb_build_object('seq', e.seq, 'why', 'the entry was not written by this appliance (its authentication code does not check)');
+        EXIT;
+      END IF;
+    ELSIF v_leg_through IS NOT NULL AND e.seq <= v_leg_through AND (e.seq < v_leg_through OR e.hash = v_leg_head) THEN
+      NULL; -- a legacy entry covered by a valid seal; the chain ties it to the sealed hash
+    ELSE
+      v_conflict := jsonb_build_object('seq', e.seq, 'why', 'the entry carries no authentication code and is not covered by a seal, so it is not applied');
+      EXIT;
+    END IF;
     BEGIN
       IF e.kind = 'erase' THEN
         PERFORM public.ledger_replay_erase(e.tenant, e.site, e.body::jsonb);
@@ -15204,8 +16412,8 @@ BEGIN
       ELSIF e.kind = 'assisted_closed' THEN
         PERFORM public.ledger_replay_assisted_closed(e.tenant, e.site, e.body::jsonb);
       END IF;
-      INSERT INTO iam_v2.erasure_ledger (seq, ledger_id, tenant_id, site_id, kind, at_us, body, prev_hash, hash, confirmed)
-      VALUES (e.seq, e.ledger, e.tenant, e.site, e.kind, e.at_us, e.body, e.prev, e.hash, true);
+      INSERT INTO iam_v2.erasure_ledger (seq, ledger_id, tenant_id, site_id, kind, at_us, body, prev_hash, hash, confirmed, mac)
+      VALUES (e.seq, e.ledger, e.tenant, e.site, e.kind, e.at_us, e.body, e.prev, e.hash, true, e.mac);
     EXCEPTION WHEN OTHERS THEN
       v_failed := jsonb_build_object('seq', e.seq, 'kind', e.kind, 'error', SQLERRM);
     END;
@@ -15225,7 +16433,7 @@ END $$;
 -- Name: FUNCTION ledger_apply(p_entries jsonb, p_adopt boolean); Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON FUNCTION public.ledger_apply(p_entries jsonb, p_adopt boolean) IS 'Applies the erasure ledger entries the database does not have (0148). Run by scd on a restored database before it goes live, and hourly; granted to nobody else.';
+COMMENT ON FUNCTION public.ledger_apply(p_entries jsonb, p_adopt boolean) IS 'Applies the erasure ledger entries the database does not have (0148); since 0173 only entries whose authentication code checks, or that a valid seal covers. Granted to scd only.';
 
 
 --
@@ -15937,6 +17145,58 @@ COMMENT ON FUNCTION public.run_data_retention_public(p_tenant uuid, p_site uuid,
 
 
 --
+-- Name: run_event_table_trim(uuid, uuid, integer); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.run_event_table_trim(p_tenant uuid, p_site uuid, p_batch integer) RETURNS TABLE(o_category text, o_cutoff timestamp with time zone, o_anonymised integer)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $$
+DECLARE r record; v_cut timestamptz; v_n integer; v_k integer;
+BEGIN
+  IF p_batch IS NULL OR p_batch NOT BETWEEN 1 AND 10000 THEN
+    RAISE EXCEPTION 'a batch of 1-10000 is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  SELECT * INTO r FROM iam_v2.data_retention_get(p_tenant, p_site);
+  v_cut := now() - make_interval(days => r.expired_record_days); v_n := 0;
+
+  DELETE FROM public.auth_otps o
+   WHERE o.id IN (SELECT x.id FROM public.auth_otps x
+                   WHERE x.tenant_id = p_tenant AND x.expires_at < v_cut
+                     AND x.destination = 'anonymised' AND x.ip IS NULL AND x.user_agent IS NULL
+                   LIMIT p_batch);
+  GET DIAGNOSTICS v_k = ROW_COUNT; v_n := v_n + v_k;
+
+  DELETE FROM public.pms_attempts a
+   WHERE a.id IN (SELECT x.id FROM public.pms_attempts x
+                   WHERE x.tenant_id = p_tenant AND x.attempted_at < v_cut
+                     AND x.room_number = 'anonymised' AND x.ip IS NULL
+                   LIMIT p_batch);
+  GET DIAGNOSTICS v_k = ROW_COUNT; v_n := v_n + v_k;
+
+  DELETE FROM public.social_oauth_states s
+   WHERE s.state IN (SELECT x.state FROM public.social_oauth_states x
+                      WHERE x.tenant_id = p_tenant AND x.expires_at < v_cut
+                        AND num_nonnulls(x.client_ip, x.client_mac, x.user_agent, x.code_verifier, x.nonce) = 0
+                      LIMIT p_batch);
+  GET DIAGNOSTICS v_k = ROW_COUNT; v_n := v_n + v_k;
+
+  IF v_n > 0 THEN
+    -- Not written to data_retention_runs: that record is of anonymisation (its category check admits nothing else), and
+    -- what is removed here was already recorded there when it was scrubbed. scd logs this removal.
+    o_category := 'expired_records_removed'; o_cutoff := v_cut; o_anonymised := v_n; RETURN NEXT;
+  END IF;
+END $$;
+
+
+--
+-- Name: FUNCTION run_event_table_trim(p_tenant uuid, p_site uuid, p_batch integer); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.run_event_table_trim(p_tenant uuid, p_site uuid, p_batch integer) IS 'Removes one-time-code, room-attempt and sign-in-redirect rows that run_data_retention_public has already scrubbed and whose expiry is older than expired_record_days (0178, AD-49).';
+
+
+--
 -- Name: run_staff_retention(uuid, uuid); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -16206,6 +17466,54 @@ CREATE TABLE iam_v2.accounting_retention_changes (
     CONSTRAINT arc_actor CHECK ((length(btrim(changed_by)) > 0)),
     CONSTRAINT arc_reason CHECK (((length(btrim(change_reason)) >= 4) AND (length(btrim(change_reason)) <= 500)))
 );
+
+
+--
+-- Name: accounting_usage_hour; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.accounting_usage_hour (
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    session_id uuid NOT NULL,
+    bucket timestamp with time zone NOT NULL,
+    bytes_up bigint DEFAULT 0 NOT NULL,
+    bytes_down bigint DEFAULT 0 NOT NULL,
+    samples integer DEFAULT 0 NOT NULL,
+    CONSTRAINT auh_down CHECK ((bytes_down >= 0)),
+    CONSTRAINT auh_up CHECK ((bytes_up >= 0))
+);
+
+
+--
+-- Name: TABLE accounting_usage_hour; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.accounting_usage_hour IS 'Per-session usage per hour, summed from iam_v2.accounting_records by iam_v2.rollup_accounting_usage (0175). Kept as long as the site''s usage-detail retention.';
+
+
+--
+-- Name: accounting_usage_minute; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.accounting_usage_minute (
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    session_id uuid NOT NULL,
+    bucket timestamp with time zone NOT NULL,
+    bytes_up bigint DEFAULT 0 NOT NULL,
+    bytes_down bigint DEFAULT 0 NOT NULL,
+    samples integer DEFAULT 0 NOT NULL,
+    CONSTRAINT aum_down CHECK ((bytes_down >= 0)),
+    CONSTRAINT aum_up CHECK ((bytes_up >= 0))
+);
+
+
+--
+-- Name: TABLE accounting_usage_minute; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.accounting_usage_minute IS 'Per-session usage per minute, summed from iam_v2.accounting_records by iam_v2.rollup_accounting_usage (0175). Kept minute_retention_days (7).';
 
 
 --
@@ -16695,11 +18003,16 @@ CREATE TABLE iam_v2.card_reversal_reviews (
     resolved_at timestamp with time zone,
     resolved_by text,
     resolution_reason text,
+    reversal_kind text,
+    reversal_amount_minor bigint,
+    detail text,
     CONSTRAINT card_reversal_reviews_check CHECK (((resolution IS NULL) = (resolved_at IS NULL))),
     CONSTRAINT card_reversal_reviews_check1 CHECK (((resolution IS NULL) = (resolved_by IS NULL))),
     CONSTRAINT card_reversal_reviews_check2 CHECK (((resolution IS NULL) = (resolution_reason IS NULL))),
-    CONSTRAINT card_reversal_reviews_kind_check CHECK ((kind = ANY (ARRAY['DISPUTE'::text, 'CHARGEBACK'::text]))),
+    CONSTRAINT card_reversal_reviews_kind_check CHECK ((kind = ANY (ARRAY['DISPUTE'::text, 'CHARGEBACK'::text, 'REVERSAL_REFUSED'::text, 'LATE_CAPTURE'::text]))),
+    CONSTRAINT card_reversal_reviews_late_has_detail CHECK (((kind <> 'LATE_CAPTURE'::text) OR ((detail IS NOT NULL) AND (length(detail) <= 500)))),
     CONSTRAINT card_reversal_reviews_provider_ref_check CHECK (((length(provider_ref) >= 1) AND (length(provider_ref) <= 200))),
+    CONSTRAINT card_reversal_reviews_refused_has_detail CHECK (((kind <> 'REVERSAL_REFUSED'::text) OR ((reversal_kind = ANY (ARRAY['REFUND'::text, 'CHARGEBACK'::text])) AND (reversal_amount_minor > 0) AND (detail IS NOT NULL) AND (length(detail) <= 500)))),
     CONSTRAINT card_reversal_reviews_resolution_check CHECK ((resolution = ANY (ARRAY['KEEP_ACCESS'::text, 'END_ACCESS'::text]))),
     CONSTRAINT card_reversal_reviews_resolution_reason_check CHECK (((resolution_reason IS NULL) OR ((length(resolution_reason) >= 1) AND (length(resolution_reason) <= 500)))),
     CONSTRAINT card_reversal_reviews_resolved_by_check CHECK (((resolved_by IS NULL) OR ((length(resolved_by) >= 1) AND (length(resolved_by) <= 200))))
@@ -17254,6 +18567,8 @@ CREATE TABLE iam_v2.entitlement_transfers (
     reason text DEFAULT 'CROSS_PMS_TRANSFER'::text NOT NULL,
     actor uuid NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
+    operator_reason text,
+    CONSTRAINT entitlement_transfers_operator_reason_bounded CHECK (((operator_reason IS NULL) OR ((length(btrim(operator_reason)) >= 4) AND (length(btrim(operator_reason)) <= 500)))),
     CONSTRAINT et_no_self CHECK ((from_entitlement_id <> to_entitlement_id)),
     CONSTRAINT et_two_stays CHECK ((from_stay_id <> to_stay_id))
 );
@@ -17981,6 +19296,26 @@ CREATE TABLE iam_v2.internet_packages (
 
 
 --
+-- Name: ledger_mac_key; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.ledger_mac_key (
+    singleton boolean DEFAULT true NOT NULL,
+    key bytea NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ledger_mac_key_len CHECK ((length(key) = 32)),
+    CONSTRAINT ledger_mac_key_one CHECK (singleton)
+);
+
+
+--
+-- Name: TABLE ledger_mac_key; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.ledger_mac_key IS 'The per-appliance key that authenticates the erasure ledger (0173). One row; no role can read it except through the ledger definer functions.';
+
+
+--
 -- Name: ledger_meta; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -18296,6 +19631,7 @@ CREATE TABLE iam_v2.payment_checkouts (
     last_state text,
     status_checks integer DEFAULT 0 NOT NULL,
     consecutive_failures integer DEFAULT 0 NOT NULL,
+    late_checked_at timestamp with time zone,
     CONSTRAINT payment_checkouts_consecutive_failures_check CHECK ((consecutive_failures >= 0)),
     CONSTRAINT payment_checkouts_creation_outcome_check CHECK ((creation_outcome = ANY (ARRAY['PENDING'::text, 'CREATED'::text, 'NOT_CREATED'::text, 'AMBIGUOUS'::text]))),
     CONSTRAINT payment_checkouts_provider_session_ref_check CHECK (((provider_session_ref IS NULL) OR ((length(provider_session_ref) >= 1) AND (length(provider_session_ref) <= 300)))),
@@ -19464,7 +20800,7 @@ CREATE TABLE iam_v2.post_stay_profiles (
     origin_stay_id uuid NOT NULL,
     origin_lifecycle_version integer NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    pin_hash text NOT NULL,
+    pin_hash text,
     pin_generation integer DEFAULT 1 NOT NULL,
     pin_set_at timestamp with time zone DEFAULT now() NOT NULL,
     pin_revealed_at timestamp with time zone,
@@ -19476,14 +20812,28 @@ CREATE TABLE iam_v2.post_stay_profiles (
     issued_via text NOT NULL,
     issued_by_operator uuid,
     issued_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT post_stay_profiles_issued_via_check CHECK ((issued_via = ANY (ARRAY['GUEST_AUTHENTICATED_SESSION'::text, 'OPERATOR_RESET'::text]))),
+    CONSTRAINT post_stay_profiles_issued_via_check CHECK ((issued_via = ANY (ARRAY['GUEST_AUTHENTICATED_SESSION'::text, 'OPERATOR_RESET'::text, 'ROOM_RESERVATION'::text]))),
     CONSTRAINT post_stay_profiles_pin_generation_check CHECK ((pin_generation > 0)),
     CONSTRAINT post_stay_profiles_pin_hash_check CHECK ((pin_hash ~~ '$argon2id$%'::text)),
     CONSTRAINT post_stay_profiles_status_check CHECK ((status = ANY (ARRAY['ACTIVE'::text, 'REVOKED'::text]))),
-    CONSTRAINT psp_issuer_coherent CHECK ((((issued_via = 'OPERATOR_RESET'::text) AND (issued_by_operator IS NOT NULL)) OR ((issued_via = 'GUEST_AUTHENTICATED_SESSION'::text) AND (issued_by_operator IS NULL)))),
+    CONSTRAINT psp_issuer_coherent CHECK ((((issued_via = 'OPERATOR_RESET'::text) AND (issued_by_operator IS NOT NULL)) OR ((issued_via = 'GUEST_AUTHENTICATED_SESSION'::text) AND (issued_by_operator IS NULL)) OR ((issued_via = 'ROOM_RESERVATION'::text) AND (issued_by_operator IS NULL) AND (pin_hash IS NULL)))),
     CONSTRAINT psp_revoked_coherent CHECK ((((status = 'ACTIVE'::text) AND (revoked_at IS NULL) AND (revoked_by IS NULL) AND (revoke_reason IS NULL)) OR ((status = 'REVOKED'::text) AND (revoked_at IS NOT NULL) AND (revoke_reason IS NOT NULL)))),
     CONSTRAINT psp_validity_window CHECK ((valid_until > created_at))
 );
+
+
+--
+-- Name: TABLE post_stay_profiles; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.post_stay_profiles IS 'The post-stay identity of one stay episode. Created on the first successful room + reservation check for the stay (0165); older rows were created with a PIN (see pin_hash). Rows are never deleted: revoke instead.';
+
+
+--
+-- Name: COLUMN post_stay_profiles.pin_hash; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.post_stay_profiles.pin_hash IS 'HISTORICAL (0165). A PIN issued before the post-stay sign-in became room + reservation. Never verified and never written again; kept as the record of that issuance. NULL on a profile created by the room + reservation route.';
 
 
 --
@@ -19564,6 +20914,11 @@ CREATE TABLE iam_v2.posting_outbox (
     posting_id uuid NOT NULL,
     state text DEFAULT 'QUEUED'::text NOT NULL,
     enqueued_at timestamp with time zone DEFAULT now() NOT NULL,
+    not_before timestamp with time zone DEFAULT now() NOT NULL,
+    not_sent_count integer DEFAULT 0 NOT NULL,
+    decline_count integer DEFAULT 0 NOT NULL,
+    parked_reason text,
+    CONSTRAINT posting_outbox_counts_nonnegative CHECK (((not_sent_count >= 0) AND (decline_count >= 0))),
     CONSTRAINT posting_outbox_state_check CHECK ((state = ANY (ARRAY['QUEUED'::text, 'IN_FLIGHT'::text, 'DONE'::text, 'HELD_RECOVERY'::text])))
 );
 
@@ -19666,6 +21021,59 @@ CREATE VIEW iam_v2.posting_execution_state AS
           WHERE ((o.posting_id = p.id) AND (o.state = ANY (ARRAY['QUEUED'::text, 'IN_FLIGHT'::text, 'HELD_RECOVERY'::text])))
          LIMIT 1) ob ON (true))
      LEFT JOIN iam_v2.posting_review_state rs ON ((rs.posting_id = p.id)));
+
+
+--
+-- Name: posting_lane_settings; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.posting_lane_settings (
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    park_after_declines integer DEFAULT 10 NOT NULL,
+    config_version bigint DEFAULT 1 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pls_park_bounded CHECK (((park_after_declines >= 1) AND (park_after_declines <= 1000))),
+    CONSTRAINT pls_version_positive CHECK ((config_version >= 1))
+);
+
+
+--
+-- Name: posting_lane_settings_changes; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.posting_lane_settings_changes (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    changed_by text NOT NULL,
+    reason text NOT NULL,
+    old_values jsonb,
+    new_values jsonb NOT NULL,
+    new_config_version bigint NOT NULL,
+    CONSTRAINT posting_lane_settings_changes_changed_by_check CHECK ((length(btrim(changed_by)) > 0)),
+    CONSTRAINT posting_lane_settings_changes_reason_check CHECK (((length(btrim(reason)) >= 3) AND (length(btrim(reason)) <= 500)))
+);
+
+
+--
+-- Name: posting_outbox_park_events; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.posting_outbox_park_events (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    outbox_id uuid NOT NULL,
+    posting_id uuid NOT NULL,
+    event text NOT NULL,
+    decline_count integer NOT NULL,
+    reason text,
+    actor text NOT NULL,
+    at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT posting_outbox_park_events_event_check CHECK ((event = ANY (ARRAY['PARKED'::text, 'REQUEUED'::text])))
+);
 
 
 --
@@ -20094,6 +21502,25 @@ COMMENT ON COLUMN iam_v2.sign_in_attempts.sensitive_ciphertext IS 'AES-256-GCM o
 
 
 --
+-- Name: signin_capacity_settings_changes; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.signin_capacity_settings_changes (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    changed_by text NOT NULL,
+    change_reason text NOT NULL,
+    old_values jsonb,
+    new_values jsonb NOT NULL,
+    new_config_version bigint NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT scsc_actor CHECK ((length(btrim(changed_by)) > 0)),
+    CONSTRAINT scsc_reason CHECK ((length(btrim(change_reason)) > 0))
+);
+
+
+--
 -- Name: site_account_password_settings; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -20194,6 +21621,40 @@ CREATE TABLE iam_v2.site_card_payment_settings (
     config_version bigint DEFAULT 1 NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT site_card_payment_settings_bounds CHECK ((((checkout_expiry_minutes >= 30) AND (checkout_expiry_minutes <= 240)) AND ((reconcile_grace_minutes >= 15) AND (reconcile_grace_minutes <= 1440))))
+);
+
+
+--
+-- Name: site_card_recheck_setting_changes; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.site_card_recheck_setting_changes (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    changed_by text NOT NULL,
+    reason text NOT NULL,
+    old_window_days integer,
+    new_window_days integer NOT NULL,
+    new_config_version bigint NOT NULL,
+    CONSTRAINT site_card_recheck_setting_changes_changed_by_check CHECK ((length(btrim(changed_by)) > 0)),
+    CONSTRAINT site_card_recheck_setting_changes_reason_check CHECK (((length(btrim(reason)) >= 3) AND (length(btrim(reason)) <= 500)))
+);
+
+
+--
+-- Name: site_card_recheck_settings; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.site_card_recheck_settings (
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    window_days integer DEFAULT 7 NOT NULL,
+    config_version bigint DEFAULT 1 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT scrs_version_positive CHECK ((config_version >= 1)),
+    CONSTRAINT scrs_window_bounded CHECK (((window_days >= 1) AND (window_days <= 30)))
 );
 
 
@@ -20449,6 +21910,112 @@ COMMENT ON TABLE iam_v2.site_self_service_settings IS 'Per-site Email accounts s
 
 
 --
+-- Name: site_signin_capacity_settings; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.site_signin_capacity_settings (
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    otp_code_lifetime_minutes integer DEFAULT 10 NOT NULL,
+    otp_max_attempts integer DEFAULT 5 NOT NULL,
+    otp_device_hourly_cap integer DEFAULT 5 NOT NULL,
+    otp_destination_hourly_cap integer DEFAULT 15 NOT NULL,
+    otp_source_hourly_cap integer DEFAULT 20 NOT NULL,
+    signin_ceiling_per_minute integer,
+    network_pause_exempt_hours integer DEFAULT 24 NOT NULL,
+    device_retention_days integer DEFAULT 90 NOT NULL,
+    portal_image_max_edge_px integer DEFAULT 2560 NOT NULL,
+    portal_image_quality integer DEFAULT 82 NOT NULL,
+    config_version bigint DEFAULT 0 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_by text,
+    CONSTRAINT ssc_ceiling CHECK (((signin_ceiling_per_minute IS NULL) OR ((signin_ceiling_per_minute >= 600) AND (signin_ceiling_per_minute <= 100000)))),
+    CONSTRAINT ssc_destination_over_device CHECK ((otp_destination_hourly_cap >= otp_device_hourly_cap)),
+    CONSTRAINT ssc_device_retention CHECK (((device_retention_days >= 7) AND (device_retention_days <= 3650))),
+    CONSTRAINT ssc_image_edge CHECK (((portal_image_max_edge_px >= 640) AND (portal_image_max_edge_px <= 4096))),
+    CONSTRAINT ssc_image_quality CHECK (((portal_image_quality >= 50) AND (portal_image_quality <= 95))),
+    CONSTRAINT ssc_otp_attempts CHECK (((otp_max_attempts >= 3) AND (otp_max_attempts <= 10))),
+    CONSTRAINT ssc_otp_destination_cap CHECK (((otp_destination_hourly_cap >= 1) AND (otp_destination_hourly_cap <= 100))),
+    CONSTRAINT ssc_otp_device_cap CHECK (((otp_device_hourly_cap >= 1) AND (otp_device_hourly_cap <= 20))),
+    CONSTRAINT ssc_otp_lifetime CHECK (((otp_code_lifetime_minutes >= 2) AND (otp_code_lifetime_minutes <= 30))),
+    CONSTRAINT ssc_otp_source_cap CHECK (((otp_source_hourly_cap >= 5) AND (otp_source_hourly_cap <= 500))),
+    CONSTRAINT ssc_pause_exempt CHECK (((network_pause_exempt_hours >= 0) AND (network_pause_exempt_hours <= 168))),
+    CONSTRAINT ssc_version CHECK ((config_version >= 0))
+);
+
+
+--
+-- Name: TABLE site_signin_capacity_settings; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.site_signin_capacity_settings IS 'Per-site sign-in limits and capacity (0162): one-time-code lifetime and caps, the appliance-wide sign-in ceiling (NULL follows the licence guest cap, never below 600 a minute), the room sign-in pause exemption, device retention and the uploaded-image limits. A site with no row reads the defaults. Written only through iam_v2.signin_capacity_settings_set.';
+
+
+--
+-- Name: site_usage_rollup_changes; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.site_usage_rollup_changes (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    changed_by text NOT NULL,
+    change_reason text NOT NULL,
+    old_values jsonb NOT NULL,
+    new_values jsonb NOT NULL,
+    new_config_version bigint NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT surc_actor CHECK ((length(btrim(changed_by)) > 0)),
+    CONSTRAINT surc_reason CHECK (((length(btrim(change_reason)) >= 4) AND (length(btrim(change_reason)) <= 500)))
+);
+
+
+--
+-- Name: site_usage_rollup_settings; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.site_usage_rollup_settings (
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    minute_retention_days integer DEFAULT 7 NOT NULL,
+    raw_retention_days integer DEFAULT 2 NOT NULL,
+    purge_budget_seconds integer DEFAULT 10 NOT NULL,
+    config_version bigint DEFAULT 1 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_by text,
+    CONSTRAINT surs_budget CHECK (((purge_budget_seconds >= 1) AND (purge_budget_seconds <= 120))),
+    CONSTRAINT surs_minute CHECK (((minute_retention_days >= 1) AND (minute_retention_days <= 90))),
+    CONSTRAINT surs_raw CHECK (((raw_retention_days >= 1) AND (raw_retention_days <= 30)))
+);
+
+
+--
+-- Name: TABLE site_usage_rollup_settings; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.site_usage_rollup_settings IS 'minute_retention_days: days of per-minute usage kept (default 7). raw_retention_days: days of per-sample detail kept once rolled up (default 2). purge_budget_seconds: the most time one purge run may spend deleting (default 10). A site with no row reads the defaults. Written only through iam_v2.usage_rollup_settings_set (0175).';
+
+
+--
+-- Name: site_usage_rollup_state; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.site_usage_rollup_state (
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    watermark timestamp with time zone NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: TABLE site_usage_rollup_state; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.site_usage_rollup_state IS 'How far the usage rollup has read iam_v2.accounting_records, by ingested_at (0175). Raw samples are never purged beyond it.';
+
+
+--
 -- Name: site_voucher_code_settings; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -20533,6 +22100,25 @@ CREATE TABLE iam_v2.social_provider_secret_generations (
 --
 
 COMMENT ON TABLE iam_v2.social_provider_secret_generations IS 'The client secret (or Apple .p8 key) of a public.social_oauth_providers row, sealed by scd with AES-256-GCM under social_dek.key and AAD bound to (tenant, provider, generation). Exactly one current generation per provider. social_oauth_providers.client_secret is cleared once sealed (0116).';
+
+
+--
+-- Name: stay_event_payload_reductions; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.stay_event_payload_reductions (
+    event_id uuid NOT NULL,
+    equals_event_id uuid NOT NULL,
+    reduced_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT sepr_distinct CHECK ((event_id <> equals_event_id))
+);
+
+
+--
+-- Name: TABLE stay_event_payload_reductions; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.stay_event_payload_reductions IS 'Superseded RESYNC copies whose payload was emptied (0171), each with the whole row it equals, so the reduction can be undone. No personal data: ids only.';
 
 
 --
@@ -21265,6 +22851,71 @@ CREATE TABLE public.edge_offline_packages (
 
 
 --
+-- Name: enforcement_policy; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.enforcement_policy (
+    id boolean DEFAULT true NOT NULL,
+    private_deny_enabled boolean DEFAULT true NOT NULL,
+    private_allow_cidrs text[] DEFAULT '{}'::text[] NOT NULL,
+    allow_upstream_infrastructure boolean DEFAULT true NOT NULL,
+    mac_binding_enabled boolean DEFAULT false NOT NULL,
+    cutoff_seconds integer DEFAULT 5 NOT NULL,
+    config_version bigint DEFAULT 1 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_by text,
+    CONSTRAINT enforcement_policy_allow_len CHECK ((cardinality(private_allow_cidrs) <= 64)),
+    CONSTRAINT enforcement_policy_config_version_check CHECK ((config_version >= 1)),
+    CONSTRAINT enforcement_policy_cutoff_seconds_check CHECK (((cutoff_seconds >= 1) AND (cutoff_seconds <= 60))),
+    CONSTRAINT enforcement_policy_id_check CHECK (id)
+);
+
+
+--
+-- Name: TABLE enforcement_policy; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.enforcement_policy IS 'Singleton data-plane enforcement policy (0166). Written only through enforcement_policy_set(); read by netd and acctd.';
+
+
+--
+-- Name: enforcement_policy_changes; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.enforcement_policy_changes (
+    id bigint NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    changed_by text NOT NULL,
+    reason text NOT NULL,
+    field text NOT NULL,
+    old_value text,
+    new_value text,
+    config_version bigint NOT NULL,
+    CONSTRAINT enforcement_policy_changes_changed_by_check CHECK ((length(btrim(changed_by)) > 0)),
+    CONSTRAINT enforcement_policy_changes_reason_check CHECK ((length(btrim(reason)) > 0))
+);
+
+
+--
+-- Name: enforcement_policy_changes_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.enforcement_policy_changes_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: enforcement_policy_changes_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.enforcement_policy_changes_id_seq OWNED BY public.enforcement_policy_changes.id;
+
+
+--
 -- Name: guest_networks; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -21779,9 +23430,7 @@ CREATE TABLE public.pms_providers (
     host text,
     port integer,
     use_tls boolean DEFAULT false NOT NULL,
-    auth_key text,
     base_url text,
-    api_key text,
     property_id text,
     extra jsonb DEFAULT '{}'::jsonb NOT NULL,
     field_map jsonb DEFAULT '{}'::jsonb NOT NULL,
@@ -22127,6 +23776,13 @@ CREATE TABLE public.walled_garden_rules (
 
 
 --
+-- Name: enforcement_policy_changes id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.enforcement_policy_changes ALTER COLUMN id SET DEFAULT nextval('public.enforcement_policy_changes_id_seq'::regclass);
+
+
+--
 -- Name: portal_https_settings_changes id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -22203,6 +23859,22 @@ ALTER TABLE ONLY iam_v2.accounting_records
 
 ALTER TABLE ONLY iam_v2.accounting_retention_changes
     ADD CONSTRAINT accounting_retention_changes_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: accounting_usage_hour accounting_usage_hour_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.accounting_usage_hour
+    ADD CONSTRAINT accounting_usage_hour_pkey PRIMARY KEY (session_id, bucket);
+
+
+--
+-- Name: accounting_usage_minute accounting_usage_minute_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.accounting_usage_minute
+    ADD CONSTRAINT accounting_usage_minute_pkey PRIMARY KEY (session_id, bucket);
 
 
 --
@@ -23046,6 +24718,14 @@ ALTER TABLE ONLY iam_v2.erasure_ledger
 
 
 --
+-- Name: ledger_mac_key ledger_mac_key_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.ledger_mac_key
+    ADD CONSTRAINT ledger_mac_key_pkey PRIMARY KEY (singleton);
+
+
+--
 -- Name: ledger_meta ledger_meta_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -23686,6 +25366,30 @@ ALTER TABLE ONLY iam_v2.posting_attempts
 
 
 --
+-- Name: posting_lane_settings_changes posting_lane_settings_changes_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.posting_lane_settings_changes
+    ADD CONSTRAINT posting_lane_settings_changes_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: posting_lane_settings posting_lane_settings_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.posting_lane_settings
+    ADD CONSTRAINT posting_lane_settings_pkey PRIMARY KEY (tenant_id, site_id);
+
+
+--
+-- Name: posting_outbox_park_events posting_outbox_park_events_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.posting_outbox_park_events
+    ADD CONSTRAINT posting_outbox_park_events_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: posting_outbox posting_outbox_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -23966,6 +25670,14 @@ ALTER TABLE ONLY iam_v2.sign_in_attempts
 
 
 --
+-- Name: signin_capacity_settings_changes signin_capacity_settings_changes_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.signin_capacity_settings_changes
+    ADD CONSTRAINT signin_capacity_settings_changes_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: site_account_password_settings site_account_password_settings_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -23995,6 +25707,22 @@ ALTER TABLE ONLY iam_v2.site_card_payment_setting_changes
 
 ALTER TABLE ONLY iam_v2.site_card_payment_settings
     ADD CONSTRAINT site_card_payment_settings_pkey PRIMARY KEY (tenant_id, site_id);
+
+
+--
+-- Name: site_card_recheck_setting_changes site_card_recheck_setting_changes_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.site_card_recheck_setting_changes
+    ADD CONSTRAINT site_card_recheck_setting_changes_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: site_card_recheck_settings site_card_recheck_settings_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.site_card_recheck_settings
+    ADD CONSTRAINT site_card_recheck_settings_pkey PRIMARY KEY (tenant_id, site_id);
 
 
 --
@@ -24078,6 +25806,38 @@ ALTER TABLE ONLY iam_v2.site_self_service_settings
 
 
 --
+-- Name: site_signin_capacity_settings site_signin_capacity_settings_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.site_signin_capacity_settings
+    ADD CONSTRAINT site_signin_capacity_settings_pkey PRIMARY KEY (tenant_id, site_id);
+
+
+--
+-- Name: site_usage_rollup_changes site_usage_rollup_changes_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.site_usage_rollup_changes
+    ADD CONSTRAINT site_usage_rollup_changes_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: site_usage_rollup_settings site_usage_rollup_settings_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.site_usage_rollup_settings
+    ADD CONSTRAINT site_usage_rollup_settings_pkey PRIMARY KEY (tenant_id, site_id);
+
+
+--
+-- Name: site_usage_rollup_state site_usage_rollup_state_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.site_usage_rollup_state
+    ADD CONSTRAINT site_usage_rollup_state_pkey PRIMARY KEY (tenant_id, site_id);
+
+
+--
 -- Name: site_voucher_code_settings site_voucher_code_settings_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -24107,6 +25867,14 @@ ALTER TABLE ONLY iam_v2.social_provider_secret_generations
 
 ALTER TABLE ONLY iam_v2.social_provider_secret_generations
     ADD CONSTRAINT social_provider_secret_generations_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: stay_event_payload_reductions stay_event_payload_reductions_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.stay_event_payload_reductions
+    ADD CONSTRAINT stay_event_payload_reductions_pkey PRIMARY KEY (event_id);
 
 
 --
@@ -24427,6 +26195,22 @@ ALTER TABLE ONLY public.edge_offline_packages
 
 ALTER TABLE ONLY public.edge_offline_packages
     ADD CONSTRAINT edge_offline_packages_pkey PRIMARY KEY (package_id);
+
+
+--
+-- Name: enforcement_policy_changes enforcement_policy_changes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.enforcement_policy_changes
+    ADD CONSTRAINT enforcement_policy_changes_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: enforcement_policy enforcement_policy_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.enforcement_policy
+    ADD CONSTRAINT enforcement_policy_pkey PRIMARY KEY (id);
 
 
 --
@@ -24780,6 +26564,13 @@ CREATE INDEX account_password_settings_changes_lookup ON iam_v2.account_password
 
 
 --
+-- Name: accounting_records_site_ingested_idx; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX accounting_records_site_ingested_idx ON iam_v2.accounting_records USING btree (tenant_id, site_id, ingested_at);
+
+
+--
 -- Name: aco_by_context; Type: INDEX; Schema: iam_v2; Owner: -
 --
 
@@ -24843,6 +26634,20 @@ CREATE INDEX arc_site ON iam_v2.accounting_retention_changes USING btree (tenant
 
 
 --
+-- Name: auh_site_bucket; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX auh_site_bucket ON iam_v2.accounting_usage_hour USING btree (tenant_id, site_id, bucket);
+
+
+--
+-- Name: aum_site_bucket; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX aum_site_bucket ON iam_v2.accounting_usage_minute USING btree (tenant_id, site_id, bucket);
+
+
+--
 -- Name: auth_resolutions_req_idem; Type: INDEX; Schema: iam_v2; Owner: -
 --
 
@@ -24875,6 +26680,13 @@ CREATE INDEX client_group_rules_group ON iam_v2.client_group_rules USING btree (
 --
 
 CREATE UNIQUE INDEX client_groups_name_per_site ON iam_v2.client_groups USING btree (tenant_id, site_id, lower(btrim(name)));
+
+
+--
+-- Name: controlled_operation_scope_opened_at; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX controlled_operation_scope_opened_at ON iam_v2.controlled_operation_scope USING btree (opened_at);
 
 
 --
@@ -25263,6 +27075,13 @@ COMMENT ON INDEX iam_v2.outbox_one_inflight_per_interface IS 'Contract 10: a PMS
 
 
 --
+-- Name: outbox_queued_by_lane; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX outbox_queued_by_lane ON iam_v2.posting_outbox USING btree (pms_interface_id, enqueued_at, id) WHERE (state = 'QUEUED'::text);
+
+
+--
 -- Name: package_eligibility_rules_by_revision; Type: INDEX; Schema: iam_v2; Owner: -
 --
 
@@ -25281,6 +27100,13 @@ CREATE INDEX package_revision_visibility ON iam_v2.internet_package_revisions US
 --
 
 CREATE INDEX payment_checkouts_open ON iam_v2.payment_checkouts USING btree (tenant_id, site_id, last_status_at NULLS FIRST);
+
+
+--
+-- Name: pls_changes_scope_idx; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX pls_changes_scope_idx ON iam_v2.posting_lane_settings_changes USING btree (tenant_id, site_id, changed_at DESC);
 
 
 --
@@ -25323,6 +27149,13 @@ CREATE INDEX pms_interface_financial_setting_changes_iface ON iam_v2.pms_interfa
 --
 
 CREATE INDEX pms_roster_recon_runs_recent_idx ON iam_v2.pms_roster_reconciliation_runs USING btree (tenant_id, site_id, run_at DESC);
+
+
+--
+-- Name: pope_scope_idx; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX pope_scope_idx ON iam_v2.posting_outbox_park_events USING btree (tenant_id, site_id, at DESC);
 
 
 --
@@ -25473,6 +27306,13 @@ CREATE INDEX purchases_auth_context ON iam_v2.purchases USING btree (tenant_id, 
 
 
 --
+-- Name: scsc_lookup; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX scsc_lookup ON iam_v2.signin_capacity_settings_changes USING btree (tenant_id, site_id, changed_at DESC);
+
+
+--
 -- Name: se_live_identity; Type: INDEX; Schema: iam_v2; Owner: -
 --
 
@@ -25501,6 +27341,13 @@ CREATE UNIQUE INDEX se_resync_identity ON iam_v2.stay_events USING btree (tenant
 
 
 --
+-- Name: se_resync_payload_digest; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX se_resync_payload_digest ON iam_v2.stay_events USING btree (tenant_id, site_id, pms_interface_id, md5((payload)::text), resync_generation) WHERE (admission_kind = 'RESYNC'::text);
+
+
+--
 -- Name: seb_attribution; Type: INDEX; Schema: iam_v2; Owner: -
 --
 
@@ -25519,6 +27366,34 @@ CREATE UNIQUE INDEX seb_one_open ON iam_v2.session_entitlement_bindings USING bt
 --
 
 CREATE INDEX self_service_settings_changes_lookup ON iam_v2.self_service_settings_changes USING btree (tenant_id, site_id, changed_at DESC);
+
+
+--
+-- Name: sessions_entitlement_id; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX sessions_entitlement_id ON iam_v2.sessions USING btree (entitlement_id);
+
+
+--
+-- Name: sessions_live_by_site; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX sessions_live_by_site ON iam_v2.sessions USING btree (tenant_id, site_id, started) WHERE ((state = 'active'::text) AND (ended IS NULL));
+
+
+--
+-- Name: sessions_open_by_device; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX sessions_open_by_device ON iam_v2.sessions USING btree (device_id) WHERE ((ended IS NULL) AND (state = ANY (ARRAY['active'::text, 'PENDING_ENFORCEMENT'::text])));
+
+
+--
+-- Name: sessions_site_started; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX sessions_site_started ON iam_v2.sessions USING btree (tenant_id, site_id, started DESC);
 
 
 --
@@ -25610,6 +27485,13 @@ CREATE INDEX stays_effective_checkout ON iam_v2.stays USING btree (tenant_id, si
 --
 
 CREATE INDEX stays_room_lookup ON iam_v2.stays USING btree (tenant_id, site_id, pms_interface_id, normalized_room_number) WHERE (status = 'IN_HOUSE'::text);
+
+
+--
+-- Name: surc_site; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX surc_site ON iam_v2.site_usage_rollup_changes USING btree (tenant_id, site_id, changed_at DESC);
 
 
 --
@@ -26233,6 +28115,20 @@ CREATE TRIGGER imm_pms_rev BEFORE DELETE OR UPDATE ON iam_v2.pms_interface_revis
 --
 
 CREATE TRIGGER ledger_meta_guard BEFORE DELETE OR UPDATE ON iam_v2.ledger_meta FOR EACH ROW EXECUTE FUNCTION iam_v2.ledger_guard();
+
+
+--
+-- Name: sessions notify_session_active; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER notify_session_active AFTER UPDATE OF state ON iam_v2.sessions FOR EACH ROW WHEN (((new.state = 'active'::text) AND (old.state IS DISTINCT FROM 'active'::text))) EXECUTE FUNCTION iam_v2.notify_session_active();
+
+
+--
+-- Name: site_signin_capacity_settings notify_settings_changed; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER notify_settings_changed AFTER INSERT OR UPDATE ON iam_v2.site_signin_capacity_settings FOR EACH STATEMENT EXECUTE FUNCTION iam_v2.notify_settings_changed();
 
 
 --
@@ -26936,6 +28832,20 @@ CREATE TRIGGER pms_room_inventory_changes_no_update BEFORE DELETE OR UPDATE ON i
 
 
 --
+-- Name: posting_lane_settings_changes posting_lane_settings_changes_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER posting_lane_settings_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.posting_lane_settings_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.posting_lane_append_only();
+
+
+--
+-- Name: posting_outbox_park_events posting_outbox_park_events_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER posting_outbox_park_events_append_only BEFORE DELETE OR UPDATE ON iam_v2.posting_outbox_park_events FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.posting_lane_append_only();
+
+
+--
 -- Name: posting_presend_aborts posting_presend_aborts_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
@@ -26985,6 +28895,13 @@ CREATE TRIGGER scpsc_append_only BEFORE DELETE OR UPDATE ON iam_v2.site_card_pay
 
 
 --
+-- Name: site_card_recheck_setting_changes scrsc_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER scrsc_append_only BEFORE DELETE OR UPDATE ON iam_v2.site_card_recheck_setting_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.p4_append_only_refuse();
+
+
+--
 -- Name: self_service_settings_changes self_service_settings_changes_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
@@ -26999,10 +28916,24 @@ CREATE TRIGGER sg_guard BEFORE DELETE OR UPDATE ON iam_v2.pms_interface_secret_g
 
 
 --
+-- Name: signin_capacity_settings_changes signin_capacity_settings_changes_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER signin_capacity_settings_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.signin_capacity_settings_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.signin_capacity_settings_changes_append_only();
+
+
+--
 -- Name: site_module_changes site_module_changes_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
 CREATE TRIGGER site_module_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.site_module_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.site_module_changes_append_only();
+
+
+--
+-- Name: site_usage_rollup_changes site_usage_rollup_changes_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER site_usage_rollup_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.site_usage_rollup_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.accounting_retention_append_only();
 
 
 --
@@ -27059,6 +28990,13 @@ CREATE TRIGGER voucher_revocations_append_only BEFORE DELETE OR UPDATE ON iam_v2
 --
 
 CREATE TRIGGER walled_garden_settings_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.walled_garden_settings_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.walled_garden_settings_changes_append_only();
+
+
+--
+-- Name: entitlement_transfers zy_scrub_operator_reason; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zy_scrub_operator_reason BEFORE UPDATE ON iam_v2.entitlement_transfers FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.entitlement_transfers_scrub_operator_reason();
 
 
 --
@@ -27314,6 +29252,20 @@ CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.post_stay_profil
 
 
 --
+-- Name: posting_lane_settings_changes zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.posting_lane_settings_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: posting_outbox_park_events zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.posting_outbox_park_events FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
 -- Name: posting_review_actions zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
@@ -27346,6 +29298,13 @@ CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.site_accounting_
 --
 
 CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.site_card_payment_setting_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: site_card_recheck_setting_changes zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.site_card_recheck_setting_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
 
 
 --
@@ -27451,6 +29410,20 @@ CREATE TRIGGER backup_key_holder_events_append_only BEFORE DELETE OR UPDATE ON p
 --
 
 CREATE TRIGGER backup_key_holders_no_delete BEFORE DELETE ON public.backup_key_holders FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION public.backup_key_holders_no_delete();
+
+
+--
+-- Name: enforcement_policy_changes enforcement_policy_changes_append_only; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER enforcement_policy_changes_append_only BEFORE DELETE OR UPDATE ON public.enforcement_policy_changes FOR EACH ROW EXECUTE FUNCTION public.enforcement_policy_changes_append_only();
+
+
+--
+-- Name: tenants notify_settings_changed; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER notify_settings_changed AFTER UPDATE OF auth_methods ON public.tenants FOR EACH STATEMENT EXECUTE FUNCTION iam_v2.notify_settings_changed();
 
 
 --
@@ -29327,6 +31300,23 @@ GRANT ALL ON FUNCTION iam_v2.card_payment_settings_set(p_tenant uuid, p_site uui
 
 
 --
+-- Name: FUNCTION card_recheck_settings_get(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.card_recheck_settings_get(p_tenant uuid, p_site uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.card_recheck_settings_get(p_tenant uuid, p_site uuid) TO sc_payment_runtime;
+GRANT ALL ON FUNCTION iam_v2.card_recheck_settings_get(p_tenant uuid, p_site uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION card_recheck_settings_set(p_tenant uuid, p_site uuid, p_expected_version bigint, p_window_days integer, p_operator text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.card_recheck_settings_set(p_tenant uuid, p_site uuid, p_expected_version bigint, p_window_days integer, p_operator text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.card_recheck_settings_set(p_tenant uuid, p_site uuid, p_expected_version bigint, p_window_days integer, p_operator text, p_reason text) TO svc_edged;
+
+
+--
 -- Name: FUNCTION client_device_action(p_tenant uuid, p_site uuid, p_action text, p_device uuid, p_auth_context uuid, p_target uuid); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -29724,8 +31714,15 @@ REVOKE ALL ON FUNCTION iam_v2.ledger_append_erasure(p_tenant uuid, p_site uuid, 
 --
 
 REVOKE ALL ON FUNCTION iam_v2.ledger_confirm(p_hashes text[]) FROM PUBLIC;
-GRANT ALL ON FUNCTION iam_v2.ledger_confirm(p_hashes text[]) TO svc_edged;
 GRANT ALL ON FUNCTION iam_v2.ledger_confirm(p_hashes text[]) TO svc_scd;
+
+
+--
+-- Name: FUNCTION ledger_confirm_checked(p_hashes text[], p_receipts text[]); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.ledger_confirm_checked(p_hashes text[], p_receipts text[]) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.ledger_confirm_checked(p_hashes text[], p_receipts text[]) TO svc_edged;
 
 
 --
@@ -29760,6 +31757,44 @@ GRANT ALL ON FUNCTION iam_v2.ledger_head() TO svc_scd;
 
 
 --
+-- Name: FUNCTION ledger_mac_key_ensure(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.ledger_mac_key_ensure() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION ledger_mac_key_get(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.ledger_mac_key_get() FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.ledger_mac_key_get() TO svc_scd;
+
+
+--
+-- Name: FUNCTION ledger_mac_key_install(p_hex text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.ledger_mac_key_install(p_hex text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.ledger_mac_key_install(p_hex text) TO svc_scd;
+
+
+--
+-- Name: FUNCTION ledger_mac_of(p_hash text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.ledger_mac_of(p_hash text) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION ledger_mac_ok(p_hash text, p_mac text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.ledger_mac_ok(p_hash text, p_mac text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.ledger_mac_ok(p_hash text, p_mac text) TO svc_scd;
+
+
+--
 -- Name: FUNCTION ledger_pending(); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -29769,10 +31804,25 @@ GRANT ALL ON FUNCTION iam_v2.ledger_pending() TO svc_scd;
 
 
 --
+-- Name: FUNCTION ledger_receipt_of(p_hash text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.ledger_receipt_of(p_hash text) FROM PUBLIC;
+
+
+--
 -- Name: FUNCTION ledger_row_json(l iam_v2.erasure_ledger); Type: ACL; Schema: iam_v2; Owner: -
 --
 
 REVOKE ALL ON FUNCTION iam_v2.ledger_row_json(l iam_v2.erasure_ledger) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION ledger_seal_legacy(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.ledger_seal_legacy(p_tenant uuid, p_site uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.ledger_seal_legacy(p_tenant uuid, p_site uuid) TO svc_scd;
 
 
 --
@@ -29820,6 +31870,20 @@ GRANT ALL ON FUNCTION iam_v2.lock_stay(p_tenant uuid, p_site uuid, p_stay uuid) 
 --
 
 REVOKE ALL ON FUNCTION iam_v2.mac_is_private(p_mac macaddr) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION notify_session_active(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.notify_session_active() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION notify_settings_changed(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.notify_settings_changed() FROM PUBLIC;
 
 
 --
@@ -30263,11 +32327,27 @@ GRANT ALL ON FUNCTION iam_v2.p4_interface_freshness_block(p_tenant uuid, p_site 
 
 
 --
+-- Name: FUNCTION p4_late_capture_candidates(p_tenant uuid, p_site uuid, p_days integer, p_limit integer); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p4_late_capture_candidates(p_tenant uuid, p_site uuid, p_days integer, p_limit integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p4_late_capture_candidates(p_tenant uuid, p_site uuid, p_days integer, p_limit integer) TO sc_payment_runtime;
+
+
+--
 -- Name: FUNCTION p4_lock_posting_stay(p_posting uuid); Type: ACL; Schema: iam_v2; Owner: -
 --
 
 REVOKE ALL ON FUNCTION iam_v2.p4_lock_posting_stay(p_posting uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.p4_lock_posting_stay(p_posting uuid) TO sc_posting_runtime;
+
+
+--
+-- Name: FUNCTION p4_mark_late_checked(p_tenant uuid, p_site uuid, p_charge uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p4_mark_late_checked(p_tenant uuid, p_site uuid, p_charge uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p4_mark_late_checked(p_tenant uuid, p_site uuid, p_charge uuid) TO sc_payment_runtime;
 
 
 --
@@ -30284,6 +32364,14 @@ GRANT ALL ON FUNCTION iam_v2.p4_mark_purchase_granted(p_purchase uuid) TO svc_sc
 
 REVOKE ALL ON FUNCTION iam_v2.p4_open_dispute_review(p_tenant uuid, p_site uuid, p_charge uuid, p_provider_ref text) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.p4_open_dispute_review(p_tenant uuid, p_site uuid, p_charge uuid, p_provider_ref text) TO sc_payment_outcome;
+
+
+--
+-- Name: FUNCTION p4_open_late_capture_review(p_tenant uuid, p_site uuid, p_charge uuid, p_provider_ref text, p_amount_minor bigint, p_currency text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p4_open_late_capture_review(p_tenant uuid, p_site uuid, p_charge uuid, p_provider_ref text, p_amount_minor bigint, p_currency text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p4_open_late_capture_review(p_tenant uuid, p_site uuid, p_charge uuid, p_provider_ref text, p_amount_minor bigint, p_currency text) TO sc_payment_outcome;
 
 
 --
@@ -30389,6 +32477,14 @@ REVOKE ALL ON FUNCTION iam_v2.p4_record_compliance_receipt(p_archive uuid, p_aut
 
 REVOKE ALL ON FUNCTION iam_v2.p4_record_provider_reversal(p_tenant uuid, p_site uuid, p_parent uuid, p_kind text, p_amount_minor bigint, p_provider_event_id text, p_provider_txn_ref text) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.p4_record_provider_reversal(p_tenant uuid, p_site uuid, p_parent uuid, p_kind text, p_amount_minor bigint, p_provider_event_id text, p_provider_txn_ref text) TO sc_payment_outcome;
+
+
+--
+-- Name: FUNCTION p4_record_provider_reversal_v2(p_tenant uuid, p_site uuid, p_parent uuid, p_kind text, p_amount_minor bigint, p_cumulative boolean, p_provider_event_id text, p_provider_txn_ref text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p4_record_provider_reversal_v2(p_tenant uuid, p_site uuid, p_parent uuid, p_kind text, p_amount_minor bigint, p_cumulative boolean, p_provider_event_id text, p_provider_txn_ref text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p4_record_provider_reversal_v2(p_tenant uuid, p_site uuid, p_parent uuid, p_kind text, p_amount_minor bigint, p_cumulative boolean, p_provider_event_id text, p_provider_txn_ref text) TO sc_payment_outcome;
 
 
 --
@@ -30928,6 +33024,14 @@ GRANT ALL ON FUNCTION iam_v2.pms_record_resync_coverage(p_tenant uuid, p_site uu
 
 
 --
+-- Name: FUNCTION pms_resync_supersede_payloads(p_tenant uuid, p_site uuid, p_limit integer); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.pms_resync_supersede_payloads(p_tenant uuid, p_site uuid, p_limit integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.pms_resync_supersede_payloads(p_tenant uuid, p_site uuid, p_limit integer) TO svc_pmsd;
+
+
+--
 -- Name: FUNCTION pms_review_decide(p_tenant uuid, p_site uuid, p_event uuid, p_action text, p_stay uuid, p_operator text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -30994,6 +33098,53 @@ REVOKE ALL ON FUNCTION iam_v2.pms_site_blocked_after_refusals(p_tenant uuid, p_s
 GRANT ALL ON FUNCTION iam_v2.pms_site_blocked_after_refusals(p_tenant uuid, p_site uuid) TO sc_commerce_runtime;
 GRANT ALL ON FUNCTION iam_v2.pms_site_blocked_after_refusals(p_tenant uuid, p_site uuid) TO sc_financial_operator;
 GRANT ALL ON FUNCTION iam_v2.pms_site_blocked_after_refusals(p_tenant uuid, p_site uuid) TO sc_financial_readonly;
+
+
+--
+-- Name: FUNCTION posting_lane_settings_get(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.posting_lane_settings_get(p_tenant uuid, p_site uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.posting_lane_settings_get(p_tenant uuid, p_site uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION posting_lane_settings_set(p_tenant uuid, p_site uuid, p_expected_version bigint, p_park_after integer, p_operator text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.posting_lane_settings_set(p_tenant uuid, p_site uuid, p_expected_version bigint, p_park_after integer, p_operator text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.posting_lane_settings_set(p_tenant uuid, p_site uuid, p_expected_version bigint, p_park_after integer, p_operator text, p_reason text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION posting_outbox_defer(p_outbox uuid, p_kind text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.posting_outbox_defer(p_outbox uuid, p_kind text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.posting_outbox_defer(p_outbox uuid, p_kind text, p_reason text) TO sc_posting_runtime;
+
+
+--
+-- Name: FUNCTION posting_outbox_requeue_parked(p_tenant uuid, p_site uuid, p_outbox uuid, p_operator text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.posting_outbox_requeue_parked(p_tenant uuid, p_site uuid, p_outbox uuid, p_operator text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.posting_outbox_requeue_parked(p_tenant uuid, p_site uuid, p_outbox uuid, p_operator text, p_reason text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION profile_privacy_notice_stamp(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.profile_privacy_notice_stamp() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION prune_idle_devices(p_tenant uuid, p_site uuid, p_batch integer); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.prune_idle_devices(p_tenant uuid, p_site uuid, p_batch integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.prune_idle_devices(p_tenant uuid, p_site uuid, p_batch integer) TO svc_scd;
 
 
 --
@@ -31113,6 +33264,14 @@ GRANT ALL ON FUNCTION iam_v2.request_register_open(p_tenant uuid, p_site uuid, p
 
 
 --
+-- Name: FUNCTION rollup_accounting_usage(p_tenant uuid, p_site uuid, p_max_window interval); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.rollup_accounting_usage(p_tenant uuid, p_site uuid, p_max_window interval) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.rollup_accounting_usage(p_tenant uuid, p_site uuid, p_max_window interval) TO svc_acctd;
+
+
+--
 -- Name: FUNCTION run_data_retention(p_tenant uuid, p_site uuid, p_batch integer); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -31201,6 +33360,30 @@ GRANT ALL ON FUNCTION iam_v2.service_plan_delete_unused(p_tenant uuid, p_site uu
 
 REVOKE ALL ON FUNCTION iam_v2.service_plan_deletion_blockers(p_tenant uuid, p_site uuid, p_plan uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.service_plan_deletion_blockers(p_tenant uuid, p_site uuid, p_plan uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION signin_capacity_settings_changes_append_only(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.signin_capacity_settings_changes_append_only() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION signin_capacity_settings_get(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.signin_capacity_settings_get(p_tenant uuid, p_site uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.signin_capacity_settings_get(p_tenant uuid, p_site uuid) TO svc_scd;
+GRANT ALL ON FUNCTION iam_v2.signin_capacity_settings_get(p_tenant uuid, p_site uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION signin_capacity_settings_set(p_tenant uuid, p_site uuid, p_values jsonb, p_operator text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.signin_capacity_settings_set(p_tenant uuid, p_site uuid, p_values jsonb, p_operator text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.signin_capacity_settings_set(p_tenant uuid, p_site uuid, p_values jsonb, p_operator text, p_reason text) TO svc_edged;
 
 
 --
@@ -31333,6 +33516,22 @@ REVOKE ALL ON FUNCTION iam_v2.trg_posting_charge_gate() FROM PUBLIC;
 --
 
 REVOKE ALL ON FUNCTION iam_v2.trg_stay_posting_permission() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION usage_rollup_settings_get(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.usage_rollup_settings_get(p_tenant uuid, p_site uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.usage_rollup_settings_get(p_tenant uuid, p_site uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION usage_rollup_settings_set(p_tenant uuid, p_site uuid, p_minute_days integer, p_raw_days integer, p_budget_seconds integer, p_operator text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.usage_rollup_settings_set(p_tenant uuid, p_site uuid, p_minute_days integer, p_raw_days integer, p_budget_seconds integer, p_operator text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.usage_rollup_settings_set(p_tenant uuid, p_site uuid, p_minute_days integer, p_raw_days integer, p_budget_seconds integer, p_operator text, p_reason text) TO svc_edged;
 
 
 --
@@ -31483,6 +33682,14 @@ REVOKE ALL ON FUNCTION public.audit_clean_macs(p_tenant uuid, p_macs text[], p_r
 
 
 --
+-- Name: FUNCTION auth_throttle_charge(p_kinds text[], p_keys text[], p_methods text[], p_limits integer[], p_blocks_seconds integer[], p_globals boolean[], p_now timestamp with time zone, p_window_start timestamp with time zone, p_window_seconds integer); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.auth_throttle_charge(p_kinds text[], p_keys text[], p_methods text[], p_limits integer[], p_blocks_seconds integer[], p_globals boolean[], p_now timestamp with time zone, p_window_start timestamp with time zone, p_window_seconds integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.auth_throttle_charge(p_kinds text[], p_keys text[], p_methods text[], p_limits integer[], p_blocks_seconds integer[], p_globals boolean[], p_now timestamp with time zone, p_window_start timestamp with time zone, p_window_seconds integer) TO svc_scd;
+
+
+--
 -- Name: FUNCTION backup_key_holder_add(p_tenant uuid, p_site uuid, p_label text, p_public_key text, p_check_code_hash text, p_loss_acknowledged boolean, p_actor text); Type: ACL; Schema: public; Owner: -
 --
 
@@ -31521,6 +33728,36 @@ GRANT ALL ON FUNCTION public.backup_key_holder_tested(p_tenant uuid, p_site uuid
 REVOKE ALL ON FUNCTION public.backup_key_recipients(p_tenant uuid, p_site uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.backup_key_recipients(p_tenant uuid, p_site uuid) TO svc_edged;
 GRANT ALL ON FUNCTION public.backup_key_recipients(p_tenant uuid, p_site uuid) TO svc_scd;
+
+
+--
+-- Name: FUNCTION data_retention_dry_run(p_tenant uuid, p_site uuid, p_override boolean, p_pms integer, p_activity integer, p_inactive integer, p_expired integer, p_audit integer, p_attempts integer, p_logs integer, p_notes integer); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.data_retention_dry_run(p_tenant uuid, p_site uuid, p_override boolean, p_pms integer, p_activity integer, p_inactive integer, p_expired integer, p_audit integer, p_attempts integer, p_logs integer, p_notes integer) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION data_retention_preview(p_tenant uuid, p_site uuid, p_pms integer, p_activity integer, p_inactive integer, p_expired integer, p_audit integer, p_attempts integer, p_logs integer, p_notes integer); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.data_retention_preview(p_tenant uuid, p_site uuid, p_pms integer, p_activity integer, p_inactive integer, p_expired integer, p_audit integer, p_attempts integer, p_logs integer, p_notes integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.data_retention_preview(p_tenant uuid, p_site uuid, p_pms integer, p_activity integer, p_inactive integer, p_expired integer, p_audit integer, p_attempts integer, p_logs integer, p_notes integer) TO svc_edged;
+
+
+--
+-- Name: FUNCTION enforcement_policy_changes_append_only(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.enforcement_policy_changes_append_only() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION enforcement_policy_set(p_field text, p_value text, p_operator text, p_reason text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.enforcement_policy_set(p_field text, p_value text, p_operator text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.enforcement_policy_set(p_field text, p_value text, p_operator text, p_reason text) TO svc_edged;
 
 
 --
@@ -31769,6 +34006,14 @@ GRANT ALL ON FUNCTION public.run_data_retention_public(p_tenant uuid, p_site uui
 
 
 --
+-- Name: FUNCTION run_event_table_trim(p_tenant uuid, p_site uuid, p_batch integer); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.run_event_table_trim(p_tenant uuid, p_site uuid, p_batch integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.run_event_table_trim(p_tenant uuid, p_site uuid, p_batch integer) TO svc_scd;
+
+
+--
 -- Name: FUNCTION run_staff_retention(p_tenant uuid, p_site uuid); Type: ACL; Schema: public; Owner: -
 --
 
@@ -31824,6 +34069,20 @@ GRANT SELECT ON TABLE iam_v2.accounting_records TO svc_edged;
 --
 
 GRANT SELECT ON TABLE iam_v2.accounting_retention_changes TO svc_edged;
+
+
+--
+-- Name: TABLE accounting_usage_hour; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.accounting_usage_hour TO svc_edged;
+
+
+--
+-- Name: TABLE accounting_usage_minute; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.accounting_usage_minute TO svc_edged;
 
 
 --
@@ -32904,6 +35163,13 @@ GRANT SELECT ON TABLE iam_v2.sign_in_attempts TO svc_edged;
 
 
 --
+-- Name: TABLE signin_capacity_settings_changes; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.signin_capacity_settings_changes TO svc_edged;
+
+
+--
 -- Name: TABLE site_card_payment_setting_changes; Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -32938,6 +35204,13 @@ GRANT SELECT ON TABLE iam_v2.site_payment_domain_changes TO svc_edged;
 
 GRANT SELECT ON TABLE iam_v2.site_payment_domains TO svc_scd;
 GRANT SELECT ON TABLE iam_v2.site_payment_domains TO svc_edged;
+
+
+--
+-- Name: TABLE site_usage_rollup_changes; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.site_usage_rollup_changes TO svc_edged;
 
 
 --
@@ -33265,6 +35538,22 @@ GRANT SELECT,INSERT,UPDATE ON TABLE public.edge_offline_packages TO svc_scd;
 
 
 --
+-- Name: TABLE enforcement_policy; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT ON TABLE public.enforcement_policy TO svc_netd;
+GRANT SELECT ON TABLE public.enforcement_policy TO svc_acctd;
+GRANT SELECT ON TABLE public.enforcement_policy TO svc_edged;
+
+
+--
+-- Name: TABLE enforcement_policy_changes; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT ON TABLE public.enforcement_policy_changes TO svc_edged;
+
+
+--
 -- Name: TABLE guest_networks; Type: ACL; Schema: public; Owner: -
 --
 
@@ -33463,6 +35752,7 @@ GRANT SELECT,INSERT ON TABLE public.privacy_notice_versions TO iam_v2_owner;
 --
 
 GRANT SELECT,DELETE ON TABLE public.schema_migrations TO iam_v2_rollback;
+GRANT SELECT,INSERT ON TABLE public.schema_migrations TO iam_v2_owner;
 
 
 --
@@ -33717,6 +36007,13 @@ INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, han
 INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.post_stay_profiles', 'pin_hash', 'secret', NULL, false, NULL) ON CONFLICT DO NOTHING;
 INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.guest_data_request_register', 'created_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
 INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.guest_data_request_register', 'answered_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.posting_lane_settings_changes', 'reason', 'note', 'changed_at', false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.posting_lane_settings_changes', 'changed_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.posting_outbox_park_events', 'reason', 'note', 'at', false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.posting_outbox_park_events', 'actor', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.entitlement_transfers', 'operator_reason', 'note', 'created_at', false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.site_card_recheck_setting_changes', 'reason', 'note', 'changed_at', false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.site_card_recheck_setting_changes', 'changed_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
 
 -- ROWS A NEW APPLIANCE NEEDS FROM ITS FIRST MINUTE, WHICH THE MIGRATIONS INSERT AND A SCHEMA-ONLY BASELINE LOSES.
 -- (Appended to data-plane/migrations/baseline/0000_production_baseline.sql by scripts/generate-production-baseline.sh; the semantic

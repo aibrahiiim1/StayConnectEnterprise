@@ -290,16 +290,18 @@ func TestProviderRefundsFailedReadRecordsNothing(t *testing.T) {
 		t.Fatalf("first refund recorded as 300, got %d", got)
 	}
 
-	// The runtime read fails (a closed pool); the outcome login still works.
-	broken, err := pgxpool.New(ctx, os.Getenv("PHASE4_RUNTIME_DSN"))
+	// AD-42 changes this test deliberately: the running-total subtraction no longer happens in Go, so there is no Go-side
+	// read that can fail. The invariant that remains is that a failed database call records nothing, and the next
+	// healthy pass records exactly the difference. The outcome connection is the one that is broken here.
+	broken, err := pgxpool.New(ctx, os.Getenv("PHASE4_OUTCOME_DSN"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	broken.Close()
-	working := e.Runtime
-	e.Runtime = broken
+	working := e.Outcome
+	e.Outcome = broken
 	e.recordReversals(ctx, txn, event(400))
-	e.Runtime = working
+	e.Outcome = working
 	if got := sum(); got != 300 {
 		t.Fatalf("a failed read recorded the running total again: %d recorded, want 300", got)
 	}

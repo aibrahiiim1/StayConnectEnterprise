@@ -280,6 +280,21 @@ else
        adopt its assignment. Supply Central's assignment-registry-root.pub (from /opt/stayconnect/central/appliance-trust/
        on Central) at $ASSIGN_ROOT_SLOT or ASSIGN_ROOT_PUB=/path, verified against Central's FINGERPRINTS.txt."
 fi
+
+# APPLIANCE ROOT CA PIN (audit decision AD-2). Central publishes appliance-root-ca.crt next to the other public trust
+# material. With it installed the appliance accepts only mutual-TLS CA bundles and client certificates that chain to
+# it; without it the appliance pins the root of the first bundle it installs (works, but trusts Central's first reply).
+APPLIANCE_ROOT_SLOT="$DEPLOY/pki/appliance-root-ca.crt"
+if [ -n "${APPLIANCE_ROOT_CA:-}" ]; then
+  bash "$DEPLOY/scripts/install-appliance-root-ca.sh" "$APPLIANCE_ROOT_CA"
+elif [ -s "$APPLIANCE_ROOT_SLOT" ]; then
+  bash "$DEPLOY/scripts/install-appliance-root-ca.sh" "$APPLIANCE_ROOT_SLOT"
+elif [ -s "$ETC/appliance-root-ca.crt" ]; then
+  say "appliance Root CA already pinned ($(bash "$DEPLOY/scripts/install-appliance-root-ca.sh" --show | tail -1))"
+else
+  say "NOTE: no appliance Root CA pinned. The appliance will pin the root of the first CA bundle Central sends it."
+  say "      Put Central's appliance-root-ca.crt at $APPLIANCE_ROOT_SLOT or APPLIANCE_ROOT_CA=/path and re-run to pin it now."
+fi
 say "credentials ok"
 
 # ---------------------------------------------------------------- 6. service environment (NO IDENTITY)
@@ -392,6 +407,7 @@ SCD_POSTING_DB_URL=${SCD_POSTING_DB_URL}
 # sign-in was throttled only in memory (lost on every scd restart) although the contracts rely on the durable
 # throttle (ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE.md "Throttles"). Both fail closed if their key is missing.
 SCD_SECRETS_DIR=${ETC}/secrets
+# SCD_DURABLE_THROTTLE is always on in a production build (AD-32); the line below only states it.
 SCD_DURABLE_THROTTLE=true
 SCD_OTP_HMAC=true
 EOF
@@ -413,6 +429,7 @@ NETD_LAN_PHYS=${LAN_IFACE}
 EOF
 # An env file that already existed (an older install) gets a missing *_DB_URL added; a present one is never changed.
 bash "$DEPLOY/scripts/backfill-db-urls.sh" "$ETC" || die "could not check the services' database URLs (above)"
+bash "$DEPLOY/scripts/backfill-db-urls.sh" --verify "$ETC" || die "a service database URL is missing (above); the services would refuse to start (AD-64)"
 # THE ADMIN CONSOLE'S PORT 443 IS PINNED TO THE WAN ADDRESS (docs/networking/ADMIN_CONSOLE_IP_ALIAS.md). The WAN is also the
 # management interface (two-NIC topology, docs/DEPLOYMENT_APPLIANCE.md), so without a pin 443 was accepted on
 # EVERY address the WAN NIC carries. "auto" pins it to the WAN's current primary IPv4 and follows a change made

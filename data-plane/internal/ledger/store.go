@@ -68,6 +68,8 @@ type HeadInfo struct {
 	Encrypted    bool   `json:"encrypted"`
 	CipherFP     string `json:"recipients_fp,omitempty"`
 	UpdatedAt    string `json:"updated_at"`
+	// Mac authenticates the note (mac.go): whoever can write the storage cannot make a note that claims a different head.
+	Mac string `json:"mac,omitempty"`
 }
 
 type Config struct {
@@ -77,6 +79,9 @@ type Config struct {
 	// Cipher returns the recipients for the external copy, or nil for none. Called on every push.
 	Cipher func(ctx context.Context) (*Cipher, error)
 	Now    func() time.Time
+	// MACKey returns the ledger key, or nil when the appliance has none (its database predates migration 0173). With a key,
+	// Commit refuses an entry that is not authentic and the head note is MACed and checked.
+	MACKey func() MACKey
 }
 
 // Store maintains the two copies; methods serialise on one lock so "append, then replicate" is one step.
@@ -87,6 +92,13 @@ type Store struct {
 }
 
 type destBox struct{ d Destination }
+
+func (s *Store) macKey() MACKey {
+	if s.MACKey == nil {
+		return nil
+	}
+	return s.MACKey()
+}
 
 func NewStore(cfg Config) *Store {
 	s := &Store{Config: cfg}
@@ -145,7 +157,19 @@ func (s *Store) ReadLocal() Copy {
 	if len(b) == 0 {
 		return Copy{Name: "local"}
 	}
-	return Copy{Name: "local", Present: true, Parse: ParseChain(b)}
+	return Copy{Name: "local", Present: true, Parse: s.checked(ParseChain(b))}
+}
+
+// checked marks a copy damaged when an entry carries a MAC that does not check. The hash chain does not cover the MAC, so a
+// flipped bit in one would otherwise go unnoticed until a restore refused the copy; as damage, the copy is rebuilt from the
+// database like any other.
+func (s *Store) checked(p *Parse) *Parse {
+	if key := s.macKey(); len(key) > 0 && p.Err == nil {
+		if err := key.CheckPresent(p.Entries); err != nil {
+			p.Err, p.Intact = err, false
+		}
+	}
+	return p
 }
 
 // Commit makes entries durable in both places or neither: it appends to the primary (fsynced, read back), replaces
@@ -180,6 +204,7 @@ func (s *Store) Commit(ctx context.Context, entries []Entry) error {
 			}
 		}
 	}
+	key := s.macKey()
 	var fresh []Entry
 	for _, e := range entries {
 		if e.Seq >= 1 && e.Seq <= hs {
@@ -189,6 +214,11 @@ func (s *Store) Commit(ctx context.Context, entries []Entry) error {
 			continue
 		}
 		fresh = append(fresh, e)
+	}
+	for _, e := range fresh {
+		if len(key) > 0 && !key.EntryOK(e) {
+			return fmt.Errorf("%w: entry %d", ErrUnauthentic, e.Seq)
+		}
 	}
 	if len(fresh) > 0 {
 		if hs > 0 && fresh[0].Ledger != cur.Parse.LedgerID() {
@@ -368,6 +398,9 @@ func (s *Store) pushExternalLocked(ctx context.Context, force bool) error {
 		}
 	}
 	info.Object, info.ObjectSHA256 = name, sum(obj)
+	if key := s.macKey(); len(key) > 0 {
+		info.Mac = key.HeadMAC(info)
+	}
 	if err := d.Put(ctx, name, obj); err != nil {
 		return err
 	}
@@ -416,6 +449,11 @@ func (s *Store) readExternalHeadFrom(ctx context.Context, d Destination) (info *
 	var h HeadInfo
 	if err := json.Unmarshal(hb, &h); err != nil || h.Object == "" {
 		return nil, false, true, errors.New("the note describing the secondary copy is unreadable")
+	}
+	// A note with a MAC that does not check was not written by this appliance. A note without one predates the key: it is
+	// replaced by the next push.
+	if key := s.macKey(); len(key) > 0 && h.Mac != "" && !eq(h.Mac, key.HeadMAC(h)) {
+		return nil, false, true, fmt.Errorf("%w: the note describing the secondary copy", ErrUnauthentic)
 	}
 	obj, err := d.Get(ctx, h.Object)
 	if errors.Is(err, ErrNotFound) {
@@ -473,7 +511,7 @@ func (s *Store) ReadExternal(ctx context.Context, identity age.Identity) Copy {
 			return c
 		}
 	}
-	c.Present, c.Parse = true, ParseChain(plain)
+	c.Present, c.Parse = true, s.checked(ParseChain(plain))
 	if c.Parse.Err == nil && sum(plain) != info.PlainSHA256 && !c.Parse.Torn {
 		c.Parse = &Parse{Err: fmt.Errorf("%w: the content is not what the note describes", ErrCorrupt)}
 	}

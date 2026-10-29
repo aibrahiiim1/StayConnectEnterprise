@@ -478,6 +478,8 @@ func (s *server) setGuestAccountPasswordIAMv2(w http.ResponseWriter, r *http.Req
 		Generate bool   `json:"generate,omitempty"`
 		// decodeJSON disallows unknown fields, and the console always sends this one.
 		DisconnectSessions bool `json:"disconnect_sessions,omitempty"`
+		// Why the desk is replacing a client's password (audit AD-8, P9 L2): bounded, recorded with the audit entry, no step-up.
+		Reason string `json:"reason"`
 	}
 	if err := decodeJSON(r, &in); err != nil {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
@@ -501,6 +503,12 @@ func (s *server) setGuestAccountPasswordIAMv2(w http.ResponseWriter, r *http.Req
 	}
 	if st, code, msg := selfServicePasswordRefusal(selfRegistered); st != 0 {
 		jsonErr(w, st, code, msg)
+		return
+	}
+	reason, reasonOK := reasonText(in.Reason)
+	if !reasonOK {
+		jsonErr(w, http.StatusBadRequest, "reason_required", "A reason for replacing this client's password is required ("+
+			itoa(reasonMinChars)+"-"+itoa(reasonMaxChars)+" characters). Do not write the password in it.")
 		return
 	}
 	generated := false
@@ -553,7 +561,7 @@ func (s *server) setGuestAccountPasswordIAMv2(w http.ResponseWriter, r *http.Req
 	// The counters are reset defensively so a stray locked_until cannot leave a reset account unusable.
 	// The audit never carries the password or hash.
 	s.audit(r, "guest_account.password_set", "guest_account", id,
-		map[string]any{"username": username, "authority": "iam_v2"})
+		map[string]any{"username": username, "authority": "iam_v2", "reason": reason})
 	if generated {
 		out["generated_password"] = in.Password
 	}

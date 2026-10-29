@@ -55,7 +55,6 @@ func TestNoTemporaryVerificationAccessRemainsInTheRuleset(t *testing.T) {
 		fwd := n[strings.Index(n, "chain forward"):strings.Index(n, "chain prerouting_nat")]
 		allowed := []string{
 			"ct state established,related accept",
-			`oifname "ens160" iifname . ip saddr @auth_ipv4 accept comment "authenticated guests"`,
 			`oifname "ens160" iifname . ip saddr @phase3_auth_ipv4 accept comment "phase-3 authorized guests"`,
 			`iifname @guest_interfaces oifname "ens160" ip daddr @walled_garden_ip accept`,
 			`iifname @guest_interfaces oifname "ens160" ip daddr . tcp dport @walled_garden_tcp accept`,

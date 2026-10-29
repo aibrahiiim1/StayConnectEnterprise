@@ -66,9 +66,16 @@ func TestRequestBodiesAreBounded(t *testing.T) {
 			t.Errorf("bodyLimitFor(%q) = %d, want %d", path, got, want)
 		}
 	}
+	// AD-58: the upload limit is 1 MB. An image at the limit reaches its handler; a 3 MB one (the former 8 MB limit's
+	// territory) is turned away by the body limit before any handler reads it.
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/edge/v1/portal-assets", bytes.NewReader(make([]byte, maxAssetBytes))))
+	if rec.Code == http.StatusRequestEntityTooLarge {
+		t.Fatal("a portal image at the 1 MB limit must reach its handler")
+	}
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("POST", "/edge/v1/portal-assets", bytes.NewReader(make([]byte, 3<<20))))
-	if rec.Code == http.StatusRequestEntityTooLarge {
-		t.Fatal("a 3 MB portal image upload must reach its handler")
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("a 3 MB portal image: status %d, want 413", rec.Code)
 	}
 }

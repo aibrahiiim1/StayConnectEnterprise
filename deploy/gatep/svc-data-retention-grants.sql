@@ -19,6 +19,10 @@ BEGIN
   GRANT EXECUTE ON FUNCTION iam_v2.data_retention_get(uuid,uuid) TO svc_scd;
   GRANT EXECUTE ON FUNCTION iam_v2.run_data_retention(uuid,uuid,integer) TO svc_scd;
   GRANT EXECUTE ON FUNCTION public.run_data_retention_public(uuid,uuid,integer) TO svc_scd;
+  -- Migration 0178 (AD-49): removes one-time-code, room-attempt and redirect rows the run above has already scrubbed.
+  IF to_regprocedure('public.run_event_table_trim(uuid,uuid,integer)') IS NOT NULL THEN
+    GRANT EXECUTE ON FUNCTION public.run_event_table_trim(uuid,uuid,integer) TO svc_scd;
+  END IF;
 
   GRANT EXECUTE ON FUNCTION iam_v2.data_retention_get(uuid,uuid) TO svc_edged;
   -- Migration 0134 (GDPR plan F5) added the system-log period, and 0140 (GDPR audit C4) the staff-note period,
@@ -36,5 +40,18 @@ BEGIN
   -- definers run as iam_v2_owner, which needs these three columns of public.sites and nothing else.
   IF to_regclass('iam_v2.retention_floor') IS NOT NULL AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'iam_v2_owner') THEN
     GRANT SELECT (id, tenant_id, timezone) ON public.sites TO iam_v2_owner;
+  END IF;
+END $g$;
+
+-- Migration 0174 (a retention period can be previewed before it is shortened, audit AD-67): edged asks what the proposed periods would
+-- remove. The function counts with the retention functions inside a rolled-back sub-transaction and writes nothing.
+DO $g$
+BEGIN
+  IF to_regprocedure('public.data_retention_preview(uuid,uuid,integer,integer,integer,integer,integer,integer,integer,integer)') IS NULL THEN
+    RAISE NOTICE 'migration 0174 is not applied; retention preview grants skipped';
+    RETURN;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_edged') THEN
+    GRANT EXECUTE ON FUNCTION public.data_retention_preview(uuid,uuid,integer,integer,integer,integer,integer,integer,integer,integer) TO svc_edged;
   END IF;
 END $g$;

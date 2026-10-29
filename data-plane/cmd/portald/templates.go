@@ -250,6 +250,8 @@ const landingHTML = `<!doctype html>
   </div>
 
   <main class="card">
+    <!-- AD-35: shown only when a request has been slow for a moment; portald has already retried once on the guest's behalf. -->
+    <p id="busy-moment" class="hint" role="status" aria-live="polite" hidden><span data-i18n="busy.moment" data-i18n-en="One moment…">{{index .T "busy.moment"}}</span></p>
     <div class="sc-brandblock">
       <!-- BRANDING. Rendered from the published design so the first paint is already the hotel's, and applied
            again from /api/branding (which is how the admin preview shows unsaved changes). The defaults are
@@ -407,19 +409,30 @@ const landingHTML = `<!doctype html>
     <div id="pms-choices" role="group" aria-label="{{index .T "pms.choose"}}" style="display:none"></div>
   </div>
 
-  <!-- POST-STAY — ONE field. The appliance already knows which stay this device belonged to. -->
+  <!-- POST-STAY — the room number and the reservation number of the stay the guest left (AD-36). The appliance finds the
+       stay from this device's own history; the last name is asked for only on a device that was never on the stay. -->
   <div class="panel" id="panel-poststay">
     <form id="form-poststay" autocomplete="off">
       <div class="field">
-        <label for="ps-pin"><span data-i18n="poststay.pin" data-i18n-en="Post-stay PIN">{{index .T "poststay.pin"}}</span></label>
-        <input id="ps-pin" name="pin" type="text" inputmode="text" autocapitalize="characters" autocorrect="off" spellcheck="false" required dir="ltr"
+        <label for="ps-room"><span data-i18n="pms.room" data-i18n-en="Room Number">{{index .T "pms.room"}}</span></label>
+        <input id="ps-room" name="room" type="text" inputmode="text" autocapitalize="characters" autocorrect="off" spellcheck="false" required dir="ltr"
                aria-describedby="ps-hint">
-        <p class="hint" id="ps-hint" data-i18n="poststay.hint" data-i18n-en="The PIN you were given at checkout">{{index .T "poststay.hint"}}</p>
+        <p class="hint" id="ps-hint" data-i18n="poststay.hint" data-i18n-en="The room number and reservation number of the stay you checked out of">{{index .T "poststay.hint"}}</p>
+      </div>
+      <div class="field">
+        <label for="ps-res"><span data-i18n="pms.prompt.reservation" data-i18n-en="Reservation / confirmation number">{{index .T "pms.prompt.reservation"}}</span></label>
+        <input id="ps-res" name="reservation" type="text" inputmode="text" autocapitalize="characters" autocorrect="off" spellcheck="false" required dir="ltr">
+      </div>
+      <div class="field">
+        <label for="ps-last"><span data-i18n="pms.prompt.lastname" data-i18n-en="Last name on the reservation">{{index .T "pms.prompt.lastname"}}</span></label>
+        <input id="ps-last" name="last_name" type="text" autocomplete="family-name" autocorrect="off" spellcheck="false" dir="auto"
+               aria-describedby="ps-last-hint">
+        <p class="hint" id="ps-last-hint" data-i18n="poststay.lasthint" data-i18n-en="Needed only if this is not the device you used during your stay">{{index .T "poststay.lasthint"}}</p>
       </div>
       <button class="primary" type="submit"><span data-i18n="btn.reconnect" data-i18n-en="Reconnect">{{index .T "btn.reconnect"}}</span></button>
     </form>
     <div id="ps-choices" role="group" aria-label="{{index .T "pms.choose"}}" style="display:none"></div>
-    <div class="err" id="ps-err" role="alert" data-for="ps-pin"></div>
+    <div class="err" id="ps-err" role="alert" data-for="ps-room ps-res ps-last"></div>
   </div>
 
   <div class="panel" id="panel-social">
@@ -526,7 +539,7 @@ const landingHTML = `<!doctype html>
       ` + helpOpen + `
       <ul class="help-tips" id="help-tips">
         <li data-help-method="pms"><strong data-i18n="method.pms" data-i18n-en="Room">{{index .T "method.pms"}}</strong><span data-i18n="help.pms" data-i18n-en="Enter your room number, then the detail asked for below it, exactly as it appears on your reservation.">{{index .T "help.pms"}}</span></li>
-        <li data-help-method="poststay"><strong data-i18n="method.poststay" data-i18n-en="Post-stay">{{index .T "method.poststay"}}</strong><span data-i18n="help.poststay" data-i18n-en="Already checked out? Enter the PIN you were given at checkout to reconnect.">{{index .T "help.poststay"}}</span></li>
+        <li data-help-method="poststay"><strong data-i18n="method.poststay" data-i18n-en="Post-stay">{{index .T "method.poststay"}}</strong><span data-i18n="help.poststay" data-i18n-en="Already checked out? Enter your room number and reservation number to reconnect.">{{index .T "help.poststay"}}</span></li>
         <li data-help-method="voucher"><strong data-i18n="method.voucher" data-i18n-en="Voucher">{{index .T "method.voucher"}}</strong><span data-i18n="help.voucher" data-i18n-en="Type the code exactly as it is printed on your voucher, then tap Login.">{{index .T "help.voucher"}}</span></li>
         <li data-help-method="account"><strong data-i18n="method.account" data-i18n-en="Personal account">{{index .T "method.account"}}</strong><span data-i18n="help.account" data-i18n-en="Enter the username and password you were given. If a voucher field is showing, switch on “Use Personal Account” first.">{{index .T "help.account"}}</span></li>
         <li data-help-method="email"><strong data-i18n="method.email" data-i18n-en="Email">{{index .T "method.email"}}</strong><span data-i18n="help.email.account" data-i18n-en="Sign in with your email address and password. New here? Tap “Create an account”, then open the link in the email we send you to verify the address. Forgot your password? Tap “Forgot password?” for a reset link.">{{index .T "help.email.account"}}</span></li>
@@ -545,6 +558,27 @@ const landingHTML = `<!doctype html>
   </main>
   </div>
 
+  <script nonce="{{.Nonce}}">
+    // A sign-in that takes more than a moment says so, once: any form submit starts the timer, any finished fetch or
+    // the page leaving stops it. It adds no request and changes nothing about the sign-in itself.
+    (function () {
+      var note = document.getElementById('busy-moment'), timer = null;
+      if (!note) return;
+      function stop() { if (timer) { clearTimeout(timer); timer = null; } note.hidden = true; }
+      document.addEventListener('submit', function () {
+        stop();
+        timer = setTimeout(function () { note.hidden = false; }, 1500);
+      }, true);
+      if (window.fetch) {
+        var f = window.fetch;
+        window.fetch = function () {
+          var p = f.apply(this, arguments);
+          p.then(stop, stop);
+          return p;
+        };
+      }
+    })();
+  </script>
   <script nonce="{{.Nonce}}">
     // THE REFERENCE DESIGN PRESENTS TWO DOORS, NOT SIX. Every enabled method lands in one of two groups --
     // "am I staying here, or do I have a code?" -- and the group is only shown when it has something in it.
@@ -1591,7 +1625,7 @@ const landingHTML = `<!doctype html>
     // ONE DELIBERATE SUBMISSION, ONE RESOLUTION REQUEST ID. The id is minted where the guest's tap is handled
     // and never reused by a later tap: a derived id froze room sign-in on the guest's own typo.
 
-    // POST-STAY. The body is {pin} and nothing else.
+    // POST-STAY. The body is the room, the reservation and (optionally) the last name, and nothing else.
     document.addEventListener('DOMContentLoaded', function () {
       const f = document.getElementById('form-poststay');
       if (!f) return;
@@ -1599,7 +1633,11 @@ const landingHTML = `<!doctype html>
         e.preventDefault();
         const errEl = document.getElementById('ps-err');
         errEl.textContent = '';
-        submitPostStay(document.getElementById('ps-pin').value, errEl);
+        submitPostStay({
+          room: document.getElementById('ps-room').value,
+          reservation: document.getElementById('ps-res').value,
+          last_name: document.getElementById('ps-last').value
+        }, errEl);
       });
     });
 
@@ -1607,7 +1645,7 @@ const landingHTML = `<!doctype html>
       let j = {};
       let reached = true;
       try {
-        const r = await fetch('/auth/post-stay-pin', {
+        const r = await fetch('/auth/post-stay', {
           method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
         });
         j = await r.json().catch(function(){ reached = false; return {}; });
@@ -1615,8 +1653,8 @@ const landingHTML = `<!doctype html>
       return { j: j, reached: reached };
     }
 
-    async function submitPostStay(pin, errEl) {
-      const res = await postStayCall({ pin: pin });
+    async function submitPostStay(answers, errEl) {
+      const res = await postStayCall({ room: answers.room, reservation: answers.reservation, last_name: answers.last_name });
       const j = res.j;
       // A single post-stay package is converted by the server in the same request: the answer is the session.
       if (j.ok && j.session_id) {
@@ -1629,9 +1667,9 @@ const landingHTML = `<!doctype html>
         renderPostStayChoices(j.auth_context_id, j.choices, errEl);
         return;
       }
-      // Every other ANSWER is the same message -- wrong PIN, expired, revoked, locked out, the room re-let, or
+      // Every other ANSWER is the same message -- wrong room or reservation, expired, revoked, locked out, the room re-let, or
       // post-stay not being offered here at all. A request that never reached the server is not an answer, and
-      // telling a guest whose connection dropped to re-check a PIN they typed correctly helps nobody.
+      // telling a guest whose connection dropped to re-check details they typed correctly helps nobody.
       errEl.textContent = res.reached ? PHASE3_FAIL() : PHASE3_UNREACHED();
     }
 

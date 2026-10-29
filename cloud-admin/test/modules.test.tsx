@@ -145,6 +145,7 @@ describe("licence modules in the appliance dialogs", () => {
     const site = within(dialog).getByLabelText(/^Site$|^Site\b/);
     await waitFor(() => expect(within(site).getByRole("option", { name: "Demo Resort" })).toBeInTheDocument());
     await user.selectOptions(site, "s1");
+    await user.type(within(dialog).getByLabelText(/^Activation code/), "ab12-cd34");
     await waitFor(() => expect(within(dialog).getByRole("checkbox", { name: /^Hotel/ })).toBeChecked());
     await user.click(within(dialog).getByRole("button", { name: "Activate" }));
     await waitFor(() => expect(calls.some((c) => c.url.endsWith("/activate"))).toBe(true));

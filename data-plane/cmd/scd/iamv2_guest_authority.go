@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strconv"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
@@ -101,6 +102,12 @@ func (s *server) authorizeViaIAMv2(w http.ResponseWriter, r *http.Request,
 	req.Device.ApplianceID = s.applianceID
 
 	res, err := s.iamv2Auth.Authenticate(r.Context(), req)
+	if err != nil && iamv2.CodeOf(err) == iamv2.ErrBusy {
+		// AD-35: not a wrong credential and not an outage. The same answer scd gives when it is at capacity.
+		w.Header().Set("Retry-After", strconv.Itoa(guestBusyRetryAfter))
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "BUSY", "retry_after": guestBusyRetryAfter})
+		return true
+	}
 	if err != nil {
 		// A config or repository error on an ENABLED method must not degrade to legacy.
 		slog.Error("iamv2 guest auth failed", "method", string(method), "err", err)

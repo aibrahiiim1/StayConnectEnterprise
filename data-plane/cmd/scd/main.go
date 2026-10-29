@@ -43,8 +43,6 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/nft"
 	"github.com/stayconnect/enterprise/data-plane/internal/otp"
 	"github.com/stayconnect/enterprise/data-plane/internal/otpkey"
-	"github.com/stayconnect/enterprise/data-plane/internal/pms"
-	"github.com/stayconnect/enterprise/data-plane/internal/pmsloader"
 	"github.com/stayconnect/enterprise/data-plane/internal/reqlog"
 	"github.com/stayconnect/enterprise/data-plane/internal/sealbox"
 	"github.com/stayconnect/enterprise/data-plane/internal/shape"
@@ -103,10 +101,20 @@ type cfg struct {
 	PortalTLSExtraRoots string
 }
 
+// requireDBURL refuses to start without SCD_DB_URL (audit AD-64, P6 L14): the built-in fallback carried a published
+// password and turned TLS off. The installer and the upgrade add a missing value (deploy/scripts/backfill-db-urls.sh)
+// and read it back before any service is restarted.
+func requireDBURL(c cfg) error {
+	if strings.TrimSpace(c.DBURL) == "" {
+		return errors.New("SCD_DB_URL is not set; scd has no built-in database URL. Run deploy/scripts/backfill-db-urls.sh or set it in /etc/stayconnect/scd.env")
+	}
+	return nil
+}
+
 func loadCfg() cfg {
 	return cfg{
 		SocketPath:      envOr("SCD_SOCKET", "/run/stayconnect/scd.sock"),
-		DBURL:           envOr("SCD_DB_URL", "postgres://stayconnect:stayconnect@127.0.0.1:5432/stayconnect?sslmode=disable"),
+		DBURL:           os.Getenv("SCD_DB_URL"),
 		TenantID:        os.Getenv("SCD_TENANT_ID"),
 		SiteID:          os.Getenv("SCD_SITE_ID"),
 		ApplianceID:     os.Getenv("SCD_APPLIANCE_ID"),
@@ -129,7 +137,7 @@ func loadCfg() cfg {
 		MTLSBase: os.Getenv("SCD_MTLS_BASE"),
 
 		SecretsDir:      envOr("SCD_SECRETS_DIR", "/etc/stayconnect/secrets"),
-		DurableThrottle: os.Getenv("SCD_DURABLE_THROTTLE") == "true",
+		DurableThrottle: durableThrottleEnabled(os.Getenv("SCD_DURABLE_THROTTLE")),
 		OTPHMAC:         os.Getenv("SCD_OTP_HMAC") == "true",
 
 		PortalTLSDir:        envOr("SCD_PORTAL_TLS_DIR", "/etc/stayconnect/portal-tls"),
@@ -180,6 +188,10 @@ type server struct {
 	// socialPortal reports HTTPS state and canonical hostname for social sign-in; nil or noPortalHTTPS{} means the HTTP fallback (no real provider offered).
 	socialPortal portalHosts
 	loginRL      *loginLimiter // layered throttling for guest username/password logins (optional fast in-memory layer)
+	// settings caches the sign-in-path settings for a few seconds, cleared by database notification (AD-52); nil = no cache.
+	settings *ttlCache
+	// waiters wakes the last sign-in step when netd activates a session (AD-52); nil = poll only.
+	waiters *sessionWaiters
 
 	// Dark-auth machinery, inert unless enabled: authThrottle (durable DB throttle; nil = in-memory only), otpRing
 	// (keyed-HMAC OTPs; nil = legacy), iamv2Auth (all method flags OFF, never touches its nil repository).
@@ -229,11 +241,6 @@ type server struct {
 	ledgerRT     ledgerRuntime
 	// operatorMFA seals operators' authenticator secrets and MACs their recovery codes.
 	operatorMFA operatorMFAKeys
-
-	// The PMS registry is live-reloadable: readers use currentPMSReg(); reload swaps it under pmsMu, and pmsBuilt holds the generation's providers to Stop() on the next reload.
-	pmsMu    sync.RWMutex
-	pmsReg   *pms.Registry
-	pmsBuilt []pms.Provider
 
 	db     *pgxpool.Pool
 	tenID  string
@@ -286,52 +293,6 @@ type server struct {
 
 	// portalTLS is the portal HTTPS certificate agent and the one answer to "is the portal on HTTPS"; a nil agent reports the HTTP fallback.
 	portalTLS *portalTLSAgent
-}
-
-func (s *server) currentPMSReg() *pms.Registry {
-	s.pmsMu.RLock()
-	defer s.pmsMu.RUnlock()
-	return s.pmsReg
-}
-
-// pmsReloadSafetyLoop reloads every 10 minutes as a safety net; Hotel Admin changes reload immediately through /v1/admin/pms/reload.
-func (s *server) pmsReloadSafetyLoop(ctx context.Context) {
-	t := time.NewTicker(10 * time.Minute)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			rctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-			if err := s.reloadPMS(rctx); err != nil {
-				slog.Warn("pms safety-net reload failed", "err", err)
-			}
-			cancel()
-		}
-	}
-}
-
-// reloadPMS swaps in a freshly built provider set, then stops the previous generation; a failure mid-build leaves the old registry intact.
-func (s *server) reloadPMS(ctx context.Context) error {
-	reg, built, err := pmsloader.Load(ctx, s.db, s.tenID, s.siteID)
-	if err != nil {
-		return fmt.Errorf("reloadPMS load: %w", err)
-	}
-	pmsloader.StartAll(ctx, built)
-	// Re-seed stub reservations if SCD_PMS_STUB_SEED=true: the fresh Stub lost the previous generation's seed.
-	maybeSeedPMSStubs(built)
-
-	s.pmsMu.Lock()
-	oldBuilt := s.pmsBuilt
-	s.pmsReg = reg
-	s.pmsBuilt = built
-	s.pmsMu.Unlock()
-
-	// Stop the prior generation after the swap so in-flight requests holding the old registry finish without racing on torn-down resources.
-	pmsloader.StopAll(oldBuilt)
-	slog.Info("pms reloaded", "count", len(built))
-	return nil
 }
 
 type authorizeReq struct {
@@ -519,6 +480,10 @@ func main() {
 	startupbackoff.Guard("scd")
 
 	c := loadCfg()
+	if err := requireDBURL(c); err != nil {
+		slog.Error("configuration", "err", err)
+		os.Exit(1)
+	}
 
 	applianceauth.SetVersion(scdVersion)
 
@@ -534,7 +499,12 @@ func main() {
 			"does not register and does not contact Central until it is factory-reset", "since", removedRec.At)
 	}
 	// The site database is opened before registration, which reports whose customer data it still holds (held_customer.go). pgxpool.New does not connect.
-	pool, err := pgxpool.New(rootCtx, c.DBURL)
+	poolCfg, err := scdPoolConfig(c.DBURL)
+	if err != nil {
+		slog.Error("db config", "err", err)
+		os.Exit(1)
+	}
+	pool, err := pgxpool.NewWithConfig(rootCtx, poolCfg)
 	if err != nil {
 		slog.Error("db open", "err", err)
 		os.Exit(1)
@@ -611,21 +581,6 @@ func main() {
 	// the setup wizard and runs the assignment agent, then re-execs once a signed assignment arrives.
 	awaiting := c.TenantID == "" || c.SiteID == ""
 
-	var pmsReg *pms.Registry
-	var pmsBuilt []pms.Provider
-	if awaiting {
-		pmsReg = pms.NewRegistry()
-		slog.Warn("awaiting assignment/enrollment: skipping tenant-scoped guest-plane subsystems (PMS/social)")
-	} else {
-		pmsReg, pmsBuilt, err = pmsloader.Load(rootCtx, pool, c.TenantID, c.SiteID)
-		if err != nil {
-			slog.Error("pmsloader: load failed", "err", err)
-			os.Exit(1)
-		}
-		pmsloader.StartAll(rootCtx, pmsBuilt)
-		maybeSeedPMSStubs(pmsBuilt)
-	}
-
 	s := &server{
 		nft:          newLocalNFT(nft.New()),
 		shp:          shape.New(),
@@ -635,8 +590,8 @@ func main() {
 		whatsapp:     whatsapp.NewStub(c.WhatsAppLogPath),
 		socialBase:   socialBase,
 		loginRL:      newLoginLimiter(),
-		pmsReg:       pmsReg,
-		pmsBuilt:     pmsBuilt,
+		settings:     newTTLCache(settingsCacheTTL),
+		waiters:      newSessionWaiters(),
 		db:           pool,
 		tenID:        c.TenantID,
 		siteID:       c.SiteID,
@@ -733,6 +688,14 @@ func main() {
 		Serial:                 s.hw.Serial,
 		HardwareFingerprint:    s.hw.Fingerprint,
 		WANMAC:                 s.hw.WANMAC,
+	})
+	// AD-15(b): a licence being installed must name the customer and site of this appliance's verified assignment.
+	s.lic.SetAssignmentLookup(func() (string, string, bool) {
+		r, doc := s.resolveOwnAssignment(time.Now().UTC())
+		if doc == nil || !r.Assigned() {
+			return "", "", false
+		}
+		return doc.TenantID, doc.SiteID, true
 	})
 	s.lic.Load(rootCtx)
 	if err := s.initModules(); err != nil {
@@ -835,9 +798,6 @@ func main() {
 	r.Post("/v1/sessions/authorize-resume", s.authorizeResume)
 	r.Post("/v1/sessions/resume-revoke", s.resumeRevoke)
 	// /v1/auth/pms/verify is removed; the PMS guest path is /v1/phase3/auth/pms/resolve then /grant, which derives identity from the connection rather than the body.
-	r.Post("/v1/admin/pms/{name}/test", s.pmsAdminTest)
-	r.Get("/v1/admin/pms/{name}/cache", s.pmsAdminCache)
-	r.Get("/v1/admin/pms/{name}/health", s.pmsAdminHealth)
 	r.Get("/v1/tenant/auth-methods", s.tenantAuthMethods)
 	r.Get("/v1/tenant/branding", s.tenantBranding)
 	r.Get("/v1/ledger/status", s.ledgerStatusGet)
@@ -867,7 +827,7 @@ func main() {
 	r.Get("/v1/central/offline-request", s.setupActivationRequest)
 	r.Post("/v1/central/offline-package", s.centralOfflinePackage)
 	r.Post("/v1/license/install", s.licenseInstall)
-	r.Post("/v1/admin/pms/reload", s.pmsAdminReload)
+	r.Post("/v1/license/clock-reset", s.licenseClockReset)
 	r.Post("/v1/admin/walled-garden/reload", s.gardenReload)
 	s.notifyAdminRoutes(r)
 	// Social sign-in administration for edged: the write-only secret, its yes/no state, reload, and the offered/why-not status.
@@ -928,8 +888,7 @@ func main() {
 		os.Exit(1)
 	}
 	if s.p5poststay = newPhase5PostStay(p5cfg, s, s.p3auth); s.p5poststay != nil {
-		r.Post("/v1/phase5/poststay/issue", s.p5poststay.issueHandler)
-		r.Post("/v1/phase5/auth/post-stay-pin", s.p5poststay.verifyHandler)
+		r.Post("/v1/phase5/auth/post-stay", s.p5poststay.verifyHandler)
 		r.Post("/v1/phase5/poststay/convert", s.p5poststay.convertHandler)
 		slog.Info("phase5 post-stay guest routes mounted", "flags", p5cfg.SafeFlagSummary())
 	} else {
@@ -1003,7 +962,7 @@ func main() {
 			}
 		}()
 	}
-	go s.pmsHealthFlushLoop(rootCtx)
+	go s.activeSessionsGaugeLoop(rootCtx)
 	// The portal HTTPS certificate agent runs on every appliance: one that cannot reach Central still decides HTTPS from the certificate it has until it expires.
 	go s.portalTLS.run(rootCtx)
 	// Walled-garden rules from the site DB are reconciled into the nft walled_garden_ip set.
@@ -1015,8 +974,6 @@ func main() {
 	}
 	go s.cardReconcileLoop(rootCtx)
 	go s.postingLoop(rootCtx, s.initPostingWorker(rootCtx))
-	// Safety-net reload every 10 minutes in case a Hotel Admin reload was missed.
-	go s.pmsReloadSafetyLoop(rootCtx)
 
 	// Bounded-retention cleanup of durable throttle buckets (only when enabled).
 	if s.authThrottle != nil {
@@ -1027,6 +984,9 @@ func main() {
 	if s.p3auth != nil && s.p3auth.attempts != nil {
 		go s.p3auth.attempts.RunPurge(rootCtx, time.Hour)
 	}
+
+	// Settings-change and session-active notifications; the TTL and the poll remain the fallback (AD-52).
+	go s.runNotifications(rootCtx, c.DBURL)
 
 	// Hourly anonymisation of guest data that outlived the site's retention settings.
 	go s.dataRetentionLoop(rootCtx)
@@ -1093,6 +1053,8 @@ func main() {
 	// Appliance-side mTLS: ensure a client certificate exists (CSR, issue, fetch, store), verify the transport, rotate before expiry. A failure here never affects local guest operation.
 	if ident != nil && talksToCentral && c.MTLSBase != "" {
 		certMgr := appliancecert.New(c.CertDir, c.CtrlAPIBase, c.MTLSBase, ident.ApplianceID, ident.PrivateKey())
+		// AD-2: the appliance Root CA pinned at provisioning (default /etc/stayconnect/appliance-root-ca.crt).
+		certMgr.PinPath = envOr("SCD_APPLIANCE_ROOT_CA", "")
 		s.certMgr = certMgr
 		// Every bootstrap attempt tells us whether Central is answering, including while it waits for an operator to activate.
 		certMgr.OnAttempt(func(err error) { central.record(err, time.Now()) })
@@ -1174,4 +1136,11 @@ func main() {
 	if metricsSrv != nil {
 		_ = metricsSrv.Shutdown(shutCtx)
 	}
+}
+
+// durableThrottleEnabled: the durable guest rate limit is always on in a production build (AD-32); the env value can only
+// switch it on in a development build, where a test script has no throttle.key and sets it deliberately. Production fails
+// closed at start when the key is missing (authsec.go) rather than running with no limit.
+func durableThrottleEnabled(env string) bool {
+	return buildprofile.Production || env == "true"
 }

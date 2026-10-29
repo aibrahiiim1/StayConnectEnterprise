@@ -724,7 +724,24 @@ func (s *server) overviewGuests(ctx context.Context, win overviewWindow, cands [
 	return g
 }
 
-// accounting_records has no index on sampled_at, so a predicate on it alone is a sequential scan of every sample
+// overviewUsageTable picks the rollup a window is read from (migration 0175, AD-48): per-minute totals cover the
+// recent days, per-hour totals everything older. The raw samples are not read: they are kept only a couple of days
+// once rolled up, and summing them is what made this block scale with history. The choice and the date_trunc unit
+// are compile-time strings, never request input.
+func overviewUsageTable(winStart, now time.Time) (table, unit string) {
+	if now.Sub(winStart) <= minuteTableReach {
+		return "iam_v2.accounting_usage_minute", "minute"
+	}
+	return "iam_v2.accounting_usage_hour", "hour"
+}
+
+// minuteTableReach is deliberately below the default 7-day per-minute retention, so a window it sends to the
+// minute table is whole at the default. A site that shortened minute_retention_days sees the older part of a 7d
+// window as missing, and the block reports the shortfall by being smaller, not by erroring.
+const minuteTableReach = 6*24*time.Hour + 12*time.Hour
+
+// The rollups lag the samples by at most a minute (the watermark leaves rows still being committed alone) plus
+// acctd's rollup interval. accounting_records has no index on sampled_at, so a predicate on it alone is a sequential scan of every sample
 // ever recorded. Candidate sessions are chosen first from iam_v2.sessions and probed by `session_id = ANY($1)` in
 // batches, the leading column of the unique (session_id, sample_seq) index. That plan is expected from the index
 // definitions and was not measured, so every statement also runs under SET LOCAL statement_timeout and a timeout
@@ -732,7 +749,7 @@ func (s *server) overviewGuests(ctx context.Context, win overviewWindow, cands [
 // session totals in the same transaction.
 func (s *server) overviewTraffic(ctx context.Context, win overviewWindow, cands []overviewCandidate, candErr error) ovTraffic {
 	t := ovTraffic{SeriesDown: make([]int64, win.N), SeriesUp: make([]int64, win.N),
-		TopNetworks: []ovTrafficRow{}, TopPackages: []ovTrafficRow{}, Source: "accounting_samples"}
+		TopNetworks: []ovTrafficRow{}, TopPackages: []ovTrafficRow{}, Source: "accounting_rollup"}
 	if candErr != nil {
 		t.section = section{Available: false, Reason: candidateReason(candErr)}
 		return t
@@ -753,17 +770,18 @@ func (s *server) overviewTraffic(ctx context.Context, win overviewWindow, cands 
 	}
 
 	var rowsOut []sampleBucketRow
+	usageTable, usageUnit := overviewUsageTable(win.Start, time.Now())
 	for i := 0; i < len(ids); i += overviewSampleBatch {
 		batch := ids[i:min(i+overviewSampleBatch, len(ids))]
 		err := s.boundedRead(ctx, overviewStatementTimeout, func(tx pgx.Tx) error {
 			rows, err := tx.Query(ctx, `
-				SELECT floor(extract(epoch FROM (ar.sampled_at - $2::timestamptz)) / $4)::int,
+				SELECT GREATEST(floor(extract(epoch FROM (ar.bucket - $2::timestamptz)) / $4)::int, 0),
 				       ar.session_id::text,
 				       COALESCE(sum(ar.bytes_down), 0)::bigint, COALESCE(sum(ar.bytes_up), 0)::bigint
-				  FROM iam_v2.accounting_records ar
+				  FROM `+usageTable+` ar
 				 WHERE ar.session_id = ANY($1::uuid[])
 				   AND ar.tenant_id = $5 AND ar.site_id = $6
-				   AND ar.sampled_at >= $2 AND ar.sampled_at < $3
+				   AND ar.bucket >= date_trunc('`+usageUnit+`', $2::timestamptz) AND ar.bucket < $3
 				 GROUP BY 1, 2`,
 				batch, win.Start, win.End, win.Bucket.Seconds(), s.tenantID, s.siteID)
 			if err != nil {

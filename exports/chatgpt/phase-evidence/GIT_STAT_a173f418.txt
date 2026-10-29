@@ -1,4 +1,0 @@
-commit a173f4184fb269d95ec19f7fb182856f626bbdc4
-Date:   Wed Oct 28 17:51:06 2026 +0000
-
-    Governance: generated blocks re-rendered at T0266; manifest refreshed

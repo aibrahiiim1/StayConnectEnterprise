@@ -201,6 +201,8 @@ type sessionsSummary struct {
 type sessionsPage struct {
 	pagedList[edgeSessionRow]
 	Summary sessionsSummary `json:"summary"`
+	// Window is the period applied to ENDED sessions (AD-56). Active and pending sessions are always listed.
+	Window listWindowInfo `json:"window"`
 }
 
 func (s *server) listGuestSessions(w http.ResponseWriter, r *http.Request) {
@@ -235,7 +237,17 @@ func (s *server) listGuestSessions(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	args := []any{s.tenantID, stateArg, kindArg, likePattern(search)}
+	since, winInfo, werr := parseListWindow(r.URL.Query(), time.Now())
+	if werr != nil {
+		jsonErr(w, http.StatusBadRequest, "bad_request", werr.Error())
+		return
+	}
+	var sinceArg any
+	if since != nil {
+		sinceArg = *since
+	}
+	// $5 is the window start (NULL: the whole history). It narrows ended sessions only: a live session is listed however old.
+	args := []any{s.tenantID, stateArg, kindArg, likePattern(search), sinceArg}
 
 	ctx, cancel := dbCtx(r)
 	defer cancel()
@@ -258,6 +270,7 @@ func (s *server) listGuestSessions(w http.ResponseWriter, r *http.Request) {
           `+sessionFrom+`
          WHERE s.tenant_id = $1
            AND ($2::text IS NULL OR s.state = $2)
+           AND ($5::timestamptz IS NULL OR s.state <> 'ended' OR s.started >= $5)
     `, args...).Scan(&sum.Devices, &sum.Clients, &sum.Rooms, &sum.Bytes, &total,
 		&kRoom, &kAccount, &kVoucher, &kGuest, &kOpen, &kNone); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
@@ -271,9 +284,10 @@ func (s *server) listGuestSessions(w http.ResponseWriter, r *http.Request) {
           `+sessionFrom+`
          WHERE s.tenant_id = $1
            AND ($2::text IS NULL OR s.state = $2)
+           AND ($5::timestamptz IS NULL OR s.state <> 'ended' OR s.started >= $5)
            AND `+sessionMatch+`
          ORDER BY s.started DESC, s.id
-         LIMIT $5 OFFSET $6
+         LIMIT $6 OFFSET $7
     `, append(args, pg.Fetch(), pg.Offset())...)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
@@ -294,7 +308,7 @@ func (s *server) listGuestSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, more := trimPage(out, pg)
-	writeJSON(w, http.StatusOK, sessionsPage{pagedList: newPagedList(out, more, pg, &total), Summary: sum})
+	writeJSON(w, http.StatusOK, sessionsPage{pagedList: newPagedList(out, more, pg, &total), Summary: sum, Window: winInfo})
 }
 
 func (s *server) getGuestSession(w http.ResponseWriter, r *http.Request) {

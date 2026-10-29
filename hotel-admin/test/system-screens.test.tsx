@@ -149,8 +149,8 @@ describe("Activity", () => {
 describe("Backups", () => {
   const ART = {
     data: [
-      { name: "db-20260921T095526Z.sql.gz", size_bytes: 1024, modified_at: "2026-09-21T09:55:26Z", verified_at: "2026-09-21T10:00:00Z", verified_tables: 90 },
-      { name: "db-20260920T095526Z.sql.gz", size_bytes: 1024, modified_at: "2026-09-20T09:55:26Z", verified_at: null },
+      { name: "db-20260921T095526Z.sql.gz.age", size_bytes: 1024, modified_at: "2026-09-21T09:55:26Z", verified_at: "2026-09-21T10:00:00Z", verified_tables: 90, downloadable: true },
+      { name: "db-20260920T095526Z.sql.gz.age", size_bytes: 1024, modified_at: "2026-09-20T09:55:26Z", verified_at: null, downloadable: true },
     ],
   };
   const base = {
@@ -165,17 +165,20 @@ describe("Backups", () => {
     routes(base, ["site_admin"]);
     const Page = (await import("@/app/(app)/backups/page")).default;
     render(<Page />);
-    let menu = await openRowMenu("db-20260921T095526Z.sql.gz");
+    let menu = await openRowMenu("db-20260921T095526Z.sql.gz.age");
     expect(within(menu).getByRole("menuitem", { name: "Restore…" })).toBeTruthy();
     fireEvent.keyDown(menu, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
-    menu = await openRowMenu("db-20260920T095526Z.sql.gz");
+    menu = await openRowMenu("db-20260920T095526Z.sql.gz.age");
     expect(within(menu).queryByRole("menuitem", { name: "Restore…" })).toBeNull();
     expect(screen.getByText("This site can be recovered from its latest backup")).toBeTruthy();
   });
 
   it("restore requires the backup's name typed out and a password, and sends both", async () => {
-    routes(base, ["site_admin"]);
+    // A backup taken before backups were always encrypted: restored with the password and its name, no key holder's key.
+    routes({ ...base, "/backups/artifacts": { data: [
+      { name: "db-20260921T095526Z.sql.gz", size_bytes: 1024, modified_at: "2026-09-21T09:55:26Z", verified_at: "2026-09-21T10:00:00Z", verified_tables: 90 },
+    ] } }, ["site_admin"]);
     post.mockResolvedValue({});
     const Page = (await import("@/app/(app)/backups/page")).default;
     render(<Page />);
@@ -216,11 +219,33 @@ describe("Backups", () => {
     const Page = (await import("@/app/(app)/backups/page")).default;
     render(<Page />);
     await screen.findByText(/can see the backups, but not download/);
-    await screen.findByText("db-20260921T095526Z.sql.gz");
+    await screen.findByText("db-20260921T095526Z.sql.gz.age");
     expect(screen.queryByRole("button", { name: /Back up now/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /^Restore / })).toBeNull();
     expect(screen.queryByRole("button", { name: /^Download / })).toBeNull();
     expect(screen.queryByRole("link", { name: /^Download / })).toBeNull();
+  });
+
+  // AD-9: only an encrypted database dump can be downloaded; an unencrypted one is marked and never offered, and a file that is not a
+  // database dump is listed without a download.
+  it("marks an unencrypted dump and offers no download for it or for a non-database file", async () => {
+    routes({
+      ...base,
+      "/backups/artifacts": { data: [
+        { name: "db-20260919T095526Z.sql.gz", kind: "database", size_bytes: 1024, modified_at: "2026-09-19T09:55:26Z", verified_at: "2026-09-19T10:00:00Z", downloadable: false, encrypted: false,
+          download_refusal: "This database backup is not encrypted, so it cannot be downloaded." },
+        { name: "deploy-20260919.tgz", kind: "deployment rollback", size_bytes: 2048, modified_at: "2026-09-19T08:00:00Z", downloadable: false,
+          download_refusal: "Only database backups can be downloaded. This file is kept on the appliance." },
+      ] },
+    }, ["hotel_it_manager"]);
+    const Page = (await import("@/app/(app)/backups/page")).default;
+    render(<Page />);
+    await screen.findByText("db-20260919T095526Z.sql.gz");
+    expect(screen.getByText("Not encrypted")).toBeTruthy();
+    // The IT manager has nothing else to do with either file, so neither row offers any action: no Download item anywhere.
+    expect(screen.queryByRole("button", { name: "Actions for db-20260919T095526Z.sql.gz" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Actions for deploy-20260919.tgz" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Download…" })).toBeNull();
   });
 
   it("the IT manager downloads with a password: a ticket first, then the file by form post", async () => {
@@ -228,13 +253,13 @@ describe("Backups", () => {
     post.mockResolvedValue({ ticket: "tkt-1" });
     const submit = vi.spyOn(HTMLFormElement.prototype, "submit").mockImplementation(function (this: HTMLFormElement) {
       expect(this.method.toLowerCase()).toBe("post");
-      expect(this.action).toContain("/api/edge/v1/backup-download/db-20260921T095526Z.sql.gz");
+      expect(this.action).toContain("/api/edge/v1/backup-download/db-20260921T095526Z.sql.gz.age");
       expect((this.elements.namedItem("ticket") as HTMLInputElement).value).toBe("tkt-1");
     });
     const Page = (await import("@/app/(app)/backups/page")).default;
     render(<Page />);
     await screen.findByText(/can see and download backups/);
-    await openRowMenu("db-20260921T095526Z.sql.gz");
+    await openRowMenu("db-20260921T095526Z.sql.gz.age");
     fireEvent.click(await screen.findByRole("menuitem", { name: "Download…" }));
     const dialog = await screen.findByRole("dialog");
     const go = within(dialog).getByRole("button", { name: "Download" }) as HTMLButtonElement;
@@ -242,7 +267,7 @@ describe("Backups", () => {
     await userEvent.type(within(dialog).getByLabelText(/Confirm your password/), "pw");
     await userEvent.click(go);
     await waitFor(() => expect(post).toHaveBeenCalledWith(
-      "/backup-download/db-20260921T095526Z.sql.gz/ticket", { password: "pw" }));
+      "/backup-download/db-20260921T095526Z.sql.gz.age/ticket", { password: "pw" }));
     await waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
     submit.mockRestore();
   });

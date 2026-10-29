@@ -88,6 +88,7 @@ func TestOfflineImportConflictAndSinglePackage(t *testing.T) {
 		t.Fatal("offline base")
 	}
 	reqA, _ := signedRequest(t, "SC-TEST-M16-A")
+	f.header = map[string]string{"X-Activation-Code": codeOfPub(t, reqA.PublicKey)}
 	if rec := f.operatorCall(off.importRequest, http.MethodPost, "", reqA); rec.Code != http.StatusOK {
 		t.Fatalf("import A: %d %s", rec.Code, rec.Body.String())
 	}
@@ -96,10 +97,12 @@ func TestOfflineImportConflictAndSinglePackage(t *testing.T) {
 	_, privB, _ := ed25519.GenerateKey(rand.Reader)
 	reqB.PublicKey = base64.RawStdEncoding.EncodeToString(privB.Public().(ed25519.PublicKey))
 	activation.SignRequest(privB, &reqB)
+	f.header = map[string]string{"X-Activation-Code": codeOfPub(t, reqB.PublicKey)}
 	if rec := f.operatorCall(off.importRequest, http.MethodPost, "", reqB); rec.Code != http.StatusConflict {
 		t.Fatalf("a request id of another appliance must be 409, got %d %s", rec.Code, rec.Body.String())
 	}
 
+	f.header = nil
 	var appID string
 	if err := f.pool.QueryRow(f.ctx, `SELECT id::text FROM appliances WHERE serial='SC-TEST-M16-A'`).Scan(&appID); err != nil {
 		t.Fatal(err)

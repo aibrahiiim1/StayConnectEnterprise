@@ -20,6 +20,12 @@ export type SecuritySettings = {
   signin_lock_failures_bounds: { default: number; min: number; max: number; unit: string };
   signin_lock_minutes: number;
   signin_lock_minutes_bounds: { default: number; min: number; max: number; unit: string };
+  /** Hours an appliance marked for replacement stays licensed until its replacement is activated. */
+  replacement_window_hours?: number;
+  replacement_window_hours_bounds?: { default: number; min: number; max: number; unit: string };
+  /** Minutes Central waits for a retiring appliance's signed acknowledgement before it raises an alert. */
+  retirement_ack_minutes?: number;
+  retirement_ack_minutes_bounds?: { default: number; min: number; max: number; unit: string };
   default: number;
   min: number;
   max: number;
@@ -36,16 +42,20 @@ export function SessionLifetimeSetting({ canManage }: { canManage: boolean }) {
   const [idle, setIdle] = useState("");
   const [lockN, setLockN] = useState("");
   const [lockMins, setLockMins] = useState("");
+  const [replHours, setReplHours] = useState("");
+  const [ackMins, setAckMins] = useState("");
   const [reason, setReason] = useState("");
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
-  const fields = useFieldErrors<"hours" | "idle" | "lockN" | "lockMins" | "reason" | "unchanged">();
+  const fields = useFieldErrors<"hours" | "idle" | "lockN" | "lockMins" | "replHours" | "ackMins" | "reason" | "unchanged">();
 
   useEffect(() => {
     api.get<SecuritySettings>("/cloud/v1/settings/security")
       .then((v) => {
         setS(v); setHours(String(v.operator_session_max_hours)); setIdle(String(v.operator_idle_minutes));
         setLockN(String(v.signin_lock_failures)); setLockMins(String(v.signin_lock_minutes));
+        setReplHours(v.replacement_window_hours === undefined ? "" : String(v.replacement_window_hours));
+        setAckMins(v.retirement_ack_minutes === undefined ? "" : String(v.retirement_ack_minutes));
       })
       .catch(setErr);
   }, []);
@@ -73,6 +83,15 @@ export function SessionLifetimeSetting({ canManage }: { canManage: boolean }) {
       fail({ lockMins: `Enter a whole number of minutes from ${mb.min} to ${mb.max} for the lock.` });
       return;
     }
+    const rb = s.replacement_window_hours_bounds, ab = s.retirement_ack_minutes_bounds;
+    if (rb && (!/^\d+$/.test(replHours.trim()) || Number(replHours) < rb.min || Number(replHours) > rb.max)) {
+      fail({ replHours: `Enter a whole number of hours from ${rb.min} to ${rb.max}.` });
+      return;
+    }
+    if (ab && (!/^\d+$/.test(ackMins.trim()) || Number(ackMins) < ab.min || Number(ackMins) > ab.max)) {
+      fail({ ackMins: `Enter a whole number of minutes from ${ab.min} to ${ab.max}.` });
+      return;
+    }
     if (!reason.trim()) {
       fail({ reason: "Enter a reason; it is recorded in the audit log." });
       return;
@@ -84,6 +103,8 @@ export function SessionLifetimeSetting({ canManage }: { canManage: boolean }) {
       const v = await withStepUp(() =>
         api.patch<SecuritySettings>("/cloud/v1/settings/security", {
           operator_session_max_hours: n, operator_idle_minutes: m, signin_lock_failures: ln, signin_lock_minutes: lm,
+          ...(rb ? { replacement_window_hours: Number(replHours) } : {}),
+          ...(ab ? { retirement_ack_minutes: Number(ackMins) } : {}),
           reason: reason.trim(),
         }),
       );
@@ -92,6 +113,8 @@ export function SessionLifetimeSetting({ canManage }: { canManage: boolean }) {
       setIdle(String(v.operator_idle_minutes));
       setLockN(String(v.signin_lock_failures));
       setLockMins(String(v.signin_lock_minutes));
+      setReplHours(v.replacement_window_hours === undefined ? "" : String(v.replacement_window_hours));
+      setAckMins(v.retirement_ack_minutes === undefined ? "" : String(v.retirement_ack_minutes));
       setReason("");
       toast.success("Sign-in limits saved", `${v.operator_idle_minutes} minutes idle, ${v.operator_session_max_hours} hours at most`);
     } catch (e) {
@@ -102,7 +125,9 @@ export function SessionLifetimeSetting({ canManage }: { canManage: boolean }) {
   }
 
   const unchanged = !!s && hours === String(s.operator_session_max_hours) && idle === String(s.operator_idle_minutes)
-    && lockN === String(s.signin_lock_failures) && lockMins === String(s.signin_lock_minutes);
+    && lockN === String(s.signin_lock_failures) && lockMins === String(s.signin_lock_minutes)
+    && replHours === (s.replacement_window_hours === undefined ? "" : String(s.replacement_window_hours))
+    && ackMins === (s.retirement_ack_minutes === undefined ? "" : String(s.retirement_ack_minutes));
 
   return (
     <SectionCard
@@ -160,6 +185,28 @@ export function SessionLifetimeSetting({ canManage }: { canManage: boolean }) {
             <Input id={fields.id("lockMins")} inputMode="numeric" aria-label="Minutes an account stays locked" value={lockMins}
               disabled={!canManage} onChange={(e) => setLockMins(e.target.value)} />
           </Field>
+          {s.replacement_window_hours_bounds && (
+            <Field
+              label="Replacement window (hours)"
+              required
+              hint={`How long an appliance marked for replacement stays licensed until its replacement is activated. From ${s.replacement_window_hours_bounds.min} to ${s.replacement_window_hours_bounds.max} hours. Default ${s.replacement_window_hours_bounds.default}.`}
+              error={fields.error("replHours")}
+            >
+              <Input id={fields.id("replHours")} inputMode="numeric" aria-label="Hours an appliance marked for replacement stays licensed" value={replHours}
+                disabled={!canManage} onChange={(e) => setReplHours(e.target.value)} />
+            </Field>
+          )}
+          {s.retirement_ack_minutes_bounds && (
+            <Field
+              label="Retirement acknowledgement wait (minutes)"
+              required
+              hint={`How long Central waits for a retiring appliance to confirm before it raises an alert. From ${s.retirement_ack_minutes_bounds.min} to ${s.retirement_ack_minutes_bounds.max} minutes. Default ${s.retirement_ack_minutes_bounds.default}.`}
+              error={fields.error("ackMins")}
+            >
+              <Input id={fields.id("ackMins")} inputMode="numeric" aria-label="Minutes to wait for a retiring appliance to acknowledge" value={ackMins}
+                disabled={!canManage} onChange={(e) => setAckMins(e.target.value)} />
+            </Field>
+          )}
           {canManage && (
             <Field label="Reason" required hint="Recorded in the audit log." error={fields.error("reason")}>
               <Input id={fields.id("reason")} value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} placeholder="e.g. shared workstation" />

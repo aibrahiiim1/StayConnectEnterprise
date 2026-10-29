@@ -47,6 +47,7 @@ export function ActivateDialog({
   const heldGone = !!heldId && !heldName;
   const [placement, setPlacement] = useState<Placement>(emptyPlacement(heldGone ? "" : heldId));
   const [terms, setTerms] = useState<TermsDraft>(DEFAULT_TERMS);
+  const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<unknown>(null);
   const { catalog } = useModuleCatalog();
@@ -58,6 +59,7 @@ export function ActivateDialog({
     if (open) {
       setPlacement(emptyPlacement(heldGone ? "" : heldId));
       setTerms(DEFAULT_TERMS);
+      setCode("");
       setErr(null);
       clearFields();
     }
@@ -73,6 +75,10 @@ export function ActivateDialog({
       setErr(HOLDS_OTHER_CUSTOMER);
       return;
     }
+    if (!code.trim()) {
+      setErr("Enter the activation code shown on the appliance (Admin Console, System, Appliance and licence).");
+      return;
+    }
     const issue = placementIssue(placement) ?? termsIssue(terms);
     if (issue) {
       setErr(null);
@@ -84,7 +90,9 @@ export function ActivateDialog({
     setErr(null);
     try {
       await withStepUp(() =>
-        api.post(`/cloud/v1/appliances/${appliance.id}/activate`, { ...placementBody(placement), license: termsBody(terms) }),
+        api.post(`/cloud/v1/appliances/${appliance.id}/activate`, {
+          ...placementBody(placement), license: termsBody(terms), activation_code: code.trim(),
+        }),
       );
       toast.success(`${appliance.serial} activated`, "It picks up its license the next time it contacts Central.");
       onOpenChange(false);
@@ -124,6 +132,11 @@ export function ActivateDialog({
           )}
         </Callout>
       )}
+      <Section title="Prove it is the right appliance">
+        <Field label="Activation code" required hint="Shown on the appliance's own Admin Console, under System, Appliance and licence.">
+          <Input value={code} maxLength={12} autoComplete="off" onChange={(e) => setCode(e.target.value)} placeholder="XXXX-XXXX" />
+        </Field>
+      </Section>
       <Section title="Where it is installed">
         <PlacementFields
           value={placement}

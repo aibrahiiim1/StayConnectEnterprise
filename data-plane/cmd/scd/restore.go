@@ -429,6 +429,16 @@ func (s *server) runRestore(ctx context.Context, name, identity, by string, rec 
 		ok("retention", detail)
 	}
 
+	// ---- 3e. the backup's schema must be the one the installed software expects (restore_schema.go, audit P9 M3) ---------------------
+	// After the more specific ledger and retention refusals above, which keep their own wording; before anything is replaced.
+	if detail, good := s.restoreSchemaCheck(ctx, staging); !good {
+		dropStaging()
+		fail("schema", detail)
+		return
+	} else {
+		ok("schema", detail)
+	}
+
 	// ---- 4. the swap: rename aside, rename in ----------------------------------------------------------
 	//
 	// Connections must be gone first or the rename is refused; services are stopped, not just disconnected,

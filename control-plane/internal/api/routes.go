@@ -93,6 +93,8 @@ func (b *Base) CloudRoutes(off *OfflineBase) http.Handler {
 	tm.Patch("/settings/security", b.patchSecuritySettings)
 	r.With(perm(auth.PermFleetView)).Get("/settings/retention", b.getRetentionSettings)
 	tm.Patch("/settings/retention", b.patchRetentionSettings)
+	r.With(perm(auth.PermFleetView)).Get("/settings/registration", b.getRegistrationSettings)
+	tm.Patch("/settings/registration", b.patchRegistrationSettings)
 
 	b.portalTLSRoutes(r)
 

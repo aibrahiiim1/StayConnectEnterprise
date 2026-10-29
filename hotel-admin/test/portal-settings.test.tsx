@@ -7,6 +7,7 @@ const post = vi.fn();
 const del = vi.fn();
 const upload = vi.fn();
 vi.mock("@/lib/api", () => ({
+  PORTAL_IMAGE_MAX_BYTES: 1024 * 1024,
   api: {
     get: (...a: any[]) => get(...a),
     put: (...a: any[]) => put(...a),
@@ -533,7 +534,7 @@ describe("unsaved work is kept only when the server would keep it (found on PRE-
 
 // Preserve hidden translation overrides when a module is unavailable.
 describe("the wording follows the site's modules", () => {
-  const HIDDEN = [/Room Number in English/, /Post-stay PIN in English/, /Pay by card in English/,
+  const HIDDEN = [/Room Number in English/, /Post-stay in English/, /Pay by card in English/,
     /Charge to my room in English/, /Continue with Google in English/, /Email address in English/,
     /Verification code in English/, /Confirming your payment in English/];
 

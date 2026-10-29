@@ -8,11 +8,14 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"filippo.io/age"
@@ -22,7 +25,35 @@ import (
 )
 
 func execPsql(ctx context.Context, db, sql string) (string, error) {
-	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", pgContainer, "psql", "-U", pgUser, "-d", db, "-tA", "-v", "ON_ERROR_STOP=1")
+	return execPsqlVars(ctx, db, sql, nil)
+}
+
+// randomHex is n random bytes as hex: a per-call dollar-quote tag no document can contain.
+func randomHex(n int) string {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		panic("no randomness: " + err.Error())
+	}
+	return hex.EncodeToString(b)
+}
+
+// psqlArgs builds the psql command line. Values go in as variables (-v name=value) and are used in the SQL as :'name', which psql
+// quotes itself, so no value is ever formatted into SQL text (audit P4 CC4). They travel as arguments, never through a shell.
+func psqlArgs(db string, vars map[string]string) []string {
+	args := []string{"exec", "-i", pgContainer, "psql", "-U", pgUser, "-d", db, "-tA", "-v", "ON_ERROR_STOP=1"}
+	names := make([]string, 0, len(vars))
+	for k := range vars {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	for _, k := range names {
+		args = append(args, "-v", k+"="+vars[k])
+	}
+	return args
+}
+
+func execPsqlVars(ctx context.Context, db, sql string, vars map[string]string) (string, error) {
+	cmd := exec.CommandContext(ctx, "docker", psqlArgs(db, vars)...)
 	cmd.Stdin = strings.NewReader(sql)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -181,11 +212,27 @@ func (s *server) restoreLedgerApply(ctx context.Context, staging, identityText s
 	}
 	applied := 0
 	if len(feed) > 0 {
+		// AD-3: every entry about to be applied must be one this appliance wrote (or that a seal covers). Nothing is applied on
+		// an entry that cannot be vouched for, so a copy written by someone else can never make a restore erase a record.
+		var after int64
+		if !adopt {
+			after = sh.Seq
+		}
+		macKey, why := s.restoreLedgerKey(ctx, entries, after, ident)
+		if why != "" {
+			return why, false
+		}
+		if msg, ok := s.installRestoreKey(ctx, staging, macKey); !ok {
+			return msg, false
+		}
 		doc, _ := json.Marshal(feed)
-		if bytes.Contains(doc, []byte("$led$")) {
+		// The document is far larger than one command-line argument may be, so it travels on stdin inside a dollar quote whose tag is
+		// random for this call: nothing in an entry can close it, and the check below refuses the one-in-2^128 case anyway.
+		tag := "led" + randomHex(16)
+		if bytes.Contains(doc, []byte("$"+tag+"$")) {
 			return "a ledger entry contains an unexpected delimiter", false
 		}
-		out, err := execPsql(ctx, staging, fmt.Sprintf("SELECT public.ledger_apply($led$%s$led$::jsonb, %t)::text", doc, adopt))
+		out, err := execPsql(ctx, staging, fmt.Sprintf("SELECT public.ledger_apply($%[1]s$%[2]s$%[1]s$::jsonb, %[3]t)::text", tag, doc, adopt))
 		if err != nil {
 			return "the erasures could not be applied to the restored data: " + err.Error(), false
 		}
@@ -248,6 +295,7 @@ END $do$`, doc)
 // ledgerReconcileAfterRestore returns "" when both copies are in step, else a plain statement of what is not (never an error that undoes the restore).
 func (s *server) ledgerReconcileAfterRestore(ctx context.Context) string {
 	s.resetPool()
+	s.ledgerForgetKey() // the restored database carries its own copy of the key
 	st := s.ledgerReconcile(ctx)
 	switch {
 	case st.State == "ok":

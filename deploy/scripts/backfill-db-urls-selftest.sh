@@ -39,7 +39,21 @@ rm "$E/.dsn"; printf 'EDGED_SCD_SOCKET=x\n' > "$E/edged.env"
 bash "$HERE/backfill-db-urls.sh" "$E" >/dev/null 2>&1 && bad "ran without .dsn"
 grep -q DB_URL "$E/edged.env" && bad "wrote without .dsn" || ok "no .dsn: refused, nothing written"
 
+# AD-64 --verify: the read-back that runs before any restart
+V="$T/verify"; mkdir -p "$V"
+for k in SCD EDGED NETD ACCTD; do printf '%s_DB_URL=postgres://x:y@h/db
+' "$k" > "$V/$(echo "$k" | tr A-Z a-z).env"; done
+bash "$HERE/backfill-db-urls.sh" --verify "$V" >/dev/null 2>&1 && ok "--verify passes when all four are present" || bad "--verify refused a complete set"
+printf 'NETD_DB_URL=
+' > "$V/netd.env"
+vout="$(bash "$HERE/backfill-db-urls.sh" --verify "$V" 2>&1)"; vrc=$?
+[ "$vrc" != 0 ] && printf '%s' "$vout" | grep -q 'netd.env has no non-empty NETD_DB_URL' && ok "--verify fails on an empty value and names it" || bad "--verify accepted an empty NETD_DB_URL ($vrc)"
+rm "$V/netd.env"
+bash "$HERE/backfill-db-urls.sh" --verify "$V" >/dev/null 2>&1 && bad "--verify accepted an absent env file" || ok "--verify fails on an absent env file"
+printf '%s' "$vout" | grep -q 'postgres://' && bad "--verify printed a value" || ok "--verify prints no value"
+
 # both install paths call it
 grep -q 'backfill-db-urls.sh' "$HERE/provision-fresh-appliance.sh" && ok "provision-fresh-appliance.sh runs it" || bad "provisioning does not run it"
+grep -q 'backfill-db-urls.sh" --verify' "$HERE/appliance-install.sh" && grep -q 'backfill-db-urls.sh" --verify' "$HERE/provision-fresh-appliance.sh" && ok "both paths run --verify before a restart" || bad "--verify is not wired in"
 grep -q 'backfill-db-urls.sh' "$HERE/appliance-install.sh" && ok "appliance-install.sh runs it" || bad "the installer does not run it"
 exit "$fail"

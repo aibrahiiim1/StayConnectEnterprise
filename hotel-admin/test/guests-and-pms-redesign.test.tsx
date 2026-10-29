@@ -40,7 +40,6 @@ const PROFILE = {
   normalized_room_number: "412",
   stay_status: "CHECKED_OUT",
   status: "ACTIVE",
-  pin_generation: 1,
   issued_via: "CHECKOUT",
   issued_at: "2026-09-20T10:00:00Z",
   valid_until: "2026-09-27T10:00:00Z",
@@ -56,32 +55,12 @@ describe("Post-stay access", () => {
     );
   });
 
-  it("shows the reset PIN once, in the one-time reveal, after a reason and password", async () => {
-    post.mockResolvedValue({ pin: "482913", valid_until: "2026-09-27T10:00:00Z" });
+  it("offers no PIN to give out or reset: access is the room and reservation of the stay", async () => {
     const { PostStayView } = await import("@/components/phase5/post-stay-view");
-    const user = userEvent.setup();
     render(<PostStayView canAct />);
-
-    await user.click(await screen.findByRole("button", { name: /^Reset PIN: room/ }));
-    const dialog = await screen.findByRole("dialog");
-    const submit = within(dialog).getByRole("button", { name: "Reset PIN" });
-    expect(submit).toBeDisabled();
-    await user.type(within(dialog).getByLabelText(/Reason/), "Guest lost the printout");
-    await user.type(within(dialog).getByLabelText(/Confirm your password/), "hunter22");
-    await user.click(submit);
-
-    await waitFor(() =>
-      expect(post).toHaveBeenCalledWith("/post-stay-profiles/p-1/reset", {
-        password: "hunter22",
-        reason: "Guest lost the printout",
-      }),
-    );
-    expect(await screen.findByText("New PIN — shown once")).toBeTruthy();
-    expect(screen.getByTestId("one-time-value").textContent).toBe("482913");
-    expect(screen.getByText(/Shown once\./)).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "I have given it to the guest" }));
-    await waitFor(() => expect(screen.queryByTestId("one-time-value")).toBeNull());
-    expect(screen.queryByRole("button", { name: /show pin/i })).toBeNull();
+    await screen.findByRole("button", { name: /^Actions for room/ });
+    expect(screen.queryByRole("button", { name: /reset pin/i })).toBeNull();
+    expect(screen.queryByText(/\bPIN\b/)).toBeNull();
   });
 
   it("ends access only with a reason of 4+ characters, the password AND the typed word REVOKE", async () => {
@@ -211,11 +190,12 @@ describe("Guest accounts", () => {
     await chooseInRow(document.body, /password/i);
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByLabelText(/generate a strong password/i));
+    await user.type(within(dialog).getByLabelText(/reason/i), "forgot it at the desk");
     await user.click(within(dialog).getByRole("button", { name: "Set password" }));
 
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith("/guest-accounts/ga-1/set-password", {
-        password: "", generate: true, disconnect_sessions: false,
+        password: "", generate: true, disconnect_sessions: false, reason: "forgot it at the desk",
       }),
     );
     expect(await screen.findByText("Password for room101")).toBeTruthy();

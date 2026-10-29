@@ -101,6 +101,7 @@ describe("an SMTP sender", () => {
     fireEvent.change(within(dialog).getByLabelText(/From name/), { target: { value: "Wi-Fi Access" } });
     fireEvent.change(within(dialog).getByLabelText(/^Timeout/), { target: { value: "20" } });
 
+    fireEvent.change(within(dialog).getByLabelText(/Your password/), { target: { value: "op-pw" } });
     fireEvent.click(within(dialog).getByRole("button", { name: /^Add sender$/ }));
     await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
     expect(post.mock.calls[0][0]).toBe("/notification-providers");
@@ -109,7 +110,7 @@ describe("an SMTP sender", () => {
       api_key: "s3cret", api_user: undefined,
       from_address: "codes@example.com", from_name: "Wi-Fi Access",
       extra: { host: "smtp.example.com", port: "", security: "tls", username: "codes@example.com", timeout_seconds: "20" },
-      enabled: true,
+      enabled: true, password: "op-pw", // the operator's own password confirms the change (audit P9 M2)
     });
   });
 
@@ -123,8 +124,10 @@ describe("an SMTP sender", () => {
     expect((within(dialog).getByLabelText(/Mail server/) as HTMLInputElement).value).toBe("smtp.example.com");
     expect((within(dialog).getByLabelText(/^Port/) as HTMLInputElement).value).toBe("587");
     fireEvent.change(within(dialog).getByLabelText(/^Port/), { target: { value: "2525" } });
+    fireEvent.change(within(dialog).getByLabelText(/Your password/), { target: { value: "op-pw" } });
     fireEvent.click(within(dialog).getByRole("button", { name: /Save changes/ }));
     await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
+    expect(patch.mock.calls[0][1].password).toBe("op-pw");
     expect(patch.mock.calls[0][0]).toBe("/notification-providers/p1");
     expect(patch.mock.calls[0][1]).not.toHaveProperty("api_key");
     expect(patch.mock.calls[0][1].extra).toEqual({ host: "smtp.example.com", port: "2525", security: "starttls", username: "codes@example.com", timeout_seconds: "10" });
@@ -140,6 +143,7 @@ describe("an SMTP sender", () => {
     fireEvent.change(within(dialog).getByLabelText("Service"), { target: { value: "smtp" } });
     fireEvent.change(within(dialog).getByLabelText(/Mail server/), { target: { value: "smtp.example.com" } });
     fireEvent.change(within(dialog).getByLabelText(/^Username/), { target: { value: "codes" } });
+    fireEvent.change(within(dialog).getByLabelText(/Your password/), { target: { value: "op-pw" } });
     fireEvent.click(within(dialog).getByRole("button", { name: /^Add sender$/ }));
     expect(await within(dialog).findByText("a username requires a password")).toBeInTheDocument();
   });

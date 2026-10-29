@@ -34,7 +34,6 @@ func TestAnUnauthenticatedGuestStillCannotReachTheInternetOn443(t *testing.T) {
 		t.Fatal("the forward chain is no longer default-deny")
 	}
 	for _, required := range []string{
-		`ip saddr @auth_ipv4 accept comment "authenticated guests"`,
 		`ip saddr @phase3_auth_ipv4 accept comment "phase-3 authorized guests"`,
 	} {
 		if !strings.Contains(out, required) {
@@ -93,7 +92,6 @@ func TestWithNoTLSPortalNothingRedirectsTo443AndItGoesUnanswered(t *testing.T) {
 	// The drop must be the forward chain's last rule, after every accept, or it would cut off authorized guests and the garden.
 	dropAt := strings.Index(fwd, unauthenticated443Drop)
 	for _, accept := range []string{
-		`ip saddr @auth_ipv4 accept comment "authenticated guests"`,
 		`ip saddr @phase3_auth_ipv4 accept comment "phase-3 authorized guests"`,
 		"ip daddr @walled_garden_ip accept",
 		"ip daddr . tcp dport @walled_garden_tcp accept",

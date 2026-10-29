@@ -221,6 +221,9 @@ func (p *phase3Auth) applyProtection(ctx context.Context, at signinattempt.Attem
 			// WARN: many wrong room sign-ins from many devices looks like guessing.
 			slog.Warn("phase3 auth: room sign-in paused on a guest network after many wrong room sign-ins",
 				"failures", n, "until", until, "guest_network", at.GuestNetworkName)
+			// AD-31: staff are told. The pause is also listed on the Room sign-in page; this puts it in the audit log, where
+			// the operational alerts and the Audit page read, without the room or anything a guest typed.
+			p.srv.alertNetworkPaused(ctx, at.GuestNetworkName, n, until)
 		}
 	}
 }

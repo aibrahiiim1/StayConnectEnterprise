@@ -25,6 +25,13 @@ func (h *handler) accessStatus(w http.ResponseWriter, r *http.Request) {
 	b := h.newPhase3Budget(r)
 	defer b.cancel()
 
+	// A device that was just told there was nothing to say is not asked about again for a few seconds (AD-57).
+	quietKey := clientIPString(r)
+	if h.accessQuiet.quiet(quietKey) {
+		h.accessStatusQuiet(w, r, b, "recently_quiet")
+		return
+	}
+
 	// The device comes from the appliance's neighbour table; a guest cannot describe a device they are not.
 	device, ok := h.originDevice(w, r, b, h.accessStatusQuiet)
 	if !ok {
@@ -41,6 +48,7 @@ func (h *handler) accessStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	msg, known := endedMessages[out.EndedReason]
 	if !known {
+		h.accessQuiet.remember(quietKey)
 		h.accessStatusQuiet(w, r, b, "no_recent_expiry")
 		return
 	}

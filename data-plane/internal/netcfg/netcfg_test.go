@@ -205,7 +205,10 @@ func TestNftRenderConcatSet(t *testing.T) {
 	if !strings.Contains(out, "type ifname . ipv4_addr") {
 		t.Fatal("auth set must be concatenated ifname . ipv4_addr")
 	}
-	if !strings.Contains(out, "iifname . ip saddr @auth_ipv4 accept") {
+	if strings.Contains(out, "@auth_ipv4 accept") {
+		t.Fatal("the legacy auth_ipv4 set is retired (AD-23 b): no rule may accept on it")
+	}
+	if !strings.Contains(out, "iifname . ip saddr @phase3_auth_ipv4 accept") {
 		t.Fatal("forward auth rule must use the concat match")
 	}
 	if !strings.Contains(out, "dnat ip to 10.20.0.1:8380") {

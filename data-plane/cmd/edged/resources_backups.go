@@ -177,8 +177,14 @@ type backupArtifact struct {
 	Kind      string `json:"kind"`
 	SizeBytes int64  `json:"size_bytes"`
 	ModTime   string `json:"modified_at"`
-	// Downloadable is false for directories (a deploy rollback set is a tree).
+	// Downloadable is true only for an ENCRYPTED database dump (audit AD-9): every other artefact is listed but cannot be
+	// downloaded, and a plain .sql.gz is refused whatever its age.
 	Downloadable bool `json:"downloadable"`
+	// Encrypted says whether a database dump is encrypted to the key holders. False on a database dump means a plain
+	// earlier backup: it is flagged in the console, never offered for download, and can be replaced by an encrypted one.
+	Encrypted bool `json:"encrypted"`
+	// DownloadRefusal explains, for the console, why Downloadable is false.
+	DownloadRefusal string `json:"download_refusal,omitempty"`
 
 	// Verification state is read from the file on disk, not remembered by the browser; it goes stale when the
 	// archive changes. scd enforces the same rule before restoring.
@@ -315,6 +321,22 @@ func artifactKind(name string, dir bool) string {
 
 var reDBBackupFile = regexp.MustCompile(`^db-(safety-)?[0-9TZ]+\.sql\.gz(\.age)?$`)
 
+// downloadPolicy is the one rule for what leaves the appliance (audit AD-9, Product-Owner decision): only a database
+// dump (db-*) can be downloaded, and only when it is encrypted. Deployment, privilege-configuration and other artefacts
+// are listed but not downloadable; an unencrypted database dump is refused outright.
+func downloadPolicy(name string, dir bool) (downloadable, encrypted bool, refusal string) {
+	encrypted = strings.HasSuffix(name, ".age")
+	switch {
+	case dir:
+		return false, false, "This is a folder of deployment files and cannot be downloaded."
+	case !strings.HasPrefix(name, "db-") || !reDBBackupFile.MatchString(name):
+		return false, false, "Only database backups can be downloaded. This file is kept on the appliance."
+	case !encrypted:
+		return false, false, "This database backup is not encrypted, so it cannot be downloaded. Take a new backup (it is encrypted to your backup key holders) and download that one."
+	}
+	return true, true, ""
+}
+
 func (s *server) listBackupArtifacts(w http.ResponseWriter, r *http.Request) {
 	out := []backupArtifact{}
 	add := func(base string, e os.DirEntry) {
@@ -331,8 +353,8 @@ func (s *server) listBackupArtifacts(w http.ResponseWriter, r *http.Request) {
 			Kind:         artifactKind(e.Name(), e.IsDir()),
 			SizeBytes:    fi.Size(),
 			ModTime:      fi.ModTime().UTC().Format(time.RFC3339),
-			Downloadable: !e.IsDir(),
 		}
+		a.Downloadable, a.Encrypted, a.DownloadRefusal = downloadPolicy(e.Name(), e.IsDir())
 		if rec, ok := readVerification(base, e.Name()); ok {
 			a.VerifiedAt = rec.VerifiedAt.Format(time.RFC3339)
 			a.VerifiedTables = rec.Tables

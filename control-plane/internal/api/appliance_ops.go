@@ -54,6 +54,8 @@ type activateReq struct {
 	} `json:"new_site"`
 	License licenseTerms `json:"license"`
 	Reason  string       `json:"reason"`
+	// ActivationCode is the code the appliance shows on its own Admin Console (AD-1). Activation is refused without it.
+	ActivationCode string `json:"activation_code"`
 }
 
 // activate: POST /cloud/v1/appliances/{id}/activate — WAITING appliances only.
@@ -110,11 +112,11 @@ func (b *Base) activate(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(ctx)
 
 	// Lock and re-check the state: two concurrent activations yield one 409, never two assignments.
-	var lifecycle, held string
+	var lifecycle, held, pubB64 string
 	var deleting bool
-	if err := tx.QueryRow(ctx, `SELECT lifecycle_state, COALESCE(held_customer_id::text,''), deletion_started_at IS NOT NULL
-          FROM appliances WHERE id=$1 FOR UPDATE`, id).
-		Scan(&lifecycle, &held, &deleting); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT lifecycle_state, COALESCE(held_customer_id::text,''), deletion_started_at IS NOT NULL,
+          COALESCE(public_key,'') FROM appliances WHERE id=$1 FOR UPDATE`, id).
+		Scan(&lifecycle, &held, &deleting, &pubB64); err != nil {
 		Fail(w, r, http.StatusNotFound, CodeNotFound, "appliance not found")
 		return
 	}
@@ -124,6 +126,13 @@ func (b *Base) activate(w http.ResponseWriter, r *http.Request) {
 	}
 	if deleting { // audit Phase 1 M8
 		Fail(w, r, http.StatusConflict, "invalid_state", "the appliance is being deleted; it cannot be activated")
+		return
+	}
+	// AD-1: the operator must read the code off the appliance's own screen; serial and MAC are not secret.
+	if ref := activationCodeRefusal(pubB64, in.ActivationCode); ref != nil {
+		audit.Op(r.Context(), b.DB, r, "appliance.activation_code_refused", "appliance", id,
+			map[string]any{"supplied": strings.TrimSpace(in.ActivationCode) != ""})
+		Fail(w, r, ref.Status, ref.Code, ref.Message)
 		return
 	}
 	// An appliance still holding a customer's data activates only for that customer (held_customer.go); checked before anything is created.
@@ -543,9 +552,10 @@ func (b *Base) replace(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusConflict, CodeConflict, "the appliance is already marked for replacement")
 		return
 	}
+	windowHours := b.replacementWindowHours(ctx, tx)
 	if _, err := tx.Exec(ctx, `UPDATE appliances SET replacement_pending=true,
         replacement_deadline = now() + make_interval(hours => $2), updated_at=now() WHERE id=$1`,
-		id, int(replacementWindow.Hours())); err != nil {
+		id, windowHours); err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "update failed")
 		return
 	}
@@ -557,7 +567,7 @@ func (b *Base) replace(w http.ResponseWriter, r *http.Request) {
 	recordLifecycle(ctx, b.DB, id, "assigned", "assigned", email, clientIP(r), "marked for replacement: "+in.Reason)
 	audit.Op(ctx, b.DB, r, "appliance.replacement_started", "appliance", id, map[string]any{
 		"_tenant_id": deref(row.CustomerID), "site_id": deref(row.SiteID), "reason": in.Reason,
-		"window_hours": int(replacementWindow.Hours())})
+		"window_hours": windowHours})
 	b.writeAppliance(w, r, http.StatusOK, id)
 }
 
@@ -848,6 +858,12 @@ func (b *Base) deleteAppliance(w http.ResponseWriter, r *http.Request) {
 		failInternal(w, r, "delete failed", err)
 		return
 	}
+	// AD-65: the history the cascade would remove is kept (migration 0062), in this transaction, so a delete that
+	// finds the appliance changed rolls the archive row back with it.
+	if _, err := tx.Exec(ctx, archiveApplianceHistorySQL, id, operatorID); err != nil {
+		failInternal(w, r, "delete failed", err)
+		return
+	}
 	tag, err := tx.Exec(ctx, `DELETE FROM appliances WHERE id=$1 AND lifecycle_state IN ('pending_approval','revoked','decommissioned')
           AND deletion_started_at IS NOT NULL`, id)
 	if err != nil {
@@ -896,3 +912,15 @@ func PruneAssignmentFetchLog(ctx context.Context, b *Base) (int64, error) {
 	}
 	return tag.RowsAffected(), nil
 }
+
+// archiveApplianceHistorySQL copies the history a delete would cascade away ($1 appliance, $2 operator; AD-65, 0062).
+const archiveApplianceHistorySQL = `
+        INSERT INTO appliance_history_archive (appliance_id, serial, tenant_id, site_id, lifecycle_state, deleted_by,
+               lifecycle_events, certificates, certificate_requests, assignment_moves)
+        SELECT a.id, a.serial, a.tenant_id, a.site_id, a.lifecycle_state, NULLIF($2,''),
+               COALESCE((SELECT jsonb_agg(to_jsonb(x) ORDER BY x.created_at) FROM appliance_lifecycle_events x WHERE x.appliance_id=a.id), '[]'),
+               COALESCE((SELECT jsonb_agg(to_jsonb(x) ORDER BY x.created_at) FROM appliance_certificates x WHERE x.appliance_id=a.id), '[]'),
+               COALESCE((SELECT jsonb_agg(to_jsonb(x) - 'csr_pem' ORDER BY x.requested_at) FROM appliance_certificate_requests x WHERE x.appliance_id=a.id), '[]'),
+               COALESCE((SELECT jsonb_agg(to_jsonb(x) ORDER BY x.created_at) FROM appliance_assignments x WHERE x.appliance_id=a.id), '[]')
+          FROM appliances a WHERE a.id=$1 AND a.lifecycle_state IN ('pending_approval','revoked','decommissioned')
+           AND a.deletion_started_at IS NOT NULL`

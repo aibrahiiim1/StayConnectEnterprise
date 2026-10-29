@@ -82,8 +82,31 @@ func TestRevocationSaveFailureFailsFetch(t *testing.T) {
 	srv := licenceServer(t, map[string]any{"license_id": "", "envelope": nil,
 		"revoked": []string{"11111111-1111-1111-1111-111111111111"}})
 	_, priv, _ := ed25519.GenerateKey(rand.Reader)
+	m.SetMTLSTransport(srv.Client(), srv.URL) // AD-16: revocations are honoured over mutual TLS only
 	if err := m.FetchFromCloud(context.Background(), srv.URL, "44444444-4444-4444-4444-444444444444", priv); err == nil {
 		t.Fatal("fetch must fail when the revocation cannot be stored")
+	}
+}
+
+// AD-16: a revocation list received outside mutual TLS is ignored; the same list over mutual TLS is stored.
+func TestRevocationsAreHonouredOnlyOverMutualTLS(t *testing.T) {
+	f := newFixture(t)
+	m := New(nil, "", f.dir, f.pubPath, true)
+	const id = "11111111-1111-1111-1111-111111111111"
+	srv := licenceServer(t, map[string]any{"license_id": "", "envelope": nil, "revoked": []string{id}})
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
+	if err := m.FetchFromCloud(context.Background(), srv.URL, "44444444-4444-4444-4444-444444444444", priv); err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if revokedOnDisk(t, f.dir, id) {
+		t.Fatal("a revocation over plain HTTPS must be ignored")
+	}
+	m.SetMTLSTransport(srv.Client(), srv.URL)
+	if err := m.FetchFromCloud(context.Background(), srv.URL, "44444444-4444-4444-4444-444444444444", priv); err != nil {
+		t.Fatalf("fetch over mTLS: %v", err)
+	}
+	if !revokedOnDisk(t, f.dir, id) {
+		t.Fatal("a revocation over mutual TLS must be stored")
 	}
 }
 
@@ -133,4 +156,25 @@ func TestConcurrentLoadInstallFetchNoRace(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func revokedOnDisk(t *testing.T, dir, id string) bool {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(dir, "revoked.json"))
+	if os.IsNotExist(err) {
+		return false
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	if err := json.Unmarshal(raw, &ids); err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range ids {
+		if v == id {
+			return true
+		}
+	}
+	return false
 }

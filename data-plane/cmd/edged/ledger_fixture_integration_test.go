@@ -58,12 +58,23 @@ func sharedLedger(t testing.TB, pool *pgxpool.Pool) *ledger.Store {
 type storeLedger struct {
 	st         *ledger.Store
 	prepareErr error
+	key        ledger.MACKey // the database's ledger key, as scd would hold it (nil: the old confirmation)
 }
 
 func (l *storeLedger) Prepare(context.Context) error { return l.prepareErr }
 
-func (l *storeLedger) Commit(ctx context.Context, e []ledger.Entry) error {
-	return ledgerRefusalOf(l.st.Commit(ctx, e))
+func (l *storeLedger) Commit(ctx context.Context, e []ledger.Entry) ([]string, error) {
+	if err := ledgerRefusalOf(l.st.Commit(ctx, e)); err != nil {
+		return nil, err
+	}
+	if l.key == nil {
+		return nil, nil
+	}
+	out := make([]string, len(e))
+	for i, x := range e {
+		out[i] = l.key.Receipt(x.Hash)
+	}
+	return out, nil
 }
 
 func (l *storeLedger) Abort(ctx context.Context, e []ledger.Entry) error { return l.st.Abort(ctx, e) }

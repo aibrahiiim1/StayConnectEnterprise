@@ -1,5 +1,7 @@
 # Audit backlog: backend audit and performance audit
 
+> **Update, 2026-10-29 (T0267, D81).** The Product Owner decided AD-1 to AD-68 and the decisions were implemented. The disposition of each decision is in [`AUDIT_DECISION_DISPOSITIONS.md`](AUDIT_DECISION_DISPOSITIONS.md). The per-row statuses below are those of T0266 and were not rewritten row by row; where a row's remainder was an `AD-n` decision, the register is the current answer.
+
 **What this is.** Every finding from the two audit report sets, in one place, each with an honest status. The source folders are being removed from the current tree, but they stay in Git history. Each row points back to its source.
 
 **Source of record.** Both folders exist at commit **`1d69508a847248ec63ceed01e06ec8f8f1661fb0`** (HEAD when this backlog was drawn up, 2026-10-28). To read a source file:
@@ -527,6 +529,8 @@ All open decisions are in **`AUDIT_DECISIONS.md`**: 68 items, `AD-1` … `AD-68`
 
 
 ## Security hardening list of 2026-07-11 (folded in)
+
+> **SUPERSEDED (AD-68, option b).** The 2026-07-11 hardening list, its "Additional hardening (target architecture)" items and the pilot-cutover checklist are superseded by the verification checklist of the installation manual ([ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md](runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md), Part D and F.5). The list below is kept unchanged as a historical record; it is no longer a live checklist, and no item here is deleted or closed by this note.
 
 `docs/SECURITY_HARDENING.md` (source: `git show 1d69508a847248ec63ceed01e06ec8f8f1661fb0:docs/SECURITY_HARDENING.md`) was a
 pilot-era list. Its statuses below come from the system handbook §23 assessment and the current tree; nothing is

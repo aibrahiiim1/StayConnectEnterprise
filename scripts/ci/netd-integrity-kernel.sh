@@ -10,7 +10,7 @@
 set -uo pipefail
 export PATH="$PATH:/c/Program Files/Docker/Docker/resources/bin"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
-IMAGE="${NETD_KERNEL_IMAGE:-golang:1.25.12}"
+IMAGE="${NETD_KERNEL_IMAGE:-golang:1.26.10}"
 MODCACHE="$(cd "$ROOT/data-plane" && go env GOMODCACHE 2>/dev/null || true)"
 
 docker image inspect "$IMAGE" >/dev/null 2>&1 || { echo "INFRA: image $IMAGE is not available locally"; exit 2; }

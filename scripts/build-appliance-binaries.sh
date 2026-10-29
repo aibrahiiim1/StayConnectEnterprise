@@ -44,8 +44,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="${1:-$ROOT/../sc-appliance-build}"
 # Pinned by digest as well as tag (audit P0-3 / X1): a re-pushed tag cannot change the compiler silently. The digest
-# is the multi-arch index Docker Hub lists for golang:1.25.12; change both together.
-GO_IMAGE="${GO_IMAGE:-golang:1.25.12@sha256:dbeddb5e728ea4b5ba7920574413e311025ffa42d196793857e4d160e8dfe60d}"
+# is the multi-arch index Docker Hub lists for golang:1.26.10; change both together.
+GO_IMAGE="${GO_IMAGE:-golang:1.26.10@sha256:670bb5aa5349ae03b8516764718486f4f16399134bdc9acd0c46a23f043ab05c}"
 # keybootstrap and svc-run are part of every release: the provisioner runs keybootstrap before scd may start, and
 # the Caddy, Admin Console, Kea and Unbound units run svc-run as their ExecStartPre. They were missing from this
 # default, so a release built with it could not be provisioned.

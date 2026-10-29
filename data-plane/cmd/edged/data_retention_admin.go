@@ -6,6 +6,8 @@ package main
 // mirror the table CHECKs, which are the authority.
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -38,6 +40,8 @@ func (s *server) dataRetentionRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", s.getDataRetention)
 	r.Put("/", s.setDataRetention)
+	// What the proposed periods would remove, counted by the retention functions themselves and rolled back (audit AD-67).
+	r.Post("/preview", s.previewDataRetention)
 	return r
 }
 
@@ -134,28 +138,124 @@ func (s *server) getDataRetention(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *server) setDataRetention(w http.ResponseWriter, r *http.Request) {
+// retentionValues validates a full set of proposed periods against the bounds; msg is the refusal when it is not valid.
+func retentionValues(settings map[string]*int) (values []any, code, msg string) {
+	values = make([]any, 0, len(dataRetentionBounds))
+	for _, b := range dataRetentionBounds {
+		v := settings[b.Key]
+		if v == nil || *v < b.Min || *v > b.Max {
+			return nil, "invalid_setting", b.Key + " is required and must be " + itoa(b.Min) + "-" + itoa(b.Max) + " " + b.Unit
+		}
+		values = append(values, *v)
+	}
+	if len(settings) != len(dataRetentionBounds) {
+		return nil, "invalid_setting", "unknown retention setting in the request"
+	}
+	return values, "", ""
+}
+
+// retentionImpact is what the retention functions would remove, by category, under the periods in force and under the proposed ones.
+type retentionImpact struct {
+	Current    map[string]int `json:"current"`
+	Proposed   map[string]int `json:"proposed"`
+	Complete   bool           `json:"complete"`
+	NotCounted []string       `json:"not_counted"`
+}
+
+// additional is what the change adds to what the periods in force would already remove: per category, never below zero.
+func (im retentionImpact) additional() (total int, byCategory map[string]int) {
+	byCategory = map[string]int{}
+	for c, p := range im.Proposed {
+		if d := p - im.Current[c]; d > 0 {
+			byCategory[c] = d
+			total += d
+		}
+	}
+	return total, byCategory
+}
+
+// retentionShortened reports whether any proposed period is shorter than the one in force (unknown old values count as shortened).
+func retentionShortened(old map[string]int, values []any) bool {
+	if old == nil {
+		return true
+	}
+	for i, b := range dataRetentionBounds {
+		if values[i].(int) < old[b.Key] {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *server) retentionPreview(ctx context.Context, values []any) (retentionImpact, error) {
+	var raw []byte
+	args := append([]any{s.tenantID, s.siteID}, values...)
+	if err := s.db.QueryRow(ctx, `SELECT public.data_retention_preview($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,$10)::text`, args...).Scan(&raw); err != nil {
+		return retentionImpact{}, err
+	}
+	var im retentionImpact
+	if err := json.Unmarshal(raw, &im); err != nil {
+		return retentionImpact{}, err
+	}
+	return im, nil
+}
+
+// previewDataRetention answers "what would these periods remove?" without changing anything: no password (nothing is written), but
+// the same permission as the change.
+func (s *server) previewDataRetention(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Settings map[string]*int `json:"settings"`
-		Reason   string          `json:"reason"`
-		Password string          `json:"password"`
 	}
 	if err := decodeJSON(r, &in); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid", "malformed request")
 		return
 	}
-	values := make([]any, 0, len(dataRetentionBounds))
-	for _, b := range dataRetentionBounds {
-		v := in.Settings[b.Key]
-		if v == nil || *v < b.Min || *v > b.Max {
-			jsonErr(w, http.StatusBadRequest, "invalid_setting",
-				b.Key+" is required and must be "+itoa(b.Min)+"-"+itoa(b.Max)+" "+b.Unit)
+	values, code, msg := retentionValues(in.Settings)
+	if values == nil {
+		jsonErr(w, http.StatusBadRequest, code, msg)
+		return
+	}
+	if s.tenantID == "" || s.siteID == "" {
+		jsonErr(w, http.StatusConflict, "awaiting_assignment", "this appliance has no site yet, so there is nothing to preview")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	old, err := scanRetention(s.db.QueryRow(ctx, `SELECT `+dataRetentionCols+` FROM iam_v2.data_retention_get($1::uuid,$2::uuid)`, s.tenantID, s.siteID))
+	if err != nil && !isNoRows(err) {
+		jsonErr(w, http.StatusServiceUnavailable, "read_failed", "the current retention periods could not be read")
+		return
+	}
+	im, err := s.retentionPreview(ctx, values)
+	if err != nil {
+		if isUndefinedObject(err) {
+			jsonErr(w, http.StatusServiceUnavailable, "not_available", "this appliance's database cannot preview a retention change yet")
 			return
 		}
-		values = append(values, *v)
+		jsonErr(w, http.StatusServiceUnavailable, "impact_unavailable", "the effect of these periods could not be worked out, so none was shown")
+		return
 	}
-	if len(in.Settings) != len(dataRetentionBounds) {
-		jsonErr(w, http.StatusBadRequest, "invalid_setting", "unknown retention setting in the request")
+	total, by := im.additional()
+	writeJSON(w, http.StatusOK, map[string]any{"impact": im, "shortens": retentionShortened(old, values),
+		"additional_records": total, "additional_by_category": by})
+}
+
+func (s *server) setDataRetention(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Settings map[string]*int `json:"settings"`
+		Reason   string          `json:"reason"`
+		Password string          `json:"password"`
+		// ConfirmRecords is the second confirmation of a SHORTENING (audit AD-67): the number of additional records the preview
+		// showed. A shortening that would remove more is refused until the request repeats the number the appliance now counts.
+		ConfirmRecords *int `json:"confirm_records"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid", "malformed request")
+		return
+	}
+	values, code, msg := retentionValues(in.Settings)
+	if values == nil {
+		jsonErr(w, http.StatusBadRequest, code, msg)
 		return
 	}
 	reason := strings.TrimSpace(in.Reason)
@@ -184,6 +284,29 @@ func (s *server) setDataRetention(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusServiceUnavailable, "read_failed", "the current retention periods could not be read, so nothing was changed")
 		return
 	}
+	// A shortening shows what it will remove first, and is made only on a second confirmation of that number (audit AD-67).
+	impactConfirmed := -1
+	if retentionShortened(old, values) {
+		pctx, pcancel := context.WithTimeout(r.Context(), 100*time.Second) // two rolled-back runs, each bounded at 45 s in the database
+		im, perr := s.retentionPreview(pctx, values)
+		pcancel()
+		if perr != nil {
+			jsonErr(w, http.StatusServiceUnavailable, "impact_unavailable",
+				"The effect of these shorter periods could not be worked out, so nothing was changed. Try again in a moment.")
+			return
+		}
+		total, by := im.additional()
+		if total > 0 {
+			if in.ConfirmRecords == nil || *in.ConfirmRecords != total {
+				writeJSON(w, http.StatusConflict, map[string]any{"error": "impact_confirmation_required",
+					"message": "These shorter periods will anonymise or delete " + itoa(total) + " more record" + map[bool]string{true: "", false: "s"}[total == 1] +
+						" on the next hourly run. This cannot be undone. Confirm the number to go ahead.",
+					"impact": im, "additional_records": total, "additional_by_category": by})
+				return
+			}
+			impactConfirmed = total
+		}
+	}
 	args := append([]any{s.tenantID, s.siteID}, values...)
 	args = append(args, actor, reason)
 	var version int64
@@ -204,7 +327,10 @@ func (s *server) setDataRetention(w http.ResponseWriter, r *http.Request) {
 	for i, b := range dataRetentionBounds {
 		saved[b.Key] = values[i].(int)
 	}
-	s.audit(r, "data_retention.changed", "data_retention", s.siteID, map[string]any{
-		"old": old, "new": saved, "config_version": version, "reason": reason})
+	auditPayload := map[string]any{"old": old, "new": saved, "config_version": version, "reason": reason}
+	if impactConfirmed >= 0 {
+		auditPayload["impact_confirmed_records"] = impactConfirmed
+	}
+	s.audit(r, "data_retention.changed", "data_retention", s.siteID, auditPayload)
 	writeJSON(w, http.StatusOK, map[string]any{"settings": saved, "config_version": version})
 }

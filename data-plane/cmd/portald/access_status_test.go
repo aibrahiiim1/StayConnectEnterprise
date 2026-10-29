@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 type scdSaying struct{ reason string }
@@ -127,5 +128,59 @@ func TestAccessStatus_MessageVocabularyIsClosed(t *testing.T) {
 		if endedMessages[k] == "" {
 			t.Fatalf("no sentence for %s", k)
 		}
+	}
+}
+
+// AD-57 (c): a "nothing to say" answer is remembered per client address for a few seconds so a reload does not reach scd
+// again, and a notice is never remembered.
+type countingScd struct {
+	reason string
+	calls  int
+}
+
+func (c *countingScd) RoundTrip(r *http.Request) (*http.Response, error) {
+	c.calls++
+	return scdSaying{reason: c.reason}.RoundTrip(r)
+}
+
+func TestAccessStatus_ANegativeAnswerIsRemembered_ANoticeIsNot(t *testing.T) {
+	quiet := &countingScd{reason: ""}
+	h := statusFixture(t, "")
+	h.scd = &http.Client{Transport: quiet}
+	h.accessQuiet = newQuietCache()
+	for i := 0; i < 5; i++ {
+		if _, out, _ := askStatus(t, h); out.EndedReason != "" {
+			t.Fatalf("unexpected notice %+v", out)
+		}
+	}
+	if quiet.calls != 1 {
+		t.Fatalf("scd was asked %d times for five views from one address, want 1", quiet.calls)
+	}
+
+	notice := &countingScd{reason: "DATA"}
+	h2 := statusFixture(t, "DATA")
+	h2.scd = &http.Client{Transport: notice}
+	h2.accessQuiet = newQuietCache()
+	for i := 0; i < 3; i++ {
+		if _, out, _ := askStatus(t, h2); out.EndedReason != "DATA" {
+			t.Fatalf("view %d lost the notice: %+v", i, out)
+		}
+	}
+	if notice.calls != 3 {
+		t.Fatalf("a notice must be asked every time; scd was asked %d times", notice.calls)
+	}
+}
+
+func TestQuietCacheExpires(t *testing.T) {
+	c := newQuietCache()
+	now := c.now()
+	c.now = func() time.Time { return now }
+	c.remember("10.0.0.1")
+	if !c.quiet("10.0.0.1") {
+		t.Fatal("not remembered")
+	}
+	now = now.Add(accessStatusQuietFor + time.Second)
+	if c.quiet("10.0.0.1") {
+		t.Fatal("still remembered after the window")
 	}
 }

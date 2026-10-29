@@ -127,6 +127,19 @@ func mayGrant(s *auth.Session, role string) bool {
 	return true
 }
 
+// mayResetCredentials is AD-5: changing the password, email or two-step setting of a platform administrator (or
+// owner) needs the platform_owner role, so peer administrators cannot take each other over. Your own account is
+// always yours to change.
+func mayResetCredentials(s *auth.Session, targetID, targetRole string) bool {
+	if s != nil && s.OperatorID == targetID {
+		return true
+	}
+	if targetRole == "platform_admin" || targetRole == "platform_owner" {
+		return hasRole(s, "platform_owner")
+	}
+	return true
+}
+
 func hasRole(s *auth.Session, role string) bool {
 	if s == nil {
 		return false
@@ -277,6 +290,10 @@ func (b *Base) updateUser(w http.ResponseWriter, r *http.Request, customerID, id
 	// Changing an owner requires being allowed to grant owner.
 	if !mayGrant(s, cur[0].Role) {
 		Fail(w, r, http.StatusForbidden, CodeForbidden, "you may not change a "+cur[0].Role)
+		return
+	}
+	if (in.Email != "" || in.Password != "") && !mayResetCredentials(s, id, cur[0].Role) {
+		Fail(w, r, http.StatusForbidden, CodeForbidden, "only an owner may change an administrator's email or password")
 		return
 	}
 	demoted := in.Role != "" && in.Role != "platform_owner" && in.Role != "platform_admin"
@@ -482,6 +499,10 @@ func (b *Base) teamPassword(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusForbidden, CodeForbidden, "you may not change a "+cur[0].Role)
 		return
 	}
+	if !mayResetCredentials(auth.FromContext(r.Context()), id, cur[0].Role) {
+		Fail(w, r, http.StatusForbidden, CodeForbidden, "only an owner may reset an administrator's password")
+		return
+	}
 	hash, err := auth.HashPassword(in.Password)
 	if err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "hash failed")
@@ -549,6 +570,10 @@ func (b *Base) resetUserMFA(w http.ResponseWriter, r *http.Request, customerID, 
 	}
 	if !mayGrant(s, cur[0].Role) {
 		Fail(w, r, http.StatusForbidden, CodeForbidden, "you may not change a "+cur[0].Role)
+		return
+	}
+	if !mayResetCredentials(s, id, cur[0].Role) {
+		Fail(w, r, http.StatusForbidden, CodeForbidden, "only an owner may reset an administrator's two-step sign-in")
 		return
 	}
 	tx, err := b.DB.Begin(ctx)

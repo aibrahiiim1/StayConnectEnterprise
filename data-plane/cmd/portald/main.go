@@ -70,6 +70,9 @@ type handler struct {
 	// designs caches the published portal design briefly; nil disables it.
 	designs *designCache
 
+	// accessQuiet remembers, per client address, that scd had no access-ended notice to show (AD-57); nil disables it.
+	accessQuiet *quietCache
+
 	// clock drives the Phase-3 response-time budget; nil is the real clock and only tests set it.
 	clock phase3Clock
 
@@ -105,7 +108,7 @@ func newHandler(c cfg) (*handler, error) {
 	}
 	h := &handler{
 		cfg:         c,
-		scd:         &http.Client{Transport: tr, Timeout: 5 * time.Second},
+		scd:         &http.Client{Transport: &busyRetry{next: tr}, Timeout: 8 * time.Second},
 		tmplLand:    tland,
 		tmplSucc:    tsucc,
 		arpCache:    defaultArp,
@@ -113,6 +116,7 @@ func newHandler(c cfg) (*handler, error) {
 		arpNudge:    defaultArpNudge,
 		commerceCfg: commCfg,
 		designs:     &designCache{},
+		accessQuiet: newQuietCache(),
 		portalTLS:   &tlsStateHolder{},
 		signIns:     newSignInDamper(),
 	}
@@ -257,6 +261,8 @@ func (h *handler) authVoucher(w http.ResponseWriter, r *http.Request) {
 			msg = guestCapacityMessage
 		case e.Error == "METHOD_DISABLED" || isLicenceRefusal(e.Error):
 			msg = guestLicenseRefusedMessage
+		case e.Error == "BUSY":
+			msg = msgServiceBusy
 		case resp.StatusCode >= 500:
 			msg = "Service unavailable. Please try again."
 		}
@@ -559,8 +565,7 @@ func (h *handler) routes() http.Handler {
 	// Read-only; answers "nothing to say" for every device that has not just run out.
 	r.Post("/access/status", h.accessStatus)
 	// Phase 5 is mounted unconditionally for the same reason: the hop failing gives the same uniform non-success a wrong PIN gets.
-	r.Post("/poststay/issue", h.dampedBudget(h.postStayIssue, h.refuseDampedSignIn))
-	r.Post("/auth/post-stay-pin", h.dampedBudget(h.postStayAuth, h.refuseDampedSignIn))
+	r.Post("/auth/post-stay", h.dampedBudget(h.postStayAuth, h.refuseDampedSignIn))
 
 	// Phase 6 likewise: whether device management exists is decided twice behind this layer (deployment gate, per-appliance setting), and the guest gets the same uniform answer either way.
 	r.Post("/devices/list", h.dampedBudget(h.deviceList, h.refuseDampedDevice))

@@ -34,6 +34,8 @@ type Manager struct {
 	mtlsBase    string // mTLS listener (e.g. https://central.example.com:9443)
 	applianceID string
 	priv        ed25519.PrivateKey
+	// PinPath is the pinned appliance Root CA file (AD-2); empty means <parent of dir>/appliance-root-ca.crt.
+	PinPath string
 
 	mu       sync.RWMutex
 	mtlsPriv ed25519.PrivateKey // SEPARATE key: CSR + mTLS client auth only
@@ -554,7 +556,15 @@ func (m *Manager) loadLocal() error {
 	if err != nil {
 		return err
 	}
-	return m.installPEM(certPEM, caPEM)
+	adopt, err := m.checkAgainstPin(certPEM, caPEM, time.Time{}, nil)
+	if err != nil {
+		return err
+	}
+	if err := m.installPEM(certPEM, caPEM); err != nil {
+		return err
+	}
+	m.writePin(adopt, "installed CA bundle")
+	return nil
 }
 
 func (m *Manager) buildClient(certPEM, caPEM []byte) (*http.Client, *x509.Certificate, error) {
@@ -608,6 +618,13 @@ func (m *Manager) store(ctx context.Context, certPEM, caPEM []byte) error {
 	if _, _, err := m.buildClient(certPEM, caPEM); err != nil {
 		return err
 	}
+	// AD-2: the bundle must chain to the pinned appliance Root CA (the offline package's bundle seeds the pin on an
+	// appliance that has none).
+	offlineBundle, _ := os.ReadFile(filepath.Join(m.dir, "ca-bundle.crt"))
+	adopt, err := m.checkAgainstPin(certPEM, caPEM, time.Now(), offlineBundle)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(m.dir, 0o700); err != nil {
 		return err
 	}
@@ -624,7 +641,11 @@ func (m *Manager) store(ctx context.Context, certPEM, caPEM []byte) error {
 		}
 		return err
 	}
-	return m.installPEM(certPEM, caPEM)
+	if err := m.installPEM(certPEM, caPEM); err != nil {
+		return err
+	}
+	m.writePin(adopt, "first CA bundle")
+	return nil
 }
 
 func (m *Manager) makeCSR() ([]byte, error) {

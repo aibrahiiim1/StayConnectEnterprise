@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"net/netip"
 	"net/url"
 	"regexp"
 	"sort"
@@ -130,6 +131,36 @@ func validHTTPSURL(s string) string {
 		return "must not contain a user name or password"
 	case u.RawQuery != "" || u.Fragment != "":
 		return "must not contain a query or fragment"
+	}
+	return HostRefusal(u.Hostname())
+}
+
+// HostRefusal explains why a REST PMS host may not be dialled, or returns "". Loopback and link-local addresses are
+// refused because a base URL an operator sets could otherwise reach the appliance's own internal services (their
+// loopback listeners, the 169.254.x.x range); private RFC 1918 addresses stay allowed, since an on-premises PMS lives
+// there (audit AD-40). A host name is checked here only for the literal "localhost" forms; what a name resolves to is
+// checked again at dial time (pmsrest), which is what stops a name pointed at 127.0.0.1.
+func HostRefusal(host string) string {
+	h := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
+	if h == "localhost" || strings.HasSuffix(h, ".localhost") {
+		return "must not be this machine (localhost)"
+	}
+	if ip, err := netip.ParseAddr(strings.Trim(h, "[]")); err == nil {
+		return IPRefusal(ip)
+	}
+	return ""
+}
+
+// IPRefusal is the address-level half of HostRefusal, shared with the dial-time guard.
+func IPRefusal(ip netip.Addr) string {
+	ip = ip.Unmap()
+	switch {
+	case ip.IsLoopback():
+		return "must not be a loopback address"
+	case ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsInterfaceLocalMulticast():
+		return "must not be a link-local address"
+	case ip.IsUnspecified():
+		return "must not be the unspecified address"
 	}
 	return ""
 }

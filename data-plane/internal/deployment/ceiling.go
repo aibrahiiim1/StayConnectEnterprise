@@ -26,9 +26,11 @@ const (
 	CapPaidAccess     Capability = "paid_access"
 	// CapCardPayment: the payment domain is installed, so card payment can be configured (accounts, sealed credentials,
 	// domains). It permits no provider call: that is CapCardProviderCalls.
-	CapCardPayment        Capability = "card_payment"
-	CapCardProviderCalls  Capability = "card_payment_provider_calls" // the appliance may call a payment provider
-	CapCardLive           Capability = "card_payment_live"           // LIVE-mode (real money) provider execution
+	CapCardPayment       Capability = "card_payment"
+	CapCardProviderCalls Capability = "card_payment_provider_calls" // the appliance may call a payment provider
+	CapCardLive          Capability = "card_payment_live"           // LIVE-mode (real money) provider execution
+	// CapCardLateRecheck: the slow read-only provider re-query of failed/unknown charges for a late capture (AD-43). Off by default.
+	CapCardLateRecheck    Capability = "card_payment_late_capture_recheck"
 	CapRoomChargeConfig   Capability = "room_charge_config"
 	CapRoomChargeReview   Capability = "room_charge_review"
 	CapRoomChargeTransmit Capability = "room_charge_transmit" // PS bytes may reach a PMS (real posting)
@@ -144,6 +146,8 @@ func (c Ceiling) Available(cp Capability) bool {
 		return c.pay.ProviderOn() && c.commerce.PortalOn()
 	case CapCardLive:
 		return c.liveAllowed && c.pay.ProviderOn()
+	case CapCardLateRecheck:
+		return c.pay.RecheckOn() && c.commerce.PortalOn()
 	case CapRoomChargeConfig:
 		return c.post.PostingOn() && c.pms.MasterEnabled
 	case CapRoomChargeReview:

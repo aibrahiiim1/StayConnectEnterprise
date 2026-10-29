@@ -13,8 +13,41 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/auth"
 )
 
-// replacementWindow bounds how long an outgoing appliance may stay licensed until its replacement is activated at the same site.
-const replacementWindow = 72 * time.Hour
+// Defaults and bounds of the two settings in central_security_settings (migration 0061, AD-54; the table's CHECK
+// constraints are the authority).
+const (
+	DefaultReplacementWindowHours = 72
+	MinReplacementWindowHours     = 1
+	MaxReplacementWindowHours     = 720
+	DefaultRetirementAckMinutes   = 10
+	MinRetirementAckMinutes       = 1
+	MaxRetirementAckMinutes       = 120
+)
+
+// settingReader is what both a pool and a transaction offer.
+type settingReader interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// replacementWindowHours is how long an outgoing appliance may stay licensed until its replacement is activated at
+// the same site (the setting; 72 by default).
+func (b *Base) replacementWindowHours(ctx context.Context, q settingReader) int {
+	n := DefaultReplacementWindowHours
+	if err := q.QueryRow(ctx, `SELECT replacement_window_hours FROM central_security_settings WHERE id`).Scan(&n); err != nil || n < 1 {
+		return DefaultReplacementWindowHours
+	}
+	return n
+}
+
+// retirementAckTimeout is how long Phase 1 waits for the signed ack before raising an alert (the setting; 10 minutes
+// by default).
+func (b *Base) retirementAckTimeout(ctx context.Context, q settingReader) time.Duration {
+	n := DefaultRetirementAckMinutes
+	if err := q.QueryRow(ctx, `SELECT retirement_ack_minutes FROM central_security_settings WHERE id`).Scan(&n); err != nil || n < 1 {
+		n = DefaultRetirementAckMinutes
+	}
+	return time.Duration(n) * time.Minute
+}
 
 // completeReplacementIfPending runs on activation. If the same site has an outgoing appliance marked for
 // replacement, the old one is retired through the acknowledged two-phase terminal delivery, like Retire:

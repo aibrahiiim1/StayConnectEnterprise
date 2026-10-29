@@ -53,6 +53,8 @@ type ledgerRuntime struct {
 	mu          sync.Mutex
 	status      ledgerStatus
 	destErr     string
+	keyMu       sync.Mutex
+	key2        ledger.MACKey // the database's ledger key (AD-3), cached; nil when the database has none
 }
 
 type ledgerStatus struct {
@@ -95,7 +97,7 @@ func (s *server) ledgerInit(secretsDir string) {
 	} else {
 		slog.Warn("erasure ledger: the sealing key is missing; the secondary storage credentials cannot be opened", "err", err)
 	}
-	s.ledgerRT.store = ledger.NewStore(ledger.Config{LocalPath: ledgerLocalPath, Cipher: s.ledgerCipher})
+	s.ledgerRT.store = ledger.NewStore(ledger.Config{LocalPath: ledgerLocalPath, Cipher: s.ledgerCipher, MACKey: s.ledgerCachedKey})
 }
 
 func (s *server) ledgerCipher(ctx context.Context) (*ledger.Cipher, error) {
@@ -262,6 +264,7 @@ func (s *server) ledgerReconcile(ctx context.Context) ledgerStatus {
 		st.State, st.Message = "unavailable", "the erasure ledger is not available on this appliance"
 		return finish()
 	}
+	s.ledgerKey(ctx) // loaded before any entry is checked or any head note is MACed
 	if err := s.ledgerLoadDestination(ctx); err != nil && !ledgerMissing(err) {
 		slog.Warn("erasure ledger: the secondary storage setting could not be read", "err", err)
 	}
@@ -548,6 +551,7 @@ func (s *server) ledgerCommit(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 90*time.Second)
 	defer cancel()
+	key := s.ledgerKey(ctx)
 	if err := s.ledgerRT.store.Commit(ctx, in.Entries); err != nil {
 		slog.Error("erasure ledger: commit refused", "err", err)
 		if s.db != nil {
@@ -556,7 +560,17 @@ func (s *server) ledgerCommit(w http.ResponseWriter, r *http.Request) {
 		ledgerFailure(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "seq": in.Entries[len(in.Entries)-1].Seq})
+	// The durability receipt (AD-3): only scd, which holds the key and has just written both copies, can make it. The database
+	// confirms an entry only against it, so edged cannot mark an entry durable that is not.
+	resp := map[string]any{"ok": true, "seq": in.Entries[len(in.Entries)-1].Seq}
+	if len(key) > 0 {
+		receipts := make([]string, len(in.Entries))
+		for i, e := range in.Entries {
+			receipts[i] = key.Receipt(e.Hash)
+		}
+		resp["receipts"] = receipts
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *server) ledgerAbort(w http.ResponseWriter, r *http.Request) {
@@ -763,6 +777,17 @@ func (s *server) ledgerRecoverFromExternal(ctx context.Context, identityText str
 	entries := v.Best.Parse.Entries
 	var dbs int64 = head.Seq
 	adopt := head.Seq == 1 && entries[0].Ledger != head.Ledger
+	// AD-3: the copy may be recovered only if every entry the database does not yet hold was written by this appliance (or a
+	// seal covers it). What the database already holds is its own history.
+	if key := s.ledgerKey(ctx); len(key) > 0 {
+		var after int64
+		if !adopt {
+			after = head.Seq
+		}
+		if err := key.AuthenticateAfter(entries, after); err != nil {
+			return "", fmt.Errorf("the secondary copy holds an entry this appliance did not write, so nothing was recovered: %v", err)
+		}
+	}
 	feed := entries
 	if !adopt && int(dbs) <= len(entries) {
 		feed = entries[dbs:]
@@ -853,6 +878,10 @@ func (s *server) runLedger(ctx context.Context) {
 	st := s.ledgerReconcile(cctx)
 	switch st.State {
 	case "ok":
+		if err := s.ledgerSeal(cctx); err != nil && ctx.Err() == nil {
+			slog.Warn("erasure ledger: the entries written before authentication could not be sealed yet", "err", err)
+		}
+		s.ledgerWriteEscrow(cctx)
 		if err := s.ledgerCheckpoint(cctx); err != nil && ctx.Err() == nil {
 			slog.Warn("erasure ledger: the daily checkpoint could not be written", "err", err)
 		}

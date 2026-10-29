@@ -117,6 +117,7 @@ describe("Activate", () => {
     const site = within(dialog).getByLabelText(/^Site/);
     await waitFor(() => expect(within(site).getByRole("option", { name: "Demo Resort" })).toBeInTheDocument());
     await user.selectOptions(site, "s1");
+    await user.type(within(dialog).getByLabelText(/^Activation code/), "ab12-cd34");
     expect(within(dialog).getByLabelText(/Clients online at once/)).toHaveValue("500");
     expect(within(dialog).getByLabelText(/Days from today/)).toHaveValue("365");
     expect(within(dialog).getByLabelText(/Grace period/)).toHaveValue("30");
@@ -128,6 +129,7 @@ describe("Activate", () => {
     expect(sent[1].body).toEqual({
       customer_id: "c1",
       site_id: "s1",
+      activation_code: "ab12-cd34",
       license: { max_concurrent_online_guests: 500, valid_days: 365, grace_period_days: 30, modules: [] },
     });
     expect(calls.some((c) => c.url === "/api/v1/auth/reauth")).toBe(true);
@@ -153,6 +155,7 @@ describe("Activate", () => {
     const site = within(dialog).getByLabelText(/^Site/);
     await waitFor(() => expect(within(site).getByRole("option", { name: "Demo Resort" })).toBeInTheDocument());
     await user.selectOptions(site, "s1");
+    await user.type(within(dialog).getByLabelText(/^Activation code/), "ab12-cd34");
     await user.click(within(dialog).getByRole("button", { name: "Activate" }));
 
     await waitFor(() => expect(calls.some((c) => c.url.endsWith("/activate"))).toBe(true));
@@ -198,6 +201,7 @@ describe("Activate", () => {
     await user.type(within(dialog).getByLabelText(/Clients online at once/), "250");
     await user.click(within(dialog).getByRole("radio", { name: "Until a date" }));
     await user.type(within(dialog).getByLabelText(/Ends on/), "2030-12-31");
+    await user.type(within(dialog).getByLabelText(/^Activation code/), "ab12-cd34");
     await user.click(within(dialog).getByRole("button", { name: "Activate" }));
 
     await waitFor(() => expect(calls.some((c) => c.url.endsWith("/activate"))).toBe(true));

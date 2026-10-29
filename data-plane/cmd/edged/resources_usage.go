@@ -504,6 +504,30 @@ func (s *server) listSessionSamples(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "the accounting samples could not be read")
 		return
 	}
+	// Raw samples are kept only a couple of days once rolled up (migration 0175, AD-48); an older session shows its
+	// per-minute totals instead, labelled as such, until those too pass their retention.
+	grain := "sample"
+	if len(out) == 0 {
+		mrows, merr := s.db.Query(ctx, `
+			SELECT bucket, bytes_down, bytes_up
+			  FROM iam_v2.accounting_usage_minute
+			 WHERE session_id = $1 AND tenant_id = $2 AND site_id = $3
+			 ORDER BY bucket ASC
+			 LIMIT `+strconv.Itoa(sessionSamplesMax+1), id, s.tenantID, s.siteID)
+		if merr == nil {
+			for mrows.Next() {
+				var x usageSample
+				if mrows.Scan(&x.At, &x.BytesDown, &x.BytesUp) != nil {
+					break
+				}
+				down += x.BytesDown
+				up += x.BytesUp
+				out = append(out, x)
+				grain = "minute"
+			}
+			mrows.Close()
+		}
+	}
 	// Past sessionSamplesMax the samples no longer add up to the total, so the response must say it is a cut list.
 	truncated := len(out) > sessionSamplesMax
 	if truncated {
@@ -514,7 +538,7 @@ func (s *server) listSessionSamples(w http.ResponseWriter, r *http.Request) {
 	}
 	// The sum is returned with the samples so the screen can show they add up to the session total.
 	writeJSON(w, http.StatusOK, map[string]any{
-		"samples": out, "sample_count": len(out), "truncated": truncated,
+		"samples": out, "sample_count": len(out), "truncated": truncated, "grain": grain,
 		"bytes_down": down, "bytes_up": up, "bytes_total": down + up,
 	})
 }

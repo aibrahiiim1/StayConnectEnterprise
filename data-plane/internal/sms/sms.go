@@ -3,6 +3,7 @@ package sms
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -11,6 +12,10 @@ import (
 
 	"github.com/stayconnect/enterprise/data-plane/internal/buildprofile"
 )
+
+// ErrNotDelivered: the message did not and could not leave the appliance (no provider is configured). A caller reports
+// "could not be sent"; it never tells a guest a code is on its way (AD-35).
+var ErrNotDelivered = errors.New("sms: not delivered, no SMS provider is configured")
 
 type Sender interface {
 	Send(ctx context.Context, msg Message) error
@@ -57,7 +62,7 @@ func (s *Stub) Send(_ context.Context, m Message) error {
 	}
 	if s.redact {
 		slog.Warn("sms.stub: message not delivered, no SMS provider is configured", "to", MaskNumber(m.To))
-		return nil
+		return ErrNotDelivered
 	}
 	slog.Info("sms.stub", "to", m.To)
 	return nil

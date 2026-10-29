@@ -27,6 +27,10 @@ import (
 	lic "github.com/stayconnect/enterprise/license"
 )
 
+// fixtureIdentityFpr is the identity key fingerprint the fixture licences are bound to (AD-15), shared with
+// signedLicence in license_fixture_integration_test.go.
+const fixtureIdentityFpr = "f1f1f1f1f1f1f1f1"
+
 // licenceWithModules installs a vendor-signed, production-profile (required) licence authorising exactly ids.
 func licenceWithModules(t *testing.T, ids ...string) *licstate.Manager {
 	t.Helper()
@@ -49,6 +53,8 @@ func licenceWithModules(t *testing.T, ids ...string) *licstate.Manager {
 		TenantID: "22222222-2222-2222-2222-222222222222", SiteID: "33333333-3333-3333-3333-333333333333",
 		IssuedAt: now.Add(-time.Hour), ValidUntil: now.AddDate(0, 6, 0), SchemaVersion: lic.CurrentSchemaVersion,
 		LicenseVersion: 1, MaxConcurrentOnlineGuests: 10, Modules: mods, Features: lic.ProjectFeatures(mods),
+		// AD-15: an installed v4 licence must name the appliance it is for.
+		IdentityKeyFingerprint: fixtureIdentityFpr, ApplianceSerial: "SC-FIXTURE",
 	}
 	env, err := lic.NewSigner(priv).Sign(doc)
 	if err != nil {
@@ -59,6 +65,7 @@ func licenceWithModules(t *testing.T, ids ...string) *licstate.Manager {
 		t.Fatal(err)
 	}
 	m := licstate.New(nil, "", filepath.Join(dir, "license"), pubPath, true)
+	m.SetLocalIdentity(lic.LocalIdentity{IdentityKeyFingerprint: fixtureIdentityFpr, Serial: "SC-FIXTURE"})
 	if _, err := m.Install(context.Background(), raw); err != nil {
 		t.Fatalf("install licence: %v", err)
 	}

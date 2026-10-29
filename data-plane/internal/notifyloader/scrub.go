@@ -5,8 +5,24 @@ package notifyloader
 
 import (
 	"errors"
+	"log/slog"
 	"regexp"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/mail"
 )
+
+// OperatorText is the text an operator may read for a provider failure (audit AD-13): an SMTP server's own words are
+// replaced by a generic instruction and written to the journal instead; contacts are scrubbed from anything else.
+func OperatorText(err error) string {
+	if err == nil {
+		return ""
+	}
+	if t, ok := mail.OperatorSMTPText(err); ok {
+		slog.Warn("notifyloader: mail server refused the send", "detail", ScrubContacts(err.Error()))
+		return t
+	}
+	return ScrubContacts(err.Error())
+}
 
 var (
 	emailPattern = regexp.MustCompile(`[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`)
