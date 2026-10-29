@@ -318,6 +318,9 @@ func runSeedAdmin(args []string) error {
 		slog.Warn("seeding a WEAK site-admin password via --allow-weak — it must be changed at first sign-in")
 	}
 	c := loadCfg()
+	if err := requireDBURL(c); err != nil {
+		return err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	pool, err := pgxpool.New(ctx, c.DBURL)
@@ -410,6 +413,9 @@ func runResetMFA(args []string) error {
 		return fmt.Errorf("--email and --reason (4-500 characters) are required")
 	}
 	c := loadCfg()
+	if err := requireDBURL(c); err != nil {
+		return err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	pool, err := pgxpool.New(ctx, c.DBURL)

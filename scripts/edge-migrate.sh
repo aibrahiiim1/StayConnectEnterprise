@@ -576,8 +576,20 @@ verify_in_order(){ # $1 = version being applied
 # with no record of it. A file with its own BEGIN;/COMMIT; (exactly one of each, nothing after the COMMIT) gets
 # the insert just before its COMMIT; a file without transaction control is wrapped in one. Any other shape is
 # refused before anything runs.
-check_tx_shape(){ # $1 = file -> "plain" or "own"; exits 3 on any other shape
+check_tx_shape(){ # $1 = file -> "plain", "own" or "notx"; exits 3 on any other shape
   local f="$1" b c last
+  # NO-TRANSACTION MODE (audit AD-62): `-- edge-migrate: no-transaction` in the first 20 lines. Needed for
+  # CREATE INDEX CONCURRENTLY, which PostgreSQL refuses inside a transaction block. The file must carry NO
+  # transaction control of its own; each statement then commits by itself, and the ledger row is a SEPARATE
+  # step written after the last statement. A crash between the two leaves objects without a row, so such a
+  # file must be idempotent (IF NOT EXISTS) and is simply re-run.
+  if head -n 20 "$f" | grep -qE '^--[[:space:]]*edge-migrate:[[:space:]]*no-transaction[[:space:]]*$'; then
+    b="$(grep -ciE '^[[:space:]]*(BEGIN|COMMIT|START[[:space:]]+TRANSACTION)[[:space:]]*;' "$f" || true)"
+    if [ "$b" != 0 ]; then
+      echo "REFUSED: $(basename "$f") is marked no-transaction but contains BEGIN/COMMIT; remove them" >&2; exit 3
+    fi
+    echo notx; return 0
+  fi
   b="$(grep -ciE '^[[:space:]]*BEGIN[[:space:]]*;' "$f" || true)"
   c="$(grep -ciE '^[[:space:]]*COMMIT[[:space:]]*;' "$f" || true)"
   if [ "$b" = 0 ] && [ "$c" = 0 ]; then echo plain; return 0; fi
@@ -594,7 +606,11 @@ check_tx_shape(){ # $1 = file -> "plain" or "own"; exits 3 on any other shape
 body_with_ledger(){ # $1 = file, $2 = version (validated against NAME_RE), $3 = shape
   local ins
   ins="INSERT INTO public.schema_migrations(version) VALUES ('$2') ON CONFLICT DO NOTHING;"
-  if [ "$3" = plain ]; then
+  if [ "$3" = notx ]; then
+    # Separate ledger step: autocommit statements, then the row. ON_ERROR_STOP means a failed statement never
+    # reaches the INSERT, so a half-built migration is not recorded and is retried.
+    cat "$1"; printf '\n%s\n' "$ins"
+  elif [ "$3" = plain ]; then
     printf 'BEGIN;\n'; cat "$1"; printf '\n%s\nCOMMIT;\n' "$ins"
   else
     INS="$ins" awk '/^[[:space:]]*[Cc][Oo][Mm][Mm][Ii][Tt][[:space:]]*;/ { print ENVIRON["INS"] } { print }' "$1"

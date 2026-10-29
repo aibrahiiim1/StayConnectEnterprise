@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"os/user"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -51,7 +52,11 @@ func main() {
 	startupbackoff.Guard("netd")
 
 	sock := envOr("NETD_SOCKET", "/run/stayconnect/netd.sock")
-	dbURL := envOr("NETD_DB_URL", "postgres://stayconnect:stayconnect@127.0.0.1:5432/stayconnect_site?sslmode=disable")
+	dbURL := os.Getenv("NETD_DB_URL")
+	if err := requireDBURL(dbURL); err != nil {
+		slog.Error("configuration", "err", err)
+		os.Exit(1)
+	}
 	dryRun := os.Getenv("NETD_DRY_RUN") == "true"
 
 	topo := netcfg.DefaultTopology()
@@ -534,4 +539,14 @@ func extractDhcp4(raw []byte) (map[string]any, error) {
 		return nil, errors.New("no Dhcp4 in file")
 	}
 	return d, nil
+}
+
+// requireDBURL refuses to start without NETD_DB_URL (audit AD-64, P6 L14): the built-in fallback carried a published
+// password and turned TLS off. The installer and the upgrade add a missing value (deploy/scripts/backfill-db-urls.sh)
+// and read it back BEFORE netd is restarted, so an upgrade cannot leave netd stopped and enforcement cut.
+func requireDBURL(v string) error {
+	if strings.TrimSpace(v) == "" {
+		return errors.New("NETD_DB_URL is not set; netd has no built-in database URL. Run deploy/scripts/backfill-db-urls.sh or set it in /etc/stayconnect/netd.env")
+	}
+	return nil
 }

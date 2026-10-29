@@ -69,6 +69,22 @@ func (e *Enforcer) PurgeAccountingDetail(ctx context.Context, tenant, site strin
 	return n, err
 }
 
+// RollupAccountingUsage adds the next window of raw accounting samples to the per-minute and per-hour usage tables
+// (migration 0240, AD-48) and returns the samples read. A no-op on a database without the migration. The purge never
+// removes a raw sample the rollup has not read, so this must keep running for detail to be reclaimed.
+func (e *Enforcer) RollupAccountingUsage(ctx context.Context, tenant, site string) (int64, error) {
+	present, err := e.procPresent(ctx, "iam_v2.rollup_accounting_usage(uuid,uuid,interval)")
+	if err != nil {
+		return 0, err
+	}
+	if !present {
+		return 0, nil
+	}
+	var n int64
+	err = e.pool.QueryRow(ctx, `SELECT iam_v2.rollup_accounting_usage($1,$2)`, tenant, site).Scan(&n)
+	return n, err
+}
+
 // procPresent reports whether a database function exists, re-probing the catalog at most once a minute.
 func (e *Enforcer) procPresent(ctx context.Context, signature string) (bool, error) {
 	v, err := e.probes.get(signature, func() ([]bool, error) {

@@ -189,7 +189,7 @@ func (a *acctd) runLoops(ctx context.Context, c cfg, clock *cutoffClock, netd pl
 			slog.Debug("phase3: accounting samples ingested", "count", n)
 		}
 		p3.enforceSessionLimits(ctx, now)
-		p3.purgeAccountingDetail(ctx, now)
+		p3.accountingMaintenance(ctx, now)
 		aggOwner.sweep(ctx)
 		sub.kick() // a limit may have ended a session: tell netd now, not at the next period
 		// The heartbeat proves the accounting loop is progressing; the report says why it is degraded, since a loop

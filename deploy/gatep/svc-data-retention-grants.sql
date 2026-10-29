@@ -19,6 +19,10 @@ BEGIN
   GRANT EXECUTE ON FUNCTION iam_v2.data_retention_get(uuid,uuid) TO svc_scd;
   GRANT EXECUTE ON FUNCTION iam_v2.run_data_retention(uuid,uuid,integer) TO svc_scd;
   GRANT EXECUTE ON FUNCTION public.run_data_retention_public(uuid,uuid,integer) TO svc_scd;
+  -- Migration 0243 (AD-49): removes one-time-code, room-attempt and redirect rows the run above has already scrubbed.
+  IF to_regprocedure('public.run_event_table_trim(uuid,uuid,integer)') IS NOT NULL THEN
+    GRANT EXECUTE ON FUNCTION public.run_event_table_trim(uuid,uuid,integer) TO svc_scd;
+  END IF;
 
   GRANT EXECUTE ON FUNCTION iam_v2.data_retention_get(uuid,uuid) TO svc_edged;
   -- Migration 0134 (GDPR plan F5) added the system-log period, and 0140 (GDPR audit C4) the staff-note period,

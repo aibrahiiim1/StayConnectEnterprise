@@ -740,6 +740,35 @@ if ! applied && [ "$(marker)" = "0" ] && echo "$out" | grep -q "statements after
 else no "a migration with statements after its COMMIT was run" "$out"; fi
 cp "$WORK/0099.keep" "$MIGDIR/0099_selftest_noop.up.sql"; undo
 
+echo "== 12. no-transaction mode: CREATE INDEX CONCURRENTLY with a separate ledger step (AD-62) =="
+Q "CREATE TABLE IF NOT EXISTS iam_v2.edge_selftest_big(id int, v int);" >/dev/null
+# CREATE INDEX needs the table's owner, and the apply role is the one that runs the migration.
+Q "ALTER TABLE iam_v2.edge_selftest_big OWNER TO edge_apply;" >/dev/null
+ledger_reset; mk_commerce
+mk_notx(){ printf '%s\n' "$@" > "$MIGDIR/0099_selftest_noop.up.sql"; PSHA="$(sha256sum "$MIGDIR/0099_selftest_noop.up.sql" | awk '{print $1}')"; }
+run_notx(){ EDGE_PSQL="$PSQL" bash "$RUN" --apply-role edge_apply --only 0099_selftest_noop --expect-db "$DB" --target-kind live-site \
+        --ack-target I_UNDERSTAND_LIVE_DARK_SITE_MIGRATION --expect-sha256 "$PSHA" 2>&1; }
+mk_notx '-- edge-migrate: no-transaction' 'CREATE INDEX CONCURRENTLY IF NOT EXISTS edge_selftest_big_v ON iam_v2.edge_selftest_big(v);' \
+        'CREATE TABLE IF NOT EXISTS iam_v2.edge_selftest_marker(id int PRIMARY KEY);'
+out="$(run_notx)"
+if applied && [ "$(Q "SELECT count(*) FROM pg_indexes WHERE indexname='edge_selftest_big_v'")" = 1 ] && [ "$(marker)" = "1" ]; then
+  ok "a marked file runs CREATE INDEX CONCURRENTLY outside a transaction and then records its ledger row"
+else no "no-transaction migration did not apply" "$out"; fi
+undo; Q "DROP INDEX IF EXISTS iam_v2.edge_selftest_big_v;" >/dev/null
+mk_notx '-- edge-migrate: no-transaction' 'CREATE INDEX CONCURRENTLY IF NOT EXISTS edge_selftest_big_v ON iam_v2.edge_selftest_big(v);' \
+        'CREATE INDEX CONCURRENTLY edge_selftest_nope ON iam_v2.edge_selftest_big(no_such_column);'
+out="$(run_notx)"; rc=$?
+if [ "$rc" != 0 ] && ! applied; then ok "a failing statement leaves NO ledger row (the file is retried, so it must be idempotent)"
+else no "a failed no-transaction migration was recorded as applied (rc=$rc)" "$out"; fi
+Q "DROP INDEX IF EXISTS iam_v2.edge_selftest_big_v;" >/dev/null
+mk_notx '-- edge-migrate: no-transaction' 'BEGIN;' 'CREATE INDEX CONCURRENTLY IF NOT EXISTS edge_selftest_big_v ON iam_v2.edge_selftest_big(v);' 'COMMIT;'
+out="$(run_notx)"
+if ! applied && echo "$out" | grep -q "marked no-transaction but contains BEGIN/COMMIT"; then
+  ok "a marked file with its own BEGIN/COMMIT is REFUSED before anything runs"
+else no "marked file with transaction control was run" "$out"; fi
+Q "DROP TABLE IF EXISTS iam_v2.edge_selftest_big;" >/dev/null
+cp "$WORK/0099.keep" "$MIGDIR/0099_selftest_noop.up.sql"; undo
+
 echo "============================================================"
 if [ "$fail" = "0" ]; then echo "EDGE_MIGRATE_SELFTEST = PASS ($pass cases)"; exit 0; fi
 echo "EDGE_MIGRATE_SELFTEST = FAIL"; exit 1

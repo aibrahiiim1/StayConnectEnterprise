@@ -101,10 +101,20 @@ type cfg struct {
 	PortalTLSExtraRoots string
 }
 
+// requireDBURL refuses to start without SCD_DB_URL (audit AD-64, P6 L14): the built-in fallback carried a published
+// password and turned TLS off. The installer and the upgrade add a missing value (deploy/scripts/backfill-db-urls.sh)
+// and read it back before any service is restarted.
+func requireDBURL(c cfg) error {
+	if strings.TrimSpace(c.DBURL) == "" {
+		return errors.New("SCD_DB_URL is not set; scd has no built-in database URL. Run deploy/scripts/backfill-db-urls.sh or set it in /etc/stayconnect/scd.env")
+	}
+	return nil
+}
+
 func loadCfg() cfg {
 	return cfg{
 		SocketPath:      envOr("SCD_SOCKET", "/run/stayconnect/scd.sock"),
-		DBURL:           envOr("SCD_DB_URL", "postgres://stayconnect:stayconnect@127.0.0.1:5432/stayconnect?sslmode=disable"),
+		DBURL:           os.Getenv("SCD_DB_URL"),
 		TenantID:        os.Getenv("SCD_TENANT_ID"),
 		SiteID:          os.Getenv("SCD_SITE_ID"),
 		ApplianceID:     os.Getenv("SCD_APPLIANCE_ID"),
@@ -470,6 +480,10 @@ func main() {
 	startupbackoff.Guard("scd")
 
 	c := loadCfg()
+	if err := requireDBURL(c); err != nil {
+		slog.Error("configuration", "err", err)
+		os.Exit(1)
+	}
 
 	applianceauth.SetVersion(scdVersion)
 

@@ -50,7 +50,7 @@ func (s *server) retentionPasses(ctx context.Context, maxPasses int) (complete b
 	var failures []string
 	for pass := 0; maxPasses <= 0 || pass < maxPasses; pass++ {
 		changed := 0
-		for _, fn := range []string{"iam_v2.run_data_retention", "public.run_data_retention_public", "iam_v2.run_staff_note_retention"} {
+		for _, fn := range []string{"iam_v2.run_data_retention", "public.run_data_retention_public", "iam_v2.run_staff_note_retention", "public.run_event_table_trim"} {
 			if failed[fn] {
 				continue
 			}
