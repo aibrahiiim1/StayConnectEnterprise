@@ -26,6 +26,7 @@ CAVER=$(PSQL "SELECT version FROM appliance_ca_versions ORDER BY version DESC LI
 
 clean() { PSQL "BEGIN;
  DELETE FROM retired_appliance_identities WHERE serial LIKE 'ZZZ-%';
+ DELETE FROM appliance_history_archive WHERE serial LIKE 'ZZZ-%';
  DELETE FROM licenses WHERE tenant_id IN (SELECT id FROM tenants WHERE slug LIKE 'zzz-%');
  DELETE FROM appliances WHERE tenant_id IN (SELECT id FROM tenants WHERE slug LIKE 'zzz-%') OR serial LIKE 'ZZZ-%';
  DELETE FROM sites WHERE tenant_id IN (SELECT id FROM tenants WHERE slug LIKE 'zzz-%');

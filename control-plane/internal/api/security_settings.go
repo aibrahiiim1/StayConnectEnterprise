@@ -28,6 +28,12 @@ type securitySettingsView struct {
 	LockFailures       settingBounds `json:"signin_lock_failures_bounds"`
 	SigninLockMinutes  int           `json:"signin_lock_minutes"`
 	LockMinutes        settingBounds `json:"signin_lock_minutes_bounds"`
+	// How long an appliance marked for replacement stays licensed until its replacement is activated (AD-54).
+	ReplacementWindowHours int           `json:"replacement_window_hours"`
+	ReplacementWindow      settingBounds `json:"replacement_window_hours_bounds"`
+	// How long Central waits for a retiring appliance's signed acknowledgement before it raises an alert (AD-54).
+	RetirementAckMinutes int           `json:"retirement_ack_minutes"`
+	RetirementAck        settingBounds `json:"retirement_ack_minutes_bounds"`
 }
 
 type settingBounds struct {
@@ -46,13 +52,18 @@ func (b *Base) loadSecuritySettings(r *http.Request) (securitySettingsView, erro
 		LockFailures: settingBounds{Default: auth.DefaultSigninLockFailures, Min: auth.MinSigninLockFailures,
 			Max: auth.MaxSigninLockFailures, Unit: "wrong attempts"},
 		LockMinutes: settingBounds{Default: auth.DefaultSigninLockMinutes, Min: auth.MinSigninLockMinutes,
-			Max: auth.MaxSigninLockMinutes, Unit: "minutes"}}
+			Max: auth.MaxSigninLockMinutes, Unit: "minutes"},
+		ReplacementWindow: settingBounds{Default: DefaultReplacementWindowHours, Min: MinReplacementWindowHours,
+			Max: MaxReplacementWindowHours, Unit: "hours"},
+		RetirementAck: settingBounds{Default: DefaultRetirementAckMinutes, Min: MinRetirementAckMinutes,
+			Max: MaxRetirementAckMinutes, Unit: "minutes"}}
 	var by string
 	var at time.Time
 	err := b.DB.QueryRow(ctx, `SELECT operator_session_max_hours, operator_idle_minutes, signin_lock_failures,
-                                        signin_lock_minutes, updated_at, COALESCE(updated_by,'')
+                                        signin_lock_minutes, updated_at, COALESCE(updated_by,''),
+                                        replacement_window_hours, retirement_ack_minutes
                                  FROM central_security_settings WHERE id`).Scan(&v.OperatorSessionMaxHours, &v.OperatorIdleMinutes,
-		&v.SigninLockFailures, &v.SigninLockMinutes, &at, &by)
+		&v.SigninLockFailures, &v.SigninLockMinutes, &at, &by, &v.ReplacementWindowHours, &v.RetirementAckMinutes)
 	if err != nil {
 		return v, err
 	}
@@ -79,10 +90,13 @@ func (b *Base) patchSecuritySettings(w http.ResponseWriter, r *http.Request) {
 		OperatorIdleMinutes     *int   `json:"operator_idle_minutes"`
 		SigninLockFailures      *int   `json:"signin_lock_failures"`
 		SigninLockMinutes       *int   `json:"signin_lock_minutes"`
+		ReplacementWindowHours  *int   `json:"replacement_window_hours"`
+		RetirementAckMinutes    *int   `json:"retirement_ack_minutes"`
 		Reason                  string `json:"reason"`
 	}
 	if err := DecodeJSON(r, &in); err != nil || (in.OperatorSessionMaxHours == nil && in.OperatorIdleMinutes == nil &&
-		in.SigninLockFailures == nil && in.SigninLockMinutes == nil) {
+		in.SigninLockFailures == nil && in.SigninLockMinutes == nil && in.ReplacementWindowHours == nil &&
+		in.RetirementAckMinutes == nil) {
 		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "at least one setting is required")
 		return
 	}
@@ -111,6 +125,21 @@ func (b *Base) patchSecuritySettings(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "The lock time must be between 1 and 1440 minutes.")
 		return
 	}
+	replHours, ackMins := before.ReplacementWindowHours, before.RetirementAckMinutes
+	if in.ReplacementWindowHours != nil {
+		replHours = *in.ReplacementWindowHours
+	}
+	if in.RetirementAckMinutes != nil {
+		ackMins = *in.RetirementAckMinutes
+	}
+	if replHours < MinReplacementWindowHours || replHours > MaxReplacementWindowHours {
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "The replacement window must be between 1 and 720 hours.")
+		return
+	}
+	if ackMins < MinRetirementAckMinutes || ackMins > MaxRetirementAckMinutes {
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "The retirement acknowledgement wait must be between 1 and 120 minutes.")
+		return
+	}
 	if in.OperatorSessionMaxHours != nil {
 		h = *in.OperatorSessionMaxHours
 	}
@@ -130,8 +159,9 @@ func (b *Base) patchSecuritySettings(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	if _, err := b.DB.Exec(ctx, `UPDATE central_security_settings
                                     SET operator_session_max_hours=$1, operator_idle_minutes=$2, signin_lock_failures=$4,
-                                        signin_lock_minutes=$5, updated_at=now(), updated_by=$3
-                                  WHERE id`, h, idle, email, lockN, lockMins); err != nil {
+                                        signin_lock_minutes=$5, replacement_window_hours=$6, retirement_ack_minutes=$7,
+                                        updated_at=now(), updated_by=$3
+                                  WHERE id`, h, idle, email, lockN, lockMins, replHours, ackMins); err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "The setting could not be saved. Try again.")
 		return
 	}
@@ -147,6 +177,12 @@ func (b *Base) patchSecuritySettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if lockMins != before.SigninLockMinutes {
 		payload["signin_lock_minutes"] = map[string]int{"from": before.SigninLockMinutes, "to": lockMins}
+	}
+	if replHours != before.ReplacementWindowHours {
+		payload["replacement_window_hours"] = map[string]int{"from": before.ReplacementWindowHours, "to": replHours}
+	}
+	if ackMins != before.RetirementAckMinutes {
+		payload["retirement_ack_minutes"] = map[string]int{"from": before.RetirementAckMinutes, "to": ackMins}
 	}
 	audit.Op(r.Context(), b.DB, r, "settings.security_updated", "settings", "security", payload)
 	b.getSecuritySettings(w, r)

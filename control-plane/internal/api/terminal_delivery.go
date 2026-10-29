@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -18,9 +19,6 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/auth"
 	pki "github.com/stayconnect/enterprise/control-plane/internal/pki"
 )
-
-// terminalTimeout is how long Phase 1 waits for the signed ack before raising an alert; the box is not reported decommissioned.
-func terminalTimeout() time.Duration { return 10 * time.Minute }
 
 // beginTerminalDelivery starts retirement inside the caller's transaction, so the caller's licence revocation and
 // the signed terminal assignment commit together (a revoked licence with no terminal document would leave the
@@ -52,7 +50,7 @@ func (b *Base) beginTerminalDelivery(ctx context.Context, tx pgx.Tx, id, termina
 	ver := doc.Version
 
 	deliveryState := "terminal_delivery_pending"
-	var timeoutAt any = time.Now().Add(terminalTimeout())
+	var timeoutAt any = time.Now().Add(b.retirementAckTimeout(ctx, tx))
 	if emergency {
 		deliveryState = "credential_revoked"
 		timeoutAt = nil
@@ -418,7 +416,18 @@ func decodeApplPub(b64 string) (ed25519.PublicKey, bool) {
 	return ed25519.PublicKey(raw), true
 }
 
+// logFetch records a fetch. Served and denied fetches are one row each; "not-modified" fetches (one per 30-second
+// poll) share one row per appliance, outcome and hour, counted in hits (AD-54).
 func logFetch(ctx context.Context, db *pgxpool.Pool, applianceID, fpr, outcome string) {
+	if strings.HasPrefix(outcome, "not-modified") && applianceID != "" {
+		tag, err := db.Exec(ctx, `UPDATE appliance_assignment_fetch_log SET hits = hits + 1
+            WHERE id = (SELECT id FROM appliance_assignment_fetch_log
+                         WHERE appliance_id = $1::uuid AND outcome = $2 AND at >= date_trunc('hour', now())
+                         ORDER BY at DESC LIMIT 1)`, applianceID, outcome)
+		if err == nil && tag.RowsAffected() > 0 {
+			return
+		}
+	}
 	_, _ = db.Exec(ctx, `INSERT INTO appliance_assignment_fetch_log (appliance_id, fingerprint, outcome)
         VALUES (NULLIF($1,'')::uuid,NULLIF($2,''),$3)`, applianceID, fpr, outcome)
 }
