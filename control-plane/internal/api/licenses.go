@@ -292,6 +292,11 @@ func (b *LicensesBase) ApplianceLicenseHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 	// The appliance now keeps these revocations (license.Store.AddRevocation), so deleting the site cannot undo them (deleteSite).
+	//
+	// revocation_delivered_at means SENT, not confirmed (AD-21, audit Phase 1 L5): it is set once the response has been
+	// encoded for the appliance. The appliance applies revocations only over mutual TLS (AD-16) and stores them durably
+	// before it validates the fetch, and the next fetch repeats the list until the licence is gone, but Central does
+	// not wait for a confirmation. Confirmation by protocol is deferred to the Phase 2 licensing work.
 	_, _ = b.DB.Exec(ctx, `UPDATE licenses SET revocation_delivered_at = now()
          WHERE $1::uuid = ANY(appliance_ids) AND status = 'revoked' AND id::text = ANY($2) AND revocation_delivered_at IS NULL`,
 		ident.ApplianceID, revoked)

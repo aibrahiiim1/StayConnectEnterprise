@@ -381,3 +381,34 @@ and re-checks verified custom domains daily. Every action is in the append-only 
 the same transaction releases the hostname, queues every valid portal certificate for revocation, cancels open orders
 and removes the hotel-domain claim. Delete additionally deletes the A record and revokes at once (the record's portal
 rows are cascaded away with it) and refuses to delete when that fails.
+
+## 10. Licensing and activation contract notes (audit decisions AD-1 to AD-21, AD-61)
+
+- **Activation code (AD-1).** An appliance shows a code, derived from its identity public key, in its Admin Console while it
+  waits (`details.activation_code`, System, Appliance and licence). **Activate** and the offline **request import**
+  (`X-Activation-Code` header or `activation_code` query) require it; Central recomputes it from the key it holds
+  (`applianceauth.ActivationCode`: SHA-256 of `onegate-activation-code-v1`, 0x00, the raw key; first 8 base32 characters,
+  written XXXX-XXXX; golden vector in both modules). A waiting row's identity key is **never replaced**, whatever the
+  fingerprint: the operator deletes the waiting row and the reinstalled box registers as a new row.
+- **Registration limits (AD-19, AD-20).** A new registration whose serial or fingerprint is the shared constant-anchor value
+  (no DMI data, machine-id or NIC) is refused with 422; existing rows are untouched. New waiting rows are capped by the
+  setting `max_waiting_appliances` (default 200, 10-5000; `GET|PATCH /cloud/v1/settings/registration`, audited, migration
+  0060): past it, registration answers 503 and raises one `registration_cap_reached` alert. Nothing is pruned.
+- **Trust and revocations (AD-2, AD-16).** The appliance pins the appliance Root CA (`/etc/stayconnect/appliance-root-ca.crt`,
+  installed at provisioning by `install-appliance-root-ca.sh`) and accepts only CA bundles and client certificates that chain
+  to it. It stores licence revocations only when the fetch came over mutual TLS.
+- **Licence installation (AD-15, AD-18).** Install refuses an unbound v4 licence, a licence whose identity fields the appliance
+  cannot compare, an appliance outside the licence list, and a licence for another customer or site than the signed
+  assignment. Evaluation of an already installed licence is unchanged, so no running appliance is bricked. Offline import
+  records its single-use row only together with a successful install; first activation is refused for an appliance holding
+  any signed assignment state, including a revoked one.
+- **Clock (AD-17).** `POST /license/clock-reset` (license write permission, reason required, audited) sets the licence clock
+  high-water mark to Central's authenticated time; it is refused while the local clock still disagrees with Central.
+- **Replay cache (AD-11).** ctrlapi's appliance-JWT replay cache stays **in process** (bounded, O(1) expiry). That is correct
+  while ctrlapi runs as a single instance; moving to Redis `SET NX EX` is required before scaling ctrlapi out.
+- **Contract details kept as they are (AD-21).** A revoked licence keeps its portal hostname until the appliance is retired or
+  deleted. `licenses.revocation_delivered_at` means *sent*, not *confirmed by the appliance*. The assignment fetch answers
+  every refusal with 204; changing that needs a matching scd change.
+- **Mirrored code (AD-61).** The assignment, offline, activation, totp and applianceauth packages are copies in both modules.
+  Golden-vector tests in both modules pin their signed byte layouts and key-id encodings (activation uses base64url, the
+  others hex); a one-sided change fails the test on the side that did not change.
