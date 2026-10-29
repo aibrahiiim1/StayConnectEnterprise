@@ -4865,6 +4865,7 @@ BEGIN
     RAISE EXCEPTION 'unknown ledger entry kind %', p_kind USING ERRCODE = 'invalid_parameter_value';
   END IF;
   PERFORM pg_advisory_xact_lock(hashtext('stayconnect-erasure-ledger'));
+  PERFORM iam_v2.ledger_mac_key_ensure();
   SELECT * INTO m FROM ledger_meta;
   SELECT l.seq, l.hash INTO v_seq, v_prev FROM erasure_ledger l ORDER BY l.seq DESC LIMIT 1;
   v_seq := COALESCE(v_seq, 0) + 1;
@@ -5022,13 +5023,36 @@ $$;
 
 
 --
+-- Name: ledger_mac_key_ensure(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.ledger_mac_key_ensure() RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM iam_v2.ledger_mac_key) THEN
+    PERFORM pg_advisory_xact_lock(hashtext('stayconnect-erasure-ledger'));
+    INSERT INTO iam_v2.ledger_mac_key (key) SELECT public.gen_random_bytes(32)
+     WHERE NOT EXISTS (SELECT 1 FROM iam_v2.ledger_mac_key);
+  END IF;
+END $$;
+
+
+--
 -- Name: ledger_mac_key_get(); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
 CREATE FUNCTION iam_v2.ledger_mac_key_get() RETURNS text
-    LANGUAGE sql STABLE SECURITY DEFINER
+    LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'iam_v2', 'pg_temp'
-    AS $$ SELECT encode(k.key, 'hex') FROM iam_v2.ledger_mac_key k $$;
+    AS $$
+DECLARE v text;
+BEGIN
+  PERFORM iam_v2.ledger_mac_key_ensure();
+  SELECT encode(k.key, 'hex') INTO v FROM iam_v2.ledger_mac_key k;
+  RETURN v;
+END $$;
 
 
 --
@@ -31724,6 +31748,13 @@ REVOKE ALL ON FUNCTION iam_v2.ledger_hash(p_ledger uuid, p_seq bigint, p_prev te
 REVOKE ALL ON FUNCTION iam_v2.ledger_head() FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.ledger_head() TO svc_edged;
 GRANT ALL ON FUNCTION iam_v2.ledger_head() TO svc_scd;
+
+
+--
+-- Name: FUNCTION ledger_mac_key_ensure(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.ledger_mac_key_ensure() FROM PUBLIC;
 
 
 --
