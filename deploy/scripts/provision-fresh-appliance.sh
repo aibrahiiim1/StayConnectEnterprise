@@ -280,6 +280,21 @@ else
        adopt its assignment. Supply Central's assignment-registry-root.pub (from /opt/stayconnect/central/appliance-trust/
        on Central) at $ASSIGN_ROOT_SLOT or ASSIGN_ROOT_PUB=/path, verified against Central's FINGERPRINTS.txt."
 fi
+
+# APPLIANCE ROOT CA PIN (audit decision AD-2). Central publishes appliance-root-ca.crt next to the other public trust
+# material. With it installed the appliance accepts only mutual-TLS CA bundles and client certificates that chain to
+# it; without it the appliance pins the root of the first bundle it installs (works, but trusts Central's first reply).
+APPLIANCE_ROOT_SLOT="$DEPLOY/pki/appliance-root-ca.crt"
+if [ -n "${APPLIANCE_ROOT_CA:-}" ]; then
+  bash "$DEPLOY/scripts/install-appliance-root-ca.sh" "$APPLIANCE_ROOT_CA"
+elif [ -s "$APPLIANCE_ROOT_SLOT" ]; then
+  bash "$DEPLOY/scripts/install-appliance-root-ca.sh" "$APPLIANCE_ROOT_SLOT"
+elif [ -s "$ETC/appliance-root-ca.crt" ]; then
+  say "appliance Root CA already pinned ($(bash "$DEPLOY/scripts/install-appliance-root-ca.sh" --show | tail -1))"
+else
+  say "NOTE: no appliance Root CA pinned. The appliance will pin the root of the first CA bundle Central sends it."
+  say "      Put Central's appliance-root-ca.crt at $APPLIANCE_ROOT_SLOT or APPLIANCE_ROOT_CA=/path and re-run to pin it now."
+fi
 say "credentials ok"
 
 # ---------------------------------------------------------------- 6. service environment (NO IDENTITY)

@@ -1093,6 +1093,8 @@ func main() {
 	// Appliance-side mTLS: ensure a client certificate exists (CSR, issue, fetch, store), verify the transport, rotate before expiry. A failure here never affects local guest operation.
 	if ident != nil && talksToCentral && c.MTLSBase != "" {
 		certMgr := appliancecert.New(c.CertDir, c.CtrlAPIBase, c.MTLSBase, ident.ApplianceID, ident.PrivateKey())
+		// AD-2: the appliance Root CA pinned at provisioning (default /etc/stayconnect/appliance-root-ca.crt).
+		certMgr.PinPath = envOr("SCD_APPLIANCE_ROOT_CA", "")
 		s.certMgr = certMgr
 		// Every bootstrap attempt tells us whether Central is answering, including while it waits for an operator to activate.
 		certMgr.OnAttempt(func(err error) { central.record(err, time.Now()) })

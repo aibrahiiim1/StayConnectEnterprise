@@ -12,6 +12,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -54,12 +55,28 @@ func (f *fakeCentral) handler() http.Handler {
 	return mux
 }
 
-// mintCertFor issues a self-signed CA and a leaf bound to the manager's mTLS public key, so the certificate pairs with the key the appliance kept.
-func mintCertFor(t *testing.T, pub ed25519.PublicKey) (certPEM, caPEM string) {
+// testCA is the one appliance Root CA of the test process: AD-2 pins the first bundle an appliance installs, so every
+// certificate a test rotates to must chain to the same root, as it does under one Central.
+var (
+	testCAOnce sync.Once
+	testCACert *x509.Certificate
+	testCAPriv ed25519.PrivateKey
+	testCAPEM  string
+)
+
+func sharedTestCA(t *testing.T) (*x509.Certificate, ed25519.PrivateKey, string) {
 	t.Helper()
-	caPub, caPriv, _ := ed25519.GenerateKey(rand.Reader)
+	testCAOnce.Do(func() {
+		pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+		testCACert, testCAPriv, testCAPEM = newTestCA(t, "Test CA", pub, priv)
+	})
+	return testCACert, testCAPriv, testCAPEM
+}
+
+func newTestCA(t *testing.T, cn string, caPub ed25519.PublicKey, caPriv ed25519.PrivateKey) (*x509.Certificate, ed25519.PrivateKey, string) {
+	t.Helper()
 	caTmpl := &x509.Certificate{
-		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "Test CA"},
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: cn},
 		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(24 * time.Hour),
 		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign,
 	}
@@ -68,9 +85,28 @@ func mintCertFor(t *testing.T, pub ed25519.PublicKey) (certPEM, caPEM string) {
 		t.Fatalf("ca: %v", err)
 	}
 	caCert, _ := x509.ParseCertificate(caDER)
+	return caCert, caPriv, string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}))
+}
 
+// mintCertFor issues a leaf bound to the manager's mTLS public key under the shared test CA, so the certificate pairs with the key the appliance kept.
+func mintCertFor(t *testing.T, pub ed25519.PublicKey) (certPEM, caPEM string) {
+	t.Helper()
+	caCert, caPriv, caPEM := sharedTestCA(t)
+	return mintLeaf(t, pub, caCert, caPriv), caPEM
+}
+
+// mintCertUnderNewCA issues a leaf under a CA the appliance has never seen (a hostile or mistaken ca_chain).
+func mintCertUnderNewCA(t *testing.T, pub ed25519.PublicKey) (certPEM, caPEM string) {
+	t.Helper()
+	caPub, caPriv, _ := ed25519.GenerateKey(rand.Reader)
+	caCert, _, caPEM := newTestCA(t, "Other CA", caPub, caPriv)
+	return mintLeaf(t, pub, caCert, caPriv), caPEM
+}
+
+func mintLeaf(t *testing.T, pub ed25519.PublicKey, caCert *x509.Certificate, caPriv ed25519.PrivateKey) string {
+	t.Helper()
 	leafTmpl := &x509.Certificate{
-		SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "appliance"},
+		SerialNumber: big.NewInt(time.Now().UnixNano()), Subject: pkix.Name{CommonName: "appliance"},
 		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(24 * time.Hour),
 		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 	}
@@ -78,8 +114,7 @@ func mintCertFor(t *testing.T, pub ed25519.PublicKey) (certPEM, caPEM string) {
 	if err != nil {
 		t.Fatalf("leaf: %v", err)
 	}
-	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: leafDER})),
-		string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}))
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: leafDER}))
 }
 
 func newManagerFor(t *testing.T, base string) *Manager {
