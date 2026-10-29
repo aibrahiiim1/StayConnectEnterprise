@@ -1,0 +1,4 @@
+commit 0707394240c61e8bac3a3b12bb8a9f772b9d3643
+Date:   Thu Oct 29 06:05:44 2026 +0300
+
+    Governance: T0267 change manifest (review fixes)
