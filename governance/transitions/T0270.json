@@ -1,0 +1,31 @@
+{
+  "transition_id": "T0270",
+  "seq": 270,
+  "timestamp": "2026-10-29T08:03:23Z",
+  "timestamp_derivation": "Computed from the session clock after the branch was validated, before the commit that introduces this receipt.",
+  "record_type": "AUDIT_CLOSURE_ROUND_IMPLEMENTATION",
+  "authorisation": "D82, the Product Owner's continuation of the mission of 2026-10-29.",
+  "implementation": "Closure round of AD-1 to AD-68: the installer pins the appliance Root CA only against a fingerprint on a fresh install and on --upgrade (AD-2); a platform-marked migration must match the installed release's SHA256SUMS before any migration is applied (review of PR #266); Hotel Admin: Network, Client access protection (enforcement policy, password step-up, reason, history) and a licence clock reset card; Central console: appliance registration limit with the waiting count; migration 0179 makes the post-stay sign-in window after check-out a per-site audited setting (default 7 days, 1-30) and post-stay lookups honour it; netd unit hardened; docs reconciled.",
+  "migrations": "Appliance 0179 (iam_v2.site_signin_capacity_settings.post_stay_signin_days; both settings functions re-created and re-owned to iam_v2_owner; applies as iam_v2_owner on a database built from the previous baseline). The production baseline was regenerated through 0179. No Central migration in this delivery.",
+  "verification": "Isolated full-schema post-stay integration suite (10 cases, three new: window, next occupant, other PMS interface); scd, edged, netd, acctd unit suites on Go 1.26.10 (Linux); hotel-admin 1075 tests and both typechecks; apply-pending-migrations selftest 8 of 8; migration location, grant durability and delivery-protocol validators. Live on the test appliance before this deployment: cut-off 2.7 s, conntrack clean, image optimiser through the operator API, offline licence file import and replay refusal, netd hardened unit with the client journey 12/12, 500 and 300 simultaneous sign-in attempts, console-versus-direct latency; Linux restore drills (ledger 16 of 16, phase-4 38 of 38).",
+  "deployment": "At the time of this receipt: NOT deployed. The deployment to Central and the test appliance follows the merge and is recorded by its own receipt with the commits read back from the installed artifacts.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "d5137b1890da2e8d4bb7e1c9f34976dd7702003a",
+  "previous_delivery": "T0269",
+  "decision": "D82",
+  "go_live": "NOT authorised."
+}
