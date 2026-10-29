@@ -46,6 +46,8 @@ type Plan struct {
 
 type Enforcer struct {
 	pool *pgxpool.Pool
+	// rollupWin is the usage roll-up's current window per site (plan_limits.go).
+	rollupWin rollupWindows
 	// aggregateTimeMaxCharge > 0 enables the AGGREGATE_ONLINE_TIME accrual tick, bounded per tick. Zero is dark.
 	aggregateTimeMaxCharge int
 	// dataCrossing is the LATERAL deriving the DATA-quota crossing, chosen per sweep from the catalog.
