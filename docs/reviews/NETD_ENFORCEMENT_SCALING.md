@@ -172,3 +172,81 @@ Single bridge at N = 2,000 (measured once on the build before the last small opt
 * `data-plane/cmd/netd/phase3_provision.go`, `phase3_shaping.go`, `phase3_enforcement.go`, `phase3_origin.go`, `phase3_fastpath.go`, `main.go`: hooks (pre-check/tail split, deferral of denials and lease writes, unchanged-class and proof skips, switch).
 * `data-plane/internal/nft/batch.go` (new), `data-plane/internal/shape/batch.go` (new), `data-plane/internal/shape/shape.go` (`ClassBytes` carries parent/rate/ceil; `NewWithExec`), `data-plane/internal/nft/nft.go` (`NewWithExec`).
 * Tests: `cmd/netd/phase3_batch_test.go`, `phase3_scale_test.go`, `phase3_fakekernel_test.go`, `internal/nft/batch_test.go`, `internal/shape/batch_test.go`.
+
+## 10. Second lab run: sustained churn plus traffic (continuation)
+
+Release 885b6ac986c6 (this work, commit 56b35312) ramped 1,700 sessions well (98 % sign-ins, p95 7.6 s, 45-61 % of 2 vCPU, 2.4 execs/s at rest) and then collapsed under the steady phase: 10 % of the 1,700 moving 256 KB every 5 s while 300 devices cycled 60-second vouchers at 300 sign-ins a minute. 2,214 of 6,474 traffic requests and 23 of 3,000 churn sign-ins succeeded; the stress phase (all 1,700 moving) 4,778 of 33,320. This section is what the logs and an instrumented re-run showed, what was changed, and what is still open.
+
+### 10.1 Evidence
+
+Method: the pass now logs one line per full pass (`phase3: pass`) with the time it waited for the lock, the budget left when it got it, where its time went (stage in ms), counts of what it did, and the database calls it made (`db_<kind>=calls/total ms/slowest ms`). The base build was re-run with that line (lab, 6 min steady), the original `netd2.log` was re-read, and the appliance was sampled once a second (authorization set, 40 long sessions, MAC set), plus blocked-query and active-query samples of Postgres.
+
+| Finding | Evidence |
+|---|---|
+| **The "pass budget" was not 2 minutes.** The two-minute context was created in the HTTP handler before the pass waited for `p.mu`. acctd submits again after its 10 s client timeout while the previous pass is still running, so detached handlers queued, each arriving at the front with its budget spent. | `netd2.log`: 3,647 of the 3,652 `session enforcement ended but durable state not converged` lines have `err = context deadline exceeded` and 3,096 fall in one 30 s window starting 19:18:32; `phase-3 authorization scan failed` (its list ran with a dead context); the 72 `budget nearly exhausted` warnings came from the same passes (the reserve check saw an expired deadline). New log shows `lock_wait_ms` up to 13.7 s and `budget_at_lock_ms` ≈ 119,990 once the budget starts at the lock. |
+| **Lease renewal waited behind everything else**, so one slow pass let every lease run out together. | Base build, instrumented: one pass of 109 s, whose `admit` stage was 107 s because ONE `allocate_class_generation` call took 106 s (`db_alloc=20/106232/106163`). `monitor2.csv`: the authorization set reads 0 at 738, 923, 1,045 and 1,229 s although 1,700 sessions are active. |
+| **Every re-prove of every active session was a locking write** (`activate_session_enforcement` does `SELECT ... FOR UPDATE` and commits, even for an already-active session): 1,700 per 60-90 s, 1,700 `ALREADY_ACTIVE` log lines in a burst. | Function definition; `db_activate=1700/5166/10` in one pass. |
+| **Ended sessions were recorded as ended again on every pass.** A churned client keeps its address, so each ended session is "handed over" to its successor and the handover branch ran `end_session_enforcement` (also `FOR UPDATE`) each pass, for as long as the plan lists it (one hour). | `db_ended=4176` in a single pass; 388-711 per pass thereafter. Simulator: 28,355 end writes for 2,043 ended sessions (14 each). |
+| **A session that ended while its plan was in flight was treated as a failed activation:** grace, strike, quarantine, `Failed++`, degraded pass. | `ENFORCE_SESSION_ENDED`, `ACCT_SESSION_OUT_OF_SCOPE ... has ended`, `less than one representable second of access remains` in the problem lists (64 degraded passes, `failed` 2..302). |
+| **The plan grows without bound under churn.** Ended sessions stay in it for an hour (`internal/enforce.PlanForSite`): 18,000 entries at 300/min, past netd's 4 MB request limit after about 45 minutes, and thousands of entries walked per pass. | Code; plan sizes 3,392 → 5,876 in the runs. |
+| **Per-session database calls ran one after another with no bound.** | Pass stages of 43-64 s for 37-300 admissions; calls with a 5-8 s tail. |
+| **The remaining slowness is the database, not netd, and it is caused by the sign-in path.** Active-query sampling (150 samples): `svc_scd` sign-in transactions waiting on `pg_advisory_xact_lock(hashtextextended(appliance, 7))` in 136 samples and "idle in transaction" in most others. That lock is `reserveLicensedSlot` (`cmd/scd/iamv2_session_ops.go`), held for the whole sign-in transaction, so all activations on the appliance are serial; `svc_scd` is limited to 20 connections and hit it (`too many connections for role "svc_scd"`); `lock_timeout` 5 s and `idle_in_transaction_session_timeout` 30 s kill transactions (`canceling statement due to lock timeout`, `terminating connection due to idle-in-transaction timeout`). netd's own calls were not blocked by locks (a sampler of blocked `svc_netd` calls stayed empty), they were slow: `db_alloc` 87 ms/call in a quiet pass, 460 ms/call under churn. | `pg_stat_activity` samples, Postgres log, role limits. |
+| **The traffic success rate in this lab is not a measure of forwarding.** A burst of 850 clients fetching from the appliance's OWN portal (no forwarding, no NAT, no authorization set involved) failed 43 % of connections, and the bridge counters show that the failed SYNs never arrived (`rx_packets` rose only by the successful connections, no drops). 100 clients at once: 100 % ok. Spreading the requests over 4 s did not change it (58 % failed). | `ogload traffic -sink http://10.60.0.1:8380`; `sink` saw exactly the successful number of passive opens. The limit is in the generator's side of the lab, above roughly 100 simultaneous namespace dials. |
+
+### 10.2 What changed
+
+* **Budget at the lock, newest plan wins** (`phase3_shaping.go`): the handler no longer starts the clock; `submit` does, after it has the lock and a fresh `now`. `noteArrival` records the newest generation on arrival and a plan that was overtaken while waiting is answered `superseded_by_newer_plan` without walking.
+* **Order of a pass** (`phase3_batch.go`, `provisionBridgeBatched`): precheck (memory only), denials, **lease renewal of every unchanged session (one transaction, no database)**, new sessions, the per-session path, a second renewal when the pass has already run 8 s (judged by the time left NOW: `gateView.aged`, `renewAgain`), re-proof, and last the durable end records. Nothing that can wait on the database stands between a long session and its lease.
+* **A pass bounds its work** (`phase3SoftBudget`, 15 s): admissions and the per-session path stop after it; what was not reached is not a failure and is first in line next pass (`indivCursor` resumes where the previous pass stopped, so a few sessions that always wait cannot take every pass). A single database call is bounded (`phase3DBCallTimeout`, 3 s; applied in `timedEnforcement` / `timedOrigins` / `timedGenerations`).
+* **Database calls a few at a time** (`phase3_churn.go`, `phase3DBConcurrency` = 6, pool raised to 8 but within the role's limit of 10): class generations, origins and promotions of a chunk, promotions of the per-session path, re-proofs, end records. Results are consumed in order by the unchanged state machines (`takeActivation`, `activationResult`), so quarantine, grace and the write-ahead record are untouched.
+* **Reads instead of writes**: a re-prove is a plain `Confirm` read (the promotion call is only used when the read does not say "active"); an end record is skipped when `IsEnded` (plain read) says durable state already ended the session. Both fall back to the previous calls on any other answer.
+* **An ended session is recorded once**: the handover branch is de-duplicated through `endedTorn`; end records are written at the end of the pass, a few at a time, with a limit of three failures (a database that does not answer is not asked once per ended session).
+* **The ordinary end of a session is an event, not a failure** (`activationEnded`, `endClosed`, `ended_mid_pass` in the response): `ENFORCE_SESSION_ENDED`, an origin refused because the session ended, and a window with under a second left withdraw access (denial proven first, tc torn down) with no grace, strike, quarantine or `Failed++`. A withdrawal that cannot be proven is still a failure.
+* **The plan lists ended sessions for 10 minutes, not an hour** (`enforce.EndedListedFor`): netd's stray sweeps and the durable record already cover them. Requires the acctd of this branch.
+* Instrumentation kept: the `phase3: pass` line and `db_*` timings; `ogload traffic -spread`.
+
+Invariants: unchanged paths for fail-closed, element timeouts (a renewal restores the pass's lease and a second renewal restores that lease less the time already spent, never longer), the write-ahead journal, quarantine and backoff, the durable class store, MAC binding and error reporting. A session is renewed at full length only while its durable proof is fresh (5 minutes, `phase3ProofMaxAge`); an unproven or stale one gets the short lease until a read confirms it. Off switch: `NETD_PASS_BATCHING=false` still gives the per-session pass (the new bookkeeping reads and the superseding of plans apply in both).
+
+### 10.3 Numbers
+
+**Simulator** (`TestChurn*`, 300 long sessions, 100 clients cycling 60-second sessions, 60 passes of 5 s, one 100 s database stall armed in the run, database latencies 40 ms writes / 5 ms reads added to the simulated clock; same harness run against commit 56b35312 for "before"):
+
+| | before (56b35312) | after |
+|---|---|---|
+| long sessions whose authorization lapsed | 268 of 300 | 0 |
+| longest pass (simulated) | 127.8 s | 4.3 s |
+| p95 pass | 45.6 s | 1.8 s |
+| longest wait of a new session for promotion | 127.8 s | 4.3 s |
+| database calls | 40,209 | 3,114 |
+| locking end writes for 2,043 / 483 ended sessions | 28,355 | 0 |
+| failed passes' failures | 53 | 0 (11 sessions counted as ended mid-pass) |
+
+Full size (1,000 long, 300 clients, 120 passes; `NETD_CHURN_FULL=1`, informational: the simulated database adds the latency of concurrent calls up instead of overlapping them): no lapse, 3,638 arrivals all promoted in their pass, p95 pass 11.2 s, longest 24.9 s, 24,422 database calls, 0 failures.
+
+**Lab** (2 vCPU / 4 GB appliance, 1,700 long sessions, steady phase; the generator limit of 10.1 applies to the traffic rows):
+
+| | base build (coordinator run) | base build + pass log (re-run) | this branch, final build, 10 min |
+|---|---|---|---|
+| passes | 64 degraded, 72 `budget nearly exhausted` | pass of 109 s (one 106 s call), 70 s, 18 s | 35 passes, p50 15.8 s, p95 23.2 s, max 35.4 s; lock wait p50 4.1 s, max 10.5 s |
+| end records per pass | 3,096 failing in one window | 4,176 | 0 writes (reads only) |
+| authorization of long sessions (1 s sampler) | set at 0 four times | not sampled | 446 of 494 samples complete; 48 s with the whole set empty, see below. The previous build of this branch (6 min, soft budget, no second renewal): 314 of 314 complete. |
+| new sessions promoted within 10 s of creation | n/a | 4.3 % | 4.6 % (p50 29 s; was 44.5 s in the re-run of the base build) |
+| churn sign-ins ok | 23 / 3,000 | 40 / 1,800 | 22 / 3,000 |
+| traffic ok | 2,214 / 6,474 | 1,237 / 4,316 | 2,753 / 6,806 |
+
+### 10.4 What is NOT solved, and why
+
+1. **New sign-ins do not meet 95 % within 10 s in the lab, and this is no longer netd's pass.** Promotion takes p50 29 s because every database call the pass makes costs 0.1-0.5 s while the sign-in path saturates the database (section 10.1). Needed, outside netd: (a) scd: `reserveLicensedSlot` takes an appliance-wide advisory lock for the whole activation transaction and counts sessions by a join; hold it for the shortest part of the transaction (or count from an indexed counter), and keep the transaction free of non-database work (it sits `idle in transaction` for 5-9 s); (b) the `svc_scd` connection limit (20) is below the concurrency a 9 s sign-in at 5 per second needs; (c) acctd's accounting (one commit per live session per tick) and its expiry transaction (idle in transaction 5-14 s) are the other large writers. A migration or role change is a controlled decision and was not made.
+2. **Authorization of long sessions still lapses when acctd delivers no plan for about 90 s.** In the final run the whole set was empty from 21:38:44 to 21:39:35: plan generations 14303 and 14304 are consecutive and 91 s apart, acctd logged `expiry enforcement failed: terminating connection due to idle-in-transaction timeout` at 21:39:37, and Postgres was in a lock-timeout storm from 21:38:05. By design a lease lives only as long as the plan that renews it (lease TTL = plan validity = 90 s), so a producer that cannot reach its database for 90 s takes every guest offline. Whether that bound should be longer is a product and security decision (PO); it is not changed here.
+3. **Traffic success is gated by the generator** above about 100 simultaneous dials; use fewer movers per round or the new `-spread` flag and judge forwarding from the authorization sampler.
+4. The lab host's C: drive was at 100 % while this was being measured (the Go build cache; 6 GB freed). If the lab VM shares it, its fsync latency during the earlier runs is suspect.
+
+### 10.5 Verification and files
+
+* Linux (`golang:1.26.10`): `go test -v` over `cmd/netd`, `internal/shape`, `internal/nft`, `internal/shapeplan`, `cmd/acctd`, `internal/conntrack`, `internal/enforce` -> all ok, 541 top-level tests pass, 0 fail, 2 skipped (real-kernel tests); `go test -race` over `cmd/netd`, `internal/nft`, `internal/shape` -> ok. The `internal/enforce` integration tests need a database and were not run, so the shorter ended listing (`EndedListedFor`) is untested against Postgres.
+* New tests: `phase3_churn_test.go` (`TestChurn*`, superseded plans, a database call that never answers, ended-in-durable-state sessions, ended once, deferral, second renewal), `TestLeaseRenewalComesBeforeAnyDatabaseCallAndNewSessionsFollow`, `TestBetweenWalkRenewalIsOneTransaction`.
+* Files: `cmd/netd/phase3_churn.go`, `phase3_dbtime.go`, `phase3_trace.go`, `phase3_origin_register.go` (new); `phase3_batch.go`, `phase3_provision.go`, `phase3_shaping.go`, `phase3_enforcement.go`, `phase3_gate.go`, `phase3_origin.go`, `main.go`; `internal/enforce/enforce.go`; `tools/ogload/main.go` (`-spread`).
+
+### 10.6 Lab hygiene
+
+netd and acctd were replaced (originals kept as `*.orig`, restored byte for byte and removed at the end: sizes equal the installed release), samplers stopped, every file added to `oglab-appl`, `oglab-gen` and `oglab-sink` removed. several batches of 3,600 short vouchers (`LAB-S60`) were issued on the appliance and remain in its database; no other lab state was changed.
