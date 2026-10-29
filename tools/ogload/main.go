@@ -331,11 +331,20 @@ func emit(m map[string]any) {
 func cmdSignin() {
 	vf := flag.String("vouchers", "", "file with one voucher code per line")
 	rate := flag.Float64("rate", 300, "sign-ins per minute")
-	count := flag.Int("count", 0, "stop after this many attempts (0 = every client not yet signed in)")
+	count := flag.Int("count", 0, "stop after this many attempts (0 = every selected client once)")
 	portalPort := flag.Int("portal-port", 8380, "portal port on the gateway")
-	redo := flag.Bool("redo", false, "also sign in clients already marked signed in (after a release)")
+	from := flag.Int("from", 0, "first client index")
+	to := flag.Int("to", 1<<30, "client index to stop before")
+	loopFor := flag.Duration("loop-for", 0, "keep cycling over the selected clients (re-signing them in) for this long")
+	voucherOffset := flag.Int("voucher-offset", 0, "skip this many voucher codes first")
 	flag.Parse()
 	cs := load()
+	var sel []*Client
+	for _, c := range cs {
+		if c.Idx >= *from && c.Idx < *to {
+			sel = append(sel, c)
+		}
+	}
 	var codes []string
 	f, err := os.Open(*vf)
 	if err != nil {
@@ -348,56 +357,81 @@ func cmdSignin() {
 		}
 	}
 	f.Close()
+	if *voucherOffset > len(codes) {
+		*voucherOffset = len(codes)
+	}
+	codes = codes[*voucherOffset:]
 	next := int64(0)
 	st := newStats()
 	var wg sync.WaitGroup
-	interval := time.Duration(float64(time.Minute) / *rate)
-	tick := time.NewTicker(interval)
+	tick := time.NewTicker(time.Duration(float64(time.Minute) / *rate))
 	defer tick.Stop()
-	attempts := 0
-	for _, c := range cs {
-		if c.SignedIn && !*redo {
-			continue
-		}
-		if *count > 0 && attempts >= *count {
-			break
-		}
-		<-tick.C
-		i := int(atomic.AddInt64(&next, 1)) - 1
-		if i >= len(codes) {
-			emit(map[string]any{"warning": "out of vouchers"})
-			break
-		}
-		attempts++
-		wg.Add(1)
-		go func(c *Client, code string) {
-			defer wg.Done()
-			hc := clientHTTP(c, 30*time.Second)
-			t := time.Now()
-			form := url.Values{"code": {code}}
-			resp, err := hc.PostForm(fmt.Sprintf("http://%s:%d/auth/voucher", c.Gateway, *portalPort), form)
-			d := time.Since(t)
-			if err != nil {
-				st.add("error:"+short(err), d, 0)
-				return
+	deadline := time.Now().Add(*loopFor)
+	progress := time.NewTicker(30 * time.Second)
+	defer progress.Stop()
+	var okN, errN int64
+	attempts, out := 0, false
+	clients := make(map[int]*http.Client, len(sel))
+	for _, c := range sel {
+		clients[c.Idx] = clientHTTP(c, 30*time.Second)
+	}
+	for !out {
+		for _, c := range sel {
+			if *loopFor == 0 && c.SignedIn {
+				continue
 			}
-			io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
-			loc := resp.Header.Get("Location")
-			switch {
-			case strings.Contains(loc, "/success"):
-				c.SignedIn, c.Voucher = true, code
-				st.add("ok", d, 0)
-			case strings.Contains(loc, "/packages"):
-				st.add("needs_package_choice", d, 0)
+			if (*count > 0 && attempts >= *count) || (*loopFor > 0 && time.Now().After(deadline)) {
+				out = true
+				break
+			}
+			select {
+			case <-progress.C:
+				emit(map[string]any{"progress": "signin", "attempts": attempts, "ok": atomic.LoadInt64(&okN), "errors": atomic.LoadInt64(&errN), "elapsed_s": time.Since(st.t0).Seconds()})
 			default:
-				st.add(fmt.Sprintf("refused:%d", resp.StatusCode), d, 0)
 			}
-		}(c, codes[i])
+			<-tick.C
+			i := int(atomic.AddInt64(&next, 1)) - 1
+			if i >= len(codes) {
+				emit(map[string]any{"warning": "out of vouchers"})
+				out = true
+				break
+			}
+			attempts++
+			wg.Add(1)
+			go func(c *Client, code string) {
+				defer wg.Done()
+				t := time.Now()
+				resp, err := clients[c.Idx].PostForm(fmt.Sprintf("http://%s:%d/auth/voucher", c.Gateway, *portalPort), url.Values{"code": {code}})
+				d := time.Since(t)
+				if err != nil {
+					atomic.AddInt64(&errN, 1)
+					st.add("error:"+short(err), d, 0)
+					return
+				}
+				io.Copy(io.Discard, resp.Body)
+				resp.Body.Close()
+				loc := resp.Header.Get("Location")
+				switch {
+				case strings.Contains(loc, "/success"):
+					c.SignedIn, c.Voucher = true, code
+					atomic.AddInt64(&okN, 1)
+					st.add("ok", d, 0)
+				case strings.Contains(loc, "/packages"):
+					atomic.AddInt64(&errN, 1)
+					st.add("needs_package_choice", d, 0)
+				default:
+					atomic.AddInt64(&errN, 1)
+					st.add(fmt.Sprintf("refused:%d", resp.StatusCode), d, 0)
+				}
+			}(c, codes[i])
+		}
+		if *loopFor == 0 {
+			break
+		}
 	}
 	wg.Wait()
 	save(cs)
-	st.report("signin", map[string]any{"target_rate_per_min": *rate, "attempts": attempts})
+	st.report("signin", map[string]any{"target_rate_per_min": *rate, "attempts": attempts, "ok": okN, "from": *from, "to": *to})
 }
 
 func short(err error) string {
@@ -416,11 +450,13 @@ func cmdTraffic() {
 	nbytes := flag.Int("bytes", 262144, "bytes each moving client downloads per round")
 	every := flag.Duration("every", 5*time.Second, "round period")
 	dur := flag.Duration("duration", time.Minute, "total duration")
+	from := flag.Int("from", 0, "first client index")
+	to := flag.Int("to", 1<<30, "client index to stop before")
 	flag.Parse()
 	cs := load()
 	var live []*Client
 	for _, c := range cs {
-		if c.SignedIn {
+		if c.SignedIn && c.Idx >= *from && c.Idx < *to {
 			live = append(live, c)
 		}
 	}

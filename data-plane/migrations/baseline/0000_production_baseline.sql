@@ -36183,3 +36183,10 @@ SELECT 1, m.ledger_id, '00000000-0000-0000-0000-000000000000', '00000000-0000-00
 
 -- 0144: the floor for rows whose age is unknown. A new appliance has no row of unknown age, so the floor is the moment it is built.
 INSERT INTO iam_v2.retention_floor (id, since) VALUES (true, now()) ON CONFLICT (id) DO NOTHING;
+
+-- 0166: the singleton enforcement policy (private-network denial, MAC binding, cut-off delay) and its first change record. Without the row the
+-- Admin Console's Client access protection page answers "policy_unreadable" on a new appliance; netd and acctd fall back to the same defaults.
+INSERT INTO public.enforcement_policy (id, updated_by) VALUES (true, 'migration 0166') ON CONFLICT (id) DO NOTHING;
+INSERT INTO public.enforcement_policy_changes (changed_by, reason, field, old_value, new_value, config_version)
+SELECT 'migration 0166', 'defaults created', 'all', NULL, 'defaults', 1
+ WHERE NOT EXISTS (SELECT 1 FROM public.enforcement_policy_changes);
