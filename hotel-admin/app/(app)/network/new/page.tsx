@@ -592,7 +592,7 @@ export default function NewGuestNetworkPage() {
               <SwitchRow label="Captive portal" hint="Clients see the sign-in page before they get online. Off means no internet on this network." checked={captivePortal} onChange={setCaptivePortal} />
               <SwitchRow label="Internet access" hint="Clients can reach the internet once signed in." checked={internetAccess} onChange={setInternetAccess} />
               <SwitchRow label="NAT (masquerade)" hint="Client traffic leaves through the appliance's own address." checked={nat} onChange={setNat} />
-              <SwitchRow label="Client isolation" hint="Drops device-to-device traffic through the appliance; also enable it on the access points." checked={clientIsolation} onChange={setClientIsolation} />
+              <SwitchRow label="Client isolation" hint="Works only together with the access point: devices on the same access point talk to each other directly, so turn on client isolation on the access point. The appliance only stops traffic that is routed through it." checked={clientIsolation} onChange={setClientIsolation} />
             </div>
           )}
 
