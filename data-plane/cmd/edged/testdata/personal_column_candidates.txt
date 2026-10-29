@@ -38,6 +38,7 @@ iam_v2.entitlement_termination_evidence.terminal_reason
 iam_v2.entitlement_transfers.actor
 iam_v2.entitlement_transfers.reason
 iam_v2.entitlements.terminal_reason
+iam_v2.erasure_ledger.mac
 iam_v2.financial_epochs.reason
 iam_v2.financial_epochs.release_note
 iam_v2.financial_epochs.system_identity
