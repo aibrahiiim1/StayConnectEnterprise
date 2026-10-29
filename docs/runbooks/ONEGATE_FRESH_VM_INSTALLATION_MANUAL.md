@@ -174,7 +174,7 @@ bash deploy/scripts/appliance-build.sh                  # → dist/appliance/one
 ```
 
 What it does (**[CODE]**): takes a **fresh clone** of the commit (a dirty working tree is irrelevant and cannot leak in); refuses a baseline older than
-the newest migration; builds `scd edged netd portald acctd pmsd keybootstrap svc-run` in `golang:1.25.12` with `CGO_ENABLED=0 -trimpath -tags stayconnect_production`
+the newest migration; builds `scd edged netd portald acctd pmsd keybootstrap svc-run` in `golang:1.26.10` with `CGO_ENABLED=0 -trimpath -tags stayconnect_production`
 and reads back each binary's embedded `vcs.revision` (must equal the commit), `vcs.modified=false` and the production tag; packages the Admin Console in
 `node:20.18.0-bookworm` (`npm ci` on the committed lockfile, `next build`, capability contract); takes the deploy tree, migrations and installer scripts
 with `git archive` (the `deploy/pki` slots are emptied — trust files are never shipped); writes `RELEASE.json` (commit, toolchains, per-binary sha256,
@@ -714,6 +714,22 @@ Check these on the appliance first (each refuses or changes something an older r
 | An assignment older than the one already adopted is refused at boot | a factory reset clears it |
 | Guest routes answer `503` with `Retry-After` above 64 requests in flight; guest request bodies above 64 KB get `413`; one guest address may hold at most 256 open connections to the portal ports | nothing |
 
+#### E.5.2 Before upgrading to the audit-decision release (AD-1 to AD-68) — **[CODE]**; verified on the test pair only where Appendix 3 says so
+
+| Change | What to check before the upgrade |
+|---|---|
+| Appliance migrations 0162–0178 (settings, enforcement policy, ledger key, retention rollups, post-stay) and Central migrations 0059–0062 | upgrade in a quiet period; the Central migrations are additive |
+| A waiting appliance needs its **activation code** (shown in the Admin Console, System → Appliance and licence) for Activate and for an offline request import | tell the operator who activates; a reinstall before activation now needs the waiting row deleted first |
+| The appliance pins the appliance Root CA from `/etc/stayconnect/appliance-root-ca.crt` (`install-appliance-root-ca.sh`, called by provisioning) | an appliance without the file pins the root of the bundle it already holds; install the file to pin from provisioning |
+| **Guests can no longer reach private networks** through the appliance (RFC 1918, 100.64/10, 169.254/16) unless the audited allow-list names them; the WAN gateway and resolvers stay reachable | list any internal service guests must reach before upgrading |
+| MAC binding of authorisations ships **off** (`mac_binding_enabled`); IP-only authorisation stays the fallback | none |
+| Post-stay sign-in is room + reservation (a new device also gives a last name); existing PINs stop working | tell front-desk staff |
+| Portal images are limited to 1 MB and optimised in the background | none |
+| Only encrypted `db-*` dumps can be downloaded from the Admin Console | none |
+| Usage detail is rolled up (per-minute 7 days, hourly after); raw samples are reclaimed only after rollup | disk use falls after the first days, not at once |
+| `*_DB_URL` for scd, edged and netd is required; `--upgrade` backfills and reads back before restarting | read the installer's read-back lines |
+| Go 1.26.10 builds (`golang:1.26.10`, pinned by digest) | build hosts need the image |
+
 ### E.6 Rollback
 
 | What | How |
@@ -769,7 +785,7 @@ make central-build            # or: bash deploy/scripts/central-build.sh
 sha256sum -c dist/central/onegate-central-<sha12>.tar.gz.sha256
 ```
 
-The build is from a **fresh clone of the exact commit** in containers (`golang:1.25.12`, `node:20.18.0-bookworm-slim`), refuses a dirty tree, verifies the commit is embedded in the binary, and never overwrites an existing release directory.
+The build is from a **fresh clone of the exact commit** in containers (`golang:1.26.10`, `node:20.18.0-bookworm-slim`), refuses a dirty tree, verifies the commit is embedded in the binary, and never overwrites an existing release directory.
 
 ### F.3 Install — **[VM]** (`--mode new` on a blank lab VM; the `restore` mode is **[LIVE-REF]** — the 2026-09-27 move)
 
