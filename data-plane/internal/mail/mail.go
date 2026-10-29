@@ -3,6 +3,7 @@ package mail
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -41,6 +42,9 @@ func NewStub(path string) *Stub {
 	return &Stub{Path: path, redact: buildprofile.Production}
 }
 
+// ErrNotDelivered: the message did not and could not leave the appliance (no provider is configured) (AD-35).
+var ErrNotDelivered = errors.New("mail: not delivered, no email provider is configured")
+
 func (s *Stub) Send(ctx context.Context, m Message) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -60,7 +64,7 @@ func (s *Stub) Send(ctx context.Context, m Message) error {
 	}
 	if s.redact {
 		slog.Warn("mail.stub: message not delivered, no email provider is configured", "to", MaskAddress(m.To))
-		return nil
+		return ErrNotDelivered
 	}
 	slog.Info("mail.stub", "to", m.To, "subject", m.Subject)
 	return nil

@@ -19,6 +19,9 @@ const (
 	ErrACNotFound      Code = "auth_context_not_found"
 	ErrCapacity        Code = "capacity"
 	ErrConflict        Code = "conflict"
+	// ErrBusy: a check could not be run now (the password-hashing slots stayed taken). Nothing was decided about the
+	// credential, so it is neither a wrong password nor counted as one; the caller answers "busy, try again" (AD-35).
+	ErrBusy Code = "busy"
 )
 
 // Msg must never contain secrets, codes, OTPs or PII.

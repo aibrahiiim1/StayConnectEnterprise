@@ -3,6 +3,7 @@ package sms
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -29,7 +30,12 @@ func sendStub(t *testing.T, redact bool) (file, logs string) {
 	p := filepath.Join(t.TempDir(), "sms.log")
 	st := NewStub(p)
 	st.redact = redact
-	if err := st.Send(context.Background(), Message{To: stubTo, Text: "Your code is " + stubCode}); err != nil {
+	err := st.Send(context.Background(), Message{To: stubTo, Text: "Your code is " + stubCode})
+	// AD-35: a production stub delivers nothing and says so; a development stub is a successful local sink.
+	if redact && !errors.Is(err, ErrNotDelivered) {
+		t.Fatalf("a production stub reported %v, want ErrNotDelivered", err)
+	}
+	if !redact && err != nil {
 		t.Fatal(err)
 	}
 	b, _ := os.ReadFile(p)
