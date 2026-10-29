@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 
 	"github.com/stayconnect/enterprise/control-plane/internal/auth"
@@ -26,6 +27,37 @@ func (s Scope) Filter(requested string) string {
 		return requested
 	}
 	return s.CustomerID
+}
+
+// SupportActorLabel is what a customer-scoped reader sees in place of a Central staff member (AD-4).
+const SupportActorLabel = "OneGate support"
+
+// restrictTenant is the customer whose own users a reader may see by name; "" for platform scopes (no masking).
+func restrictTenant(s Scope) string {
+	if s.All {
+		return ""
+	}
+	if s.CustomerID == "" {
+		return "00000000-0000-0000-0000-000000000000"
+	}
+	return s.CustomerID
+}
+
+// supportSafePayload keeps only identifiers and state names of a staff-made audit entry; reasons, notes, emails,
+// addresses and any other free text are dropped (AD-4).
+func supportSafePayload(raw []byte) []byte {
+	var in map[string]any
+	if json.Unmarshal(raw, &in) != nil {
+		return []byte(`{}`)
+	}
+	out := map[string]any{}
+	for _, k := range []string{"appliance_id", "site_id", "customer_id", "license_id", "serial", "state", "from_state", "to_state"} {
+		if v, ok := in[k].(string); ok {
+			out[k] = v
+		}
+	}
+	b, _ := json.Marshal(out)
+	return b
 }
 
 func readScope(w http.ResponseWriter, r *http.Request) (Scope, bool) {
