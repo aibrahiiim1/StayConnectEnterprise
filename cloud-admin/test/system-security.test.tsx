@@ -163,6 +163,59 @@ describe("System > Team: data retention (Central migration 0054)", () => {
   });
 });
 
+const registration = {
+  max_waiting_appliances: 200, max_waiting_appliances_bounds: { default: 200, min: 10, max: 5000, unit: "appliances" },
+  waiting_appliances: 7, updated_at: "2026-10-29T08:00:00Z", updated_by: "owner@example.test",
+};
+
+describe("System > Team: appliance registration limit (Central migration 0059)", () => {
+  it("shows the waiting count next to the cap, refuses a value out of range, and saves with a reason", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetch([
+      team,
+      { match: "/api/cloud/v1/settings/registration", method: "GET", body: registration },
+      { match: "/api/cloud/v1/settings/registration", method: "PATCH", body: { ...registration, max_waiting_appliances: 300 } },
+    ]);
+    renderAs(PLATFORM_ME, <TeamPage />);
+    const max = await screen.findByLabelText("Most appliances waiting for activation");
+    expect(max).toHaveValue("200");
+    expect(screen.getByTestId("waiting-count")).toHaveTextContent("7 of 200 appliances are waiting for activation now.");
+    expect(screen.getByText(/From 10 to 5000 appliances\. Default 200\./)).toBeInTheDocument();
+    expect(screen.getByText(/Last changed/)).toHaveTextContent("owner@example.test");
+
+    await user.clear(max);
+    await user.type(max, "5");
+    await user.type(screen.getByPlaceholderText("e.g. opening week, many new appliances"), "opening week");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText(/appliances from 10 to 5000/)).toBeInTheDocument();
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+
+    await user.clear(max);
+    await user.type(max, "300");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(calls.filter((c) => c.method === "PATCH")).toHaveLength(1));
+    expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ max_waiting_appliances: 300, reason: "opening week" });
+  });
+
+  it("refuses a save without a reason", async () => {
+    const user = userEvent.setup();
+    mockFetch([team, { match: "/api/cloud/v1/settings/registration", method: "GET", body: registration }]);
+    renderAs(PLATFORM_ME, <TeamPage />);
+    const max = await screen.findByLabelText("Most appliances waiting for activation");
+    await user.clear(max);
+    await user.type(max, "250");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText(/Enter a reason/)).toBeInTheDocument();
+  });
+
+  it("support staff see the limit but cannot change it", async () => {
+    mockFetch([team, { match: "/api/cloud/v1/settings/registration", method: "GET", body: registration }]);
+    renderAs(SUPPORT_ME, <TeamPage />);
+    expect(await screen.findByLabelText("Most appliances waiting for activation")).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+  });
+});
+
 describe("System > Backup health: the database backup", () => {
   it("a failed last run is shown as a problem with its error, next to the newest good dump", async () => {
     nav.reset("/system/backup-health");

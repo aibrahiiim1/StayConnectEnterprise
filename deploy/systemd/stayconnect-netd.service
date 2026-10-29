@@ -49,6 +49,17 @@ RuntimeDirectoryPreserve=yes
 # generated bundle dir; it needs broad filesystem + net admin, so ProtectSystem
 # is deliberately relaxed here (this is the one privileged surface).
 NoNewPrivileges=no
+# Systemd hardening (AD-28 b), proven on the test appliance (client journey 12/12, netd active, no denied operation in the
+# journal; exposure 9.6 -> 7.8). Only what netd provably never needs is taken away: it keeps root, the network capabilities and
+# NoNewPrivileges=no, because it starts helpers (kea, unbound, netplan, nft, tc) that it must be able to run as it does today.
+ProtectHome=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectClock=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+SystemCallArchitectures=native
 
 [Install]
 WantedBy=multi-user.target

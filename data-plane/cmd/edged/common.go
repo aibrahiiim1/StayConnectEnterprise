@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -62,6 +63,9 @@ func (s *server) audit(r *http.Request, action, targetType, targetID string, pay
 
 // auditErr is audit for an action that must not happen unrecorded: the caller refuses when it fails.
 func (s *server) auditErr(r *http.Request, action, targetType, targetID string, payload map[string]any) error {
+	if s.db == nil { // a handler unit test without a database; production always has a pool
+		return errors.New("no database")
+	}
 	sess := sessFrom(r.Context())
 	actorID := ""
 	if sess != nil {

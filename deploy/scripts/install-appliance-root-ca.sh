@@ -14,6 +14,9 @@
 #
 # Usage (as root on the appliance):
 #   install-appliance-root-ca.sh <appliance-root-ca.crt>
+#   install-appliance-root-ca.sh --sha256 <fingerprint> <crt>   pin only if the certificate has EXACTLY this SHA-256
+#                                                  fingerprint (the one the operator holds from Central's FINGERPRINTS.txt,
+#                                                  read out of band); a mismatch pins nothing
 #   install-appliance-root-ca.sh --force <crt>     replace a DIFFERENT pin (Root CA rotation, a Product-Owner decision)
 #   install-appliance-root-ca.sh --show
 set -euo pipefail
@@ -32,8 +35,11 @@ if [ "${1:-}" = "--show" ]; then
   exit 0
 fi
 
-FORCE=0
-if [ "${1:-}" = "--force" ]; then FORCE=1; shift; fi
+FORCE=0; WANT=""
+while [ "${1:-}" = "--force" ] || [ "${1:-}" = "--sha256" ]; do
+  if [ "$1" = "--force" ]; then FORCE=1; shift
+  else [ -n "${2:-}" ] || die "--sha256 needs a fingerprint"; WANT="$2"; shift 2; fi
+done
 SRC="${1:-}"
 [ -n "$SRC" ] || die "usage: $0 [--force] <appliance-root-ca.crt> | --show"
 [ -f "$SRC" ] || die "no such file: $SRC"
@@ -49,6 +55,12 @@ iss="$(openssl x509 -in "$SRC" -noout -issuer)"
 [ "${subj#subject=}" = "${iss#issuer=}" ] || die "$SRC is not a self-signed root (subject and issuer differ)"
 
 new="$(fpr "$SRC")"
+norm() { printf '%s' "$1" | tr -d ': \t\r\n' | tr 'a-f' 'A-F'; }
+if [ -n "$WANT" ]; then
+  [ "$(norm "$WANT")" = "$(norm "$new")" ] \
+    || die "the certificate's SHA-256 fingerprint is $new, not the expected $WANT. Nothing was pinned."
+  say "fingerprint matches the one supplied"
+fi
 if [ -s "$DEST" ]; then
   cur="$(fpr "$DEST" 2>/dev/null || echo '?')"
   if [ "$cur" = "$new" ]; then

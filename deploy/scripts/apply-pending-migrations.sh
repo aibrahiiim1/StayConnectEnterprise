@@ -59,6 +59,15 @@ for v in "${PENDING[@]}"; do say "  $v"; done
 [ "$LIST" = 1 ] && exit 0
 
 if [ "${#PENDING[@]}" -gt 0 ]; then
+  # A migration marked `-- edge-migrate: platform` asks to run as the platform role, so the file must be the one this
+  # release was built and verified with: its hash has to equal its entry in the installed SHA256SUMS (written by the
+  # release the installer just verified). Checked for ALL pending migrations BEFORE any is applied, so a refusal changes
+  # nothing: a tree edited after installation, or a marker added to a file the release did not ship, is refused.
+  for v in "${PENDING[@]}"; do
+    head -n 20 "$MIG/$v.up.sql" | grep -qE '^--[[:space:]]*edge-migrate:[[:space:]]*platform[[:space:]]*$' || continue
+    relsum="$(awk -v f="./data-plane/migrations/$v.up.sql" '{n=$2; sub(/^\*/,"",n)} n==f {print $1}' "$ROOT/SHA256SUMS" 2>/dev/null | head -1)"
+    [ -n "$relsum" ] && [ "$relsum" = "$(sha256sum "$MIG/$v.up.sql" | cut -d' ' -f1)" ]       || refuse "platform migration $v does not match the installed release record ($ROOT/SHA256SUMS); refusing to run it as the platform role"
+  done
   export EDGE_PSQL="docker exec -i $CONTAINER psql -v ON_ERROR_STOP=1 -X -U $PGUSER_ROLE -d $DB"
   for v in "${PENDING[@]}"; do
     sha="$(sha256sum "$MIG/$v.up.sql" | cut -d' ' -f1)"

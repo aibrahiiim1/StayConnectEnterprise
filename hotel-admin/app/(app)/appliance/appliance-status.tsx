@@ -21,6 +21,7 @@ import { canWrite } from "@/lib/roles";
 import { usePoll } from "@/lib/use-poll";
 import { errMsg, formatRelative } from "@/lib/utils";
 import { useOperatorRoles } from "@/lib/whoami-context";
+import { LicenceClockReset } from "./licence-clock-reset";
 
 type Tone = "ok" | "warn" | "err" | "default" | "info";
 
@@ -508,6 +509,8 @@ export function ApplianceStatus({ header }: { header?: (actions: React.ReactNode
         {fileMsg && <Callout tone="success">{fileMsg}</Callout>}
         <ErrorBanner err={fileErr} className="mb-0" />
       </SectionCard>
+
+      {canInstall && <LicenceClockReset onDone={() => void load()} />}
 
       <Card>
         <details className="group" data-testid="technical-details">

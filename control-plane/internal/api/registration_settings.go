@@ -23,6 +23,8 @@ var registrationMaxWaiting = settingBounds{Default: 200, Min: 10, Max: 5000, Uni
 type registrationSettingsView struct {
 	MaxWaitingAppliances int           `json:"max_waiting_appliances"`
 	MaxWaiting           settingBounds `json:"max_waiting_appliances_bounds"`
+	// Appliances waiting for activation right now (the number the cap is compared with).
+	WaitingAppliances int `json:"waiting_appliances"`
 	UpdatedAt            *time.Time    `json:"updated_at"`
 	UpdatedBy            *string       `json:"updated_by"`
 }
@@ -84,6 +86,10 @@ func (b *Base) loadRegistrationSettings(r *http.Request) (registrationSettingsVi
 		return v, err
 	}
 	v.UpdatedAt, v.UpdatedBy = &at, strPtr(by)
+	if err := b.DB.QueryRow(ctx, `SELECT count(*) FROM appliances
+         WHERE lifecycle_state='pending_approval' AND deletion_started_at IS NULL`).Scan(&v.WaitingAppliances); err != nil {
+		return v, err
+	}
 	return v, nil
 }
 

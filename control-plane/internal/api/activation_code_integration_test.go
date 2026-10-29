@@ -107,3 +107,25 @@ func TestWaitingApplianceCap(t *testing.T) {
 		t.Fatalf("a known appliance must still re-register at the cap: %d", rec.Code)
 	}
 }
+
+// AD-20: the setting is read with the waiting count, changed with a reason within its bounds, and audited.
+func TestRegistrationSettingsPatchIsAuditedAndCounted(t *testing.T) {
+	f := newFixture(t)
+	if _, err := f.pool.Exec(f.ctx, `INSERT INTO appliances (serial, lifecycle_state, public_key)
+        SELECT 'SC-SET-'||g, 'pending_approval', 'set'||g FROM generate_series(1,3) g`); err != nil {
+		t.Fatal(err)
+	}
+	rec := f.operatorCallAs(f.session, f.base.getRegistrationSettings, http.MethodGet, nil, nil)
+	got := decode(t, rec)
+	if rec.Code != http.StatusOK || got["waiting_appliances"] != float64(3) || got["max_waiting_appliances"] != float64(200) {
+		t.Fatalf("get: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = f.operatorCallAs(f.session, f.base.patchRegistrationSettings, http.MethodPatch, nil,
+		map[string]any{"max_waiting_appliances": 40, "reason": "busy opening week"})
+	if rec.Code != http.StatusOK || decode(t, rec)["max_waiting_appliances"] != float64(40) {
+		t.Fatalf("patch: %d %s", rec.Code, rec.Body.String())
+	}
+	if n := f.count(`SELECT count(*) FROM audit_log WHERE action='settings.registration_updated' AND payload ? 'max_waiting_appliances'`); n != 1 {
+		t.Fatalf("the change was not audited: %d", n)
+	}
+}

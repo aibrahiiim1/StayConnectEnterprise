@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0178, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0179, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -14344,7 +14344,7 @@ END $$;
 -- Name: signin_capacity_settings_get(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
-CREATE FUNCTION iam_v2.signin_capacity_settings_get(p_tenant uuid, p_site uuid) RETURNS TABLE(otp_code_lifetime_minutes integer, otp_max_attempts integer, otp_device_hourly_cap integer, otp_destination_hourly_cap integer, otp_source_hourly_cap integer, signin_ceiling_per_minute integer, network_pause_exempt_hours integer, device_retention_days integer, portal_image_max_edge_px integer, portal_image_quality integer, config_version bigint, updated_at timestamp with time zone, updated_by text)
+CREATE FUNCTION iam_v2.signin_capacity_settings_get(p_tenant uuid, p_site uuid) RETURNS TABLE(otp_code_lifetime_minutes integer, otp_max_attempts integer, otp_device_hourly_cap integer, otp_destination_hourly_cap integer, otp_source_hourly_cap integer, signin_ceiling_per_minute integer, network_pause_exempt_hours integer, device_retention_days integer, portal_image_max_edge_px integer, portal_image_quality integer, post_stay_signin_days integer, config_version bigint, updated_at timestamp with time zone, updated_by text)
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
@@ -14352,7 +14352,7 @@ CREATE FUNCTION iam_v2.signin_capacity_settings_get(p_tenant uuid, p_site uuid) 
          COALESCE(s.otp_device_hourly_cap, 5), COALESCE(s.otp_destination_hourly_cap, 15),
          COALESCE(s.otp_source_hourly_cap, 20), s.signin_ceiling_per_minute,
          COALESCE(s.network_pause_exempt_hours, 24), COALESCE(s.device_retention_days, 90),
-         COALESCE(s.portal_image_max_edge_px, 2560), COALESCE(s.portal_image_quality, 82),
+         COALESCE(s.portal_image_max_edge_px, 2560), COALESCE(s.portal_image_quality, 82), COALESCE(s.post_stay_signin_days, 7),
          COALESCE(s.config_version, 0), s.updated_at, s.updated_by
     FROM (SELECT 1) one
     LEFT JOIN iam_v2.site_signin_capacity_settings s ON s.tenant_id = p_tenant AND s.site_id = p_site;
@@ -14382,7 +14382,7 @@ BEGIN
   FOR k IN SELECT jsonb_object_keys(p_values) LOOP
     IF k NOT IN ('otp_code_lifetime_minutes','otp_max_attempts','otp_device_hourly_cap','otp_destination_hourly_cap',
                  'otp_source_hourly_cap','signin_ceiling_per_minute','network_pause_exempt_hours',
-                 'device_retention_days','portal_image_max_edge_px','portal_image_quality') THEN
+                 'device_retention_days','portal_image_max_edge_px','portal_image_quality','post_stay_signin_days') THEN
       RAISE EXCEPTION 'unknown setting %', k USING ERRCODE = 'invalid_parameter_value';
     END IF;
   END LOOP;
@@ -14404,6 +14404,7 @@ BEGIN
       device_retention_days      = COALESCE((p_values->>'device_retention_days')::int, s.device_retention_days),
       portal_image_max_edge_px   = COALESCE((p_values->>'portal_image_max_edge_px')::int, s.portal_image_max_edge_px),
       portal_image_quality       = COALESCE((p_values->>'portal_image_quality')::int, s.portal_image_quality),
+      post_stay_signin_days      = COALESCE((p_values->>'post_stay_signin_days')::int, s.post_stay_signin_days),
       updated_by = btrim(p_operator), updated_at = now(), config_version = s.config_version + 1
     WHERE s.tenant_id = p_tenant AND s.site_id = p_site
     RETURNING s.config_version INTO v_version;
@@ -21929,6 +21930,7 @@ CREATE TABLE iam_v2.site_signin_capacity_settings (
     config_version bigint DEFAULT 0 NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_by text,
+    post_stay_signin_days integer DEFAULT 7 NOT NULL,
     CONSTRAINT ssc_ceiling CHECK (((signin_ceiling_per_minute IS NULL) OR ((signin_ceiling_per_minute >= 600) AND (signin_ceiling_per_minute <= 100000)))),
     CONSTRAINT ssc_destination_over_device CHECK ((otp_destination_hourly_cap >= otp_device_hourly_cap)),
     CONSTRAINT ssc_device_retention CHECK (((device_retention_days >= 7) AND (device_retention_days <= 3650))),
@@ -21940,6 +21942,7 @@ CREATE TABLE iam_v2.site_signin_capacity_settings (
     CONSTRAINT ssc_otp_lifetime CHECK (((otp_code_lifetime_minutes >= 2) AND (otp_code_lifetime_minutes <= 30))),
     CONSTRAINT ssc_otp_source_cap CHECK (((otp_source_hourly_cap >= 5) AND (otp_source_hourly_cap <= 500))),
     CONSTRAINT ssc_pause_exempt CHECK (((network_pause_exempt_hours >= 0) AND (network_pause_exempt_hours <= 168))),
+    CONSTRAINT ssc_post_stay_days CHECK (((post_stay_signin_days >= 1) AND (post_stay_signin_days <= 30))),
     CONSTRAINT ssc_version CHECK ((config_version >= 0))
 );
 

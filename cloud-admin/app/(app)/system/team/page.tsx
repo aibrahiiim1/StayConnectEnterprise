@@ -6,6 +6,7 @@ import { HelpList, HelpSection } from "@/components/help";
 import { UsersManager } from "@/components/users-manager";
 import { SessionLifetimeSetting } from "@/components/session-lifetime";
 import { DataRetentionSetting } from "@/components/data-retention";
+import { RegistrationLimitsSetting } from "@/components/registration-limits";
 import { roleLabel, TEAM_ROLES, usePermissions } from "@/lib/permissions";
 import { useSession } from "@/lib/session";
 
@@ -37,6 +38,12 @@ export default function TeamPage() {
                 ]}
               />
             </HelpSection>
+            <HelpSection title="Appliance registration">
+              <p>
+                Appliances register themselves, so Central limits how many may wait for activation at once. Past the limit
+                a new appliance is refused and an alert is raised. Every change needs a reason and is audited.
+              </p>
+            </HelpSection>
             <HelpSection title="Data retention">
               <p>
                 Every hour, records older than the retention periods are deleted, or have the people in them removed.
@@ -59,6 +66,7 @@ export default function TeamPage() {
         />
       </Card>
       <SessionLifetimeSetting canManage={can["team.manage"]} />
+      <RegistrationLimitsSetting canManage={can["team.manage"]} />
       <DataRetentionSetting canManage={can["team.manage"]} />
     </PageShell>
   );

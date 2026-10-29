@@ -47,8 +47,9 @@ proxy refuses them), so deployments run from the workstation.
   least privilege (role split, a Central deployment). **Not built**: an Admin Console screen for the enforcement policy
   (private-network allow-list, MAC binding, cut-off — set today with `enforcement_policy_set()`), a Central screen for the
   waiting-appliance cap, a button for the licence clock reset.
-* `appliance-install.sh --upgrade` does not install the appliance Root CA pin (AD-2); on an upgraded appliance run
-  `install-appliance-root-ca.sh <Central's appliance-trust/appliance-root-ca.crt>` and restart scd (done on the test appliance).
+* `appliance-install.sh` (fresh and `--upgrade`) pins the appliance Root CA (AD-2) only against a fingerprint: `--root-ca-sha256 <fp>` from
+  Central's `FINGERPRINTS.txt`, or the trust directory's `FINGERPRINTS.txt`. It never adopts a certificate nothing vouches for and never
+  replaces a pin.
 * Migrations marked `-- edge-migrate: platform` change the platform schema and run as the platform role
   (`edge-migrate.sh --platform-migration`); every other migration runs as `iam_v2_owner`. A new migration that touches
   `public` needs the marker. Test it with `FULLSCHEMA_BASELINE_FILE`, `FULLSCHEMA_BASELINE_TOP` and `FULLSCHEMA_APPLY_ROLE=iam_v2_owner`.

@@ -73,6 +73,10 @@ func envOr(k, d string) string {
 
 type server struct {
 	db *pgxpool.Pool
+	// enforcementStoreOverride replaces the database-backed enforcement policy store in tests.
+	enforcementStoreOverride enforcementStore
+	// enforcementPasswordOK replaces the database-backed password check in tests only.
+	enforcementPasswordOK func(password string) bool
 	// assetOpt turns an uploaded portal image into its stored form in the background (AD-58); created on first use.
 	assetOptOnce sync.Once
 	assetOpt     *assetOptimiser

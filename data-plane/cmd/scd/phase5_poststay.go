@@ -106,7 +106,8 @@ func (p *phase5PostStay) verifyHandler(w http.ResponseWriter, r *http.Request) {
 	// answer would be a free probe for whether this device has a post-stay identity.
 	profile, err := p.store.Verify(ctx, poststay.VerifyRequest{
 		Tenant: dev.Tenant, Site: dev.Site, Device: dev.DeviceID, IP: ipString(dev),
-		Room: req.Room, Reservation: req.Reservation, LastName: req.LastName})
+		Room: req.Room, Reservation: req.Reservation, LastName: req.LastName,
+		WindowDays: p.srv.signinCapacity(ctx).PostStaySigninDays})
 	if err != nil {
 		switch {
 		case errors.Is(err, poststay.ErrThrottled):

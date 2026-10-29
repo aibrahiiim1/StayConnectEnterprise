@@ -22,6 +22,7 @@ type signinCapacity struct {
 	DeviceRetentionDays int
 	ImageMaxEdgePx      int
 	ImageQuality        int
+	PostStaySigninDays  int
 	FromDatabase        bool
 }
 
@@ -32,6 +33,7 @@ func defaultSigninCapacity() signinCapacity {
 		DeviceRetentionDays: 90,
 		ImageMaxEdgePx:      2560,
 		ImageQuality:        82,
+		PostStaySigninDays:  7,
 	}
 }
 
@@ -50,10 +52,10 @@ func (s *server) signinCapacity(ctx context.Context) signinCapacity {
 		defer cancel()
 		if err := s.db.QueryRow(cctx, `SELECT otp_code_lifetime_minutes, otp_max_attempts, otp_device_hourly_cap,
 		       otp_destination_hourly_cap, otp_source_hourly_cap, signin_ceiling_per_minute, network_pause_exempt_hours,
-		       device_retention_days, portal_image_max_edge_px, portal_image_quality, config_version, updated_at, updated_by
+		       device_retention_days, portal_image_max_edge_px, portal_image_quality, post_stay_signin_days, config_version, updated_at, updated_by
 		  FROM iam_v2.signin_capacity_settings_get($1::uuid,$2::uuid)`, s.tenID, s.siteID).
 			Scan(&lifetime, &attempts, &devCap, &destCap, &srcCap, &ceiling, &c.PauseExemptHours,
-				&c.DeviceRetentionDays, &c.ImageMaxEdgePx, &c.ImageQuality, &version, &at, &by); err != nil {
+				&c.DeviceRetentionDays, &c.ImageMaxEdgePx, &c.ImageQuality, &c.PostStaySigninDays, &version, &at, &by); err != nil {
 			return nil, err
 		}
 		c.OTP = otp.Limits{Lifetime: time.Duration(lifetime) * time.Minute, MaxAttempts: attempts,
