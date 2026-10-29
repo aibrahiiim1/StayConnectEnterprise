@@ -109,8 +109,14 @@ func (p *phase3Shaping) proveActive(ctx context.Context, key, sessionID, bridge 
 	if p.enforcement == nil {
 		return activationProven, ""
 	}
+	if p.pb != nil && p.recentlyProven(key, epoch, nowBoot) {
+		// Proven on this boot for this very class generation moments ago, and not quarantined since: asking the database again each pass is a round trip per
+		// session per pass that can only repeat its answer. It is asked again every phase3ReproveEvery (see phase3_batch.go).
+		return activationProven, ""
+	}
 	outcome, err := p.enforcement.Activate(ctx, sessionID, bridge, minor, epoch)
 	if err == nil {
+		p.noteProven(key, epoch, nowBoot)
 		p.clearAttempt(key)
 		slog.Info("phase3: session enforcement confirmed", "session", sessionID, "bridge", bridge,
 			"minor", minor, "epoch", epoch, "outcome", outcome)
@@ -119,12 +125,14 @@ func (p *phase3Shaping) proveActive(ctx context.Context, key, sessionID, bridge 
 	// Ambiguous: ask durable state whether the promotion landed.
 	active, cerr := p.enforcement.Confirm(ctx, sessionID)
 	if cerr == nil && active {
+		p.noteProven(key, epoch, nowBoot)
 		p.clearAttempt(key)
 		slog.Info("phase3: session enforcement confirmed by re-read after an unacknowledged promotion",
 			"session", sessionID, "bridge", bridge, "minor", minor, "epoch", epoch)
 		return activationProven, ""
 	}
 
+	delete(p.provenAt, key)
 	q := p.quarantineFor(key)
 	problem := problemFor(sessionID, err, cerr)
 

@@ -117,6 +117,13 @@ type phase3Shaping struct {
 	// memo is the last full walk; walkRenewable is the one being built by the walk in progress.
 	memo          walkMemo
 	walkRenewable map[string]renewSession
+
+	// noBatch is the off switch for batched passes (NETD_PASS_BATCHING=false): every operation then runs per session, as before.
+	noBatch bool
+	// pb is the batched pass in progress; nil outside one, and always nil when batching is off or the shaper or gate cannot batch.
+	pb *passBatch
+	// provenAt remembers, per class, the generation and boot time at which the Session was last proven durably active.
+	provenAt map[string]provenMark
 }
 
 type passLeases struct {
@@ -165,6 +172,7 @@ func (p *phase3Shaping) endSeries(bridge, sessionID string) {
 	// A half-allocated generation is void once the series ends; a returning session is a new class.
 	delete(p.pending, classKey(bridge, sessionID))
 	delete(p.leaseMem, classKey(bridge, sessionID))
+	delete(p.provenAt, classKey(bridge, sessionID))
 	// The quarantine deliberately outlives the series: clearing it would let the next pass re-admit the guest.
 }
 
@@ -291,6 +299,10 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 	p.passClasses, p.passGroups = nil, nil
 	defer func() { p.passClasses, p.passGroups = nil, nil }()
 	p.pruneLeaseMemory(now)
+	if p.batching() {
+		p.pb = newPassBatch()
+	}
+	defer func() { p.pb = nil }()
 
 	desired := map[string]map[int]shapeplan.Session{}
 	// Bridges come from the plan's declaration: a bridge with no sessions is the one most likely to hold a forgotten class.
@@ -315,6 +327,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 		ifbOwner[ifb] = b
 	}
 	var tear []shapeplan.Session
+	var tearing []tearItem
 	// clashed remembers a class two sessions claimed: removing the first claimant from desired is not enough, or a
 	// third session with the same class would find no clash and be installed (audit Phase 8 L6).
 	clashed := map[string]bool{}
@@ -399,6 +412,11 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 			continue
 		}
 		p.endSeries(s.Bridge, s.SessionID)
+		if p.pb != nil {
+			// Batched pass: all denials are proven in one transaction, then all classes removed in one tc batch (tearBatch).
+			tearing = append(tearing, tearItem{s: s, ip: ip})
+			continue
+		}
 		// Deny packet authorization before tc teardown so a failed class delete cannot leave a guest online.
 		if err := p.denyAccess(ctx, s.Bridge, ip); err != nil {
 			res.Failed++
@@ -421,6 +439,9 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 		delete(p.classes, classKey(s.Bridge, s.SessionID))
 		res.TornDown++
 	}
+	if len(tearing) > 0 {
+		p.tearBatch(ctx, tearing, stillTorn, &res)
+	}
 	p.endedTorn = stillTorn
 
 	// 2a. Remove stray nft elements the plan does not claim, before the tc stray sweep: deleting a class first would leave its authorized address forwarding unshaped and uncounted.
@@ -438,6 +459,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 			sort.Slice(authorized, func(i, j int) bool {
 				return gateKey(authorized[i].Bridge, authorized[i].IP) < gateKey(authorized[j].Bridge, authorized[j].IP)
 			})
+			var strayEls []gateElem
 			for _, el := range authorized {
 				if el.IP == nil {
 					continue
@@ -451,6 +473,10 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 				if want, ok := desired[el.Bridge][minor]; ok && net.ParseIP(want.IP).Equal(el.IP) {
 					continue
 				}
+				if p.pb != nil {
+					strayEls = append(strayEls, el)
+					continue
+				}
 				if err := p.denyAccess(ctx, el.Bridge, el.IP); err != nil {
 					res.Failed++
 					res.Problems = append(res.Problems,
@@ -459,6 +485,10 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 				}
 				delete(view.byKey, gateKey(el.Bridge, el.IP))
 				res.StraysRemoved++
+			}
+			if len(strayEls) > 0 {
+				// Batched pass: every stray is removed and proven gone in one transaction.
+				p.removeStrayAuthorizations(ctx, strayEls, view, &res)
 			}
 		}
 	}
@@ -476,6 +506,22 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 			continue
 		}
 		strayReads[bridge] = installed
+		if p.pb != nil {
+			// Batched pass: all stray classes of the bridge go in one tc batch and are proven gone with one read.
+			var strays []int
+			for _, minor := range sortedInts(installed) {
+				if minor < shape.GuestMinorBase || minor > shape.GuestMinorMax {
+					continue
+				}
+				if _, want := desired[bridge][minor]; !want {
+					strays = append(strays, minor)
+				}
+			}
+			if len(strays) > 0 {
+				p.removeStrayClasses(ctx, bridge, strays, strayReads, &res)
+			}
+			continue
+		}
 		for _, minor := range sortedInts(installed) {
 			if minor < shape.GuestMinorBase || minor > shape.GuestMinorMax {
 				continue
@@ -523,9 +569,19 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 			res.Problems = append(res.Problems, "bridge "+bridge+": "+err.Error())
 			continue
 		}
+		if p.pb != nil {
+			p.provisionBridgeBatched(ctx, bridge, byMinor, view, now, &res)
+			continue
+		}
 		for _, minor := range sortedIntKeys(byMinor) {
 			p.provisionSession(ctx, bridge, minor, byMinor[minor], view, now, &res)
 		}
+	}
+	if p.pb != nil {
+		// Nothing may be left queued: a denial or a lease write that was never run is a guest in the wrong state.
+		p.flushDenies(ctx, &res)
+		p.flushRenewals(ctx, &res)
+		p.flushDenies(ctx, &res)
 	}
 
 	// Write the durable inventory after convergence so a restart resumes from what is installed; a failed write is reported because the next start re-generates every class and loses accounting continuity.

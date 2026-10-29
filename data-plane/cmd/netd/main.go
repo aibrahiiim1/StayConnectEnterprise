@@ -175,6 +175,8 @@ func main() {
 	p3shaping := &phase3Shaping{
 		// AD-53: an unchanged plan only refreshes validity between full walks; NETD_PLAN_FASTPATH=false walks every submission.
 		fastPath: os.Getenv("NETD_PLAN_FASTPATH") != "false",
+		// A pass batches its tc/nft work and puts new sessions before routine renewal (phase3_batch.go); NETD_PASS_BATCHING=false runs it per session.
+		noBatch: os.Getenv("NETD_PASS_BATCHING") == "false",
 		shp:   shape.New(),
 		mode:  p3mode,
 		authz: p3authz,

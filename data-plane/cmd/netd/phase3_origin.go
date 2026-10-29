@@ -59,6 +59,17 @@ func (p *phase3Shaping) registerOrigin(ctx context.Context, s shapeplan.Session,
 	if upErr != nil || downErr != nil {
 		return "class origin not registered for " + s.SessionID + ": counters unreadable at creation"
 	}
+	return p.registerOriginWith(ctx, s, minor, epoch, up, down)
+}
+
+// registerOriginWith records the origin from counters the caller has just read; a batched admission reads each device once for all its sessions.
+func (p *phase3Shaping) registerOriginWith(ctx context.Context, s shapeplan.Session, minor int, epoch int64, up, down map[int]shape.ClassBytes) string {
+	if p.origins == nil {
+		return ""
+	}
+	if s.DeviceID == "" {
+		return "class origin not registered for " + s.SessionID + ": the plan carries no device identity"
+	}
 	outcome, err := p.origins.RegisterClassOrigin(ctx, classOrigin{
 		Tenant: p.mode.TenantID, Site: p.mode.SiteID,
 		SessionID: s.SessionID, DeviceID: s.DeviceID, Bridge: s.Bridge, ClassMinor: minor, Epoch: epoch,
