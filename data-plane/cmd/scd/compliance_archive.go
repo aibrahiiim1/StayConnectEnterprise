@@ -5,9 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -38,12 +38,36 @@ var archivedTables = []string{
 	"iam_v2.entitlements",
 }
 
+// errNoArchiveKeyHolder is returned, and shown to the operator, when a reassignment would have to write the departing customer's
+// archive and no backup key holder exists to encrypt it to (audit AD-10).
+var errNoArchiveKeyHolder = errors.New("this appliance has no backup key holder, so the departing customer's records cannot be archived " +
+	"(they are never written unencrypted) and nothing was removed. Add a key holder in the Admin Console under Backups, Backup keys, " +
+	"then restart the appliance service (or reassign again): the move is retried at start, and guests stay blocked until it completes")
+
+// requireArchiveKeyHolder is the single rule: no key holder, no archive, no purge. The Admin Console and the Backups screen do not
+// depend on the tenant move, so adding a holder is always possible; nothing here needs an override.
+func requireArchiveKeyHolder(recipients []age.Recipient) error {
+	if len(recipients) == 0 {
+		return errNoArchiveKeyHolder
+	}
+	return nil
+}
+
 // archiveTenantBeforePurge exports the record and returns only once the database agrees an archive exists.
 // It runs before and outside the purge transaction so the archive survives a failed purge.
 func (s *server) archiveTenantBeforePurge(ctx context.Context, departing string) error {
 	dir := os.Getenv(EnvComplianceArchiveDir)
 	if dir == "" {
 		dir = complianceArchiveDir
+	}
+	// Refused BEFORE anything is read or written (audit AD-10): the archive holds guest numbers and payment references and is
+	// never written in the clear.
+	recipients, rerr := s.backupRecipients(ctx)
+	if rerr != nil {
+		return fmt.Errorf("compliance archive: %w", rerr)
+	}
+	if err := requireArchiveKeyHolder(recipients); err != nil {
+		return err
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("compliance archive directory: %w", err)
@@ -92,17 +116,8 @@ func (s *server) archiveTenantBeforePurge(ctx context.Context, departing string)
 	sum := sha256.Sum256(body)
 	digest := hex.EncodeToString(sum[:])
 	// Encrypted like the backups, to the same key holders: it holds guest numbers and payment references. The digest is of the
-	// document itself. With no holder set up it is written mode 0600 and the log says so.
-	recipients, rerr := s.backupRecipients(ctx)
-	if rerr != nil {
-		return fmt.Errorf("compliance archive: %w", rerr)
-	}
-	name := fmt.Sprintf("tenant-%s-%s.json", departing, digest[:12])
-	if len(recipients) > 0 {
-		name += ".age"
-	} else {
-		slog.Warn("compliance archive written without encryption: no backup key holder is set up")
-	}
+	// document itself.
+	name := fmt.Sprintf("tenant-%s-%s.json.age", departing, digest[:12])
 	path := filepath.Join(dir, name)
 
 	// Write to a temp file and rename so a crash cannot leave a truncated artefact whose digest is already recorded.
@@ -150,16 +165,17 @@ func (s *server) departingTenants(ctx context.Context) ([]string, error) {
 
 // writeArchiveFile writes the document to path, encrypted to the recipients when there are any, and makes it durable.
 func writeArchiveFile(path string, body []byte, recipients []age.Recipient) error {
+	if err := requireArchiveKeyHolder(recipients); err != nil {
+		return err // never in the clear, even if a caller forgot to check first
+	}
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	var sink io.WriteCloser = nopCloser{f}
-	if len(recipients) > 0 {
-		if sink, err = backupcrypt.Encrypt(f, recipients); err != nil {
-			return err
-		}
+	var sink io.WriteCloser
+	if sink, err = backupcrypt.Encrypt(f, recipients); err != nil {
+		return err
 	}
 	if _, err := sink.Write(body); err != nil {
 		return err
