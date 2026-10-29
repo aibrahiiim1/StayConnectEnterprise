@@ -168,6 +168,8 @@ func main() {
 		}
 	}
 	p3shaping := &phase3Shaping{
+		// AD-53: an unchanged plan only refreshes validity between full walks; NETD_PLAN_FASTPATH=false walks every submission.
+		fastPath: os.Getenv("NETD_PLAN_FASTPATH") != "false",
 		shp:   shape.New(),
 		mode:  p3mode,
 		authz: p3authz,
@@ -217,6 +219,8 @@ func main() {
 			return writerguard.Verify(ctx, pool, writerguard.Phase3Requirements())
 		},
 	}.loop(rootCtx, 30*time.Second)
+	// Lease renewal between full walks (AD-53); a no-op while the fast path is off or not in force.
+	go p3shaping.renewLoop(rootCtx, phase3RenewEvery)
 	slog.Info("netd phase3 shaping writer", "active", p3mode.Active, "producer_authenticated", p3authz.configured)
 
 	// Watchdog: rolls back pending revisions past their deadline; also runs at boot to recover from a crash.

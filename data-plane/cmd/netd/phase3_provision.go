@@ -207,6 +207,7 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 				}
 				if outcome == activationProven {
 					res.Shaped++
+					p.noteRenewable(key, bridge, ip, s, ev.Until, now)
 				}
 				return
 			}
@@ -321,6 +322,7 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 			return
 		}
 		res.Shaped++
+		p.noteRenewable(key, bridge, ip, s, ev.Until, now)
 	case activationUnproven:
 		// Keeps the provisional lease; the next pass retries the promotion.
 	default:
