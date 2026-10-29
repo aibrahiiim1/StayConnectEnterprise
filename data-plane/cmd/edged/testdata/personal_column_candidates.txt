@@ -109,6 +109,7 @@ iam_v2.sign_in_attempts.device_mac
 iam_v2.sign_in_attempts.room_in_mirror
 iam_v2.sign_in_attempts.submitted_room
 iam_v2.site_card_payment_setting_changes.change_reason
+iam_v2.site_card_recheck_setting_changes.reason
 iam_v2.site_data_retention.inactive_identity_days
 iam_v2.site_data_retention.staff_note_days
 iam_v2.site_module_changes.change_reason

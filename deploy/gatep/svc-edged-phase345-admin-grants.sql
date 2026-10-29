@@ -545,3 +545,14 @@ BEGIN
   GRANT EXECUTE ON FUNCTION iam_v2.posting_lane_settings_set(uuid,uuid,bigint,integer,text,text) TO svc_edged;
   GRANT EXECUTE ON FUNCTION iam_v2.posting_outbox_requeue_parked(uuid,uuid,uuid,text,text) TO svc_edged;
 END $g0200e$;
+
+-- 0205 (audit AD-43): the late-capture re-query window (read, versioned write). Definers only; the change log is read through nothing.
+DO $g0205e$
+BEGIN
+  IF to_regprocedure('iam_v2.card_recheck_settings_set(uuid,uuid,bigint,integer,text,text)') IS NULL THEN
+    RAISE NOTICE 'migration 0205 is not applied -- late-capture setting grants skipped';
+    RETURN;
+  END IF;
+  GRANT EXECUTE ON FUNCTION iam_v2.card_recheck_settings_get(uuid,uuid) TO svc_edged;
+  GRANT EXECUTE ON FUNCTION iam_v2.card_recheck_settings_set(uuid,uuid,bigint,integer,text,text) TO svc_edged;
+END $g0205e$;

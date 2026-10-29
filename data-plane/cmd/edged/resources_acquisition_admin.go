@@ -32,6 +32,8 @@ func (s *server) paymentProvidersRoutes() http.Handler {
 	r.Put("/domains", s.savePaymentDomains)
 	r.Get("/settings", s.getCardSettings)
 	r.Put("/settings", s.putCardSettings)
+	r.Get("/recheck-settings", s.getCardRecheckSettings)
+	r.Put("/recheck-settings", s.putCardRecheckSettings)
 	r.Get("/changes", s.paymentChanges)
 	return r
 }

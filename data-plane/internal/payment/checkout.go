@@ -43,6 +43,9 @@ type CheckoutEngine struct {
 	LiveAllowed bool
 	Now         func() time.Time
 	Health      *ProviderHealth
+	// RecheckEnabled lets RecheckLateCaptures ask the provider (read-only) about failed and unknown charges. Off unless the
+	// deployer switched it on (deployment.CapCardLateRecheck); while off, no provider call can come from that path.
+	RecheckEnabled bool
 }
 
 func (e *CheckoutEngine) now() time.Time {

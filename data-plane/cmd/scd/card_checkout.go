@@ -97,7 +97,8 @@ func (s *server) initCard(ctx context.Context, secretsDir string) {
 		return
 	}
 	s.card.engine = &payment.CheckoutEngine{Runtime: rt, Outcome: oc, Adapters: s.card.adapters, Key: k,
-		LiveAllowed: s.ceiling.Available(deployment.CapCardLive), Health: payment.NewProviderHealth()}
+		LiveAllowed: s.ceiling.Available(deployment.CapCardLive), Health: payment.NewProviderHealth(),
+		RecheckEnabled: s.ceiling.Available(deployment.CapCardLateRecheck)}
 	slog.Info("card payment engine ready", "live_allowed", s.card.engine.LiveAllowed)
 }
 
@@ -301,7 +302,7 @@ func (s *server) cardReconcileLoop(ctx context.Context) {
 	}
 	t := time.NewTicker(20 * time.Second)
 	defer t.Stop()
-	lastSweep := time.Time{}
+	lastSweep, lastRecheck := time.Time{}, time.Time{}
 	for {
 		select {
 		case <-ctx.Done():
@@ -332,6 +333,15 @@ func (s *server) cardReconcileLoop(ctx context.Context) {
 		if time.Since(lastSweep) > 6*time.Hour {
 			s.card.engine.SweepReversals(cctx, s.tenID, s.siteID, 60*24*time.Hour, 200)
 			lastSweep = time.Now()
+		}
+		// AD-43: the slow read-only re-query for a late capture. Dormant: it runs only when the deployer switched it on.
+		if s.card.engine.RecheckEnabled && time.Since(lastRecheck) > payment.LateRecheckEvery {
+			if n, rerr := s.card.engine.RecheckLateCaptures(cctx, s.tenID, s.siteID, 25); rerr != nil {
+				slog.Warn("card: late-capture re-query failed", "err", rerr)
+			} else if n > 0 {
+				slog.Warn("card: late captures need a finance review", "cases", n)
+			}
+			lastRecheck = time.Now()
 		}
 		cancel()
 	}
