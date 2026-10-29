@@ -6,7 +6,7 @@ BEGIN;
 
 DO $$
 BEGIN
-  IF to_regproc('central_forget_audit_apply(int)') IS NOT NULL THEN
+  IF to_regprocedure('central_forget_audit_apply(integer)') IS NOT NULL THEN
     EXECUTE 'SELECT central_forget_audit_apply(1000000)';
   END IF;
 END $$;

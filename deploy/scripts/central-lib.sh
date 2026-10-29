@@ -331,10 +331,20 @@ SQL
 # succeeded. The previous env file is kept as <env>.bak-dbrole-<stamp> (0600): rollback = copy it back and restart ctrlapi.
 # Host, port, database and query parameters of the existing URL are kept; only the credentials change. Idempotent.
 central_runtime_dsn_switch() {
-  local cur new pw
+  local cur new pw cur_pw
   cur="$(envfile_get "$CTRLAPI_ENV_PATH" CTRLAPI_DB_URL || true)"
   [ -n "$cur" ] || { warn "no CTRLAPI_DB_URL in $CTRLAPI_ENV_PATH — nothing to switch"; return 1; }
-  case "$cur" in "postgres://$CENTRAL_RUNTIME_DB_USER:"*) say "CTRLAPI_DB_URL already names $CENTRAL_RUNTIME_DB_USER"; return 0 ;; esac
+  # Already the runtime role: nothing to do ONLY if the password in the URL is the one in the secret file. A regenerated or
+  # rotated secret has just been set on the role (central_runtime_role_apply), so a URL still carrying the old one would be
+  # rejected by PostgreSQL and ctrlapi would start with credentials that no longer work.
+  case "$cur" in
+    "postgres://$CENTRAL_RUNTIME_DB_USER:"*)
+      pw="$(cat "$CENTRAL_RUNTIME_PW_FILE" 2>/dev/null || true)"
+      cur_pw="${cur#postgres://$CENTRAL_RUNTIME_DB_USER:}"; cur_pw="${cur_pw%%@*}"
+      if [ -n "$pw" ] && [ "$cur_pw" = "$pw" ]; then say "CTRLAPI_DB_URL already names $CENTRAL_RUNTIME_DB_USER with the current password"; return 0; fi
+      say "CTRLAPI_DB_URL names $CENTRAL_RUNTIME_DB_USER with a different password than the secret file: rewriting it"
+      ;;
+  esac
   if [ "$DRY_RUN" = 1 ]; then
     say "DRY-RUN would back up $CTRLAPI_ENV_PATH and set CTRLAPI_DB_URL to the $CENTRAL_RUNTIME_DB_USER role"; return 0
   fi

@@ -196,6 +196,14 @@ export T_DOCKER_ARGV="$T/docker.argv" T_DOCKER_STDIN="$T/docker.stdin" T_DOCKER_
   STAMP=20260102T000000Z central_runtime_dsn_switch >/dev/null
   if [ "$(ls "$CTRLAPI_ENV_PATH".bak-dbrole-* | wc -l | tr -d ' ')" = 1 ]; then ok "dsn switch: idempotent, no second backup once switched"
   else bad "dsn switch: a second run made another backup"; fi
+  # A regenerated or rotated secret is set on the role first, so a URL that still carries the old password must be rewritten.
+  newpw="$(printf 'b%.0s' $(seq 1 64))"
+  printf '%s' "$newpw" > "$CENTRAL_RUNTIME_PW_FILE"
+  STAMP=20260103T000000Z central_runtime_dsn_switch >/dev/null
+  now="$(envfile_get "$CTRLAPI_ENV_PATH" CTRLAPI_DB_URL)"
+  if [ "$now" = "postgres://ctrlapi_rt:$newpw@127.0.0.1:5432/stayconnect?sslmode=disable" ] && [ -f "$CTRLAPI_ENV_PATH.bak-dbrole-20260103T000000Z" ]; then
+    ok "dsn switch: a rotated runtime password is written to the URL (the old URL is backed up)"
+  else bad "dsn switch: the URL kept the old runtime password after the secret changed"; fi
   if [ "$(central_owner_dsn)" = "postgres://stayconnect:olddbpassword@127.0.0.1:5432/stayconnect?sslmode=disable" ]; then
     ok "owner DSN: built from db_password and the host/database of CTRLAPI_DB_URL"
   else bad "owner DSN has an unexpected shape"; fi
