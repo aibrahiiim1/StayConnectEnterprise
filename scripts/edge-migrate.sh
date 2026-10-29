@@ -78,7 +78,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd -P)"
 CANON_MIG_DIR="$HERE/data-plane/migrations"
 ONLY=""; ALL=0; EXPECT_DB=""; TARGET_KIND=""; ACK=""; EXPECT_SHA=""; DIR_OVERRIDE=""; ACK_DIR=""
-BOOTSTRAP=0; BOOTSTRAP_OWNER=""; APPLY_ROLE=""
+BOOTSTRAP=0; BOOTSTRAP_OWNER=""; APPLY_ROLE=""; PLATFORM=0
 DOWN=0; ACK_DOWN=""; OUT_OF_ORDER=0
 # The number of the factory-clean baseline that built this database, written by the provisioner (also read by
 # deploy/scripts/apply-pending-migrations.sh). Absent on an upgrade-path or test database.
@@ -87,6 +87,7 @@ LEDGER_OWNER_ALLOWLIST="${LEDGER_OWNER_ALLOWLIST:-iam_v2_owner postgres}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --apply-role) APPLY_ROLE="$2"; shift 2;;
+    --platform-migration) PLATFORM=1; shift;;
     --only) ONLY="$2"; shift 2;;
     --all) ALL=1; shift;;
     --expect-db) EXPECT_DB="$2"; shift 2;;
@@ -119,6 +120,22 @@ done
 # It grants nothing. SET ROLE can only reach a role the connecting account is already a member of, and every
 # least-privilege check below evaluates current_user AFTER the switch, so the role is held to exactly the same
 # standard it would be if it had connected directly.
+# --platform-migration (audit remediation 2026-10-29; the platform role of a site appliance IS its cluster superuser, so the
+# non-superuser gate is lifted for it too): a migration that must change the PLATFORM schema (public: functions and
+# tables the platform role owns) cannot be run by the least-privilege role, which holds no CREATE on public by design. Such a file
+# declares it with `-- edge-migrate: platform` in its first 20 lines and is applied with `--apply-role <the platform role>
+# --platform-migration`. The flag relaxes ONE thing, the live-site "apply role is a non-superuser with no public CREATE / ledger UPDATE" gate,
+# and only when ALL of these hold: it names exactly one migration (--only) whose file carries the marker, --expect-sha256 pins
+# that file's content, the target is a live-site that already passed the identity and acknowledgement checks, and the pre-change
+# backup, the advisory locks, the gap check and the ledger row are unchanged. The default path is not affected.
+if [ "$PLATFORM" = 1 ]; then
+  [ -n "$APPLY_ROLE" ] && [ -n "$ONLY" ] && [ -n "$EXPECT_SHA" ] && [ "$TARGET_KIND" = "live-site" ] \
+    || { echo "REFUSED: --platform-migration needs --apply-role, --only, --expect-sha256 and --target-kind live-site" >&2; exit 2; }
+  pf="$(ls "$CANON_MIG_DIR/${ONLY}.up.sql" 2>/dev/null | head -1)"
+  [ -n "$pf" ] && head -n 20 "$pf" | grep -qE '^--[[:space:]]*edge-migrate:[[:space:]]*platform[[:space:]]*$' \
+    || { echo "REFUSED: --platform-migration: $ONLY does not carry '-- edge-migrate: platform' in its first 20 lines" >&2; exit 2; }
+  echo "  PLATFORM MIGRATION: $ONLY runs as $APPLY_ROLE (the platform role); the least-privilege role gate is not applied to it"
+fi
 ROLE_PREFIX=""
 if [ -n "$APPLY_ROLE" ]; then
   echo "$APPLY_ROLE" | grep -Eq '^[a-z_][a-z0-9_]*$' || { echo "REFUSED: --apply-role '$APPLY_ROLE' is not a plain role name" >&2; exit 2; }
@@ -175,7 +192,7 @@ verify_target_identity(){ # $1=mode-label
     [ "$(q "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname='_scratch_marker'")" = 1 ] \
       || { echo "REFUSED: disposable target requires a harness-generated marker (public._scratch_marker)" >&2; exit 3; }
   fi
-  if [ "$TARGET_KIND" = "live-site" ]; then
+  if [ "$TARGET_KIND" = "live-site" ] && [ "$PLATFORM" != 1 ]; then
     [ "$(q "SELECT rolsuper FROM pg_roles WHERE rolname=current_user")" = f ] \
       || { echo "REFUSED: live-site execution role must be a least-privilege NON-superuser" >&2; exit 3; }
   fi
@@ -480,7 +497,7 @@ verify_ledger_structural(){ # read-only, BEFORE lock; fail closed
       exit 3
     fi
   done
-  if [ "$TARGET_KIND" = "live-site" ]; then
+  if [ "$TARGET_KIND" = "live-site" ] && [ "$PLATFORM" != 1 ]; then
     # live-site apply role must be minimal: no destructive ledger rights, no public DDL.
     for p in UPDATE DELETE TRUNCATE REFERENCES TRIGGER; do
       [ "$(q "SELECT has_table_privilege(current_user,'public.schema_migrations','$p')")" = f ] \

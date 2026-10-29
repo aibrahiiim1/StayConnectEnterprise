@@ -171,10 +171,18 @@ CREATE TRIGGER notify_settings_changed
 
 -- The sign-in method switches live on the tenant row (tenants.auth_methods): an Admin Console "off" must reach
 -- scd's cache at once, not at the end of its TTL.
-DROP TRIGGER IF EXISTS notify_settings_changed ON public.tenants;
-CREATE TRIGGER notify_settings_changed
-  AFTER UPDATE OF auth_methods ON public.tenants
-  FOR EACH STATEMENT EXECUTE FUNCTION iam_v2.notify_settings_changed();
+-- public.tenants belongs to the platform role, not to the role migrations run as on a live site (edge-migrate --apply-role
+-- iam_v2_owner), which may not create a trigger on it. That role skips it here; Gate-P (deploy/gatep/svc-signin-capacity-grants.sql,
+-- run as the platform role after every migration and on every install) creates the same trigger. Until then the cache's TTL applies.
+DO $tr$
+BEGIN
+  DROP TRIGGER IF EXISTS notify_settings_changed ON public.tenants;
+  CREATE TRIGGER notify_settings_changed
+    AFTER UPDATE OF auth_methods ON public.tenants
+    FOR EACH STATEMENT EXECUTE FUNCTION iam_v2.notify_settings_changed();
+EXCEPTION WHEN insufficient_privilege THEN
+  RAISE NOTICE 'the tenants trigger is created by Gate-P, not by this migration role';
+END $tr$;
 
 -- A session becoming active is what scd's last sign-in step waits for (it polled every 100 ms). The id is not guest data.
 CREATE OR REPLACE FUNCTION iam_v2.notify_session_active() RETURNS trigger

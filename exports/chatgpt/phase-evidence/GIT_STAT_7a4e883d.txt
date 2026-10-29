@@ -1,0 +1,4 @@
+commit 7a4e883d25827887d37810073c4ac7f5b5674b38
+Date:   Thu Oct 29 07:28:02 2026 +0300
+
+    Governance: T0268 change manifest

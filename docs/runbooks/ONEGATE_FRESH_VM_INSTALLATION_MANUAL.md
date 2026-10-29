@@ -729,6 +729,7 @@ Check these on the appliance first (each refuses or changes something an older r
 | Usage detail is rolled up (per-minute 7 days, hourly after); raw samples are reclaimed only after rollup | disk use falls after the first days, not at once |
 | `*_DB_URL` for scd, edged and netd is required; `--upgrade` backfills and reads back before restarting | read the installer's read-back lines |
 | Go 1.26.10 builds (`golang:1.26.10`, pinned by digest) | build hosts need the image |
+| Five of these migrations (0163, 0166, 0173, 0174, 0178) change the platform schema (`public`), which the least-privilege migration role cannot write. They carry `-- edge-migrate: platform` and `--upgrade` applies **only those** as the platform role through `edge-migrate.sh --platform-migration` (one migration, content pinned by sha256, same backup, locks, gap check and ledger row); the Gate-P reconcile afterwards re-owns what they created | nothing; the log says `is a platform migration` for each |
 
 ### E.6 Rollback
 

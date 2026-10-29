@@ -1,4 +1,5 @@
 -- ---------------------------------------------------------------------------------------------------------
+-- edge-migrate: platform
 -- 0173: the erasure ledger is authenticated by a key the external copy never holds (audit AD-3, P4 M1 / P3 M4).
 -- ---------------------------------------------------------------------------------------------------------
 -- Before: the ledger's hash chain proved an entry was not CHANGED, but anyone able to write the external storage could

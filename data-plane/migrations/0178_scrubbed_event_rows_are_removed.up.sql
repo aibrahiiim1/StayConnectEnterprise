@@ -1,4 +1,5 @@
 -- 0178 -- ROWS THE RETENTION RUN HAS ALREADY SCRUBBED ARE REMOVED (audit AD-49 (a); D1-L5)
+-- edge-migrate: platform
 --
 -- Purpose and retention per per-event table (the table is in docs/AUDIT_BACKLOG.md under AD-49):
 --

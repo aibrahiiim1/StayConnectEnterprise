@@ -1,4 +1,5 @@
 -- ---------------------------------------------------------------------------------------------------------
+-- edge-migrate: platform
 -- 0174: a retention period can be previewed before it is shortened (audit AD-67, P9 L14).
 -- ---------------------------------------------------------------------------------------------------------
 -- Shortening a period anonymises history on the next hourly run. The operator is now shown what the new periods WOULD remove

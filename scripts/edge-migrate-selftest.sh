@@ -769,6 +769,28 @@ else no "marked file with transaction control was run" "$out"; fi
 Q "DROP TABLE IF EXISTS iam_v2.edge_selftest_big;" >/dev/null
 cp "$WORK/0099.keep" "$MIGDIR/0099_selftest_noop.up.sql"; undo
 
+echo "== 13. platform migrations: the public-schema exception is narrow (audit remediation 2026-10-29) =="
+ledger_reset; mk_commerce
+mk_plat(){ printf '%s
+' "$@" > "$MIGDIR/0099_selftest_noop.up.sql"; PSHA="$(sha256sum "$MIGDIR/0099_selftest_noop.up.sql" | awk '{print $1}')"; }
+run_plat(){ EDGE_PSQL="$PSQL" bash "$RUN" --apply-role postgres --platform-migration --only 0099_selftest_noop --expect-db "$DB" --target-kind live-site         --ack-target I_UNDERSTAND_LIVE_DARK_SITE_MIGRATION --expect-sha256 "$PSHA" 2>&1; }
+mk_plat 'CREATE TABLE IF NOT EXISTS public.edge_selftest_platform(id int);'
+out="$(run_plat)"
+if ! applied && echo "$out" | grep -q "does not carry '-- edge-migrate: platform'"; then ok "--platform-migration on a file WITHOUT the marker is REFUSED"
+else no "an unmarked file was run as a platform migration" "$out"; fi
+mk_plat '-- edge-migrate: platform' 'CREATE TABLE IF NOT EXISTS public.edge_selftest_platform(id int);'
+out="$(EDGE_PSQL="$PSQL" bash "$RUN" --apply-role postgres --platform-migration --only 0099_selftest_noop --expect-db "$DB" --target-kind live-site         --ack-target I_UNDERSTAND_LIVE_DARK_SITE_MIGRATION 2>&1)"
+if ! applied && echo "$out" | grep -q "needs --apply-role, --only, --expect-sha256"; then ok "--platform-migration without --expect-sha256 is REFUSED"
+else no "a platform migration ran without a pinned sha256" "$out"; fi
+out="$(EDGE_PSQL="$PSQL" bash "$RUN" --apply-role edge_apply --only 0099_selftest_noop --expect-db "$DB" --target-kind live-site         --ack-target I_UNDERSTAND_LIVE_DARK_SITE_MIGRATION --expect-sha256 "$PSHA" 2>&1)"; rc=$?
+if [ "$rc" != 0 ] && ! applied; then ok "the same file WITHOUT the flag still cannot change public as the least-privilege role"
+else no "the least-privilege role changed public" "$out"; fi
+out="$(run_plat)"
+if applied && [ "$(Q "SELECT to_regclass('public.edge_selftest_platform') IS NOT NULL")" = t ]; then ok "a marked, sha-pinned platform migration applies as the platform role and records its ledger row"
+else no "the platform migration did not apply" "$out"; fi
+Q "DROP TABLE IF EXISTS public.edge_selftest_platform;" >/dev/null
+cp "$WORK/0099.keep" "$MIGDIR/0099_selftest_noop.up.sql"; undo
+
 echo "============================================================"
 if [ "$fail" = "0" ]; then echo "EDGE_MIGRATE_SELFTEST = PASS ($pass cases)"; exit 0; fi
 echo "EDGE_MIGRATE_SELFTEST = FAIL"; exit 1

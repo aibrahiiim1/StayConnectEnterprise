@@ -63,8 +63,16 @@ if [ "${#PENDING[@]}" -gt 0 ]; then
   for v in "${PENDING[@]}"; do
     sha="$(sha256sum "$MIG/$v.up.sql" | cut -d' ' -f1)"
     say "applying $v"
-    bash "$RUNNER" --only "$v" --expect-db "$DB" --target-kind live-site \
-         --ack-target I_UNDERSTAND_LIVE_DARK_SITE_MIGRATION --apply-role iam_v2_owner --expect-sha256 "$sha"
+    # A migration that must change the platform schema (public) declares it; it then runs as the platform role under the
+    # runner's --platform-migration conditions (see scripts/edge-migrate.sh). Everything else keeps the least-privilege role.
+    if head -n 20 "$MIG/$v.up.sql" | grep -qE '^--[[:space:]]*edge-migrate:[[:space:]]*platform[[:space:]]*$'; then
+      say "  $v is a platform migration: applied as $PGUSER_ROLE"
+      bash "$RUNNER" --only "$v" --expect-db "$DB" --target-kind live-site \
+           --ack-target I_UNDERSTAND_LIVE_DARK_SITE_MIGRATION --apply-role "$PGUSER_ROLE" --platform-migration --expect-sha256 "$sha"
+    else
+      bash "$RUNNER" --only "$v" --expect-db "$DB" --target-kind live-site \
+           --ack-target I_UNDERSTAND_LIVE_DARK_SITE_MIGRATION --apply-role iam_v2_owner --expect-sha256 "$sha"
+    fi
     rc=$?
     case "$rc" in
       0) ;;
