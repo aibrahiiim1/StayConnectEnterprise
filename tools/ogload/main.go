@@ -1,6 +1,7 @@
 // ogload: a load generator that represents N independent Wi-Fi clients against a TEST OneGate appliance.
 //
-// Every simulated client is a Linux network namespace holding one macvlan interface with its own MAC address on the
+// Every simulated client is a Linux network namespace holding one macvlan interface (mode private: bridge mode would copy every
+// broadcast to every sibling, an N-squared storm at 2,000 clients) with its own MAC address on the
 // generator's LAN-side interface, so to the appliance it is a separate device: it takes a real DHCP lease from Kea,
 // reaches the real Client Portal (voucher sign-in, the same form a phone posts), and then pulls traffic through the
 // appliance's nftables forwarding, shaping, NAT and accounting to a sink server on the WAN side.
@@ -166,7 +167,7 @@ func provision(c *Client, iface string) error {
 	if o, err := sh("ip", "netns", "add", c.NS); err != nil {
 		return fmt.Errorf("netns add: %s", o)
 	}
-	if o, err := sh("ip", "link", "add", "link", iface, "name", mv, "address", c.MAC, "type", "macvlan", "mode", "bridge"); err != nil {
+	if o, err := sh("ip", "link", "add", "link", iface, "name", mv, "address", c.MAC, "type", "macvlan", "mode", "private"); err != nil {
 		return fmt.Errorf("macvlan: %s", o)
 	}
 	if o, err := sh("ip", "link", "set", mv, "netns", c.NS); err != nil {
@@ -186,6 +187,8 @@ func provision(c *Client, iface string) error {
 			_ = syscall.Kill(p, syscall.SIGTERM)
 		}
 	}
+	// stop any dhclient still running for this interface (it daemonises after a lease and would renew for ever)
+	_, _ = sh("pkill", "-f", "dhclient .* "+mv+"$")
 	lb, err := os.ReadFile(lease)
 	if err != nil {
 		return errors.New("no lease")
