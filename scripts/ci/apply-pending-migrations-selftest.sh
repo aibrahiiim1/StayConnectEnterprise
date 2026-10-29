@@ -75,6 +75,24 @@ echo "== again"
 rc="$(EDGE_PRECHANGE_BACKUP=true run)"
 if [ "$rc" = 0 ] && grep -q 'pending: 0' "$W/out"; then ok "a second run finds nothing pending"; else bad "again rc=$rc"; tail -10 "$W/out"; fi
 
+echo "== platform marker needs the release record"
+NEXT2="$(printf '%04d' $((10#$THROUGH + 2)))_selftest_platform_migration"
+printf -- '-- 0000 selftest platform migration\n-- edge-migrate: platform\nBEGIN;\nCREATE TABLE public.selftest_platform_migration (id integer PRIMARY KEY);\nCOMMIT;\n' > "$T/data-plane/migrations/$NEXT2.up.sql"
+printf 'BEGIN;\nDROP TABLE public.selftest_platform_migration;\nCOMMIT;\n' > "$T/data-plane/migrations/$NEXT2.down.sql"
+pt() { q "select to_regclass('public.selftest_platform_migration') is not null"; }
+rm -f "$T/SHA256SUMS"
+rc="$(EDGE_PRECHANGE_BACKUP=true run)"
+if [ "$rc" = 1 ] && [ "$(pt)" = f ] && grep -q 'does not match the installed release record' "$W/out"; then ok "a platform marker with no release record is refused and applies nothing"
+else bad "unlisted platform rc=$rc"; tail -10 "$W/out"; fi
+printf '%s  ./data-plane/migrations/%s.up.sql\n' "$(printf 'edited' | sha256sum | cut -d' ' -f1)" "$NEXT2" > "$T/SHA256SUMS"
+rc="$(EDGE_PRECHANGE_BACKUP=true run)"
+if [ "$rc" = 1 ] && [ "$(pt)" = f ]; then ok "a platform migration whose hash differs from the release record is refused"
+else bad "edited platform rc=$rc"; tail -10 "$W/out"; fi
+printf '%s *./data-plane/migrations/%s.up.sql\n' "$(sha256sum "$T/data-plane/migrations/$NEXT2.up.sql" | cut -d' ' -f1)" "$NEXT2" > "$T/SHA256SUMS"
+rc="$(EDGE_PRECHANGE_BACKUP=true run)"
+if [ "$rc" = 0 ] && [ "$(pt)" = t ] && grep -q 'is a platform migration' "$W/out"; then ok "a platform migration listed in the release record applies as the platform role"
+else bad "listed platform rc=$rc"; tail -20 "$W/out"; fi
+
 echo
 echo "apply-pending-migrations selftest: $pass passed, $fail failed"
 [ "$fail" = 0 ]

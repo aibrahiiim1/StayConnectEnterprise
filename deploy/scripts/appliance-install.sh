@@ -31,6 +31,10 @@
 #   --trust-dir DIR            vendor-license.pub, assignment-registry-root.pub, central-tls-ca.crt (or central-ca.crt),
 #                              and optionally FINGERPRINTS.txt — the files Central publishes in
 #                              /opt/stayconnect/central/appliance-trust/. Required on a fresh install unless already pinned.
+#   --root-ca-sha256 FP        the SHA-256 fingerprint of Central's appliance Root CA, read from Central out of band
+#                              (its FINGERPRINTS.txt). With it the Root CA is pinned only if it matches EXACTLY; it also lets an
+#                              upgrade pin the root of the CA bundle the appliance already holds. Without it the fingerprint
+#                              in --trust-dir's FINGERPRINTS.txt is used; with neither, nothing is pinned and this says so.
 #   --admin-email E            create the first site administrator (password asked on the terminal, or --admin-password-file)
 #   --admin-password-file F    a 0600 file whose first line is the password
 #   --wan-iface X --lan-iface Y   override interface detection
@@ -48,10 +52,11 @@ REL="$(cd "$HERE/../.." && pwd)"
 SC=/opt/stayconnect
 ETC=/etc/stayconnect
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-TRUST=""; ADMIN_EMAIL=""; ADMIN_PWFILE=""; WAN=""; LAN=""; CBASE=""; CMTLS=""; OFFLINE=0; REINIT=0; UNSUPPORTED=0; UPGRADE=0; YES=0
+TRUST=""; ROOTFP=""; ADMIN_EMAIL=""; ADMIN_PWFILE=""; WAN=""; LAN=""; CBASE=""; CMTLS=""; OFFLINE=0; REINIT=0; UNSUPPORTED=0; UPGRADE=0; YES=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --trust-dir) TRUST="${2:?}"; shift 2;;
+    --root-ca-sha256) ROOTFP="${2:?}"; shift 2;;
     --admin-email) ADMIN_EMAIL="${2:?}"; shift 2;;
     --admin-password-file) ADMIN_PWFILE="${2:?}"; shift 2;;
     --wan-iface) WAN="${2:?}"; shift 2;;
@@ -137,6 +142,58 @@ if [ "$YES" != 1 ] && [ -t 0 ]; then
 fi
 
 # ================================================================= 3. stage the tree
+# AD-2: pin Central's appliance Root CA, only ever against a fingerprint. The certificate comes from the trust directory
+# (or, on an upgrade, from the CA bundle this appliance already holds); the fingerprint comes from --root-ca-sha256 (read
+# out of band) or from FINGERPRINTS.txt. A certificate nothing vouches for is never adopted. Never replaces a pin.
+PINFILE="$ETC/appliance-root-ca.crt"
+pem_fpr() { openssl x509 -noout -fingerprint -sha256 2>/dev/null | sed 's/^.*=//'; }
+fp_norm() { printf '%s' "$1" | tr -d ': \t\r\n' | tr 'a-f' 'A-F'; }
+pin_root_ca() {
+  local want="$ROOTFP" via="--root-ca-sha256" cand="" tmp="" cur
+  if [ -s "$PINFILE" ]; then
+    cur="$(openssl x509 -in "$PINFILE" -noout -fingerprint -sha256 | sed 's/^.*=//')"
+    say "appliance Root CA already pinned: $cur"
+    if [ -n "$want" ] && [ "$(fp_norm "$want")" != "$(fp_norm "$cur")" ]; then
+      die "the pinned appliance Root CA does not match --root-ca-sha256. Nothing was changed; a different root is a Root CA rotation, which is a Product-Owner decision."
+    fi
+    return 0
+  fi
+  if [ -z "$want" ] && [ -s "${TRUST:-/nonexistent}/FINGERPRINTS.txt" ]; then
+    want="$(sed -n 's/^appliance Root CA sha256:[[:space:]]*//p' "$TRUST/FINGERPRINTS.txt" | head -1)"
+    via="FINGERPRINTS.txt (it comes from the same place as the certificate: compare it with Central's published value)"
+  fi
+  [ -s "${TRUST:-/nonexistent}/appliance-root-ca.crt" ] && cand="$TRUST/appliance-root-ca.crt"
+  if [ -z "$cand" ] && [ -s "$ETC/certs/ca.crt" ] && [ -n "$ROOTFP" ]; then
+    # An appliance provisioned before the pin existed: the self-signed root of the bundle it already holds, pinned
+    # only when it is the one the operator named.
+    tmp="$(mktemp -d)"
+    awk -v d="$tmp" '/BEGIN CERTIFICATE/{n++} n{print > (d "/c" n ".pem")}' "$ETC/certs/ca.crt"
+    for c in "$tmp"/c*.pem; do
+      [ -f "$c" ] || continue
+      if [ "$(openssl x509 -in "$c" -noout -subject 2>/dev/null | sed 's/^subject=//')" = "$(openssl x509 -in "$c" -noout -issuer 2>/dev/null | sed 's/^issuer=//')" ] \
+         && [ "$(fp_norm "$(pem_fpr < "$c")")" = "$(fp_norm "$ROOTFP")" ]; then cand="$c"; break; fi
+    done
+  fi
+  if [ -z "$cand" ]; then
+    say "WARNING: the appliance Root CA is NOT pinned (no appliance-root-ca.crt in --trust-dir, and no held root matches --root-ca-sha256)."
+    say "         scd will pin the root of the first CA bundle Central sends it, which trusts Central's first reply."
+    say "         Pin it explicitly:  bash $SC/deploy/scripts/install-appliance-root-ca.sh --sha256 <Central's fingerprint> <appliance-root-ca.crt>"
+    [ -n "$tmp" ] && rm -rf "$tmp"
+    return 0
+  fi
+  if [ -z "$want" ]; then
+    say "WARNING: no fingerprint to check the Root CA against (give --root-ca-sha256 or a FINGERPRINTS.txt); NOT pinned: $(pem_fpr < "$cand")"
+    [ -n "$tmp" ] && rm -rf "$tmp"
+    return 0
+  fi
+  install -d -m 0755 "$ETC"
+  bash "$SC/deploy/scripts/install-appliance-root-ca.sh" --sha256 "$want" "$cand" \
+    || die "the appliance Root CA was refused (above); it does not match the fingerprint from $via. Nothing was pinned."
+  say "appliance Root CA pinned, verified against $via"
+  [ -n "$tmp" ] && rm -rf "$tmp"
+  return 0
+}
+
 stage_tree() {
   step "3. stage /opt/stayconnect"
   install -d -m 0755 "$SC" "$SC/bin" "$SC/bundles"
@@ -241,6 +298,7 @@ PY
       say "WARNING: no FINGERPRINTS.txt in $TRUST — compare the fingerprints below with the ones Central published, out of band:"
     fi
   fi
+  pin_root_ca
   for f in "$SC"/deploy/pki/*.pub; do [ -f "$f" ] && say "  $(basename "$f"): key_id $(python3 -c 'import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],"rb").read()).digest()[:8].hex())' "$f")"; done
   [ -f "$SC/deploy/pki/central-ca.crt" ] && say "  central-ca.crt: $(openssl x509 -in "$SC/deploy/pki/central-ca.crt" -noout -fingerprint -sha256 2>/dev/null | sed 's/^.*=//')"
 
@@ -290,6 +348,8 @@ else
   # What this release ships to a fresh install, an upgraded appliance gets too (keys only added when absent).
   bash "$SC/deploy/scripts/apply-product-profile.sh" "$SC/deploy" /etc/stayconnect \
     || die "the product profile was refused (above); the new binaries are installed but the services were not restarted"
+  step "6b. appliance Root CA pin (AD-2)"
+  pin_root_ca
   step "7. restart in dependency order"
   for u in stayconnect-netd stayconnect-scd stayconnect-acctd stayconnect-portald stayconnect-edged; do
     systemctl stop "$u" >/dev/null 2>&1 || true; systemctl reset-failed "$u" >/dev/null 2>&1 || true

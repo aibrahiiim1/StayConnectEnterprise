@@ -40,6 +40,10 @@ const CapPostStayIdentity = "post_stay_identity"
 // ProfileWindow is how long a profile created by a successful check stays usable for the post-stay conversion.
 const ProfileWindow = 24 * time.Hour
 
+// DefaultWindowDays is how long after check-out a guest may still sign in with their room and reservation when the
+// caller names no window (the setting's default, migration 0179).
+const DefaultWindowDays = 7
+
 var (
 	// ErrNotAuthenticable covers every failure alike; any distinction would be an oracle.
 	ErrNotAuthenticable = errors.New("poststay: not authenticable")
@@ -102,7 +106,7 @@ func (s *Store) Revoke(ctx context.Context, req RevokeRequest) error {
 // It never returns a profile that cannot authenticate (revoked, expired, a moved-on episode, a stay that has not checked
 // out): that is the same refusal as a wrong answer. The insert runs in the controlled-writer scope the table requires,
 // and a concurrent creator is absorbed by the episode's uniqueness.
-func (s *Store) ensureProfile(ctx context.Context, tenant, site, stay string) (string, error) {
+func (s *Store) ensureProfile(ctx context.Context, tenant, site, stay string, windowDays int) (string, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return "", err
@@ -117,8 +121,9 @@ func (s *Store) ensureProfile(ctx context.Context, tenant, site, stay string) (s
 		SELECT st.tenant_id, st.site_id, st.id, st.lifecycle_version, now() + make_interval(secs => $4), 'ROOM_RESERVATION', NULL
 		  FROM iam_v2.stays st
 		 WHERE st.tenant_id=$1 AND st.site_id=$2 AND st.id=$3 AND st.status = 'CHECKED_OUT'
+		   AND st.effective_checkout_at > now() - make_interval(days => $5)
 		ON CONFLICT (origin_stay_id, origin_lifecycle_version) DO NOTHING
-		RETURNING id::text`, tenant, site, stay, ProfileWindow.Seconds()).Scan(&profile)
+		RETURNING id::text`, tenant, site, stay, ProfileWindow.Seconds(), windowDays).Scan(&profile)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Already there (or the stay is not CHECKED_OUT): read the current episode's profile, whoever created it.
 		err = tx.QueryRow(ctx, `SELECT p.id::text FROM iam_v2.post_stay_profiles p

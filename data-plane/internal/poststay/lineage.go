@@ -31,6 +31,9 @@ type VerifyRequest struct {
 	// Device is the device id scd resolved; IP is the source address. Both are throttle dimensions (hashed by the store).
 	Device, IP                  string
 	Room, Reservation, LastName string
+	// WindowDays is how long after check-out a stay can still be signed in to (the site's post_stay_signin_days setting,
+	// migration 0179). Zero or less means DefaultWindowDays: an unset window never means "for ever".
+	WindowDays int
 }
 
 type candidate struct {
@@ -40,7 +43,7 @@ type candidate struct {
 
 // candidateStays lists the stays this device was authorised on that are in a state post-stay sign-in can use. Bounded to
 // cap the work of one attempt. The room and reservation come from the stay's own record.
-func (s *Store) candidateStays(ctx context.Context, tenant, site, device string) ([]candidate, error) {
+func (s *Store) candidateStays(ctx context.Context, tenant, site, device string, windowDays int) ([]candidate, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT st.id::text, st.lifecycle_version, COALESCE(st.normalized_room_number,''), COALESCE(st.external_reservation_id,'')
 		  FROM (SELECT DISTINCT ON (e.stay_id) e.stay_id, eda.authorized_at
@@ -51,8 +54,9 @@ func (s *Store) candidateStays(ctx context.Context, tenant, site, device string)
 		         ORDER BY e.stay_id, eda.authorized_at DESC) lineage
 		  JOIN iam_v2.stays st ON st.tenant_id=$1 AND st.site_id=$2 AND st.id=lineage.stay_id
 		 WHERE st.status IN ('CHECKED_OUT','POST_STAY_ACTIVE')
+		   AND st.effective_checkout_at > now() - make_interval(days => $4)
 		 ORDER BY lineage.authorized_at DESC
-		 LIMIT 5`, tenant, site, device)
+		 LIMIT 5`, tenant, site, device, windowDays)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +118,11 @@ func (s *Store) chargeThrottle(ctx context.Context, req VerifyRequest, cands []c
 // same on every path: the candidates are always read, every candidate is always compared, and the new-device lookup runs
 // whenever there is no candidate.
 func (s *Store) Verify(ctx context.Context, req VerifyRequest) (string, error) {
-	cands, err := s.candidateStays(ctx, req.Tenant, req.Site, req.Device)
+	windowDays := req.WindowDays
+	if windowDays <= 0 {
+		windowDays = DefaultWindowDays
+	}
+	cands, err := s.candidateStays(ctx, req.Tenant, req.Site, req.Device, windowDays)
 	if err != nil {
 		return "", err
 	}
@@ -145,11 +153,12 @@ func (s *Store) Verify(ctx context.Context, req VerifyRequest) (string, error) {
 				SELECT st.id::text
 				  FROM iam_v2.stays st
 				 WHERE st.tenant_id=$1 AND st.site_id=$2 AND st.status IN ('CHECKED_OUT','POST_STAY_ACTIVE')
+				   AND st.effective_checkout_at > now() - make_interval(days => $6)
 				   AND st.normalized_room_number=$3 AND st.external_reservation_id=$4
 				   AND EXISTS (SELECT 1 FROM iam_v2.stay_guests g
 				                WHERE g.tenant_id=st.tenant_id AND g.site_id=st.site_id AND g.stay_id=st.id
 				                  AND g.last_name_norm=$5)
-				 LIMIT 2`, req.Tenant, req.Site, room, reservation, last)
+				 LIMIT 2`, req.Tenant, req.Site, room, reservation, last, windowDays)
 			if err != nil {
 				return "", err
 			}
@@ -180,5 +189,5 @@ func (s *Store) Verify(ctx context.Context, req VerifyRequest) (string, error) {
 	if matchedStay == "" {
 		return "", ErrNotAuthenticable
 	}
-	return s.ensureProfile(ctx, req.Tenant, req.Site, matchedStay)
+	return s.ensureProfile(ctx, req.Tenant, req.Site, matchedStay, windowDays)
 }

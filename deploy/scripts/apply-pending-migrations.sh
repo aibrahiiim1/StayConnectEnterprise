@@ -66,6 +66,11 @@ if [ "${#PENDING[@]}" -gt 0 ]; then
     # A migration that must change the platform schema (public) declares it; it then runs as the platform role under the
     # runner's --platform-migration conditions (see scripts/edge-migrate.sh). Everything else keeps the least-privilege role.
     if head -n 20 "$MIG/$v.up.sql" | grep -qE '^--[[:space:]]*edge-migrate:[[:space:]]*platform[[:space:]]*$'; then
+      # The marker is a request to run as the platform role, so the file must be the one this release was built and
+      # verified with: its hash has to equal the entry in the installed SHA256SUMS (written by the release the installer
+      # just verified). A tree edited after installation, or a marker added to a file the release did not ship, is refused.
+      relsum="$(awk -v f="./data-plane/migrations/$v.up.sql" '{n=$2; sub(/^\*/,"",n)} n==f {print $1}' "$ROOT/SHA256SUMS" 2>/dev/null | head -1)"
+      [ -n "$relsum" ] && [ "$relsum" = "$sha" ]         || refuse "platform migration $v does not match the installed release record ($ROOT/SHA256SUMS); refusing to run it as the platform role"
       say "  $v is a platform migration: applied as $PGUSER_ROLE"
       bash "$RUNNER" --only "$v" --expect-db "$DB" --target-kind live-site \
            --ack-target I_UNDERSTAND_LIVE_DARK_SITE_MIGRATION --apply-role "$PGUSER_ROLE" --platform-migration --expect-sha256 "$sha"

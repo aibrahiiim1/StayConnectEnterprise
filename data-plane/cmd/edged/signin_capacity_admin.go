@@ -39,6 +39,7 @@ var signinCapacityFields = []struct {
 	{"device_retention_days", signinCapacityBound{7, 3650, 90, "days", "Devices not seen for this long, and not part of any session or package, are removed."}},
 	{"portal_image_max_edge_px", signinCapacityBound{640, 4096, 2560, "pixels", "Uploaded portal background and logo images are scaled down so their longest side is at most this."}},
 	{"portal_image_quality", signinCapacityBound{50, 95, 82, "percent", "Compression quality for uploaded portal images."}},
+	{"post_stay_signin_days", signinCapacityBound{1, 30, 7, "days", "How long after check-out a guest can still sign in with their room number and reservation number. After this the stay no longer opens post-stay access."}},
 }
 
 func (s *server) signinCapacityRoutes() http.Handler {
