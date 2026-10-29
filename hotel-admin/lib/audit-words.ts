@@ -88,6 +88,10 @@ const WORDS: Record<string, AuditWords> = {
     title: "Searched client data", category: "Client data", severity: "notice",
     note: "Every search of a client list is recorded with what was searched for. A search typed letter by letter is one entry.",
   },
+  "guest_data.listed": {
+    title: "Viewed a list of client data", category: "Client data", severity: "notice",
+    note: "Opening a page of a client, device, session, stay or sign-in list is recorded with the filter that was applied, never with anything typed into a search. Opening the same list again within 10 minutes is not recorded twice.",
+  },
   "guest_data.exported": {
     title: "Exported a client's data", category: "Client data", severity: "security",
     note: "Everything held about one client, downloaded to hand over on their request.",
