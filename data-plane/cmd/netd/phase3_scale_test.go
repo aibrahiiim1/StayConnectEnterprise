@@ -11,7 +11,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"strconv"
@@ -59,14 +58,20 @@ func setupRealKernel(t *testing.T) *realKernel {
 			t.Fatalf("setup %q: %v: %s", cmd, err, out)
 		}
 	}
-	sh("ip link del " + scaleBridge + " 2>/dev/null; ip link del ifb-gtest 2>/dev/null; nft delete table inet stayconnect 2>/dev/null; true")
-	sh("ip link add " + scaleBridge + " type bridge && ip link set " + scaleBridge + " up")
+	for _, b := range scaleBridgeNames() {
+		sh("ip link del " + b + " 2>/dev/null; ip link del " + shape.IFBName(b) + " 2>/dev/null; true")
+		sh("ip link add " + b + " type bridge && ip link set " + b + " up")
+	}
+	sh("nft delete table inet stayconnect 2>/dev/null; true")
 	sh("nft add table inet stayconnect")
 	sh("nft add set inet stayconnect auth_ipv4 '{ type ifname . ipv4_addr ; flags timeout ; }'")
 	sh("nft add set inet stayconnect phase3_auth_ipv4 '{ type ifname . ipv4_addr ; flags timeout ; size 65536 ; }'")
 	sh("nft add set inet stayconnect phase3_auth_mac_ipv4 '{ type ifname . ipv4_addr . ether_addr ; flags timeout ; size 65536 ; }'")
 	t.Cleanup(func() {
-		_ = exec.Command("sh", "-c", "ip link del "+scaleBridge+"; ip link del ifb-gtest; nft delete table inet stayconnect").Run()
+		for _, b := range scaleBridgeNames() {
+			_ = exec.Command("sh", "-c", "ip link del "+b+"; ip link del "+shape.IFBName(b)).Run()
+		}
+		_ = exec.Command("sh", "-c", "nft delete table inet stayconnect").Run()
 	})
 	return &realKernel{}
 }
@@ -169,11 +174,31 @@ func newScaleEnv(t *testing.T, k kern) *scaleEnv {
 	return e
 }
 
+// scaleBridgeCount spreads the sessions over that many bridges (NETD_SCALE_BRIDGES). The kernel installs at most 2047 u32 filters per device parent (the
+// hash-table id space is 0x7ff), so one bridge cannot hold more than 2047 shaped sessions whatever netd does; a site with more uses several guest networks.
+var scaleBridgeCount = 1
+
+func scaleBridgeName(b int) string {
+	if b == 0 {
+		return scaleBridge
+	}
+	return fmt.Sprintf("br-gtest%d", b+1)
+}
+
+func scaleBridgeNames() []string {
+	out := make([]string, scaleBridgeCount)
+	for b := range out {
+		out[b] = scaleBridgeName(b)
+	}
+	return out
+}
+
 func scaleSession(i int) shapeplan.Session {
-	a := 2 + i
+	b := i % scaleBridgeCount
+	a := 2 + i/scaleBridgeCount
 	return shapeplan.Session{
 		SessionID: fmt.Sprintf("s-%05d", i), DeviceID: fmt.Sprintf("d-%05d", i),
-		IP: fmt.Sprintf("10.20.%d.%d", a/256, a%256), Bridge: scaleBridge, DownKbps: 5000, UpKbps: 2000, Entitled: true,
+		IP: fmt.Sprintf("10.%d.%d.%d", 20+b, a/256, a%256), Bridge: scaleBridgeName(b), DownKbps: 5000, UpKbps: 2000, Entitled: true,
 		MAC: fmt.Sprintf("02:00:00:%02x:%02x:%02x", (i>>16)&0xff, (i>>8)&0xff, i&0xff),
 	}
 }
@@ -204,7 +229,7 @@ func (e *scaleEnv) pass() passStat {
 	env := shapeplan.Envelope{
 		ContractVersion: shapeplan.ContractVersion, TenantID: testTenant, SiteID: testSite, ApplianceID: testAppliance,
 		AssignmentGen: 7, PlanGeneration: e.gen, GeneratedAt: now, ExpiresAt: now.Add(90 * time.Second),
-		ManagedBridges: []string{scaleBridge}, Sessions: append([]shapeplan.Session(nil), e.sessions...),
+		ManagedBridges: scaleBridgeNames(), Sessions: append([]shapeplan.Session(nil), e.sessions...),
 	}
 	env.DesiredStateHash = shapeplan.HashDesiredState(env.ManagedBridges, env.Sessions)
 	e.leases.mu.Lock()
@@ -244,8 +269,8 @@ func (e *scaleEnv) activeCount() int {
 }
 
 func logScale(t *testing.T, kind, scenario string, n int, st passStat, extra string) {
-	line := fmt.Sprintf("SCALE kernel=%s scenario=%s n=%d execs=%d tc=%d nft=%d nft_list=%d nft_write=%d class_change=%d class_show=%d tc_batch=%d nft_script=%d db=%d lease_reads=%d shaped=%d failed=%d wall_ms=%d est_at_15ms_s=%.1f %s",
-		kind, scenario, n, st.cnt.total(), st.cnt.TC, st.cnt.NFT, st.cnt.NFTList, st.cnt.NFTWrite, st.cnt.TCClassChange, st.cnt.TCClassShow,
+	line := fmt.Sprintf("SCALE bridges=%d kernel=%s scenario=%s n=%d execs=%d tc=%d nft=%d nft_list=%d nft_write=%d class_change=%d class_show=%d tc_batch=%d nft_script=%d db=%d lease_reads=%d shaped=%d failed=%d wall_ms=%d est_at_15ms_s=%.1f %s",
+		scaleBridgeCount, kind, scenario, n, st.cnt.total(), st.cnt.TC, st.cnt.NFT, st.cnt.NFTList, st.cnt.NFTWrite, st.cnt.TCClassChange, st.cnt.TCClassShow,
 		st.cnt.TCBatch, st.cnt.NFTScript, st.db, st.leases, st.res.Shaped, st.res.Failed, st.wall.Milliseconds(),
 		float64(st.cnt.total())*0.015, extra)
 	if len(st.res.Problems) > 0 {
@@ -271,10 +296,50 @@ func scaleSizes() []int {
 	return []int{100, 500}
 }
 
+// TestRealKernelBatchFallsBackOnRealTCErrors runs only against a real kernel (NETD_SCALE_REAL=1). A qdisc elsewhere on the bridge already owns the
+// handle one new session's leaf needs, so the real `tc -batch` refuses: the other sessions must still be admitted through the per-session path, and
+// only the session that really cannot be admitted fails closed.
+func TestRealKernelBatchFallsBackOnRealTCErrors(t *testing.T) {
+	if os.Getenv("NETD_SCALE_REAL") != "1" {
+		t.Skip("needs a real kernel: NETD_SCALE_REAL=1 in a privileged container")
+	}
+	k := setupRealKernel(t)
+	e := newScaleEnv(t, k)
+	e.addSessions(9, 10)
+	if st := e.pass(); st.res.Failed != 0 {
+		t.Fatalf("%v", st.res.Problems)
+	}
+	// session 2's leaf handle is 1004: (minor 0x1004); take it with an unrelated qdisc outside the guest class range
+	for _, c := range []string{
+		"tc class add dev " + scaleBridge + " parent 1: classid 1:7ff0 htb rate 1mbit",
+		"tc qdisc add dev " + scaleBridge + " parent 1:7ff0 handle 1004: pfifo",
+	} {
+		if out, err := exec.Command("sh", "-c", c).CombinedOutput(); err != nil {
+			t.Fatalf("%s: %v %s", c, err, out)
+		}
+	}
+	e.addSessions(0, 5)
+	e.tick(time.Second)
+	st := e.pass()
+	if st.cnt.TCBatch == 0 {
+		t.Fatal("the batch path was not tried")
+	}
+	if st.res.Failed != 1 || !strings.Contains(st.res.Problems[0], "s-00002") {
+		t.Fatalf("exactly session 2 must fail: failed=%d %v", st.res.Failed, st.res.Problems)
+	}
+	if got := e.activeCount(); got != 5 { // 9, 0, 1, 3, 4
+		t.Fatalf("active = %d, want 5", got)
+	}
+}
+
 // TestScaleTable prints the measurement table (see the header). It asserts only convergence, not cost: the cost regressions are
 // TestSteadyPassCostIsConstant and TestNewSessionsAreNotStarvedByActiveOnes.
 func TestScaleTable(t *testing.T) {
 	real := os.Getenv("NETD_SCALE_REAL") == "1"
+	if v, err := strconv.Atoi(os.Getenv("NETD_SCALE_BRIDGES")); err == nil && v > 0 {
+		scaleBridgeCount = v
+		defer func() { scaleBridgeCount = 1 }()
+	}
 	for _, n := range scaleSizes() {
 		mk := func() kern {
 			if real {
@@ -327,5 +392,3 @@ func TestScaleTable(t *testing.T) {
 		})
 	}
 }
-
-var _ = net.IPv4len

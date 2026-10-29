@@ -20,6 +20,7 @@ type batchKernel struct {
 	reject       string
 	beforeScript func()
 	ignoreDelete string // a delete of a key containing this text is accepted and does nothing
+	noMACSet     bool   // the ruleset has no MAC-bound set: listing it or writing to it fails
 }
 
 func newBatchKernel() *batchKernel {
@@ -36,6 +37,9 @@ func (k *batchKernel) exec(ctx context.Context, name string, args ...string) ([]
 	case len(args) == 5 && args[0] == "list":
 		return []byte("type ifname . ipv4_addr"), nil
 	case len(args) == 6 && args[0] == "-j":
+		if k.noMACSet && args[5] == Phase3MACV4 {
+			return []byte("Error: No such file or directory"), fmt.Errorf("exit status 1")
+		}
 		keys := make([]string, 0)
 		for key := range k.sets[args[5]] {
 			keys = append(keys, key)
@@ -89,6 +93,9 @@ func (k *batchKernel) apply(script string) ([]byte, error) {
 		}
 		f := strings.Fields(cmd)
 		set := f[4]
+		if k.noMACSet && set == Phase3MACV4 {
+			return []byte("Error: No such file or directory"), fmt.Errorf("exit status 1")
+		}
 		body := cmd[strings.Index(cmd, "{")+1 : strings.LastIndex(cmd, "}")]
 		secs := 0
 		if i := strings.Index(body, " timeout "); i >= 0 {
@@ -255,6 +262,24 @@ func TestLeaseBatchReportsAnElementThatIsNotThereAfterTheWrite(t *testing.T) {
 	errs := c.LeaseBatch(context.Background(), []LeaseReq{{Iface: "br-g", IP: ip("10.0.0.1"), TTL: 90 * time.Second}}, false)
 	if errs[0] == nil {
 		t.Fatal("an authorization absent after the write must be reported")
+	}
+}
+
+func TestLeaseBatchWithoutAMACSetIsFineWhileBindingIsOffAndAnErrorWhenItIsOn(t *testing.T) {
+	k := newBatchKernel()
+	k.noMACSet = true
+	c := k.client()
+	req := []LeaseReq{{Iface: "br-g", IP: ip("10.0.0.1"), MAC: tmac, TTL: 90 * time.Second}}
+	if errs := c.LeaseBatch(context.Background(), req, false); errs[0] != nil {
+		t.Fatalf("binding is off: the IP-only authorization is what counts, got %v", errs[0])
+	}
+	if _, ok := k.sets[Phase3AuthV4]["br-g|10.0.0.1"]; !ok {
+		t.Fatal("IP-only element missing")
+	}
+	k2 := newBatchKernel()
+	k2.noMACSet = true
+	if errs := k2.client().LeaseBatch(context.Background(), req, true); errs[0] == nil {
+		t.Fatal("binding is on: an authorization that cannot be bound to the device is not an authorization")
 	}
 }
 

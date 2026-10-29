@@ -58,9 +58,11 @@ type setSnapshot struct {
 	ip     map[string][]Element // by address text
 	mac    map[string][]Element
 	hasMAC bool
+	// macErr: the MAC-bound set could not be read and the caller does not require it (binding is off), so MAC operations are skipped.
+	macErr error
 }
 
-func (c *Client) snapshot(ctx context.Context, withMAC bool) (setSnapshot, error) {
+func (c *Client) snapshot(ctx context.Context, withMAC, requireMAC bool) (setSnapshot, error) {
 	s := setSnapshot{ip: map[string][]Element{}, hasMAC: withMAC}
 	els, err := c.ListIn(ctx, Phase3AuthV4)
 	if err != nil {
@@ -73,7 +75,11 @@ func (c *Client) snapshot(ctx context.Context, withMAC bool) (setSnapshot, error
 		s.mac = map[string][]Element{}
 		els, err := c.ListIn(ctx, Phase3MACV4)
 		if err != nil {
-			return s, err
+			if requireMAC {
+				return s, err
+			}
+			// With MAC binding off the IP-only view stands and the MAC-bound set is best effort, as in the per-element calls.
+			s.macErr = err
 		}
 		for _, e := range els {
 			s.mac[e.IP.String()] = append(s.mac[e.IP.String()], e)
@@ -160,7 +166,7 @@ func (c *Client) leaseChunk(ctx context.Context, reqs []LeaseReq, errs []error, 
 	}
 	var werr error
 	for attempt := 0; attempt < 2; attempt++ {
-		snap, err := c.snapshot(ctx, withMAC)
+		snap, err := c.snapshot(ctx, withMAC, requireMAC)
 		if err != nil {
 			werr = err
 			break
@@ -177,7 +183,7 @@ func (c *Client) leaseChunk(ctx context.Context, reqs []LeaseReq, errs []error, 
 				lines = append(lines, fmt.Sprintf("delete element inet stayconnect %s { %s }", Phase3AuthV4, key))
 			}
 			lines = append(lines, fmt.Sprintf("add element inet stayconnect %s { %s timeout %ds }", Phase3AuthV4, key, it.secs))
-			if it.mac != "" {
+			if it.mac != "" && snap.macErr == nil {
 				for _, e := range snap.mac[it.ip4.String()] {
 					if e.Iface == r.Iface {
 						lines = append(lines, fmt.Sprintf("delete element inet stayconnect %s { %s }", Phase3MACV4, macElemKey(r.Iface, it.ip4, e.MAC)))
@@ -206,7 +212,7 @@ func (c *Client) leaseChunk(ctx context.Context, reqs []LeaseReq, errs []error, 
 		return
 	}
 	// Verify what the guest's forwarding depends on: the element is there after the write.
-	snap, err := c.snapshot(ctx, requireMAC)
+	snap, err := c.snapshot(ctx, requireMAC, requireMAC)
 	concat := c.probeConcatIn(ctx, Phase3AuthV4)
 	for _, it := range items {
 		r := reqs[it.i]
@@ -285,7 +291,7 @@ func (c *Client) revokeChunk(ctx context.Context, reqs []AddrReq, errs []error, 
 	var snap setSnapshot
 	for attempt := 0; attempt < 2; attempt++ {
 		var err error
-		snap, err = c.snapshot(ctx, true)
+		snap, err = c.snapshot(ctx, true, requireMAC)
 		if err != nil {
 			werr = err
 			break
@@ -342,7 +348,7 @@ func (c *Client) revokeChunk(ctx context.Context, reqs []AddrReq, errs []error, 
 	}
 	if snap.ip == nil {
 		var err error
-		snap, err = c.snapshot(ctx, requireMAC)
+		snap, err = c.snapshot(ctx, requireMAC, requireMAC)
 		if err != nil {
 			for _, it := range items {
 				errs[it.i] = err

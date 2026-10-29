@@ -789,14 +789,15 @@ func (p *phase3Shaping) admitChunk(ctx context.Context, bridge string, chunk []b
 		fallback(err.Error(), reg)
 		return
 	}
+	// Both classes were read present moments ago, after they were created; installing a filter cannot remove a class, so that read stands for the
+	// class half of the post-activation verification (it costs a full class dump per device, which grows with the number of sessions). The filter half
+	// is read afresh, for both directions, here.
 	fw, ferr := bs.ForwardingBatch(ctx, bridge, ips(reg))
-	down2, e1 := p.shp.ReadClasses(ctx, bridge)
-	up2, e2 := p.shp.ReadClasses(ctx, ifb)
 	var verified []liveCand
 	for _, l := range reg {
-		_, d := down2[l.minor]
-		_, u := up2[l.minor]
-		if ferr != nil || e1 != nil || e2 != nil || !fw[l.pc.ip.String()] || !d || !u {
+		_, d := down[l.minor]
+		_, u := up[l.minor]
+		if ferr != nil || !fw[l.pc.ip.String()] || !d || !u {
 			p.failClosed(ctx, bridge, l.pc.ip, res, "post-activation verification failed for "+l.s.SessionID)
 			continue
 		}
