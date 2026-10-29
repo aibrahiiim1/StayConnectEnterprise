@@ -364,6 +364,23 @@ func (m *Manager) Install(ctx context.Context, raw []byte) (*lic.Document, error
 	return doc, nil
 }
 
+// ClockResetSkew is how far the local clock may differ from Central's authenticated time for a reset to be accepted.
+const ClockResetSkew = 10 * time.Minute
+
+// ResetClock sets the licence clock high-water mark to centralTime (taken from an authenticated Central answer) and
+// re-evaluates (AD-17). It returns the mark it replaced. See license.Store.ResetHighWater.
+func (m *Manager) ResetClock(ctx context.Context, centralTime time.Time) (time.Time, error) {
+	if m.store == nil {
+		return time.Time{}, errors.New("vendor public key not installed")
+	}
+	old, err := m.store.ResetHighWater(centralTime, time.Now().UTC(), ClockResetSkew)
+	if err != nil {
+		return time.Time{}, err
+	}
+	m.Load(ctx)
+	return old, nil
+}
+
 // SetAssignmentLookup gives Install the signed assignment's customer and site to compare a new licence with.
 func (m *Manager) SetAssignmentLookup(fn func() (tenantID, siteID string, ok bool)) {
 	m.mu.Lock()

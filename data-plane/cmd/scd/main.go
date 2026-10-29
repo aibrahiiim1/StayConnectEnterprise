@@ -875,6 +875,7 @@ func main() {
 	r.Get("/v1/central/offline-request", s.setupActivationRequest)
 	r.Post("/v1/central/offline-package", s.centralOfflinePackage)
 	r.Post("/v1/license/install", s.licenseInstall)
+	r.Post("/v1/license/clock-reset", s.licenseClockReset)
 	r.Post("/v1/admin/pms/reload", s.pmsAdminReload)
 	r.Post("/v1/admin/walled-garden/reload", s.gardenReload)
 	s.notifyAdminRoutes(r)

@@ -204,6 +204,37 @@ func (s *server) licenseInstall(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(resp)
 }
 
+// licenseClockReset is the audited operator action "the clock was wrong" (AD-17): scd reads Central's authenticated
+// time and resets the licence clock high-water mark to it. A reason is required and recorded with the old and new mark.
+func (s *server) licenseClockReset(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Reason string `json:"reason"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&in); err != nil || strings.TrimSpace(in.Reason) == "" {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "A reason is required.")
+		return
+	}
+	st, resp, err := s.scd.call(r.Context(), http.MethodPost, "/v1/license/clock-reset", map[string]any{})
+	if err != nil {
+		s.audit(r, "license.clock_reset_failed", "license", "", map[string]any{"reason": in.Reason, "error": err.Error()})
+		internalErr(w, r, http.StatusBadGateway, "scd_unreachable", err)
+		return
+	}
+	detail := map[string]any{"reason": in.Reason, "status": st}
+	var out map[string]any
+	if json.Unmarshal(resp, &out) == nil {
+		detail["previous_high_water"], detail["high_water"] = out["previous_high_water"], out["high_water"]
+	}
+	if st == http.StatusOK {
+		s.audit(r, "license.clock_reset", "license", "", detail)
+	} else {
+		s.audit(r, "license.clock_reset_refused", "license", "", detail)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(st)
+	_, _ = w.Write(resp)
+}
+
 // health is the unauthenticated liveness answer. Anyone reaching the management address gets liveness only; site
 // id, version and licence state go only to a signed-in operator or a process on the appliance itself. Through
 // Caddy every request carries X-Forwarded-For / X-Real-IP, so loopback with no forwarding header means a local

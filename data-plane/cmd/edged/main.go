@@ -334,6 +334,7 @@ func main() {
 			r.With(s.requireAnyWrite("license", "network")).Get("/central/offline-request", s.centralOfflineRequest)
 			r.With(s.requireAnyWrite("license", "network")).Post("/central/offline-package", s.centralOfflinePackage)
 			r.With(s.requireRole("license", permWrite)).Post("/license", s.licenseInstall)
+			r.With(s.requireRole("license", permWrite)).Post("/license/clock-reset", s.licenseClockReset)
 
 			// Authenticated but not role-filtered: the navigation reads it so it never offers a destination that would 404.
 			r.Get("/capabilities", s.capabilities)

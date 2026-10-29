@@ -240,6 +240,34 @@ func (s *Store) Install(raw []byte, now time.Time) (*Document, error) {
 	return doc, nil
 }
 
+// ResetHighWater sets the clock high-water mark to centralTime, which the caller must have taken from an authenticated
+// Central answer (AD-17). It exists for one failure: a single boot with a far-future clock raised the mark, and after
+// the clock was corrected every evaluation used the mark and read the licence as expired. Rollback protection is kept
+// everywhere else: the mark is not removed, only set to the authenticated time, and a reset is refused unless the local
+// clock already agrees with that time within skew (otherwise the next evaluation would raise the mark again).
+// It returns the mark it replaced.
+func (s *Store) ResetHighWater(centralTime, localNow time.Time, skew time.Duration) (time.Time, error) {
+	if centralTime.IsZero() {
+		return time.Time{}, errors.New("no authenticated Central time")
+	}
+	if d := localNow.Sub(centralTime); d > skew || d < -skew {
+		return time.Time{}, fmt.Errorf("this appliance's clock (%s) differs from Central's (%s) by more than %s: correct the clock first",
+			localNow.UTC().Format(time.RFC3339), centralTime.UTC().Format(time.RFC3339), skew)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, err := s.readState()
+	if err != nil {
+		return time.Time{}, err
+	}
+	old := st.HighWater
+	st.HighWater = centralTime.UTC()
+	if err := s.writeState(st); err != nil {
+		return time.Time{}, err
+	}
+	return old, nil
+}
+
 func (s *Store) MarkCloudValidated(now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

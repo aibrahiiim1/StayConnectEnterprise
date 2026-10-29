@@ -410,3 +410,38 @@ func (s *server) applyLicenseToMethods(cfg *tenantcfg.AuthMethods) {
 		cfg.PMS = nil
 	}
 }
+
+// licenseClockReset is the audited operator action "the clock was wrong" (AD-17). It asks Central for its authenticated
+// time over mutual TLS and sets the licence clock high-water mark to it, which is the only way a far-future boot is
+// recovered without deleting the state file (and with it the rollback protection). It refuses while the local clock
+// still disagrees with Central, and without a working mutual-TLS link: offline appliances correct their clock first
+// and the mark then follows normal time.
+func (s *server) licenseClockReset(w http.ResponseWriter, r *http.Request) {
+	if s.refuseWhileRemoved(w) {
+		return
+	}
+	if s.lic == nil || s.certMgr == nil || !s.certMgr.Ready() {
+		httpErr(w, http.StatusServiceUnavailable, "the secure link to Central is not up, so Central's time cannot be read")
+		return
+	}
+	hello, err := s.certMgr.MTLSHello(r.Context())
+	if err != nil {
+		httpErr(w, http.StatusBadGateway, "could not read Central's time: "+err.Error())
+		return
+	}
+	raw, _ := hello["server_time"].(string)
+	central, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		httpErr(w, http.StatusBadGateway, "Central did not return a usable time")
+		return
+	}
+	old, err := s.lic.ResetClock(r.Context(), central)
+	if err != nil {
+		httpErr(w, http.StatusConflict, err.Error())
+		return
+	}
+	slog.Warn("licstate: licence clock high-water mark reset to Central time by an operator", "previous", old, "central_time", central)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "reset", "previous_high_water": old, "high_water": central.UTC(), "state": string(s.lic.State()),
+	})
+}
