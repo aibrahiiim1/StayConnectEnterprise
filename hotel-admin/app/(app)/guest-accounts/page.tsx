@@ -31,6 +31,7 @@ import { OneTimeReveal, ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { Plus, KeyRound, Eye, EyeOff, Pencil, Power, Users, Send, LogIn, Monitor } from "lucide-react";
 import { formatRelative } from "@/lib/utils";
+import { REASON_HINT, REASON_MAX_CHARS, reasonOk } from "@/lib/reason";
 import { isRemovedAccount, verificationStatus } from "@/lib/account-verification";
 import { ACCOUNT_NAME_MAX, ACCOUNT_NOTES_MAX, accountEditBody, validityWindow } from "@/lib/account-form";
 import { useOperatorRoles } from "@/lib/whoami-context";
@@ -205,9 +206,15 @@ export default function GuestAccountsPage() {
     const generate = form.get("generate") === "on";
     const password = (form.get("password") as string) || "";
     const disconnect = form.get("disconnect_sessions") === "on";
+    const reason = ((form.get("reason") as string) || "").trim();
+    if (!reasonOk(reason)) {
+      setFormErr("Say why the password is being replaced (4 to 500 characters). Do not write the password in it.");
+      setBusy(false);
+      return;
+    }
     try {
       const resp = await api.post<GuestAccountPasswordResp>(`/guest-accounts/${pwFor.id}/set-password`, {
-        password: generate ? "" : password, generate, disconnect_sessions: disconnect,
+        password: generate ? "" : password, generate, disconnect_sessions: disconnect, reason,
       });
       const shown = resp.generated_password ?? password;
       const uname = pwFor.username;
@@ -840,6 +847,10 @@ function PasswordForm({ onSubmit, busy, onCancel }: { onSubmit: (e: React.FormEv
         />
         Generate a strong password instead
       </label>
+
+      <Field label="Reason" required hint={REASON_HINT}>
+        <Input name="reason" required maxLength={REASON_MAX_CHARS} placeholder="For example: the client forgot it at the desk" />
+      </Field>
 
       <label className="flex items-start gap-2 rounded-md border border-border bg-surface/50 px-3.5 py-2.5 text-sm">
         <input type="checkbox" name="disconnect_sessions" className="mt-0.5 size-3.5 accent-[hsl(var(--primary))]" />

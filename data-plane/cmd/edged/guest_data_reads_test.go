@@ -124,6 +124,12 @@ func TestGuestDataReadRoutesExist(t *testing.T) {
 			"vouchers":                  s.vouchersRoutes,
 			"guest-signin-restrictions": s.signInRestrictionsRoutes,
 			"pms-event-decisions":       s.pmsEventDecisionsRoutes,
+			// Added with AD-7: their list pages are recorded as guest_data.listed.
+			"pms-resolutions":           s.pmsResolutionsRoutes,
+			"pms-reconciliation":        s.pmsReconciliationRoutes,
+			"pms-roster-reconciliation": s.rosterReconciliationRoutes,
+			"stay-transfers":            s.stayTransfersRoutes,
+			"code-requests":             s.codeRequestsRoutes,
 		} {
 			mountResource(r, s, name, routes)
 		}

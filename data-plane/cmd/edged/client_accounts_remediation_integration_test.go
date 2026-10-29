@@ -165,7 +165,7 @@ func TestIntegration_RemovedClientAccount_CannotBeEnabledRenamedOrEdited(t *test
 			t.Fatalf("PATCH %v on a removed account = %d %v, want 409 removed", patch, st, b)
 		}
 	}
-	if st, b := f.do(t, "POST", "/guest-accounts/"+acct+"/set-password", map[string]any{"password": "x1"}); st != http.StatusConflict {
+	if st, b := f.do(t, "POST", "/guest-accounts/"+acct+"/set-password", map[string]any{"reason": "desk reset for the client", "password": "x1"}); st != http.StatusConflict {
 		t.Fatalf("set-password on a removed account = %d %v", st, b)
 	}
 	// The database refuses it for any writer, not only the API.

@@ -1,0 +1,153 @@
+# Reviewed SQL literals that touch a tenant-keyed iam_v2 table without mentioning tenant_id (audit AD-12).
+# A RATCHET: entries may be removed (fix the query), never added without a reviewer's decision.
+# file<TAB>hash<TAB>start of the statement
+cmd/edged/client_devices_admin.go	2f7500771a07	SELECT count(*)::int FROM iam_v2.sessions WHERE id = ANY($1::uuid[]) AND state='ended'
+cmd/edged/client_devices_admin.go	b000ffc8963e	SELECT count(*)::int FROM iam_v2.entitlement_devices ed JOIN iam_v2.entitlements e ON e.id
+cmd/edged/guest_accounts_iamv2_lifecycle.go	40c4feebcefb	FROM iam_v2.guest_access_accounts a LEFT JOIN LATERAL ( SELECT count(DISTINCT s.device_id)
+cmd/edged/guest_accounts_iamv2_lifecycle.go	5cb41ff3e026	SELECT count(DISTINCT s.device_id) FROM iam_v2.sessions s JOIN iam_v2.entitlements e ON e.
+cmd/edged/resources_network.go	475d76649a90	SELECT count(*) FROM iam_v2.sessions se JOIN guest_networks g ON g.id = $1 WHERE se.state 
+cmd/edged/resources_network.go	836479de099b	DELETE FROM iam_v2.guest_network_pms_policy WHERE guest_network_id=$1::uuid
+cmd/edged/resources_network.go	ffb15517fad2	UPDATE iam_v2.guest_network_replacements SET revision_id=$2::uuid WHERE id = ANY($1::uuid[
+cmd/edged/resources_network_archive.go	0933b9c0aa81	SELECT p.name FROM iam_v2.portal_profile_assignments a JOIN iam_v2.portal_profiles p ON p.
+cmd/edged/resources_network_archive.go	e3e586834e0c	SELECT disabled_methods, primary_method FROM iam_v2.network_signin_overrides WHERE network
+cmd/edged/resources_network_changes.go	13ef9a60c16b	UPDATE iam_v2.guest_network_changes SET state='APPLIED', prior_enabled=$2, applied_at=now(
+cmd/edged/resources_network_changes.go	17be5c35cb23	UPDATE iam_v2.guest_network_changes SET state='CANCELLED', settled_at=now() WHERE id=$1
+cmd/edged/resources_network_changes.go	3519c86d7b13	UPDATE iam_v2.guest_network_changes SET revision_id=$2::uuid WHERE id = ANY($1::uuid[]) AN
+cmd/edged/resources_network_changes.go	9bb046080bbf	UPDATE iam_v2.guest_network_changes SET state='PENDING', prior_enabled=NULL, applied_at=NU
+cmd/edged/resources_network_changes.go	b3dbec1f04e5	DELETE FROM iam_v2.guest_network_pms_policy WHERE guest_network_id = ANY($1::uuid[])
+cmd/edged/resources_network_changes.go	c0ce53cbf1b2	SELECT network_id::text, prior_enabled, before FROM iam_v2.guest_network_changes WHERE id=
+cmd/edged/resources_network_changes.go	d95c4204ebc2	SELECT id::text, CASE kind WHEN 'ENABLE' THEN 0 WHEN 'SETTINGS' THEN 1 ELSE 2 END FROM iam
+cmd/edged/resources_network_impact.go	964a05c93d70	SELECT disabled_methods FROM iam_v2.network_signin_overrides WHERE network_id=$1::uuid
+cmd/edged/resources_network_recovery.go	31ccc1e634de	UPDATE iam_v2.network_signin_overrides SET disabled_methods = array_remove(disabled_method
+cmd/edged/resources_network_recovery.go	647d00d2bd91	UPDATE iam_v2.network_review_items SET paused_pms=false WHERE id=$1::uuid
+cmd/edged/resources_network_recovery.go	6e2826fffdc8	DELETE FROM iam_v2.portal_profile_assignments WHERE network_id=$1::uuid
+cmd/edged/resources_network_recovery.go	8651f5d0901e	SELECT COALESCE('pms' = ANY(disabled_methods), false) FROM iam_v2.network_signin_overrides
+cmd/edged/resources_network_recovery.go	9e7e0a8d295e	SELECT count(*) FROM iam_v2.sessions se JOIN guest_networks g ON g.id=$1::uuid WHERE se.st
+cmd/edged/resources_network_recovery.go	b8fc4bf72c30	DELETE FROM iam_v2.network_review_items WHERE id = ANY($1::uuid[])
+cmd/edged/resources_network_recovery.go	d08ae87e417f	DELETE FROM iam_v2.network_signin_overrides WHERE network_id=$1::uuid AND cardinality(disa
+cmd/edged/resources_network_recovery.go	d48a7cd82f0c	SELECT EXISTS (SELECT 1 FROM iam_v2.network_review_items WHERE network_id=$1::uuid AND pau
+cmd/edged/resources_network_recovery.go	f31db92be6be	DELETE FROM iam_v2.network_signin_overrides WHERE network_id=$1::uuid
+cmd/edged/resources_network_signin.go	f31db92be6be	DELETE FROM iam_v2.network_signin_overrides WHERE network_id=$1::uuid
+cmd/edged/resources_network_staged_replace.go	3c59ff95a502	DELETE FROM iam_v2.guest_network_pms_policy p WHERE p.guest_network_id=$1::uuid AND NOT EX
+cmd/edged/resources_network_staged_replace.go	3f8913018030	UPDATE iam_v2.guest_network_replacements SET state='REVERTED', settled_at=now(), successor
+cmd/edged/resources_network_staged_replace.go	4df25aff5393	UPDATE iam_v2.guest_network_replacements SET state='PENDING', successor_network_id=NULL, a
+cmd/edged/resources_network_staged_replace.go	6d579612521f	SELECT count(*) FROM iam_v2.guest_network_pms_map WHERE guest_network_id=$1
+cmd/edged/resources_network_staged_replace.go	6e2826fffdc8	DELETE FROM iam_v2.portal_profile_assignments WHERE network_id=$1::uuid
+cmd/edged/resources_network_staged_replace.go	83dc304e40cd	UPDATE iam_v2.guest_network_replacements SET state='APPLIED', successor_network_id=$2, app
+cmd/edged/resources_network_staged_replace.go	da6e4109d571	UPDATE iam_v2.guest_network_replacements SET state='CONFIRMED', settled_at=now(), revision
+cmd/edged/resources_network_staged_replace.go	f31db92be6be	DELETE FROM iam_v2.network_signin_overrides WHERE network_id=$1::uuid
+cmd/edged/resources_phase3.go	0cb90ed59e30	s.id::text, s.pms_interface_id::text, COALESCE(i.display_label,''), s.external_reservation
+cmd/edged/resources_phase3.go	5a5bf2f5f62b	SELECT ev.id::text, ev.pms_interface_id::text, ev.external_event_identity, ev.event_type, 
+cmd/edged/resources_phase3.go	7ca4478d9420	SELECT count(*)::int, count(*) FILTER (WHERE ent.id IS NOT NULL)::int, COALESCE(sum((SELEC
+cmd/edged/resources_phase3.go	835448f76df3	SELECT count(*) FILTER (WHERE ev.processing_status = 'APPLIED')::int, count(*) FILTER (WHE
+cmd/edged/resources_phase3.go	ec8a93cf20e2	($2::text IS NULL OR ev.processing_status = $2) AND ($4::bool IS NOT TRUE OR (ev.processin
+cmd/edged/resources_phase3.go	f857679a57a9	SELECT display_name, is_primary FROM iam_v2.stay_guests WHERE stay_id=$1 ORDER BY is_prima
+cmd/edged/resources_phase3_interface_authoring.go	c6a0ee6e6862	SELECT connector_kind FROM iam_v2.pms_interfaces WHERE id=$1
+cmd/edged/resources_phase3_interfaces.go	6c02cda67fab	i.id::text, i.connector_kind, i.display_label, i.lifecycle_state, COALESCE(i.current_revis
+cmd/edged/resources_phase4_finops.go	2d97b385dfa9	SELECT v.settlement_id::text, v.purchase_id::text, v.method, v.status, v.purchase_state, c
+cmd/edged/resources_pms_policy.go	964a05c93d70	SELECT disabled_methods FROM iam_v2.network_signin_overrides WHERE network_id=$1::uuid
+cmd/edged/resources_pms_reconciliation.go	e4f36ac3beb0	pms_interface_id::text, COALESCE((SELECT i.display_label FROM iam_v2.pms_interfaces i WHER
+cmd/edged/resources_portal_profiles.go	204c0a487d5f	SELECT count(*) FROM iam_v2.portal_profile_assignments WHERE profile_id=$1::uuid
+cmd/edged/resources_portal_profiles.go	332fe2e9f527	UPDATE iam_v2.portal_profiles SET name=$1, updated_at=now() WHERE id=$2::uuid
+cmd/edged/resources_portal_profiles.go	6e2826fffdc8	DELETE FROM iam_v2.portal_profile_assignments WHERE network_id=$1::uuid
+cmd/edged/resources_portal_profiles.go	c4b6db3ad77b	DELETE FROM iam_v2.portal_profiles WHERE id=$1::uuid
+cmd/edged/resources_sessions.go	8e45564d939b	= $3) AND ($4::text IS NULL OR st.normalized_room_number ILIKE $4 OR st.external_reservati
+cmd/edged/resources_signin_attempts.go	378e2e407bc2	)::int FROM iam_v2.sign_in_attempts a
+cmd/edged/resources_signin_attempts.go	a09939135cfa	SELECT a.id::text, a.occurred_at, COALESCE(a.submitted_room,''), COALESCE(a.guest_network_
+cmd/edged/resources_usage.go	cce1157befdf	SELECT COALESCE(d.mac::text, ''), COALESCE(SUM(se.bytes_down),0), COALESCE(SUM(se.bytes_up
+cmd/edged/resources_usage.go	f12d21cbb957	SELECT se.id::text, COALESCE(d.mac::text,''), COALESCE(se.ip::text,''), COALESCE(se.creden
+cmd/scd/card_checkout.go	2f5d9949c15e	SELECT provider_converts FROM iam_v2.payment_account_conversion WHERE account_id=$1::uuid
+cmd/scd/client_devices.go	62f577662644	SELECT spr.max_concurrent_devices FROM iam_v2.entitlements e JOIN iam_v2.service_plan_revi
+cmd/scd/client_devices.go	7cf809d8ffb9	SELECT spr.max_concurrent_devices, (SELECT count(*)::int FROM iam_v2.entitlement_devices x
+cmd/scd/client_devices.go	a27daaa0e02b	SELECT count(*)::int FROM iam_v2.device_slot_actions WHERE entitlement_id = $1::uuid AND a
+cmd/scd/client_resume.go	08ddd96f27bb	UPDATE iam_v2.principal_device_credentials SET last_used_at = now() WHERE id=$1::uuid
+cmd/scd/client_resume.go	42d2e171b6d1	UPDATE iam_v2.principal_device_credentials SET revoked_at = now() WHERE id=$1::uuid AND re
+cmd/scd/iamv2_session_activate.go	0a2fb1cc3458	SELECT count(DISTINCT device_id) FROM iam_v2.sessions WHERE entitlement_id=$1 AND ended IS
+cmd/scd/iamv2_session_activate.go	4a3fcd7b2aca	SELECT EXISTS(SELECT 1 FROM iam_v2.device_network_appearances WHERE device_id = $1 AND gue
+cmd/scd/iamv2_session_activate.go	58808cbded52	SELECT state, ended FROM iam_v2.sessions WHERE id=$1
+cmd/scd/iamv2_session_activate.go	76ef48845525	SELECT ac.device_id::text FROM iam_v2.entitlements e JOIN iam_v2.purchases p ON p.id = e.p
+cmd/scd/iamv2_session_activate.go	a801b1a989ed	SELECT id::text, COALESCE(host(ip), ''), COALESCE(ingress_interface, '') FROM iam_v2.sessi
+cmd/scd/iamv2_session_activate.go	c8f63f9e9f36	SELECT COALESCE( (SELECT NULLIF(ac.credential,'') FROM iam_v2.auth_contexts ac WHERE ac.id
+cmd/scd/iamv2_session_ops.go	76d78fe0eaef	SELECT count(*) FROM iam_v2.sessions se JOIN iam_v2.devices d ON d.id = se.device_id WHERE
+cmd/scd/otp_handlers.go	c947680c22bc	SELECT EXISTS (SELECT 1 FROM iam_v2.otp_code_reveals WHERE challenge_id=$1::uuid)
+cmd/scd/phase3_offers.go	aa8587ceaef0	SELECT rule_type, rule_value FROM iam_v2.package_eligibility_rules WHERE package_revision_
+cmd/scd/phase3_offers.go	eaf2f3554df0	SELECT tier_order, grant_value FROM iam_v2.package_grant_tiers WHERE package_revision_id=$
+cmd/scd/phase3_paid.go	e1394fa00a64	SELECT id::text FROM iam_v2.package_settlement_mappings WHERE package_revision_id=$1 AND p
+cmd/scd/phase6_remaining.go	b4db020ec041	SELECT COALESCE(e.time_accounting_mode, 'VALIDITY_WINDOW'), COALESCE(spr.time_quota_second
+cmd/scd/self_service.go	8cd7fee5096d	UPDATE iam_v2.account_email_tokens SET last_send_error = $2 WHERE id = $1::uuid
+cmd/scd/self_service.go	92e2812b8524	UPDATE iam_v2.account_email_tokens SET token_hmac = $2, key_id = $3, send_attempts = send_
+cmd/scd/self_service.go	931469b38f67	UPDATE iam_v2.account_email_tokens SET superseded_at = now() WHERE account_id = $1::uuid A
+cmd/scd/self_service.go	9708bedf5c69	UPDATE iam_v2.guest_access_accounts SET verification_reminder_sent_at = now() WHERE id = $
+cmd/scd/self_service.go	a34410eede93	SELECT a.id::text, a.username, a.self_registered, a.enabled, a.email_verified_at, a.verifi
+cmd/scd/self_service.go	af872ffa9b6e	UPDATE iam_v2.account_email_tokens SET sent_at = now(), last_send_error = NULL WHERE id = 
+cmd/scd/self_service.go	c62b94eb703f	UPDATE iam_v2.guest_access_accounts SET verification_deadline = now() + make_interval(hour
+cmd/scd/self_service.go	ed1aad20e98a	SELECT max(created_at), min(created_at) FILTER (WHERE created_at > now() - interval '24 ho
+cmd/scd/self_service_handlers.go	2829d13ba55a	UPDATE iam_v2.guest_access_accounts SET password_hash = $2, email_verified_at = COALESCE(e
+cmd/scd/self_service_handlers.go	61663c1b9ec5	UPDATE iam_v2.guest_access_accounts SET email_verified_at = COALESCE(email_verified_at, no
+cmd/scd/self_service_handlers.go	69144135a03e	UPDATE iam_v2.account_email_tokens SET superseded_at = now() WHERE account_id = $1::uuid A
+cmd/scd/self_service_handlers.go	9005e57567b8	UPDATE iam_v2.account_email_tokens SET superseded_at = now() WHERE account_id = $1::uuid A
+cmd/scd/signin_network.go	d089e921082f	SELECT mode FROM iam_v2.guest_network_pms_policy WHERE guest_network_id=$1::uuid
+cmd/scd/temp_access_admin.go	3c6db638756a	DELETE FROM iam_v2.otp_code_escrow WHERE challenge_id=$1::uuid
+cmd/scd/temp_access_admin.go	728d62828d89	DELETE FROM iam_v2.otp_code_reveals WHERE revealed_at < now() - interval '1 day'
+cmd/scd/temp_access_admin.go	88ef0fcc8e35	DELETE FROM iam_v2.otp_device_bindings WHERE issued_at < now() - interval '1 day'
+cmd/scd/temp_access_admin.go	b6c3b1ddd15c	DELETE FROM iam_v2.otp_code_escrow e WHERE e.expires_at <= now() OR NOT EXISTS (SELECT 1 F
+cmd/scd/voucher_admin.go	2b07df102692	) = 'not_yet_valid'), count(*), count(*) FILTER (WHERE created_at >= now() - interval '7 d
+cmd/scd/voucher_admin.go	4a8f9effaf1a	SELECT count(*) FROM iam_v2.vouchers
+cmd/scd/voucher_admin.go	6b7056e10027	FROM iam_v2.vouchers
+cmd/scd/voucher_issue_iamv2.go	84bd8b544412	SELECT rule_type, rule_value FROM iam_v2.package_eligibility_rules WHERE package_revision_
+internal/checkout/checkout.go	607bc04bd33b	SELECT s.id::text FROM iam_v2.sessions s WHERE s.entitlement_id=$1 AND s.state='active' AN
+internal/deviceselfservice/deviceselfservice.go	324a8caf68d5	SELECT d.id::text, d.last_seen, (live.n > 0) AS online, (live.n = 0) AS removable FROM iam
+internal/enforce/enforce.go	23c274cacf12	LEFT JOIN LATERAL ( SELECT min(x.sampled_at) AS at FROM ( SELECT ar.sampled_at, sum(ar.byt
+internal/enforce/enforce.go	419a0a121f41	UPDATE iam_v2.sessions SET state='ended', ended=GREATEST($2::timestamptz, started), end_re
+internal/enforce/enforce.go	6183afa4793d	WITH closed AS ( UPDATE iam_v2.entitlement_device_authorizations a SET deauthorized_at = G
+internal/enforce/enforce.go	674d05e14465	, 'infinity'::timestamptz)) AS at FROM iam_v2.entitlements e LEFT JOIN LATERAL ( SELECT e.
+internal/iamv2/commerce_admin_repo_pg.go	73f2bb746d16	SELECT COALESCE(max(revision_no),0)+1 FROM iam_v2.internet_package_revisions WHERE package
+internal/iamv2/commerce_admin_repo_pg.go	c14a04c1fd19	SELECT COALESCE(max(revision_no),0)+1 FROM iam_v2.service_plan_revisions WHERE service_pla
+internal/iamv2/commerce_admin_repo_pg.go	cb5373ba51e2	UPDATE iam_v2.service_plans SET current_revision_id=$1 WHERE id=$2
+internal/iamv2/commerce_admin_repo_pg.go	dd9b42cda791	UPDATE iam_v2.internet_packages SET current_revision_id=$1 WHERE id=$2
+internal/iamv2/commerce_admin_repo_pg.go	ffd84a66a9a5	UPDATE iam_v2.internet_packages SET current_revision_id=$2 WHERE id=$1
+internal/iamv2/commerce_repo_pg.go	2bcee3814f38	UPDATE iam_v2.auth_contexts SET consumed_at=$2 WHERE id=$1 AND consumed_at IS NULL AND exp
+internal/iamv2/commerce_repo_pg.go	352d0e405c8b	SELECT rule_type, rule_value FROM iam_v2.package_eligibility_rules WHERE package_revision_
+internal/iamv2/commerce_repo_pg.go	c464df95c263	UPDATE iam_v2.offer_quotes SET consumed_at=$2 WHERE id=$1 AND consumed_at IS NULL AND expi
+internal/iamv2/commerce_repo_pg.go	eaf2f3554df0	SELECT tier_order, grant_value FROM iam_v2.package_grant_tiers WHERE package_revision_id=$
+internal/iamv2/grace_policy_publish_pg.go	24e15e728a8b	UPDATE iam_v2.internet_packages SET current_revision_id=$2 WHERE id=$1 AND current_revisio
+internal/iamv2/grace_policy_publish_pg.go	6be2486307fd	SELECT COALESCE(MAX(revision_no),0)+1 FROM iam_v2.service_plan_revisions WHERE service_pla
+internal/iamv2/grace_policy_publish_pg.go	be138b96f0d0	UPDATE iam_v2.service_plans SET current_revision_id=$2 WHERE id=$1
+internal/iamv2/grace_policy_publish_pg.go	e14e347a8be5	SELECT COALESCE(MAX(revision_no),0)+1 FROM iam_v2.internet_package_revisions WHERE package
+internal/iamv2/grace_policy_publish_pg.go	e476feb38177	UPDATE iam_v2.service_plans SET current_revision_id=$2 WHERE id=$1 AND current_revision_id
+internal/iamv2/open_access.go	24012dc63758	UPDATE iam_v2.anonymous_access_subjects SET last_resumed_at=$2 WHERE id=$1
+internal/iamv2/open_access.go	5617864b56f6	SELECT id::text FROM iam_v2.entitlements WHERE anonymous_subject_id=$1 AND status='ACTIVE'
+internal/otp/otp.go	7381f30bed11	SELECT device_mac::text FROM iam_v2.otp_device_bindings WHERE challenge_id = $1::uuid
+internal/payment/checkout.go	0ff785cba6ac	SELECT a.id::text, a.provider, a.merchant_account_ref, a.currency, a.mode FROM iam_v2.paym
+internal/payment/checkout.go	1bc9c2e67491	UPDATE iam_v2.payment_checkouts SET last_status_at=now(), last_state=$2, status_checks=sta
+internal/payment/checkout.go	26a21832f5ba	UPDATE iam_v2.payment_checkouts SET provider_session_ref=$2, redirect_url=$3, creation_out
+internal/payment/checkout.go	3a8b8e7804ac	UPDATE iam_v2.payment_checkouts SET creation_outcome='AMBIGUOUS' WHERE transaction_id=$1
+internal/payment/checkout.go	709e3bee9584	UPDATE iam_v2.payment_checkouts SET last_status_at=now(), status_checks=status_checks+1, c
+internal/payment/checkout.go	a36c6a3e5b29	UPDATE iam_v2.payment_checkouts SET creation_outcome='NOT_CREATED' WHERE transaction_id=$1
+internal/payment/checkout.go	c3bf03256876	SELECT COALESCE(sum(amount_minor),0) FROM iam_v2.payment_transactions WHERE parent_transac
+internal/payment/checkout.go	c674faac6611	SELECT pt.status, se.status, pu.state, e.id::text, pc.redirect_url FROM iam_v2.payment_tra
+internal/payment/checkout.go	f31f3dfe46c8	SELECT status FROM iam_v2.payment_transactions WHERE id=$1
+internal/posting/engine.go	5b035af7924d	SELECT count(*) FROM iam_v2.posting_attempts WHERE internal_posting_id = $1 AND outcome <>
+internal/posting/engine.go	a830adbe89ce	UPDATE iam_v2.posting_outbox o SET state='QUEUED' WHERE o.posting_id = $1 AND o.state = 'H
+internal/posting/repo.go	3393a0075c11	UPDATE iam_v2.posting_attempts SET outcome = $2, pa_as_status = $3, response_at = now() WH
+internal/posting/repo.go	688317745021	SELECT coalesce(max(attempt_no),0)+1 FROM iam_v2.posting_attempts WHERE internal_posting_i
+internal/posting/repo.go	8fdf98007063	UPDATE iam_v2.posting_outbox SET state=$2 WHERE id=$1
+internal/posting/repo.go	b1980b27bbdc	UPDATE iam_v2.posting_outbox SET state='QUEUED' WHERE id=$1
+internal/signinattempt/store.go	8ebb0fcda871	DELETE FROM iam_v2.sign_in_attempts WHERE occurred_at < $1
+internal/stayengine/pg.go	1f3311a2ba78	UPDATE iam_v2.stays SET normalized_room_number=NULLIF($2,'') WHERE id=$1
+internal/stayengine/pg.go	273821b8cb74	UPDATE iam_v2.stays SET last_applied_event_version = last_applied_event_version + 1, last_
+internal/stayengine/pg.go	34aa1588ca0d	UPDATE iam_v2.stays SET status = CASE WHEN $2<>'' THEN $2 ELSE status END, arrival = COALE
+internal/stayengine/pg.go	39a772a574df	UPDATE iam_v2.stay_events SET processing_status=$2, stay_id=NULLIF($3,'')::uuid, processed
+internal/stayengine/pg.go	4ed73812859d	UPDATE iam_v2.stays SET status='IN_HOUSE', lifecycle_version=lifecycle_version+1, effectiv
+internal/stayengine/pg.go	59e1f6a3f21f	UPDATE iam_v2.stays SET travel_agent = CASE WHEN $2::text IS NULL THEN travel_agent ELSE N
+internal/stayengine/pg.go	9c0a8070a989	UPDATE iam_v2.stays SET occupancy_evidence_at = $2, occupancy_ingested_at = now(), occupan
+internal/stayengine/sharers.go	52864af177c2	SELECT id::text FROM iam_v2.stay_guests WHERE stay_id=$1 AND ( (COALESCE($2,'') <> '' AND 
+internal/stayengine/sharers.go	7caf076798d0	UPDATE iam_v2.stay_guests SET is_primary=false WHERE stay_id=$1 AND is_primary AND COALESC
+internal/stayengine/sharers.go	aa97b2d01e02	UPDATE iam_v2.stay_guests SET first_name_norm=COALESCE(NULLIF($1,''),first_name_norm), las
+internal/staygrant/staygrant.go	2a7180055882	SELECT id::text FROM iam_v2.entitlements WHERE stay_id=$1 AND status='ACTIVE' AND (window_
+internal/staygrant/staygrant.go	7576a8bc1902	SELECT COALESCE(time_accounting_mode,'VALIDITY_WINDOW') FROM iam_v2.service_plan_revisions
+internal/staygrant/staygrant.go	803833fe1bf9	SELECT count(*) FROM iam_v2.entitlements WHERE stay_id=$1 AND status IN ('PENDING','ACTIVE
+internal/transfer/transfer.go	2eb72ed2d27b	WITH closed AS ( UPDATE iam_v2.entitlement_device_authorizations a SET deauthorized_at = G
+internal/transfer/transfer.go	aaed691c38f3	SELECT (SELECT count(*) FROM iam_v2.entitlement_devices ed JOIN iam_v2.entitlements e ON e
+internal/transfer/transfer.go	e8b9421437c6	UPDATE iam_v2.sessions SET entitlement_id=$1 WHERE entitlement_id=$2 AND state='active'
+internal/transfer/transfer.go	eaf70d00e430	SELECT count(*) FROM iam_v2.entitlement_transfers WHERE from_entitlement_id=$1

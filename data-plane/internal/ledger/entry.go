@@ -34,6 +34,9 @@ type Entry struct {
 	AtUS   int64  `json:"at_us"`
 	Body   string `json:"body"`
 	Hash   string `json:"hash"`
+	// Mac authenticates the entry with the appliance's ledger key (mac.go). Absent on entries written before migration 0220;
+	// those are usable only when a seal covers them.
+	Mac string `json:"mac,omitempty"`
 }
 
 // ComputeHash covers everything except the hash; the database computes the same value (iam_v2.ledger_hash) and the

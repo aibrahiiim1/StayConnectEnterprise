@@ -29,10 +29,12 @@ func TestIntegration_NotifyProviderSecretRefusalChangesNothingAndIsAudited(t *te
 		_, _ = f.pool.Exec(context.Background(), `DELETE FROM notification_providers WHERE id=$1::uuid`, id)
 	})
 
-	req := httptest.NewRequest(http.MethodPatch, "/"+id, strings.NewReader(`{"display_name":"After","api_key":"new-secret"}`))
+	// Changing a sender needs the operator's password (audit P9 M2), so the handler is called with a session and the step-up.
+	req := httptest.NewRequest(http.MethodPatch, "/"+id, strings.NewReader(`{"display_name":"After","api_key":"new-secret","password":"`+f.password+`"}`))
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", id)
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req = req.WithContext(context.WithValue(req.Context(), sessKey, &session{OperatorID: f.operator, Email: "op@test.local", Roles: []string{"site_admin"}}))
 	rec := httptest.NewRecorder()
 	f.app.patchNotifyProvider(rec, req)
 	if rec.Code != http.StatusBadGateway {

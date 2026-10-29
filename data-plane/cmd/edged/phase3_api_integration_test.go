@@ -185,7 +185,12 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 	f.mfa = newFakeMFA(p)
 	s.mfa = f.mfa
 	f.ledger = sharedLedger(t, p)
-	f.ledgerC = &storeLedger{st: f.ledger}
+	sl := &storeLedger{st: f.ledger}
+	var keyHex string
+	if err := p.QueryRow(ctx, `SELECT iam_v2.ledger_mac_key_get()`).Scan(&keyHex); err == nil {
+		sl.key, _ = ledger.ParseMACKey(keyHex) // scd's view of the database key (AD-3): it issues the durability receipts
+	}
+	f.ledgerC = sl
 	s.ledgerC = f.ledgerC
 	// Publishing a checkout-grace policy derives plan and package revisions, so without this repository the route answers 503.
 	s.commerceRepo = iamv2.NewPgCommerceAdminRepository(p)

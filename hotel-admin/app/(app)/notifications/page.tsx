@@ -113,6 +113,8 @@ export default function NotificationsPage() {
   const roles = useOperatorRoles();
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
+  // The operator's own password confirms adding, changing or removing a sender (audit P9 M2). It is never kept.
+  const [pw, setPw] = useState("");
   const [formErr, setFormErr] = useState<unknown>(null);
 
   const [mode, setMode] = useState<"closed" | "new" | "edit">("closed");
@@ -142,7 +144,7 @@ export default function NotificationsPage() {
   function openNew() {
     const first = channels[0] ?? "email";
     setF({ ...EMPTY, channel: first, kind: KINDS[first][1] ?? KINDS[first][0] });
-    setEditing(null); setFormErr(null); setMode("new");
+    setEditing(null); setFormErr(null); setPw(""); setMode("new");
   }
   function openEdit(n: NotificationProvider) {
     const sec = n.extra?.security;
@@ -164,7 +166,7 @@ export default function NotificationsPage() {
       timeout_seconds: n.extra?.timeout_seconds !== undefined && n.extra?.timeout_seconds !== null ? String(n.extra.timeout_seconds) : "",
       enabled: n.enabled,
     });
-    setEditing(n); setFormErr(null); setMode("edit");
+    setEditing(n); setFormErr(null); setPw(""); setMode("edit");
   }
 
   async function onSubmit() {
@@ -181,6 +183,7 @@ export default function NotificationsPage() {
           from_name: f.from_name.trim() || undefined,
           extra: extraOf(f),
           enabled: f.enabled,
+          password: pw,
         });
       } else if (editing) {
         const body: Record<string, unknown> = {
@@ -189,6 +192,7 @@ export default function NotificationsPage() {
           from_address: f.from_address,
           from_name: f.from_name,
           enabled: f.enabled,
+          password: pw,
         };
         const extra = extraOf(f);
         if (extra) body.extra = extra;
@@ -196,17 +200,17 @@ export default function NotificationsPage() {
         await api.patch(`/notification-providers/${editing.id}`, body);
       }
       toast.success(mode === "new" ? "Sender added" : "Sender saved", "The change is live: no restart is needed.");
-      setMode("closed"); setEditing(null);
+      setMode("closed"); setEditing(null); setPw("");
       await load();
     } catch (e) { setFormErr(e); }
     finally { setBusy(false); }
   }
 
-  async function onDelete() {
+  async function onDelete({ password }: { password: string }) {
     if (!deleting) return;
     setBusy(true); setFormErr(null);
     try {
-      await api.del(`/notification-providers/${deleting.id}`);
+      await api.del(`/notification-providers/${deleting.id}`, { password });
       setDeleting(null);
       toast.success("Sender removed");
       await load();
@@ -356,6 +360,8 @@ export default function NotificationsPage() {
         submitLabel={mode === "edit" ? "Save changes" : "Add sender"}
         busy={busy}
         error={formErr}
+        disabled={pw === ""}
+        disabledReason="Enter your password to save."
         onSubmit={onSubmit}
       >
         <div className="grid gap-4 sm:grid-cols-2">
@@ -479,6 +485,9 @@ export default function NotificationsPage() {
           </div>
           <Switch checked={f.enabled} onCheckedChange={(v) => set("enabled", v)} label="Use this sender" />
         </div>
+        <Field label="Your password" required hint="Confirms the change. It is not stored.">
+          <Input type="password" autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} />
+        </Field>
       </DialogForm>
 
       <DialogForm
@@ -535,6 +544,7 @@ export default function NotificationsPage() {
         confirmVariant="danger"
         busy={busy}
         error={formErr}
+        requirePassword
         onConfirm={onDelete}
       />
     </PageShell>

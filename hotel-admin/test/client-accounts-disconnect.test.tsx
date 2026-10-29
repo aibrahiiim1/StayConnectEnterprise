@@ -85,12 +85,13 @@ describe("Client accounts — disconnecting an account's devices", () => {
     await chooseInRow(document.body, /password/i);
     const dialog = await screen.findByRole("dialog");
     await user.type(passwordBox(dialog), "fresh-one");
+    await user.type(within(dialog).getByLabelText(/reason/i), "forgot it at the desk");
     await user.click(within(dialog).getByLabelText(/disconnect this account’s devices now/i));
     await user.click(within(dialog).getByRole("button", { name: "Set password" }));
 
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith("/guest-accounts/ga-1/set-password", {
-        password: "fresh-one", generate: false, disconnect_sessions: true,
+        password: "fresh-one", generate: false, disconnect_sessions: true, reason: "forgot it at the desk",
       }),
     );
     expect(await screen.findByText("2 devices disconnected.")).toBeTruthy();
@@ -105,11 +106,12 @@ describe("Client accounts — disconnecting an account's devices", () => {
     await chooseInRow(document.body, /password/i);
     const dialog = await screen.findByRole("dialog");
     await user.type(passwordBox(dialog), "fresh-two");
+    await user.type(within(dialog).getByLabelText(/reason/i), "forgot it at the desk");
     await user.click(within(dialog).getByRole("button", { name: "Set password" }));
 
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith("/guest-accounts/ga-1/set-password", {
-        password: "fresh-two", generate: false, disconnect_sessions: false,
+        password: "fresh-two", generate: false, disconnect_sessions: false, reason: "forgot it at the desk",
       }),
     );
     expect(await screen.findByText("Password updated for room101.")).toBeTruthy();
@@ -125,6 +127,7 @@ describe("Client accounts — disconnecting an account's devices", () => {
     await chooseInRow(document.body, /password/i);
     const dialog = await screen.findByRole("dialog");
     await user.type(passwordBox(dialog), "fresh-three");
+    await user.type(within(dialog).getByLabelText(/reason/i), "forgot it at the desk");
     await user.click(within(dialog).getByLabelText(/disconnect this account’s devices now/i));
     await user.click(within(dialog).getByRole("button", { name: "Set password" }));
 

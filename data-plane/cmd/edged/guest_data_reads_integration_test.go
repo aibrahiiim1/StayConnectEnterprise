@@ -45,7 +45,7 @@ func TestIntegration_GuestDataReads_AreRecorded(t *testing.T) {
 		{"/guest-accounts/" + acct, nil, 200},
 		{"/guest-accounts/" + acct, nil, 200}, // opened again: one entry
 		{"/sessions/" + session, nil, 200},
-		{"/guest-accounts", nil, 200},                                          // browsing: not recorded
+		{"/guest-accounts", nil, 200},                                          // browsing: recorded as listed (AD-7)
 		{"/guest-accounts/00000000-0000-4000-8000-000000000000", nil, 404},     // failed read: not recorded
 		{"/guest-accounts", map[string]string{accountSearchHeader: "gr"}, 200}, // typing ...
 		{"/guest-accounts", map[string]string{accountSearchHeader: url.PathEscape(email)}, 200},
@@ -81,6 +81,8 @@ func TestIntegration_GuestDataReads_AreRecorded(t *testing.T) {
 	want := []row{
 		{"guest_data.viewed", "client_account", acct, "", "127.0.0.1", f.operator},
 		{"guest_data.viewed", "session", session, "", "127.0.0.1", f.operator},
+		// AD-7: a page of a list with nothing typed is recorded too, as listed, with no search text.
+		{"guest_data.listed", "client_accounts", "", "", "127.0.0.1", f.operator},
 		{"guest_data.searched", "client_accounts", "", email, "127.0.0.1", f.operator},
 	}
 	if fmt.Sprint(got) != fmt.Sprint(want) {

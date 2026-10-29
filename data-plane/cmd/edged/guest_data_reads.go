@@ -1,7 +1,7 @@
 package main
 
-// Records who opened one guest's record (guest_data.viewed) or searched a guest list (guest_data.searched).
-// Plain list browsing is not recorded. Entries go to a queue so the request never waits.
+// Records who opened one guest's record (guest_data.viewed), searched a guest list (guest_data.searched) or viewed a page of a
+// guest list (guest_data.listed, audit AD-7: the filter is recorded, never search text). Entries go to a queue so the request never waits.
 // Typed-letter searches collapse into one entry and repeated reads are recorded once per repeatWindow, decided
 // server-side. A detail read's target is the record id and a search's text is in the payload, so erasure and
 // retention find and anonymise both.
@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -57,6 +58,47 @@ var guestDataReads = map[string]guestRead{
 	"/edge/v1/pms-event-decisions/{eventID}/candidates":              {targetType: "stay_event", idParams: []string{"eventID"}},
 	"/edge/v1/guest-data-rights/register":                            {targetType: "guest_data_requests"},
 	"/edge/v1/network/dhcp/leases":                                   {targetType: "dhcp_leases", searchHeaders: []string{dhcpSearchHeader}},
+	// Lists with no search box: viewing a page is recorded as guest_data.listed (audit AD-7), once per person and list per repeatWindow.
+	"/edge/v1/guest-signin-restrictions":                {targetType: "sign_in_restrictions"},
+	"/edge/v1/guest-signin-restrictions/network-pauses": {targetType: "network_pauses"},
+	"/edge/v1/guest-data-rights/erasures":               {targetType: "erasures"},
+	"/edge/v1/guest-data-rights/assisted":               {targetType: "assisted_guest_requests"},
+	"/edge/v1/post-stay-profiles":                       {targetType: "post_stay_profiles"},
+	"/edge/v1/pms-resolutions":                          {targetType: "pms_resolutions"},
+	"/edge/v1/pms-reconciliation":                       {targetType: "pms_reconciliation"},
+	"/edge/v1/pms-reconciliation/past-departure":        {targetType: "pms_past_departure"},
+	"/edge/v1/pms-reconciliation/rooms":                 {targetType: "pms_reconciliation_rooms"},
+	"/edge/v1/pms-roster-reconciliation":                {targetType: "pms_roster_reconciliation"},
+	"/edge/v1/stay-transfers":                           {targetType: "stay_transfers"},
+	"/edge/v1/stay-transfers/review-signals":            {targetType: "stay_transfer_signals"},
+	"/edge/v1/code-requests":                            {targetType: "code_requests"},
+	"/edge/v1/vouchers":                                 {targetType: "vouchers"},
+	"/edge/v1/sessions/aggregate-time":                  {targetType: "session_time_aggregate"},
+}
+
+// listFilterKeys are the query parameters that narrow a list by a setting or a date and never carry what someone typed. They are
+// the only parameters a guest_data.listed entry records, and only when the value is a plain token: a name, address or room number
+// typed into a filter would otherwise be written to the log in the clear.
+var listFilterKeys = map[string]bool{
+	"status": true, "state": true, "kind": true, "type": true, "outcome": true, "from": true, "to": true, "since": true, "until": true,
+	"network": true, "network_id": true, "source": true, "interface": true, "interface_id": true, "active": true, "sort": true,
+	"order": true, "method": true, "channel": true, "purpose": true, "disposition": true, "scope": true,
+}
+
+var listFilterValue = regexp.MustCompile(`^[A-Za-z0-9_.:\-]{1,40}$`)
+
+// listFilter returns the filter of a list request: allow-listed parameters with plain-token values, nothing else.
+func listFilter(r *http.Request) map[string]any {
+	out := map[string]any{}
+	for k, vs := range r.URL.Query() {
+		if !listFilterKeys[strings.ToLower(k)] || len(vs) == 0 {
+			continue
+		}
+		if v := strings.TrimSpace(vs[0]); listFilterValue.MatchString(v) {
+			out[strings.ToLower(k)] = v
+		}
+	}
+	return out
 }
 
 const (
@@ -71,7 +113,7 @@ const (
 type readEntry struct {
 	at         time.Time
 	actorID    string
-	action     string // guest_data.viewed | guest_data.searched
+	action     string // guest_data.viewed | guest_data.searched | guest_data.listed
 	targetType string
 	targetID   string
 	ip         string
@@ -256,7 +298,15 @@ func (g guestRead) entry(r *http.Request, rctx *chi.Context) (readEntry, bool) {
 		}
 	}
 	e.search = strings.Join(parts, " ")
-	return e, len(parts) > 0
+	if len(parts) == 0 {
+		// A list page with nothing typed: who looked at which list, with its filter and without any search text (AD-7).
+		e.action, e.payload = "guest_data.listed", map[string]any{}
+		if f := listFilter(r); len(f) > 0 {
+			e.payload["filter"] = f
+		}
+		return e, true
+	}
+	return e, true
 }
 
 type statusWriter struct {

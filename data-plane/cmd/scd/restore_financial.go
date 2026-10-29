@@ -159,22 +159,28 @@ func assertHypertables(ctx context.Context, db string) (string, error) {
 
 var reUUID = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
+// supportedRestoreStatement is the statement and the variables that record a supported restore. Nothing is formatted into the SQL.
+func supportedRestoreStatement(tenant, site string, gen int64, manifestSHA, takenAt, by string) (string, map[string]string) {
+	return "SELECT iam_v2.p4_record_supported_restore(:'tenant'::uuid, :'site'::uuid, :'gen'::bigint, :'sha', NULLIF(:'taken', '')::timestamptz, :'by')",
+		map[string]string{"tenant": tenant, "site": site, "gen": strconv.FormatInt(gen, 10), "sha": manifestSHA, "taken": takenAt, "by": by}
+}
+
 // Puts the site into FINANCIAL_RECOVERY_MODE, which holds money movement until reconciled.
 func recordSupportedRestore(ctx context.Context, db, tenant, site string, gen int64, manifestSHA string, takenAt time.Time, by string) error {
 	if !reUUID.MatchString(tenant) || !reUUID.MatchString(site) || !reHex64.MatchString(manifestSHA) {
 		return errors.New("the restore could not be recorded: the site identity or the backup digest is not valid")
 	}
-	taken := "NULL"
+	taken := ""
 	if !takenAt.IsZero() {
-		taken = "'" + takenAt.UTC().Format(time.RFC3339) + "'::timestamptz"
+		taken = takenAt.UTC().Format(time.RFC3339)
 	}
 	if strings.TrimSpace(by) == "" {
 		by = "hotel-admin"
 	}
-	by = strings.ReplaceAll(by, "'", "''")
-	sql := fmt.Sprintf("SELECT iam_v2.p4_record_supported_restore('%s'::uuid,'%s'::uuid,%d,'%s',%s,'%s')", tenant, site, gen, manifestSHA, taken, by)
-	if out, err := exec.CommandContext(ctx, "docker", "exec", pgContainer, "psql", "-U", pgUser, "-d", db, "-tA", "-v", "ON_ERROR_STOP=1", "-c", sql).CombinedOutput(); err != nil {
-		return fmt.Errorf("the restore could not be recorded in the database: %s", firstProblem(string(out)))
+	// Values are psql variables, quoted by psql as :'name' (audit P4 CC4), not formatted into the statement.
+	sql, vars := supportedRestoreStatement(tenant, site, gen, manifestSHA, taken, by)
+	if _, err := execPsqlVars(ctx, db, sql, vars); err != nil {
+		return fmt.Errorf("the restore could not be recorded in the database: %s", firstProblem(err.Error()))
 	}
 	return nil
 }

@@ -348,7 +348,8 @@ func TestIntegrationStepUp_ThrottledAuditedAndGuardsTheBackupDownload(t *testing
 	if err := os.MkdirAll(dbBackupDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	const name = "db-20261016-010203.dump"
+	// Only an encrypted database dump can be downloaded (audit AD-9).
+	const name = "db-20261016T010203Z.sql.gz.age"
 	if err := os.WriteFile(filepath.Join(dbBackupDir, name), []byte("PGDMP-test-content"), 0o600); err != nil {
 		t.Fatal(err)
 	}

@@ -6,7 +6,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -109,6 +111,9 @@ type notifyWriteReq struct {
 	FromName    *string           `json:"from_name,omitempty"`
 	Region      *string           `json:"region,omitempty"`
 	Extra       map[string]string `json:"extra,omitempty"` // WhatsApp template settings; an empty value removes a key
+	// The operator's own password (audit P9 M2): a sender decides where sign-in codes and account emails go, so adding, changing or
+	// removing one is re-authenticated like the other security settings. Never stored or audited.
+	Password string `json:"password,omitempty"`
 }
 
 // onlySwitchesOff reports a patch that only turns the sender off; that is never subject to validation.
@@ -348,6 +353,10 @@ func (s *server) createNotifyProvider(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
 		return
 	}
+	if !s.reauth(r, in.Password) {
+		s.reauthRefused(w, r, "password confirmation required")
+		return
+	}
 	in.Channel = strings.TrimSpace(in.Channel)
 	in.Kind = strings.TrimSpace(in.Kind)
 	allowed, ok := notifyAllowedKinds[in.Channel]
@@ -416,6 +425,10 @@ func (s *server) patchNotifyProvider(w http.ResponseWriter, r *http.Request) {
 	var in notifyWriteReq
 	if err := decodeJSON(r, &in); err != nil {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
+		return
+	}
+	if !s.reauth(r, in.Password) {
+		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
 	ctx, cancel := dbCtx(r)
@@ -520,8 +533,29 @@ func (s *server) patchNotifyProvider(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, n)
 }
 
+// stepUpFromBody re-authenticates a request whose only body is {"password": ...}, such as a DELETE.
+func (s *server) stepUpFromBody(w http.ResponseWriter, r *http.Request) bool {
+	var in struct {
+		Password string `json:"password"`
+	}
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := decodeJSON(r, &in); err != nil && !errors.Is(err, io.EOF) {
+			jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
+			return false
+		}
+	}
+	if !s.reauth(r, in.Password) {
+		s.reauthRefused(w, r, "password confirmation required")
+		return false
+	}
+	return true
+}
+
 func (s *server) deleteNotifyProvider(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	if !s.stepUpFromBody(w, r) {
+		return
+	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	tag, err := s.db.Exec(ctx,
@@ -700,6 +734,8 @@ type socialWriteReq struct {
 	Tenant      *string `json:"tenant,omitempty"`  // microsoft only
 	TeamID      *string `json:"team_id,omitempty"` // apple only
 	KeyID       *string `json:"key_id,omitempty"`  // apple only
+	// The operator's own password (audit P9 M2): the application that signs clients in is a security setting. Never stored or audited.
+	Password string `json:"password,omitempty"`
 }
 
 // extraPatch holds only the keys the request carried; on update it is merged over the stored extra.
@@ -892,6 +928,10 @@ func (s *server) createSocialProvider(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
 		return
 	}
+	if !s.reauth(r, in.Password) {
+		s.reauthRefused(w, r, "password confirmation required")
+		return
+	}
 	in.Provider = strings.TrimSpace(in.Provider)
 	if !socialAllowedProviders[in.Provider] {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "provider must be google|apple|facebook|microsoft")
@@ -971,6 +1011,10 @@ func (s *server) patchSocialProvider(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
 		return
 	}
+	if !s.reauth(r, in.Password) {
+		s.reauthRefused(w, r, "password confirmation required")
+		return
+	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	var provider string
@@ -1047,6 +1091,9 @@ func (s *server) patchSocialProvider(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) deleteSocialProvider(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	if !s.stepUpFromBody(w, r) {
+		return
+	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	tag, err := s.db.Exec(ctx,

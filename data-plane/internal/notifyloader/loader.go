@@ -370,7 +370,7 @@ func updateHealth(ctx context.Context, db *pgxpool.Pool, tenantID, channel strin
             UPDATE notification_providers
                SET last_error = $3, last_error_at = now(), updated_at = now()
              WHERE tenant_id = $1 AND channel = $2 AND enabled = true
-        `, tenantID, channel, Truncate(sendErr.Error(), 500))
+        `, tenantID, channel, Truncate(OperatorText(sendErr), 500))
 	}
 	if err != nil {
 		slog.Warn("notifyloader: provider health not recorded", "channel", channel, "err", err)

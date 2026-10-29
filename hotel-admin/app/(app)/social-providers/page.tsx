@@ -74,6 +74,8 @@ export default function SocialProvidersPage() {
   const roles = useOperatorRoles();
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
+  // The operator's own password confirms adding, changing or removing a provider (audit P9 M2). It is never kept.
+  const [pw, setPw] = useState("");
   const [formErr, setFormErr] = useState<unknown>(null);
 
   const [mode, setMode] = useState<"closed" | "new" | "edit">("closed");
@@ -97,7 +99,7 @@ export default function SocialProvidersPage() {
   }, []);
 
   function openNew() {
-    setF(EMPTY); setEditing(null); setFormErr(null); setMode("new");
+    setF(EMPTY); setEditing(null); setFormErr(null); setPw(""); setMode("new");
   }
   function openEdit(p: SocialOAuthProvider) {
     setF({
@@ -113,7 +115,7 @@ export default function SocialProvidersPage() {
       key_id: p.key_id ?? "",
       enabled: p.enabled,
     });
-    setEditing(p); setFormErr(null); setMode("edit");
+    setEditing(p); setFormErr(null); setPw(""); setMode("edit");
   }
 
   function toggleHost(host: string, on: boolean) {
@@ -136,6 +138,7 @@ export default function SocialProvidersPage() {
           scopes: f.scopes.trim() || undefined,
           ...providerExtras(f),
           enabled: f.enabled,
+          password: pw,
         });
       } else if (editing) {
         const body: Record<string, unknown> = {
@@ -145,22 +148,23 @@ export default function SocialProvidersPage() {
           scopes: f.scopes,
           ...providerExtras(f),
           enabled: f.enabled,
+          password: pw,
         };
         if (f.client_secret) body.client_secret = f.client_secret; // blank keeps the existing secret
         await api.patch(`/social-providers/${editing.id}`, body);
       }
       toast.success(mode === "new" ? "Provider added" : "Provider saved");
-      setMode("closed"); setEditing(null);
+      setMode("closed"); setEditing(null); setPw("");
       await load();
     } catch (e) { setFormErr(e); }
     finally { setBusy(false); }
   }
 
-  async function onDelete() {
+  async function onDelete({ password }: { password: string }) {
     if (!deleting) return;
     setBusy(true); setFormErr(null);
     try {
-      await api.del(`/social-providers/${deleting.id}`);
+      await api.del(`/social-providers/${deleting.id}`, { password });
       setDeleting(null);
       toast.success("Provider removed");
       await load();
@@ -169,10 +173,10 @@ export default function SocialProvidersPage() {
   }
 
   const canSubmit =
-    mode === "new"
+    pw !== "" && (mode === "new"
       ? f.client_id.trim() !== "" && f.client_secret !== "" &&
         (f.provider !== "apple" || (f.team_id.trim() !== "" && f.key_id.trim() !== ""))
-      : true;
+      : true);
   const providerName = PROVIDER_LABELS[f.provider] ?? f.provider;
 
   return (
@@ -390,6 +394,9 @@ export default function SocialProvidersPage() {
           </div>
           <Switch checked={f.enabled} onCheckedChange={(v) => set("enabled", v)} label="Offer this provider" />
         </div>
+        <Field label="Your password" required hint="Confirms the change. It is not stored.">
+          <Input type="password" autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} />
+        </Field>
       </DialogForm>
 
       <ConfirmDialog
@@ -405,6 +412,7 @@ export default function SocialProvidersPage() {
         confirmVariant="danger"
         busy={busy}
         error={formErr}
+        requirePassword
         onConfirm={onDelete}
       />
     </PageShell>
