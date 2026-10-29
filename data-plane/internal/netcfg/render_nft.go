@@ -86,6 +86,9 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 	b.WriteString("\tset auth_ipv4 {\n\t\ttype ifname . ipv4_addr\n\t\tflags timeout\n\t\tcomment \"Authenticated guests: (ingress bridge, IP)\"\n\t}\n\n")
 	// Phase-3 packet-authorization set, owned by netd. It is separate from auth_ipv4 (reconciled by legacy scd from
 	// public.sessions) so a Phase-3 full-state reconciliation can never remove a live legacy guest's authorization.
+	// phase3_auth_mac_ipv4 is the same authorization bound to the device's MAC (AD-23 a). netd keeps BOTH sets populated whenever it
+	// knows the MAC, so switching MACBinding off is a rule change only: the IP-only set is always warm and the fallback is instant.
+	b.WriteString("\tset phase3_auth_mac_ipv4 {\n\t\ttype ifname . ipv4_addr . ether_addr\n\t\tflags timeout\n\t\tcomment \"Phase-3 authorized guests bound to the device MAC (netd-owned): (ingress bridge, IP, MAC)\"\n\t}\n\n")
 	// Always emitted and starting empty (an empty set matches nothing): regenerating the ruleset later would flush
 	// auth_ipv4 and drop every live legacy guest, so activation stays a flag flip.
 	b.WriteString("\tset phase3_auth_ipv4 {\n\t\ttype ifname . ipv4_addr\n\t\tflags timeout\n\t\tcomment \"Phase-3 authorized guests (netd-owned): (ingress bridge, IP)\"\n\t}\n\n")
@@ -262,7 +265,12 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 	// auth_ipv4 is RETIRED (AD-23 b): no rule accepts on it any more, so a stray element authorizes nothing. The set stays
 	// declared, empty and inert, for the drain sweeper, scd's tenant-transition flush and the converge carry-over.
 	// The Phase-3 gate. While the set is empty this rule can never match, so a dark appliance is unaffected.
-	fmt.Fprintf(&b, "\t\toifname \"%s\" iifname . ip saddr @phase3_auth_ipv4 accept comment \"phase-3 authorized guests\"\n", topo.WANInterface)
+	if topo.MACBinding {
+		// AD-23 (a): authorization is (bridge, IP, MAC). An address set by hand on another device does not match.
+		fmt.Fprintf(&b, "\t\toifname \"%s\" iifname . ip saddr . ether saddr @phase3_auth_mac_ipv4 accept comment \"phase-3 authorized guests (MAC-bound)\"\n", topo.WANInterface)
+	} else {
+		fmt.Fprintf(&b, "\t\toifname \"%s\" iifname . ip saddr @phase3_auth_ipv4 accept comment \"phase-3 authorized guests\"\n", topo.WANInterface)
+	}
 	if !topo.PrivateReach.Deny {
 		gardenAccepts()
 	}
@@ -321,6 +329,11 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 	b.WriteString("\t}\n")
 
 	b.WriteString("}\n")
+	if topo.MACBinding {
+		// "Authorized" means the same thing everywhere in the ruleset: a device holding an address it was not bound to is not
+		// exempt from the captive redirect or the pre-auth DNS limit either.
+		return strings.ReplaceAll(b.String(), "iifname . ip saddr != @phase3_auth_ipv4", "iifname . ip saddr . ether saddr != @phase3_auth_mac_ipv4")
+	}
 	return b.String()
 }
 

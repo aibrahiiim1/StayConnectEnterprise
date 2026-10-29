@@ -21,6 +21,8 @@ const (
 	// start, empty (it matches nothing), because adding it later means regenerating the ruleset by `delete table` +
 	// recreate, which would drop every live legacy guest.
 	Phase3AuthV4 = "phase3_auth_ipv4"
+	// Phase3MACV4 holds the same authorizations keyed (bridge, IP, MAC) (AD-23 a).
+	Phase3MACV4 = "phase3_auth_mac_ipv4"
 )
 
 type Client struct {
@@ -219,6 +221,8 @@ func (c *Client) elementIn(ctx context.Context, set, iface string, ip net.IP, tt
 type Element struct {
 	Iface string
 	IP    net.IP
+	// MAC is the device address of an `ifname . ipv4_addr . ether_addr` element (Phase3MACV4); "" otherwise.
+	MAC string
 	// Port is the service part of an `ipv4_addr . inet_service` element (port-restricted garden sets); 0 otherwise.
 	Port int
 	// Timeout is the lease the element was created with; Expires is how much is left, which is what renewal decisions need.

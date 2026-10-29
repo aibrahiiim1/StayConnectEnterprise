@@ -47,7 +47,7 @@ func TestMissingPolicyTableIsTheOldBehaviour(t *testing.T) {
 }
 
 func TestPolicyDeniesAndSeedsTheUpstreamAndFollowsTheSetting(t *testing.T) {
-	ps := &fakePolicyStore{found: true, p: enforcementPolicy{PrivateDeny: true, AllowUpstream: true, PrivateAllow: []string{"10.9.0.0/16"}, MACBinding: true, CutoffSeconds: 5}}
+	ps := &fakePolicyStore{found: true, p: enforcementPolicy{PrivateDeny: true, AllowUpstream: true, PrivateAllow: []string{"10.9.0.0/16"}, MACBinding: false, CutoffSeconds: 5}}
 	a, k := policyApplier(t, ps)
 	a.setInForce(testIntent(), "")
 	a.refreshEnforcementPolicy(context.Background())

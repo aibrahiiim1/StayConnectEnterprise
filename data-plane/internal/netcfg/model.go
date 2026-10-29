@@ -72,6 +72,10 @@ type Topology struct {
 	// is the previous behaviour (only MgmtCIDRs are blocked), so a Topology built without it renders as before.
 	PrivateReach PrivateReach
 
+	// MACBinding keys the Phase-3 forward accept on (bridge, IP, MAC) instead of (bridge, IP) (AD-23 a). False is the previous
+	// behaviour and the emergency fallback; the zero value is false.
+	MACBinding bool
+
 	// PortalTLSPort is the captive portal's HTTPS port, or zero when the appliance serves none. It stays zero: the
 	// portal's HTTPS listener is reachable only behind PortalVIP, never behind a gateway, so a guest's 443 to any other
 	// host is never redirected.

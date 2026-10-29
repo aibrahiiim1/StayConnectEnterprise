@@ -32,7 +32,7 @@ type enforcementPolicy struct {
 
 // defaultEnforcementPolicy is the migration's default row.
 func defaultEnforcementPolicy() enforcementPolicy {
-	return enforcementPolicy{PrivateDeny: true, AllowUpstream: true, MACBinding: true, CutoffSeconds: 5, Version: 0}
+	return enforcementPolicy{PrivateDeny: true, AllowUpstream: true, MACBinding: false, CutoffSeconds: 5, Version: 0}
 }
 
 type policyStore interface {
@@ -117,6 +117,14 @@ func (a *applier) applyPolicy(t *netcfg.Topology) {
 		allow = append(allow, a.policyUpstream...)
 	}
 	t.PrivateReach = netcfg.PrivateReach{Deny: a.policy.PrivateDeny, Allow: allow}
+	t.MACBinding = a.policy.MACBinding
+}
+
+// newMACAwareGate is the production gate: it follows the policy's MAC-binding switch (and so the ruleset the policy renders).
+func newMACAwareGate(a *applier) *nftGate {
+	g := newNFTGate()
+	g.macOn = func() bool { p, ok := a.currentPolicy(); return ok && p.MACBinding }
+	return g
 }
 
 // currentPolicy is what the data plane acts on now; the second result is false until a read has succeeded.

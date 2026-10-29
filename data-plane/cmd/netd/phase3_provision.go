@@ -83,6 +83,12 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 		}
 	}
 
+	// The device address DHCP just vouched for (or, when Kea could not be asked, the one the producer recorded) is what the
+	// MAC-bound authorization is keyed on (AD-23 a). Bound before any Authorize below.
+	if mb, ok := p.gate.(macBinder); ok && s.MAC != "" {
+		mb.BindMAC(bridge, ip, s.MAC)
+	}
+
 	// Everything below uses boot-relative monotonic milliseconds, never the wall clock (see
 	// phase3_securitytime.go). An unreadable clock means the bound cannot be measured.
 	nowBoot, clockErr := p.bootNow()

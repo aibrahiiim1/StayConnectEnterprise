@@ -9,7 +9,7 @@
 --   allow_upstream_infrastructure AD-22  netd adds the appliance's own WAN gateway and DNS resolvers as /32 exceptions, so the
 --                                        hotel's configured upstream is never cut by the default deny (default ON).
 --   mac_binding_enabled           AD-23  the Phase-3 authorization is keyed (bridge, IP, MAC from the DHCP lease). OFF is the
---                                        emergency fallback to the previous IP-only key (default ON).
+--                                        emergency fallback to the previous IP-only key. Default OFF until the MAC-bound ruleset is proven on the test appliance; turn it ON with enforcement_policy_set.
 --   cutoff_seconds                AD-47  how soon a used-up allowance cuts a guest off: acctd's enforcement pass period
 --                                        (default 5 s, 1..60).
 --
@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS public.enforcement_policy (
   private_deny_enabled          boolean NOT NULL DEFAULT true,
   private_allow_cidrs           text[]  NOT NULL DEFAULT '{}',
   allow_upstream_infrastructure boolean NOT NULL DEFAULT true,
-  mac_binding_enabled           boolean NOT NULL DEFAULT true,
+  mac_binding_enabled           boolean NOT NULL DEFAULT false,
   cutoff_seconds                integer NOT NULL DEFAULT 5 CHECK (cutoff_seconds BETWEEN 1 AND 60),
   config_version                bigint  NOT NULL DEFAULT 1 CHECK (config_version >= 1),
   updated_at                    timestamptz NOT NULL DEFAULT now(),

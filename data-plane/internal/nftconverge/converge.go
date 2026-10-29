@@ -50,7 +50,7 @@ type Outcome struct {
 // `add element` into a set the new table lacks fails the whole `nft -f`. An older table still holding the retired
 // verification-access set converges by the ordinary `delete table` + recreate, which removes it and its maps and
 // objects without reading or carrying them.
-var AuthSets = []string{nft.AuthV4, nft.Phase3AuthV4, nft.GardenV4, nft.GardenTCP, nft.GardenUDP}
+var AuthSets = []string{nft.AuthV4, nft.Phase3AuthV4, nft.Phase3MACV4, nft.GardenV4, nft.GardenTCP, nft.GardenUDP}
 
 // tableName is the single StayConnect nft table, named once so no read path drifts from the table the render replaces.
 const tableName = "stayconnect"
@@ -250,7 +250,9 @@ func CarryOverCommands(set string, els []nft.Element) []string {
 			continue
 		}
 		key := ip.String()
-		if e.Iface != "" {
+		if e.Iface != "" && e.MAC != "" {
+			key = fmt.Sprintf("%q . %s . %s", e.Iface, ip.String(), e.MAC)
+		} else if e.Iface != "" {
 			key = fmt.Sprintf("%q . %s", e.Iface, ip.String())
 		} else if e.Port > 0 {
 			// A port-restricted garden element (`address . service`), carried as the pair it is.

@@ -34,21 +34,103 @@ type gateElem struct {
 	Expires time.Duration
 }
 
-type nftGate struct{ c *nft.Client }
+// setOps is the slice of the nft client the gate uses; *nft.Client satisfies it and a test substitutes a map.
+type setOps interface {
+	LeaseIn(ctx context.Context, set, iface string, ip net.IP, ttl time.Duration) error
+	DenyIn(ctx context.Context, set, iface string, ip net.IP) error
+	AuthorizedIn(ctx context.Context, set, iface string, ip net.IP) (bool, error)
+	ListIn(ctx context.Context, set string) ([]nft.Element, error)
+	LeaseMAC(ctx context.Context, iface string, ip net.IP, mac string, ttl time.Duration) error
+	DenyMAC(ctx context.Context, iface string, ip net.IP) error
+}
+
+// macBinder is implemented by a gate that can bind an authorization to the device's hardware address (AD-23 a).
+type macBinder interface {
+	BindMAC(bridge string, ip net.IP, mac string)
+}
+
+// nftGate keeps TWO sets in step whenever it knows the device's MAC: the IP-only set (always) and the MAC-bound set.
+// Which one the forward chain accepts on is a render decision (Topology.MACBinding), so flipping the policy needs no
+// re-population and the IP-only fallback is always warm.
+type nftGate struct {
+	c    setOps
+	macs sync.Map // gateKey(bridge, ip) -> normalised MAC, bound by the shaping pass after DHCP ownership is verified
+	// macOn reports whether the ruleset currently accepts on the MAC-bound set. nil = off.
+	macOn func() bool
+}
 
 func newNFTGate() *nftGate { return &nftGate{c: nft.New()} }
 
+func (g *nftGate) bound() bool { return g.macOn != nil && g.macOn() }
+
+func (g *nftGate) BindMAC(bridge string, ip net.IP, mac string) {
+	if n := nft.NormalizeMAC(mac); n != "" && ip != nil {
+		g.macs.Store(gateKey(bridge, ip), n)
+	}
+}
+
+func (g *nftGate) macFor(bridge string, ip net.IP) string {
+	if v, ok := g.macs.Load(gateKey(bridge, ip)); ok {
+		return v.(string)
+	}
+	return ""
+}
+
 // LeaseIn, not AllowIn: a repeated `add element` does not restart an existing element's timer.
 func (g *nftGate) Authorize(ctx context.Context, bridge string, ip net.IP, ttl time.Duration) error {
-	return g.c.LeaseIn(ctx, nft.Phase3AuthV4, bridge, ip, ttl)
+	if err := g.c.LeaseIn(ctx, nft.Phase3AuthV4, bridge, ip, ttl); err != nil {
+		return err
+	}
+	mac := g.macFor(bridge, ip)
+	if mac == "" {
+		if g.bound() {
+			slog.Warn("netd: MAC binding is on and this address has no known device address; it is not authorized by the MAC-bound set",
+				"bridge", bridge, "ip", ip.String())
+		}
+		return nil
+	}
+	if err := g.c.LeaseMAC(ctx, bridge, ip, mac, ttl); err != nil {
+		if g.bound() {
+			return err
+		}
+		slog.Warn("netd: the MAC-bound authorization could not be written (MAC binding is off, so access is unaffected)",
+			"bridge", bridge, "ip", ip.String(), "err", err)
+	}
+	return nil
 }
 
 func (g *nftGate) Revoke(ctx context.Context, bridge string, ip net.IP) error {
-	return g.c.DenyIn(ctx, nft.Phase3AuthV4, bridge, ip)
+	err := g.c.DenyIn(ctx, nft.Phase3AuthV4, bridge, ip)
+	if merr := g.c.DenyMAC(ctx, bridge, ip); merr != nil && err == nil {
+		// A leftover MAC element grants access only while binding is on; then the revocation is not proven.
+		if g.bound() {
+			err = merr
+		} else {
+			slog.Warn("netd: a MAC-bound authorization could not be removed (MAC binding is off)", "bridge", bridge, "ip", ip.String(), "err", merr)
+		}
+	}
+	if err == nil && ip != nil {
+		g.macs.Delete(gateKey(bridge, ip))
+	}
+	return err
 }
 
 func (g *nftGate) Authorized(ctx context.Context, bridge string, ip net.IP) (bool, error) {
-	return g.c.AuthorizedIn(ctx, nft.Phase3AuthV4, bridge, ip)
+	ok, err := g.c.AuthorizedIn(ctx, nft.Phase3AuthV4, bridge, ip)
+	if err != nil || !ok || !g.bound() {
+		return ok, err
+	}
+	// With binding on, the IP-only element is not what admits the device: the MAC-bound one is.
+	elems, err := g.c.ListIn(ctx, nft.Phase3MACV4)
+	if err != nil {
+		return false, err
+	}
+	for _, e := range elems {
+		if e.IP.Equal(ip) && e.Iface == bridge {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (g *nftGate) List(ctx context.Context) ([]gateElem, error) {
@@ -57,8 +139,34 @@ func (g *nftGate) List(ctx context.Context) ([]gateElem, error) {
 		return nil, err
 	}
 	out := make([]gateElem, 0, len(elems))
+	have := map[string]bool{}
 	for _, e := range elems {
+		have[gateKey(e.Iface, e.IP)] = true
 		out = append(out, gateElem{Bridge: e.Iface, IP: e.IP, Expires: e.Expires})
+	}
+	// The MAC-bound set is read on its own: if it is unreadable the IP-only view still stands (binding off), and with binding
+	// on an unreadable set is an unknown state, never an empty one.
+	macElems, merr := g.c.ListIn(ctx, nft.Phase3MACV4)
+	if merr != nil {
+		if g.bound() {
+			return nil, merr
+		}
+		return out, nil
+	}
+	inMAC := map[string]bool{}
+	for _, e := range macElems {
+		k := gateKey(e.Iface, e.IP)
+		inMAC[k] = true
+		if !have[k] {
+			// A MAC-bound element with no IP-only twin has no desired session behind it: surfaced so the stray sweep revokes it.
+			out = append(out, gateElem{Bridge: e.Iface, IP: e.IP, Expires: e.Expires})
+		}
+	}
+	// A device whose MAC is known but whose MAC-bound element is missing is renewed on this pass (Expires 0 forces a refresh).
+	for i, ge := range out {
+		if !inMAC[gateKey(ge.Bridge, ge.IP)] && g.macFor(ge.Bridge, ge.IP) != "" {
+			out[i].Expires = 0
+		}
 	}
 	return out, nil
 }
@@ -105,6 +213,13 @@ type flushingGate struct {
 
 func newFlushingGate(g gate, f conntrack.Flusher) *flushingGate {
 	return &flushingGate{gate: g, flows: f, clean: map[string]bool{}}
+}
+
+// BindMAC passes the device address to a wrapped gate that can use it.
+func (g *flushingGate) BindMAC(bridge string, ip net.IP, mac string) {
+	if mb, ok := g.gate.(macBinder); ok {
+		mb.BindMAC(bridge, ip, mac)
+	}
 }
 
 func (g *flushingGate) Authorize(ctx context.Context, bridge string, ip net.IP, ttl time.Duration) error {

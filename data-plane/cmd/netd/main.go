@@ -184,7 +184,7 @@ func main() {
 		generations: &pgGenerations{pool: pool},
 		// Packet-authorization gate: writes only the Phase-3 set, and revocation also flushes the address's
 		// conntrack flows so access ends for open connections too.
-		gate: newFlushingGate(newNFTGate(), conntrack.New()),
+		gate: newFlushingGate(newMACAwareGate(ap), conntrack.New()),
 		// The legacy auth_ipv4 set is kept empty.
 		legacy: newNFTLegacySet(),
 		// Confirmed kernel result, so a Session is only `active` once both halves are in force.
