@@ -47,6 +47,8 @@ func signedLicence(t *testing.T, maxGuests int, pms, expired bool) *licstate.Man
 		TenantID: "22222222-2222-2222-2222-222222222222", SiteID: "33333333-3333-3333-3333-333333333333",
 		IssuedAt: issued, ValidUntil: until, SchemaVersion: lic.CurrentSchemaVersion, LicenseVersion: 1,
 		MaxConcurrentOnlineGuests: maxGuests,
+		// AD-15: an installed v4 licence must name the appliance it is for.
+		IdentityKeyFingerprint: fixtureIdentityFpr, ApplianceSerial: "SC-FIXTURE",
 	}
 	doc.Modules = lic.Modules{}
 	if pms {
@@ -62,6 +64,7 @@ func signedLicence(t *testing.T, maxGuests int, pms, expired bool) *licstate.Man
 		t.Fatal(err)
 	}
 	m := licstate.New(nil, "", filepath.Join(dir, "license"), pubPath, true)
+	m.SetLocalIdentity(lic.LocalIdentity{IdentityKeyFingerprint: fixtureIdentityFpr, Serial: "SC-FIXTURE"})
 	if _, err := m.Install(context.Background(), raw); err != nil {
 		t.Fatalf("install the fixture licence: %v", err)
 	}

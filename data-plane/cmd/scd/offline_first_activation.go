@@ -142,7 +142,10 @@ func (s *server) setupActivationPackage(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	alreadyAssigned := false
-	if d := s.assignmentStore().Doc(); d != nil && d.TenantID != "" {
+	// AD-18(b): decided from the assignment STATE, not from TenantID != "". A signed revoked, decommissioned or
+	// unassigned document carries no tenant, so the old test let an appliance holding one be first-activated from a
+	// file; it needs a factory reset instead.
+	if d := s.assignmentStore().Doc(); d != nil && (assignment.Grants(d.State) || assignment.Clears(d.State)) {
 		alreadyAssigned = true
 	}
 	serial := firstNonEmpty(s.serial, id.Serial)

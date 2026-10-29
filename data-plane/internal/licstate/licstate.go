@@ -47,9 +47,11 @@ type Manager struct {
 	// hwMismatch holds a reason when the identity matches but the WAN MAC differs (NIC swap): a warning, not a reject.
 	// wrongDevice holds a reason when the licence is bound to a different appliance. It is recomputed on every
 	// evaluation, boot included, so a copied licence is refused after a reboot.
-	local       lic.LocalIdentity
-	hwMismatch  string
-	wrongDevice string
+	local lic.LocalIdentity
+	// assignmentLookup reports the customer and site of this appliance's granting signed assignment (AD-15(b)).
+	assignmentLookup func() (tenantID, siteID string, ok bool)
+	hwMismatch       string
+	wrongDevice      string
 
 	// Required=false (dev/pilot): no licence gives permissive unlicensed mode. Required=true (production): no licence
 	// behaves as Expired.
@@ -196,7 +198,8 @@ func (m *Manager) Load(ctx context.Context) {
 		slog.Info("licstate: license evaluated",
 			"state", ev.State, "license_id", ev.Doc.LicenseID,
 			"plan", ev.Doc.CommercialPlanCode, "valid_until", ev.Doc.ValidUntil,
-			"cloud_stale", ev.CloudStale, "clock_rollback", ev.ClockRollback)
+			"cloud_stale", ev.CloudStale, "clock_rollback", ev.ClockRollback,
+			"unbound_legacy_licence", ev.Doc.IsUnbound())
 		m.lastLogged = evKey
 	}
 	if docKey == m.lastSynced {
@@ -322,9 +325,19 @@ func (m *Manager) Install(ctx context.Context, raw []byte) (*lic.Document, error
 		return nil, err
 	}
 	m.mu.RLock()
-	local, applianceID := m.local, m.applianceID
+	local, applianceID, asgLookup := m.local, m.applianceID, m.assignmentLookup
 	m.mu.RUnlock()
-	res, reason := pre.CheckBinding(local)
+	// AD-15: install is stricter than evaluation. An unbound v4 licence, a blank local identity field the licence
+	// names, or an appliance outside the licence's list is refused here; a licence ALREADY installed keeps being
+	// evaluated by CheckBinding in Load, so no running appliance is bricked by this.
+	res, reason := pre.CheckInstallBinding(local)
+	if res == lic.BindingOK && asgLookup != nil {
+		// AD-15(b): when this appliance holds a granting signed assignment, the licence must name the same customer and
+		// site. Without an assignment yet (a licence can arrive first) there is nothing to compare.
+		if tenant, site, ok := asgLookup(); ok && (pre.TenantID != tenant || pre.SiteID != site) {
+			res, reason = lic.BindingWrongDevice, "the licence is for a different customer or site than this appliance's signed assignment"
+		}
+	}
 	if res == lic.BindingWrongDevice {
 		slog.Warn("licstate: license REJECTED — bound to a different appliance",
 			"reason", reason, "license_id", pre.LicenseID,
@@ -349,6 +362,13 @@ func (m *Manager) Install(ctx context.Context, raw []byte) (*lic.Document, error
 	}
 	m.Load(ctx)
 	return doc, nil
+}
+
+// SetAssignmentLookup gives Install the signed assignment's customer and site to compare a new licence with.
+func (m *Manager) SetAssignmentLookup(fn func() (tenantID, siteID string, ok bool)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.assignmentLookup = fn
 }
 
 func (m *Manager) SetLocalIdentity(local lic.LocalIdentity) {
@@ -495,11 +515,19 @@ func (m *Manager) FetchFromCloud(ctx context.Context, ctrlBase, applianceID stri
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&out); err != nil {
 		return err
 	}
-	// A revocation that cannot be stored stops the fetch, so it is retried on the next one instead of being lost.
-	for _, id := range out.Revoked {
-		if err := m.store.AddRevocation(id); err != nil {
-			return fmt.Errorf("store revocation: %w", err)
+	// AD-16: a revocation list is not signed, and a revocation cannot be undone, so it is honoured only over the
+	// mutual-TLS channel (pinned to Central's CA; AD-2). Before the client certificate exists, a TLS-intercepting proxy
+	// could otherwise revoke the licence; the list is ignored and the next mTLS fetch carries it.
+	if viaMTLS {
+		// A revocation that cannot be stored stops the fetch, so it is retried on the next one instead of being lost.
+		for _, id := range out.Revoked {
+			if err := m.store.AddRevocation(id); err != nil {
+				return fmt.Errorf("store revocation: %w", err)
+			}
 		}
+	} else if len(out.Revoked) > 0 {
+		slog.Warn("licstate: ignored revocations received outside mutual TLS; they are applied once the client certificate is in use",
+			"count", len(out.Revoked))
 	}
 	// A revocation-only response carries a null envelope: apply revocations and keep the installed doc. Nothing in it
 	// is signed, so it counts as cloud validation only when it came over the mutual-TLS channel.

@@ -734,6 +734,14 @@ func main() {
 		HardwareFingerprint:    s.hw.Fingerprint,
 		WANMAC:                 s.hw.WANMAC,
 	})
+	// AD-15(b): a licence being installed must name the customer and site of this appliance's verified assignment.
+	s.lic.SetAssignmentLookup(func() (string, string, bool) {
+		r, doc := s.resolveOwnAssignment(time.Now().UTC())
+		if doc == nil || !r.Assigned() {
+			return "", "", false
+		}
+		return doc.TenantID, doc.SiteID, true
+	})
 	s.lic.Load(rootCtx)
 	if err := s.initModules(); err != nil {
 		slog.Error("deployment ceiling: incoherent configuration", "err", err)
