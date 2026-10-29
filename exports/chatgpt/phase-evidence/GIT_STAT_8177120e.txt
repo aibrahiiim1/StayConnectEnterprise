@@ -1,0 +1,4 @@
+commit 8177120e49fcb3200ad534dafd1f4bfbb351e307
+Date:   Thu Oct 29 12:09:15 2026 +0300
+
+    Governance: T0272 backup sweep order receipt, state render and manifest

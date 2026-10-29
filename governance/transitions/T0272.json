@@ -1,0 +1,31 @@
+{
+  "transition_id": "T0272",
+  "seq": 272,
+  "timestamp": "2026-10-29T09:09:11Z",
+  "timestamp_derivation": "Computed from the session clock after the branch was validated, before the commit that introduces this receipt.",
+  "record_type": "BACKUP_SWEEP_ORDER_FIX",
+  "authorisation": "D82, the Product Owner's continuation of the mission of 2026-10-29 (a defect found while deploying Central least privilege).",
+  "implementation": "The retention sweep (stayconnect-backup-cleanup.sh) ordered config backups by modification time. A backup made with cp -a or cp -p keeps its source's modification time, so copies of an unchanged file tie and the newest-named copy was swept first. Found on Central on 2026-10-29: the sweep removed the env-file backup that the least-privilege deploy had just made (the deploy reported it kept). retain_group now orders by change time (ls -t -c). The self-test lifts the function out of the script and proves that, of five copies tied on modification time, the newest three are kept.",
+  "migrations": "None.",
+  "verification": "stayconnect-backup-cleanup-selftest.sh on Linux: every case passes, including the new one. The defect was observed live on Central before the fix.",
+  "deployment": "At the time of this receipt: NOT deployed. The sweep is part of both releases; the deployment follows the merge and is recorded by its own receipt.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "20df43313f43520d52d5d27ce152c61a68e8fb4f",
+  "previous_delivery": "T0271",
+  "decision": "D82",
+  "go_live": "NOT authorised."
+}

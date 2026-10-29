@@ -1,4 +1,0 @@
-commit 0d2413224257414b1241ea11f04812012f053ffc
-Date:   Thu Oct 29 11:43:48 2026 +0300
-
-    Governance: T0271 Central least privilege receipt, state render and manifest
