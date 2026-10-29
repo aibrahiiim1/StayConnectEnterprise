@@ -1293,7 +1293,7 @@
       "name": "central.onegate.getsemantics.com",
       "recorded": "Product-Owner record, 2026-10-28: this is the current production Central; 172.21.96.196 is retired and must not be contacted.",
       "trust_universe": "Installed fresh by central-install.sh, so it has its own vendor key, assignment key, registry root, appliance CA and internal TLS CA (installation manual Appendix 3). Appliances provisioned against the retired Central, PRE-LIVE among them, do not trust it.",
-      "release": "onegate-central-ee2faf881d89 (2026-10-29, read back from DEPLOYED.json; installation manual A3.10)",
+      "release": "onegate-central-9613fb52679d (2026-10-29, read back from DEPLOYED.json: release_commit 9613fb52679d904ca0320c5cd9eeac23f06350b1; ctrlapi connects as the least-privilege role ctrlapi_rt since migration 0063; installation manual A3.11)",
       "retired_host": {
         "address": "172.21.96.196",
         "name": "sc-central.echofusion.com",
@@ -1339,9 +1339,9 @@
       "_note": "The current test appliance (Product-Owner record, 2026-10-28, D78/T0264). Activated on the production Central, in its trust universe.",
       "host": "172.21.96.97",
       "central": "central.onegate.getsemantics.com (41.128.240.133)",
-      "release": "onegate-appliance-1cd37145c468 (2026-10-29, source commit 1cd37145c4687d337fe922bf9c23ca3e786ec1c3 read back from RELEASE.json and the six installed binaries; installation manual A3.10)",
+      "release": "onegate-appliance-9613fb52679d (2026-10-29, source commit 9613fb52679d904ca0320c5cd9eeac23f06350b1 read back from RELEASE.json and all eight installed binaries via DEPLOYED_BINARIES.sha256; installation manual A3.11)",
       "status": "TEST. Go-Live not authorised. Routine software deployments are covered by the standing authorization D79.",
-      "deployed_note": "The audit-decision release (T0267, upgrade-path fix T0268) is deployed and verified on this appliance (T0269): migrations through 0178, units active, licence Active over mutual TLS, client journey 12/12. The first upgrade attempt stopped safely at migration 0162 and was fixed by PR #266."
+      "deployed_note": "The closure round of the audit-decision mission (T0270 to T0272) is deployed and verified on this appliance (T0273): migrations through 0179, units active, licence Active over mutual TLS, appliance Root CA pinned against its fingerprint, client journey 12/12, 500 simultaneous sign-in attempts answered with no busy answer. The earlier release (T0269) had stopped safely once at migration 0162 and was fixed by PR #266."
     },
     "standing_test_appliance_deployment_authorization": "STANDING PRODUCT-OWNER AUTHORIZATION, 2026-10-28 (D79/T0265), CONTINUING UNTIL REVOKED OR CHANGED: routine software deployments to the test appliance 172.21.96.97 within approved work, without separate deployment approval each time. COVERED: build and package, install, service restart, deployment verification, retry and rollback, and recording the exact deployed commit read back from the installed artifact. NOT COVERED, each a separate Product-Owner decision: the production Central; a new product, architecture or security decision; destructive or historical data mutation; a new migration or schema decision; networking or topology changes; PMS configuration, posting or traffic; financial or payment-provider activity; Guest activation or Go-Live; Root-CA or trust changes. The deployed source may run ahead of master; it is never master state.",
     "legacy_pki_custody": {
@@ -1357,12 +1357,12 @@
     "audit_backlog": {
       "record": "docs/AUDIT_BACKLOG.md",
       "decisions": "docs/AUDIT_DECISIONS.md",
-      "as_of": "T0267",
-      "note": "Backend 258 rows: FIXED 143, ALREADY-FIXED 6, PARTIAL 48, NOT-REPRODUCIBLE 2, OPEN-DECISION 40, OPEN 19 (before: OPEN 229, OPEN-DECISION 22, PARTIAL 4, FIXED 3). Performance 82 rows: FIXED 27, ALREADY-FIXED 1, PARTIAL 12, OPEN-DECISION 24, OPEN 18 (before: OPEN 71, OPEN-DECISION 11). The audits are NOT closed: decisions remain. After T0267 every decision AD-1 to AD-68 has a disposition in docs/AUDIT_DECISION_DISPOSITIONS.md (implemented, accepted risk, documentation only, or evidence-dependent); the per-row statuses above are those of T0266 and were not individually rewritten.",
+      "as_of": "T0273",
+      "note": "Backend 258 rows: FIXED 143, ALREADY-FIXED 6, PARTIAL 48, NOT-REPRODUCIBLE 2, OPEN-DECISION 40, OPEN 19 (before: OPEN 229, OPEN-DECISION 22, PARTIAL 4, FIXED 3). Performance 82 rows: FIXED 27, ALREADY-FIXED 1, PARTIAL 12, OPEN-DECISION 24, OPEN 18 (before: OPEN 71, OPEN-DECISION 11). The audits are NOT closed: decisions remain. After T0267 every decision AD-1 to AD-68 has a disposition in docs/AUDIT_DECISION_DISPOSITIONS.md (implemented, accepted risk, documentation only, or evidence-dependent); the per-row statuses above are those of T0266 and were not individually rewritten. Closure round (D82, T0270 to T0273): the remaining actionable items are worked and deployed; docs/AUDIT_DECISION_DISPOSITIONS.md lists what is still not evidenced.",
       "dispositions": "docs/AUDIT_DECISION_DISPOSITIONS.md"
     }
   },
-  "latest_transition_id": "T0272",
+  "latest_transition_id": "T0273",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1858,16 +1858,16 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "BACKUP_SWEEP_ORDER_FIX",
+    "kind": "AUDIT_CLOSURE_DEPLOYMENT",
     "decision": "D82 (Product-Owner continuation of 2026-10-29: close the AD-1 to AD-68 mission).",
-    "decision_note": "The retention sweep keeps the newest copy of a config backup (found on Central). Not yet deployed at this receipt.",
-    "manifest": "docs/manifests/BackupSweepOrder-change-manifest.md",
-    "base": "20df43313f43520d52d5d27ce152c61a68e8fb4f",
-    "base_note": "Master after the merge of PR #269.",
-    "transition": "T0272",
-    "previous_delivery": "T0271",
-    "branch": "delivery/backup-sweep-order",
-    "note": "T0272. Go-Live not authorised."
+    "decision_note": "Deployment record: Central and the test appliance run the closure round (9613fb52679d); verification in installation manual A3.11.",
+    "manifest": "docs/manifests/AuditClosureDeployment-change-manifest.md",
+    "base": "9613fb52679d904ca0320c5cd9eeac23f06350b1",
+    "base_note": "Master after the merge of PR #270.",
+    "transition": "T0273",
+    "previous_delivery": "T0272",
+    "branch": "delivery/audit-closure-deployment-record",
+    "note": "T0273. Go-Live not authorised."
   },
   "onboarding_reconciliation": {
     "decision": "D37",

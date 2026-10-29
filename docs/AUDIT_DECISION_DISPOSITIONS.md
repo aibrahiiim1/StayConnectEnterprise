@@ -142,7 +142,8 @@ record is installation manual A3.10. Round 2 (the closure round, D82) added the 
 |---|---|---|
 | OneGate Central `41.128.240.133` (private `172.21.96.96`) | round 1: `onegate-central-ee2faf881d89` | `DEPLOYED.json`: ctrlapi and console source commit `ee2faf881d89`; migrations 0059–0062; smoke 10 PASS |
 | Test OneGate Appliance `172.21.96.97` | round 1: `onegate-appliance-1cd37145c468` | `RELEASE.json` and all six binaries: `1cd37145c4687d337fe922bf9c23ca3e786ec1c3`; migrations through 0178 |
-| both | round 2 | see the deployment record of the closure round (`governance/transitions/`, installation manual A3.11) |
+| OneGate Central | round 2: `onegate-central-9613fb52679d` | `DEPLOYED.json` release_commit `9613fb52679d904ca0320c5cd9eeac23f06350b1`; migrations through 0063; smoke 9 PASS; ctrlapi's database sessions run as `ctrlapi_rt` (section 11) |
+| Test OneGate Appliance | round 2: `onegate-appliance-9613fb52679d` | `DEPLOYED_BINARIES.sha256`: all eight binaries embed `9613fb52679d904ca0320c5cd9eeac23f06350b1`; migrations through 0179; the Root CA pin installed against its fingerprint during the first round-2 upgrade (`02d20f96c54b`) |
 
 **Verified live on the test appliance** (round 1): the upgrade (after a safe stop at 0162 that PR #266 fixed), the licence over mutual TLS with the
 pinned Root CA, the client journey (12/12), private-network denial (AD-22), MAC binding on, off and against a spoof (AD-23), 300 and 500
@@ -159,6 +160,9 @@ simultaneous sign-in attempts without a busy answer (AD-26).
 | AD-28 (b) | netd on the hardened unit: active, no denied operation, client journey 12/12 |
 | AD-3 restore drills (Linux, disposable PostgreSQL containers) | `scripts/ledger-restore-drill.sh`: 16 of 16 scenarios PASS (older backup, secondary storage unavailable, forked copies, no trustworthy copy, interrupted write, cut-short copy, backup older than the ledger, replacement appliance, retention applied after the backup, retention failure stops the restore, pre-retention backup refused, stale maintenance flag). `scripts/phase4-restore-drill.sh`: 38 of 38 checks PASS |
 | AD-36 post-stay (isolated database, no PMS) | 10 integration cases PASS, three of them new (see row 36) |
+| Root CA pin (AD-2) on `--upgrade` | with the pin file moved aside, `appliance-install.sh --upgrade --root-ca-sha256 <fingerprint read from Central's FINGERPRINTS.txt>` pinned the self-signed root of the CA bundle the appliance already held, byte-identical to the pin it had; a wrong fingerprint was refused and pinned nothing; a second upgrade with the pin present reported "already pinned" and matched |
+| New console endpoints | enforcement policy: no password 401, wrong password 401, out-of-range 400, bad CIDR 400, change applied and audited with the operator's label, history shown; licence clock reset: no reason 400, reset 200 |
+| Final release (`9613fb52679d`) | client journey 12 of 12; 500 simultaneous sign-in attempts, 0 busy, p95 61 ms; the new endpoints again |
 | Migration 0179 on an upgrade | applied as `iam_v2_owner` on a database built from the previous baseline: the column is present and both settings functions are owned by `iam_v2_owner` |
 | Platform-migration mechanism (PR #266) | reviewed and hardened, see section 12 |
 | AD-50 / AD-59 | measured, see rows 50 and 59 and [`runbooks/DB_BUDGET_MEASUREMENT_PLAN.md`](runbooks/DB_BUDGET_MEASUREMENT_PLAN.md) |
@@ -181,7 +185,7 @@ simultaneous sign-in attempts without a busy answer (AD-26).
 
 Residual, stated plainly: a **future table defaults to full DML for the role** (fail-open) and a migration that adds an append-only table must list it in
 `central_apply_runtime_grants()`; the role can still call the four definer functions with arbitrary arguments (that is the sanctioned maintenance path);
-after a binary-only rollback to a release older than this one, queued emails stay in old audit payloads until the new binary runs again. Live result: see section 10.
+after a binary-only rollback to a release older than this one, queued emails stay in old audit payloads until the new binary runs again. Live result (2026-10-29, Central `onegate-central-20df43313f43`, then `9613fb52679d`): migration 0063 applied (63 applied, 0 modified); `ctrlapi_rt` logs in with the generated password and is not a superuser, cannot create objects; ctrlapi's two database sessions are `ctrlapi_rt`; as that role CREATE TABLE, UPDATE and DELETE on `audit_log`, TRUNCATE, CREATE ROLE, reading `pg_authid` and disabling a trigger were each refused; smoke PASS; the test appliance kept its Central contact and its licence. **Found live:** the deploy's rollback copy of the env file was removed by the retention sweep minutes after the deploy (copies made with `cp -a`/`cp -p` tie on modification time and the tie swept the newest); fixed by PR #270 (order by change time) and deployed in `9613fb52679d`.
 
 ## 12. Review of the platform-migration mechanism (PR #266), 2026-10-29
 

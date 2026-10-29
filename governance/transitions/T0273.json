@@ -1,0 +1,34 @@
+{
+  "transition_id": "T0273",
+  "seq": 273,
+  "timestamp": "2026-10-29T09:28:35Z",
+  "timestamp_derivation": "Computed from the session clock after the deployments were verified, before the commit that introduces this receipt.",
+  "record_type": "AUDIT_CLOSURE_DEPLOYMENT",
+  "authorisation": "D82, the Product Owner's continuation of the mission of 2026-10-29 (deployment to OneGate Central 41.128.240.133 and the test appliance 172.21.96.97).",
+  "deployment": {
+    "central": "central.onegate.getsemantics.com (41.128.240.133, private 172.21.96.96): onegate-central-02d20f96c54b, then onegate-central-20df43313f43 (migration 0063, ctrlapi switched to the least-privilege role ctrlapi_rt after a proven login), then onegate-central-9613fb52679d (the backup-sweep ordering fix), each by central-deploy.sh with a pre-deploy dump; smoke PASS each time; DEPLOYED.json release_commit 9613fb52679d904ca0320c5cd9eeac23f06350b1.",
+    "test_appliance": "172.21.96.97: onegate-appliance-02d20f96c54b (migration 0179; the appliance Root CA re-pinned against its fingerprint from the held CA bundle) then onegate-appliance-9613fb52679d, each by appliance-install.sh --upgrade; all eight installed binaries embed 9613fb52679d904ca0320c5cd9eeac23f06350b1.",
+    "found_live": "The retention sweep removed the env-file backup that the least-privilege deploy had just made (copies made with cp -a tie on modification time and the tie swept the newest); fixed by PR #270 (T0272) and deployed."
+  },
+  "verification": "Read back from the installed artifacts. Live: cut-off 2.7 s after the allowance was spent and no conntrack flow left; image optimiser through the operator API; offline licence file import and replay refusal; netd on its hardened unit; Root CA pin against a fingerprint (positive and negative); the new console endpoints (step-up, validation, audit); ctrlapi sessions as ctrlapi_rt and the refused statements; 500 and 300 simultaneous sign-in attempts without a busy answer; client journey 12 of 12 on the first and final release; Linux restore drills (ledger 16 of 16, phase-4 38 of 38). Not exercised: an offline activation package, the Post-stay flow against a real PMS feed, the 2,000-device load run, the new console pages in a browser; listed in docs/AUDIT_DECISION_DISPOSITIONS.md.",
+  "not_touched": "Every retired host, the former PRE-LIVE appliance, production users, live payment providers, PMS posting and configuration, the Root CA.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "9613fb52679d904ca0320c5cd9eeac23f06350b1",
+  "previous_delivery": "T0272",
+  "decision": "D82",
+  "go_live": "NOT authorised."
+}

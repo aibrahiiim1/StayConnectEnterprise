@@ -1109,3 +1109,22 @@ read back from the installed files; Go `golang:1.26.10`).
 Not verified live here (the dispositions file lists each): the 5-second cut-off after a used-up allowance, the conntrack flush of a lapsed address,
 the Post-stay room-and-reservation flow (dark), the image optimiser through the Admin Console, the Linux restore drills, offline activation.
 
+### A3.11 The closure round on the test pair (2026-10-29)
+
+Central `central.onegate.getsemantics.com` (`172.21.96.96`) and appliance `172.21.96.97`, identities and data preserved. Three deployments of the round,
+each read back from the installed artifacts: Central `onegate-central-02d20f96c54b`, then `…-20df43313f43` (migration 0063), then `…-9613fb52679d`;
+appliance `onegate-appliance-02d20f96c54b` then `…-9613fb52679d` (all eight binaries embed `9613fb52679d904ca0320c5cd9eeac23f06350b1`; ledger through 0179).
+
+| Area | Result |
+|---|---|
+| Root CA pin | with `/etc/stayconnect/appliance-root-ca.crt` moved aside, `--upgrade --root-ca-sha256 <fp>` (the fingerprint read from Central's `FINGERPRINTS.txt`, a different host) re-created the pin from the root of the CA bundle already held, byte-identical to the previous one; `install-appliance-root-ca.sh --sha256 AA:BB:CC` refused with the real fingerprint named and pinned nothing; a later upgrade reported "already pinned" |
+| Migration 0179 | applied by `apply-pending-migrations.sh` as `iam_v2_owner` (no platform marker); `post_stay_signin_days` = 7 visible in `GET /signin-capacity-settings` |
+| Central 0063 | `central-deploy.sh` generated `ctrlapi_db_password`, applied the grants, set the role password, proved a login and then switched `CTRLAPI_DB_URL`; ctrlapi's sessions are `ctrlapi_rt`; the refused statements are listed in the dispositions file, section 11; smoke PASS; the appliance contacted Central afterwards without error. The rollback copy of the env file made by that deploy was **removed by the retention sweep**; PR #270 fixed the ordering and the next deploy kept its copy. If a rollback is ever needed, the owner DSN is built from `secrets/db_password` (see `docs/runbooks/CENTRAL_DB_LEAST_PRIVILEGE.md`) |
+| Central `central-infra.yml` | the release changes only comments; the file was copied into place (`install -m 0644`) so the deploy stops warning, and the database container was not recreated |
+| Console endpoints | enforcement policy (step-up, validation, audit, history) and the licence clock reset exercised through the operator API; the Central registration setting returns `waiting_appliances` |
+| Behaviour | cut-off 2.7 s after a 3 MB allowance was spent; no conntrack flow left; image optimiser 3200×1800 → 2560×1440, 1.05 MB refused; offline licence file imported once and refused on replay; netd on its hardened unit; 500 and 300 simultaneous sign-in attempts without a busy answer; client journey 12 of 12 on the first and the final release |
+| Restore drills (Linux containers) | ledger restore drill 16 of 16, phase-4 restore drill 38 of 38 |
+
+Not exercised: an offline activation *package* (the test appliance is already activated), the Post-stay flow against a real PMS feed, the 2,000-device load run, and the new
+console pages in a browser.
+

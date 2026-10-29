@@ -70,6 +70,11 @@ cp -p /etc/stayconnect/ctrlapi.env.bak-dbrole-<stamp> /etc/stayconnect/ctrlapi.e
 systemctl start stayconnect-ctrlapi
 ```
 
+If the `.bak-dbrole-<stamp>` copy is gone (the retention sweep used to remove the newest copy of an unchanged file; fixed by PR #270, 2026-10-29), build the owner DSN
+again instead: set `CTRLAPI_DB_URL` in `/etc/stayconnect/ctrlapi.env` to
+`postgres://stayconnect:<the contents of /opt/stayconnect/central/secrets/db_password>@127.0.0.1:5432/stayconnect?sslmode=disable` (keep the host, port and database
+that the current URL has), then start ctrlapi. `central_owner_dsn` in `deploy/scripts/central-lib.sh` builds exactly this.
+
 The role and the grants may stay; they do nothing while nothing connects as `ctrlapi_rt`. To remove the migration as well:
 stop ctrlapi, restore the env file, then run `0063_central_runtime_role_least_privilege.down.sql` by hand as `stayconnect`
 (`central-migrate.sh` has no automatic down; the file restores the 0054/0055/0056 function bodies and drops the role) and
