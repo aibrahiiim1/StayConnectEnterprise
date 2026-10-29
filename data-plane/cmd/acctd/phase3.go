@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/enforce"
@@ -42,6 +43,10 @@ type phase3 struct {
 	scope     planScope
 	plans     *planCounter
 	lastPurge time.Time
+	// lastRollup and maintaining belong to accountingMaintenance (AD-48): the usage rollup and the purge run off the
+	// accounting tick, one at a time.
+	lastRollup  time.Time
+	maintaining atomic.Bool
 }
 
 // newPhase3 returns nil while the enforcement plane is off. It must not be gated on Checkout Grace: the shaping
@@ -126,10 +131,45 @@ func (p *phase3) enforceSessionLimits(ctx context.Context, now time.Time) {
 // The purge runs in bounded batches so a site that shortens its retention catches up over hours without a long
 // transaction on the table every tick writes to.
 const (
-	purgeInterval   = time.Hour
+	// rollupInterval: how often the per-minute / per-hour usage tables catch up (migration 0240). The purge deletes
+	// only samples the rollup has read, so a stopped rollup stops reclaiming space.
+	rollupInterval  = time.Minute
+	purgeInterval   = 10 * time.Minute
 	purgeBatch      = 5000
 	purgeMaxBatches = 20
 )
+
+// accountingMaintenance runs the usage rollup and then the retention purge OFF the accounting tick, one run at a time:
+// the purge may spend up to the site's purge time budget (a setting) and the tick that meters and enforces must not
+// wait for it. A run still in flight makes the next call a no-op.
+func (p *phase3) accountingMaintenance(ctx context.Context, now time.Time) {
+	if p == nil || !p.maintaining.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		defer p.maintaining.Store(false)
+		p.rollupAccountingUsage(ctx, now)
+		p.purgeAccountingDetail(ctx, now)
+	}()
+}
+
+func (p *phase3) rollupAccountingUsage(ctx context.Context, now time.Time) {
+	if p == nil || (!p.lastRollup.IsZero() && now.Sub(p.lastRollup) < rollupInterval) {
+		return
+	}
+	p.lastRollup = now
+	// A backlog (first run after the upgrade) is read a window at a time; stop when a window is empty.
+	for i := 0; i < 50; i++ {
+		n, err := p.enf.RollupAccountingUsage(ctx, p.tenant, p.site)
+		if err != nil {
+			slog.Error("phase3: usage rollup failed", "err", err)
+			return
+		}
+		if n == 0 {
+			return
+		}
+	}
+}
 
 func (p *phase3) purgeAccountingDetail(ctx context.Context, now time.Time) {
 	if p == nil || (!p.lastPurge.IsZero() && now.Sub(p.lastPurge) < purgeInterval) {

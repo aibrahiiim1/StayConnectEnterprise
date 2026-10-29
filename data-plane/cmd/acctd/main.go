@@ -188,7 +188,7 @@ func main() {
 			// judged only after a clean accounting pass: an unread meter is not an idle guest.
 			p3.enforceSessionLimits(rootCtx, now)
 			p3.enforceExpiries(rootCtx)
-			p3.purgeAccountingDetail(rootCtx, now)
+			p3.accountingMaintenance(rootCtx, now)
 			aggOwner.sweep(rootCtx)
 			p3.reconcileShaping(rootCtx, netdShaping, c.LegacyBridge)
 			// The heartbeat proves the loop is progressing; the report says why it is degraded, since a loop
