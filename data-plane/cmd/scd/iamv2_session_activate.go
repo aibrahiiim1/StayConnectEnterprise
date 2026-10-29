@@ -190,10 +190,6 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 
-		if err := reserveLicensedSlot(ctx, tx, s.applID, s.lic.MaxConcurrentOnlineGuests()); err != nil {
-			return err
-		}
-
 		// Device limit against the PINNED plan revision, counted in the inserting transaction so two simultaneous logins cannot both see one slot left.
 		var inUse int
 		if err := tx.QueryRow(ctx, `
@@ -236,6 +232,12 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 		      FROM iam_v2.entitlements e WHERE e.id=$1`, req.EntitlementID, req.AuthContextID).Scan(&method); err != nil {
 			return err
 		}
+		// The appliance-wide admission lock is taken as late as possible and held only for the count and the insert: every sign-in on the
+		// appliance queues behind it, so the statements above must not run while it is held (capacity acceptance, 2026-10-30).
+		if err := reserveLicensedSlot(ctx, tx, s.applID, s.lic.MaxConcurrentOnlineGuests()); err != nil {
+			return err
+		}
+
 		return tx.QueryRow(ctx, `
 		    INSERT INTO iam_v2.sessions
 		      (tenant_id, site_id, entitlement_id, device_id, credential_method, state, started,
