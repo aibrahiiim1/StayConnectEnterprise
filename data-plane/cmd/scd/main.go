@@ -43,8 +43,6 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/nft"
 	"github.com/stayconnect/enterprise/data-plane/internal/otp"
 	"github.com/stayconnect/enterprise/data-plane/internal/otpkey"
-	"github.com/stayconnect/enterprise/data-plane/internal/pms"
-	"github.com/stayconnect/enterprise/data-plane/internal/pmsloader"
 	"github.com/stayconnect/enterprise/data-plane/internal/reqlog"
 	"github.com/stayconnect/enterprise/data-plane/internal/sealbox"
 	"github.com/stayconnect/enterprise/data-plane/internal/shape"
@@ -230,11 +228,6 @@ type server struct {
 	// operatorMFA seals operators' authenticator secrets and MACs their recovery codes.
 	operatorMFA operatorMFAKeys
 
-	// The PMS registry is live-reloadable: readers use currentPMSReg(); reload swaps it under pmsMu, and pmsBuilt holds the generation's providers to Stop() on the next reload.
-	pmsMu    sync.RWMutex
-	pmsReg   *pms.Registry
-	pmsBuilt []pms.Provider
-
 	db     *pgxpool.Pool
 	tenID  string
 	siteID string
@@ -286,52 +279,6 @@ type server struct {
 
 	// portalTLS is the portal HTTPS certificate agent and the one answer to "is the portal on HTTPS"; a nil agent reports the HTTP fallback.
 	portalTLS *portalTLSAgent
-}
-
-func (s *server) currentPMSReg() *pms.Registry {
-	s.pmsMu.RLock()
-	defer s.pmsMu.RUnlock()
-	return s.pmsReg
-}
-
-// pmsReloadSafetyLoop reloads every 10 minutes as a safety net; Hotel Admin changes reload immediately through /v1/admin/pms/reload.
-func (s *server) pmsReloadSafetyLoop(ctx context.Context) {
-	t := time.NewTicker(10 * time.Minute)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			rctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-			if err := s.reloadPMS(rctx); err != nil {
-				slog.Warn("pms safety-net reload failed", "err", err)
-			}
-			cancel()
-		}
-	}
-}
-
-// reloadPMS swaps in a freshly built provider set, then stops the previous generation; a failure mid-build leaves the old registry intact.
-func (s *server) reloadPMS(ctx context.Context) error {
-	reg, built, err := pmsloader.Load(ctx, s.db, s.tenID, s.siteID)
-	if err != nil {
-		return fmt.Errorf("reloadPMS load: %w", err)
-	}
-	pmsloader.StartAll(ctx, built)
-	// Re-seed stub reservations if SCD_PMS_STUB_SEED=true: the fresh Stub lost the previous generation's seed.
-	maybeSeedPMSStubs(built)
-
-	s.pmsMu.Lock()
-	oldBuilt := s.pmsBuilt
-	s.pmsReg = reg
-	s.pmsBuilt = built
-	s.pmsMu.Unlock()
-
-	// Stop the prior generation after the swap so in-flight requests holding the old registry finish without racing on torn-down resources.
-	pmsloader.StopAll(oldBuilt)
-	slog.Info("pms reloaded", "count", len(built))
-	return nil
 }
 
 type authorizeReq struct {
@@ -611,21 +558,6 @@ func main() {
 	// the setup wizard and runs the assignment agent, then re-execs once a signed assignment arrives.
 	awaiting := c.TenantID == "" || c.SiteID == ""
 
-	var pmsReg *pms.Registry
-	var pmsBuilt []pms.Provider
-	if awaiting {
-		pmsReg = pms.NewRegistry()
-		slog.Warn("awaiting assignment/enrollment: skipping tenant-scoped guest-plane subsystems (PMS/social)")
-	} else {
-		pmsReg, pmsBuilt, err = pmsloader.Load(rootCtx, pool, c.TenantID, c.SiteID)
-		if err != nil {
-			slog.Error("pmsloader: load failed", "err", err)
-			os.Exit(1)
-		}
-		pmsloader.StartAll(rootCtx, pmsBuilt)
-		maybeSeedPMSStubs(pmsBuilt)
-	}
-
 	s := &server{
 		nft:          newLocalNFT(nft.New()),
 		shp:          shape.New(),
@@ -635,8 +567,6 @@ func main() {
 		whatsapp:     whatsapp.NewStub(c.WhatsAppLogPath),
 		socialBase:   socialBase,
 		loginRL:      newLoginLimiter(),
-		pmsReg:       pmsReg,
-		pmsBuilt:     pmsBuilt,
 		db:           pool,
 		tenID:        c.TenantID,
 		siteID:       c.SiteID,
@@ -835,9 +765,6 @@ func main() {
 	r.Post("/v1/sessions/authorize-resume", s.authorizeResume)
 	r.Post("/v1/sessions/resume-revoke", s.resumeRevoke)
 	// /v1/auth/pms/verify is removed; the PMS guest path is /v1/phase3/auth/pms/resolve then /grant, which derives identity from the connection rather than the body.
-	r.Post("/v1/admin/pms/{name}/test", s.pmsAdminTest)
-	r.Get("/v1/admin/pms/{name}/cache", s.pmsAdminCache)
-	r.Get("/v1/admin/pms/{name}/health", s.pmsAdminHealth)
 	r.Get("/v1/tenant/auth-methods", s.tenantAuthMethods)
 	r.Get("/v1/tenant/branding", s.tenantBranding)
 	r.Get("/v1/ledger/status", s.ledgerStatusGet)
@@ -867,7 +794,6 @@ func main() {
 	r.Get("/v1/central/offline-request", s.setupActivationRequest)
 	r.Post("/v1/central/offline-package", s.centralOfflinePackage)
 	r.Post("/v1/license/install", s.licenseInstall)
-	r.Post("/v1/admin/pms/reload", s.pmsAdminReload)
 	r.Post("/v1/admin/walled-garden/reload", s.gardenReload)
 	s.notifyAdminRoutes(r)
 	// Social sign-in administration for edged: the write-only secret, its yes/no state, reload, and the offered/why-not status.
@@ -1003,7 +929,7 @@ func main() {
 			}
 		}()
 	}
-	go s.pmsHealthFlushLoop(rootCtx)
+	go s.activeSessionsGaugeLoop(rootCtx)
 	// The portal HTTPS certificate agent runs on every appliance: one that cannot reach Central still decides HTTPS from the certificate it has until it expires.
 	go s.portalTLS.run(rootCtx)
 	// Walled-garden rules from the site DB are reconciled into the nft walled_garden_ip set.
@@ -1015,8 +941,6 @@ func main() {
 	}
 	go s.cardReconcileLoop(rootCtx)
 	go s.postingLoop(rootCtx, s.initPostingWorker(rootCtx))
-	// Safety-net reload every 10 minutes in case a Hotel Admin reload was missed.
-	go s.pmsReloadSafetyLoop(rootCtx)
 
 	// Bounded-retention cleanup of durable throttle buckets (only when enabled).
 	if s.authThrottle != nil {

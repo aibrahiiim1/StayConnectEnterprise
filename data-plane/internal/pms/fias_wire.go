@@ -25,7 +25,7 @@ func WriteFramedRecord(w io.Writer, body string) error {
 func ReadFramedRecord(br *bufio.Reader) (string, error) { return readFramedRecord(br) }
 
 // pmsd parses GI/GC/GO under a STRICT grammar (internal/pmsd/strict_parse.go) that rejects malformed, empty and
-// ambiguous tokens; the permissive parseFields here serves only the legacy connectors.
+// ambiguous tokens.
 
 func RecordID(body string) string {
 	if len(body) < 2 {
