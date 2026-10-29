@@ -393,7 +393,7 @@ rows are cascaded away with it) and refuses to delete when that fails.
 - **Registration limits (AD-19, AD-20).** A new registration whose serial or fingerprint is the shared constant-anchor value
   (no DMI data, machine-id or NIC) is refused with 422; existing rows are untouched. New waiting rows are capped by the
   setting `max_waiting_appliances` (default 200, 10-5000; `GET|PATCH /cloud/v1/settings/registration`, audited, migration
-  0060): past it, registration answers 503 and raises one `registration_cap_reached` alert. Nothing is pruned.
+  0059): past it, registration answers 503 and raises one `registration_cap_reached` alert. Nothing is pruned.
 - **Trust and revocations (AD-2, AD-16).** The appliance pins the appliance Root CA (`/etc/stayconnect/appliance-root-ca.crt`,
   installed at provisioning by `install-appliance-root-ca.sh`) and accepts only CA bundles and client certificates that chain
   to it. It stores licence revocations only when the fetch came over mutual TLS.
