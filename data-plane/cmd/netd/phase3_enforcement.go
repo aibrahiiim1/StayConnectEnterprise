@@ -7,6 +7,7 @@ import (
 	"context"
 	"log/slog"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -44,6 +45,34 @@ func (e *pgEnforcement) Ended(ctx context.Context, sessionID, reason string) err
 		e.tenant, e.site, sessionID, reason).Scan(&outcome)
 }
 
+// IsEnded is a plain read: has durable state already ended this session (or is it unknown to this tenant/site)?
+func (e *pgEnforcement) IsEnded(ctx context.Context, sessionID string) (bool, error) {
+	var state string
+	var ended *time.Time
+	err := e.pool.QueryRow(ctx,
+		`SELECT state, ended FROM iam_v2.sessions WHERE id=$1::uuid AND tenant_id=$2 AND site_id=$3`,
+		sessionID, e.tenant, e.site).Scan(&state, &ended)
+	if err != nil {
+		return false, err
+	}
+	return ended != nil || state == "ended" || state == "closed", nil
+}
+
+// endedReader is implemented by a recorder that can say, without taking the session's row lock, that durable state has already ended a session.
+type endedReader interface {
+	IsEnded(ctx context.Context, sessionID string) (bool, error)
+}
+
+// isSessionEndedErr recognises the controlled writers' refusal of a session that has ended.
+func isSessionEndedErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	m := err.Error()
+	return strings.Contains(m, "ENFORCE_SESSION_ENDED") ||
+		(strings.Contains(m, "ACCT_SESSION_OUT_OF_SCOPE") && strings.Contains(m, " ended"))
+}
+
 // Confirm is a plain read, not a second promotion attempt.
 func (e *pgEnforcement) Confirm(ctx context.Context, sessionID string) (bool, error) {
 	var state string
@@ -63,6 +92,8 @@ const (
 	activationProven activationOutcome = iota
 	activationUnproven
 	activationFailed
+	// activationEnded: the durable record says the session has ended. Access is withdrawn, quietly.
+	activationEnded
 )
 
 // quarantineBackoff is how long a session stays denied after exhausting the activation grace. It doubles so a
@@ -114,13 +145,35 @@ func (p *phase3Shaping) proveActive(ctx context.Context, key, sessionID, bridge 
 		// session per pass that can only repeat its answer. It is asked again every phase3ReproveEvery (see phase3_batch.go).
 		return activationProven, ""
 	}
-	outcome, err := p.enforcement.Activate(ctx, sessionID, bridge, minor, epoch)
+	if p.pb != nil && p.provenKnown(key, epoch) && p.quarantined[key] == nil {
+		// Proven before and due again: a plain read answers "still active and not ended" without the row lock and the durable write that the
+		// promotion call takes even for a session that is already active (it is a commit per session on the database's critical path). Any other
+		// answer falls through to the promotion call and its grace rules below.
+		if active, cerr := p.enforcement.Confirm(ctx, sessionID); cerr == nil && active {
+			p.noteProven(key, epoch, nowBoot)
+			return activationProven, ""
+		}
+	}
+	var outcome string
+	var err error
+	if r, ok := p.pb.takeActivation(key); ok {
+		outcome, err = r.outcome, r.err // already asked, concurrently with the rest of the chunk
+	} else {
+		outcome, err = p.enforcement.Activate(ctx, sessionID, bridge, minor, epoch)
+	}
 	if err == nil {
 		p.noteProven(key, epoch, nowBoot)
 		p.clearAttempt(key)
 		slog.Info("phase3: session enforcement confirmed", "session", sessionID, "bridge", bridge,
 			"minor", minor, "epoch", epoch, "outcome", outcome)
 		return activationProven, ""
+	}
+	if isSessionEndedErr(err) {
+		// The durable record says the session has ended (it ran out its window or was ended while the plan that listed it was in flight). That is the
+		// ordinary end of a short session, not an activation that failed: no grace, no strike, no quarantine.
+		delete(p.provenAt, key)
+		p.clearAttempt(key)
+		return activationEnded, ""
 	}
 	// Ambiguous: ask durable state whether the promotion landed.
 	active, cerr := p.enforcement.Confirm(ctx, sessionID)
@@ -207,6 +260,14 @@ func (p *phase3Shaping) markEnded(ctx context.Context, sessionID, reason string)
 	}
 	if !validEndReason(reason) {
 		reason = "ENFORCEMENT_TORN_DOWN"
+	}
+	if p.pb != nil {
+		// Already ended in durable state (the usual case for an expired short session): nothing to write, and no row lock taken to learn it.
+		if er, ok := p.enforcement.(endedReader); ok {
+			if ended, err := er.IsEnded(ctx, sessionID); err == nil && ended {
+				return true
+			}
+		}
 	}
 	if err := p.enforcement.Ended(ctx, sessionID, reason); err != nil {
 		// Access is already denied at the packet layer; this is only bookkeeping lag.

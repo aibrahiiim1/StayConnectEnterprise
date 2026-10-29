@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/shape"
@@ -20,15 +21,18 @@ import (
 )
 
 type shapingPlanResponse struct {
-	Accepted       bool     `json:"accepted"`
-	Reason         string   `json:"reason,omitempty"`
-	PlanGeneration int64    `json:"plan_generation,omitempty"`
-	TornDown       int      `json:"torn_down"`
-	StraysRemoved  int      `json:"strays_removed"`
-	Shaped         int      `json:"shaped"`
-	Failed         int      `json:"failed"`
-	Degraded       bool     `json:"degraded"`
-	Problems       []string `json:"problems,omitempty"`
+	Accepted       bool   `json:"accepted"`
+	Reason         string `json:"reason,omitempty"`
+	PlanGeneration int64  `json:"plan_generation,omitempty"`
+	TornDown       int    `json:"torn_down"`
+	StraysRemoved  int    `json:"strays_removed"`
+	Shaped         int    `json:"shaped"`
+	Failed         int    `json:"failed"`
+	Degraded       bool   `json:"degraded"`
+	// EndedMidPass counts sessions whose access ended while the plan that listed them was in flight (window ran out, durable state says ended):
+	// their access was withdrawn and nothing failed.
+	EndedMidPass int      `json:"ended_mid_pass,omitempty"`
+	Problems     []string `json:"problems,omitempty"`
 }
 
 // shaper is the tc surface netd uses; an interface so ordering and idempotency are provable without a kernel.
@@ -126,13 +130,21 @@ type phase3Shaping struct {
 	provenAt map[string]provenMark
 	// routineReserve overrides phase3RoutineReserve (tests only).
 	routineReserve time.Duration
+	// trace times the stages of the pass in progress (phase3_trace.go).
+	trace *passTrace
+	// arrivedGen is the newest plan generation that has reached the handler, whether or not it has the lock yet; supersededN counts the plans it overtook.
+	arrivedGen  atomic.Int64
+	supersededN atomic.Int64
 }
 
 type passLeases struct {
-	src    leaseSource
-	done   bool
-	leases []KeaLease
-	err    error
+	src   leaseSource
+	done  bool
+	fetch time.Duration
+	// onFetch reports how long the one lease read of the pass took and how many leases it returned.
+	onFetch func(time.Duration, int)
+	leases  []KeaLease
+	err     error
 }
 
 // KeaEpoch forwards to the real source.
@@ -154,8 +166,13 @@ func (l *passLeases) AbsenceTrusted(ip net.IP) (bool, string) {
 
 func (l *passLeases) Leases() ([]KeaLease, error) {
 	if !l.done {
+		t0 := time.Now()
 		l.leases, l.err = l.src.Leases()
 		l.done = true
+		l.fetch = time.Since(t0)
+		if l.onFetch != nil {
+			l.onFetch(l.fetch, len(l.leases))
+		}
 	}
 	return l.leases, l.err
 }
@@ -196,10 +213,41 @@ type errPlanRefused struct{ reason string }
 
 func (e errPlanRefused) Error() string { return "plan refused: " + e.reason }
 
+// reasonSuperseded answers a plan that a newer one overtook while it waited for the previous pass; it is not a refusal of the plan's content.
+const reasonSuperseded = "superseded_by_newer_plan"
+
+// noteArrival records a plan generation as soon as it reaches netd, before it waits for the lock, so a waiter can tell it has been overtaken.
+func (p *phase3Shaping) noteArrival(gen int64) {
+	for {
+		cur := p.arrivedGen.Load()
+		if gen <= cur || p.arrivedGen.CompareAndSwap(cur, gen) {
+			return
+		}
+	}
+}
+
+func (p *phase3Shaping) noteSuperseded() { p.supersededN.Add(1) }
+
 // submit is the whole admission path; it returns a refusal reason rather than applying a plan it only partly understands.
 func (p *phase3Shaping) submit(ctx context.Context, env shapeplan.Envelope, now time.Time) (shapingPlanResponse, error) {
+	entered := time.Now()
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	waited := time.Since(entered)
+	// A plan that waited for the lock behind a slow pass is judged, and its leases computed, from the moment it runs; a newer plan that arrived while it
+	// waited makes it obsolete, and walking it would only delay the newer one (the lab: a queue of detached passes, each starting with its 2-minute
+	// budget already spent, ran with a dead context and failed everything closed).
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if newest := p.arrivedGen.Load(); env.PlanGeneration < newest {
+		p.noteSuperseded()
+		return shapingPlanResponse{Accepted: false, Reason: reasonSuperseded}, errPlanRefused{reasonSuperseded}
+	}
+	// The pass budget runs from here, not from the arrival of the request.
+	var cancelPass context.CancelFunc
+	ctx, cancelPass = context.WithTimeout(ctx, phase3PassTimeout)
+	defer cancelPass()
 
 	if !p.mode.Active {
 		// DARK: netd refuses on its own authority so the kill switch does not depend on another process.
@@ -252,7 +300,24 @@ func (p *phase3Shaping) submit(ctx context.Context, env shapeplan.Envelope, now 
 	}
 
 	p.walkRenewable = map[string]renewSession{}
+	passStart := time.Now()
+	atLock := int64(-1)
+	if dl, ok := ctx.Deadline(); ok {
+		atLock = time.Until(dl).Milliseconds()
+	}
+	p.trace = newPassTrace()
 	res := p.reconcileLocked(ctx, env, now)
+	left := int64(-1)
+	if dl, ok := ctx.Deadline(); ok {
+		left = time.Until(dl).Milliseconds()
+	}
+	slog.LogAttrs(ctx, slog.LevelInfo, "phase3: pass", append([]slog.Attr{
+		slog.Int64("gen", env.PlanGeneration), slog.Int("sessions", len(env.Sessions)),
+		slog.Int64("lock_wait_ms", waited.Milliseconds()), slog.Int64("pass_ms", time.Since(passStart).Milliseconds()),
+		slog.Int64("budget_at_lock_ms", atLock), slog.Int64("budget_left_ms", left), slog.Int("shaped", res.Shaped), slog.Int("failed", res.Failed),
+		slog.Int("torn_down", res.TornDown), slog.Int("strays", res.StraysRemoved), slog.Int("ended_mid_pass", res.EndedMidPass)},
+		append(append(p.trace.counts, p.trace.stages...), dbTimes.drain()...)...)...)
+	p.trace = nil
 	res.Accepted = true
 	res.PlanGeneration = env.PlanGeneration
 	p.memo = walkMemo{hash: env.DesiredStateHash, at: now, clean: !res.Degraded && len(res.Problems) == 0 && res.Failed == 0,
@@ -295,12 +360,16 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 	// One DHCP lease list per pass, not per session per tick.
 	if p.owner.src != nil {
 		saved := p.owner
-		p.owner.src = &passLeases{src: saved.src}
+		p.owner.src = &passLeases{src: saved.src, onFetch: func(d time.Duration, n int) {
+			p.count("lease_fetch_ms", int(d.Milliseconds()))
+			p.count("leases", n)
+		}}
 		defer func() { p.owner = saved }()
 	}
 	p.passClasses, p.passGroups = nil, nil
 	defer func() { p.passClasses, p.passGroups = nil, nil }()
 	p.pruneLeaseMemory(now)
+	p.mark("setup")
 	if p.batching() {
 		p.pb = newPassBatch()
 	}
@@ -401,9 +470,18 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 		// Only the durable half runs; the kernel half is left to the new owner.
 		if minor, ok := shape.MinorForIP(ip); ok {
 			if next, taken := desired[s.Bridge][minor]; taken && next.SessionID != s.SessionID {
+				ck := classKey(s.Bridge, s.SessionID)
+				// Handed over and already recorded as ended: the plan keeps listing it for a while, and recording it again every pass is a locking write per
+				// session per pass (a churned client keeps its address, so every session it has had is handed over to the next).
+				if p.endedTorn[ck] {
+					stillTorn[ck] = true
+					continue
+				}
 				p.endSeries(s.Bridge, s.SessionID)
-				p.markEnded(ctx, s.SessionID, s.EndReason)
-				delete(p.classes, classKey(s.Bridge, s.SessionID))
+				if p.queueEnd(ctx, ck, s.SessionID, s.EndReason) {
+					stillTorn[ck] = true
+				}
+				delete(p.classes, ck)
 				res.TornDown++
 				continue
 			}
@@ -444,11 +522,16 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 	if len(tearing) > 0 {
 		p.tearBatch(ctx, tearing, stillTorn, &res)
 	}
+	p.count("tear_listed", len(tear))
+	p.count("tear_new", len(tearing))
+	p.mark("tear")
 	p.endedTorn = stillTorn
 
 	// 2a. Remove stray nft elements the plan does not claim, before the tc stray sweep: deleting a class first would leave its authorized address forwarding unshaped and uncounted.
 	// Only the Phase-3 set is enumerated (once per pass, reused for renewal); legacy auth_ipv4 is never touched here.
+	p.mark("pre_gate")
 	view := p.snapshotGate(ctx)
+	p.mark("gate_list")
 	if p.gate != nil {
 		if !view.ok {
 			res.Failed++
@@ -498,6 +581,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 	// 2b. REMOVE STRAY CLASSES — everything installed on a managed bridge that the plan does not claim.
 	// The bridge read is reused by step 3's per-pass cache (perf audit D4-L1): the sweep deletes only minors the plan
 	// does not want, and step 3 asks only about minors it does want, so the read stays exact for every question asked.
+	p.mark("stray_auth")
 	strayReads := map[string]map[int]shape.ClassBytes{}
 	for _, bridge := range sortedKeys(bridges) {
 		installed, err := p.shp.ReadClasses(ctx, bridge)
@@ -545,6 +629,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 		}
 	}
 
+	p.mark("stray_class")
 	// 2c. Reconcile the legacy set to empty: nothing writes auth_ipv4 any more, so every element is an ungoverned grant.
 	if p.legacy != nil {
 		n, err := p.legacy.Drain(ctx)
@@ -558,6 +643,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 		}
 	}
 
+	p.mark("legacy")
 	// 3. Shape what must be forwarded, staged and fail-closed (see provisionSession); tc class inventories are read once per device per pass.
 	p.passClasses = strayReads
 	p.passGroups = map[string]bool{}
@@ -584,8 +670,13 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 		p.flushDenies(ctx, &res)
 		p.flushRenewals(ctx, &res)
 		p.flushDenies(ctx, &res)
+		p.mark("flush_tail")
+		// Last: the durable end records of the sessions torn down above.
+		p.finishEnds(ctx, &res)
+		p.mark("ends")
 	}
 
+	p.mark("shape_tail")
 	// Write the durable inventory after convergence so a restart resumes from what is installed; a failed write is reported because the next start re-generates every class and loses accounting continuity.
 	if p.classStore != nil {
 		if err := p.classStore.save(p.snapshot()); err != nil {
@@ -600,6 +691,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 		}
 	}
 
+	p.mark("save")
 	res.Degraded = res.Failed > 0
 	p.lastApplied = now
 	p.lastDegrade = ""
@@ -662,11 +754,15 @@ func (s *server) phase3ShapingHandler(w http.ResponseWriter, r *http.Request) {
 
 	// The pass outlives the request (audit Phase 8 L9): acctd's client gives up after 10 s, and a cancelled context
 	// would stop a revocation half way, including the deny calls that fail closed. Its own deadline bounds it instead.
-	passCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), phase3PassTimeout)
-	defer cancel()
-	res, err := s.phase3.submit(passCtx, env, time.Now())
+	// The budget starts when the pass gets the lock (see submit), not here: a request queued behind a slow pass must not arrive at the front with it spent.
+	s.phase3.noteArrival(env.PlanGeneration)
+	res, err := s.phase3.submit(context.WithoutCancel(r.Context()), env, time.Time{})
 	if err != nil {
 		var refused errPlanRefused
+		if errors.As(err, &refused) && refused.reason == reasonSuperseded {
+			writeJSON(w, http.StatusConflict, res)
+			return
+		}
 		code := http.StatusConflict
 		if errors.As(err, &refused) && refused.reason == shapeplan.ReasonUnsupportedContract {
 			code = http.StatusBadRequest

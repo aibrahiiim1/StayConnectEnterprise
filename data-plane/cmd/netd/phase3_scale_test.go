@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -79,13 +80,47 @@ func setupRealKernel(t *testing.T) *realKernel {
 type countingEnforcement struct {
 	mu                                  sync.Mutex
 	activate, confirm, ended, activated int
+	isEndedCalls                        int
 	seen                                map[string]bool
+	// endedIDs are the sessions durable state has ended (by the expiry sweep, or by an Ended call).
+	endedIDs map[string]bool
+	// endOnActivate lists sessions that durable state ends the moment their promotion is asked for.
+	endOnActivate map[string]bool
+	// call, when set, runs on every database call (outside the lock): the churn harness advances its clock by the call's latency there.
+	call func(kind string)
+}
+
+func (e *countingEnforcement) hook(kind string) {
+	if e.call != nil {
+		e.call(kind)
+	}
+}
+
+func (e *countingEnforcement) markEndedInDB(id string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.endedIDs == nil {
+		e.endedIDs = map[string]bool{}
+	}
+	e.endedIDs[id] = true
 }
 
 func (e *countingEnforcement) Activate(ctx context.Context, sessionID, bridge string, minor int, epoch int64) (string, error) {
+	e.hook("activate")
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.activate++
+	if e.endOnActivate[sessionID] {
+		// ended in durable state between the origin and the promotion
+		e.endOnActivate[sessionID] = false
+		if e.endedIDs == nil {
+			e.endedIDs = map[string]bool{}
+		}
+		e.endedIDs[sessionID] = true
+	}
+	if e.endedIDs[sessionID] {
+		return "", fmt.Errorf("ERROR: ENFORCE_SESSION_ENDED: session %s has ended and cannot be activated", sessionID)
+	}
 	if e.seen == nil {
 		e.seen = map[string]bool{}
 	}
@@ -97,16 +132,29 @@ func (e *countingEnforcement) Activate(ctx context.Context, sessionID, bridge st
 	return "ACTIVATED", nil
 }
 func (e *countingEnforcement) Ended(ctx context.Context, sessionID, reason string) error {
+	e.hook("ended")
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.ended++
+	if e.endedIDs == nil {
+		e.endedIDs = map[string]bool{}
+	}
+	e.endedIDs[sessionID] = true
 	return nil
 }
+func (e *countingEnforcement) IsEnded(ctx context.Context, sessionID string) (bool, error) {
+	e.hook("is_ended")
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.isEndedCalls++
+	return e.endedIDs[sessionID], nil
+}
 func (e *countingEnforcement) Confirm(ctx context.Context, sessionID string) (bool, error) {
+	e.hook("confirm")
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.confirm++
-	return e.seen[sessionID], nil
+	return e.seen[sessionID] && !e.endedIDs[sessionID], nil
 }
 func (e *countingEnforcement) db() int {
 	e.mu.Lock()
@@ -120,15 +168,41 @@ func (e *countingEnforcement) isActive(id string) bool {
 }
 
 type countingOrigins struct {
-	mu sync.Mutex
-	n  int
+	mu   sync.Mutex
+	n    int
+	enf  *countingEnforcement
+	call func(kind string)
 }
 
 func (o *countingOrigins) RegisterClassOrigin(ctx context.Context, c classOrigin) (string, error) {
+	if o.call != nil {
+		o.call("origin")
+	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	if o.enf != nil {
+		o.enf.mu.Lock()
+		gone := o.enf.endedIDs[c.SessionID]
+		o.enf.mu.Unlock()
+		if gone {
+			return "", fmt.Errorf("ERROR: ACCT_SESSION_OUT_OF_SCOPE: session %s ended at 2026-01-01", c.SessionID)
+		}
+	}
 	o.n++
 	return "ORIGIN_REGISTERED", nil
+}
+
+// slowGenerations puts a latency hook in front of the generation allocator.
+type slowGenerations struct {
+	generationAllocator
+	call func(kind string)
+}
+
+func (g slowGenerations) AllocateClassGeneration(ctx context.Context, tenant, site, appliance string) (int64, error) {
+	if g.call != nil {
+		g.call("alloc")
+	}
+	return g.generationAllocator.AllocateClassGeneration(ctx, tenant, site, appliance)
 }
 
 type scaleLeases struct {
@@ -153,6 +227,7 @@ type scaleEnv struct {
 	leases   *scaleLeases
 	gate     *flushingGate
 	flows    *nopFlusher
+	clk      *atomicClock
 	gens     *fakeGenerations
 	sessions []shapeplan.Session
 	gen      int64
@@ -169,6 +244,9 @@ func newScaleEnv(t *testing.T, k kern) *scaleEnv {
 	p.gate = e.gate
 	p.enforcement = e.enf
 	p.origins = e.org
+	e.org.enf = e.enf
+	e.clk = newAtomicClock(60_000, "f81d4fae-7dec-11d0-a765-00a0c91e6bf6")
+	p.secClock = e.clk
 	p.owner = addressOwner{src: e.leases, now: k.clock}
 	e.p = p
 	return e
@@ -253,10 +331,25 @@ func (e *scaleEnv) pass() passStat {
 // tick moves the kernel's clock (element expiry) and the boot clock the activation bound is measured on forward together.
 func (e *scaleEnv) tick(d time.Duration) {
 	e.k.advance(d)
-	if c, ok := e.p.secClock.(*fixedSecurityClock); ok {
-		c.ms += d.Milliseconds()
-	}
+	e.clk.add(d)
 }
+
+// atomicClock is the boot clock of the harness; unlike fixedSecurityClock it can be advanced by the database-latency hooks, which run on several
+// goroutines at once, while the pass reads it.
+type atomicClock struct {
+	ms     atomic.Int64
+	bootID string
+}
+
+func newAtomicClock(ms int64, bootID string) *atomicClock {
+	c := &atomicClock{bootID: bootID}
+	c.ms.Store(ms)
+	return c
+}
+
+func (c *atomicClock) add(d time.Duration)        { c.ms.Add(d.Milliseconds()) }
+func (c *atomicClock) BootMillis() (int64, error) { return c.ms.Load(), nil }
+func (c *atomicClock) BootID() (string, error)    { return c.bootID, nil }
 
 func (e *scaleEnv) activeCount() int {
 	n := 0

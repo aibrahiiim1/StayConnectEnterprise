@@ -59,7 +59,8 @@ func (p *phase3Shaping) provisionPrecheck(ctx context.Context, bridge string, mi
 	// The plan may still list a session past its deadline; that is not authority to forward it.
 	lease, leasable, why := leaseFor(s, now)
 	if !leasable {
-		p.failClosed(ctx, bridge, ip, res, "shape "+s.SessionID+": "+why+"; not authorized")
+		// The plan still lists a session whose window has run out (or has under a second left): the ordinary end of access, which the next plan lists as ended.
+		p.endClosed(ctx, bridge, ip, res, "shape "+s.SessionID+": "+why+"; not authorized")
 		return provCtx{}, false
 	}
 
@@ -230,6 +231,11 @@ func (p *phase3Shaping) provisionTail(ctx context.Context, bridge string, minor 
 					res.Failed++
 					res.Problems = append(res.Problems, problem)
 				}
+				if outcome == activationEnded {
+					p.endClosed(ctx, bridge, ip, res, "session "+s.SessionID+": durable state has ended it; access withdrawn")
+					p.endSeries(bridge, s.SessionID)
+					return
+				}
 				if outcome == activationFailed {
 					// proveActive already recorded the strike and backoff; endSeries leaves that record alone.
 					p.failClosed(ctx, bridge, ip, res, "session "+s.SessionID+": activation never proven")
@@ -302,7 +308,11 @@ func (p *phase3Shaping) provisionTail(ctx context.Context, bridge string, minor 
 
 	// The origin is recorded before any forwarding filter exists so the first packet counts from a real
 	// baseline; activate_session_enforcement verifies this checkpoint before promoting the Session.
-	if problem := p.registerOrigin(ctx, s, minor, epoch); problem != "" {
+	if problem, ended := p.registerOrigin(ctx, s, minor, epoch); ended {
+		p.endClosed(ctx, bridge, ip, res, "session "+s.SessionID+": durable state has ended it; access withdrawn")
+		p.dropEnded(bridge, s.SessionID)
+		return
+	} else if problem != "" {
 		p.failClosed(ctx, bridge, ip, res, problem)
 		return
 	}
@@ -374,6 +384,9 @@ func (p *phase3Shaping) completeAdmission(ctx context.Context, bridge string, mi
 		p.noteRenewable(key, bridge, ip, s, ev.Until, now)
 	case activationUnproven:
 		// Keeps the provisional lease; the next pass retries the promotion.
+	case activationEnded:
+		p.endClosed(ctx, bridge, ip, res, "session "+s.SessionID+": durable state has ended it; access withdrawn")
+		p.endSeries(bridge, s.SessionID)
 	default:
 		p.failClosed(ctx, bridge, ip, res, "session "+s.SessionID+": activation never proven")
 		p.endSeries(bridge, s.SessionID)
@@ -479,6 +492,17 @@ func (p *phase3Shaping) failClosed(ctx context.Context, bridge string, ip net.IP
 	}
 	res.Failed++
 	res.Problems = append(res.Problems, problem)
+}
+
+// endClosed withdraws the access of a session whose access has simply ended (its window ran out, or durable state says it ended while the plan that
+// listed it was in flight). It is failClosed's withdrawal, in the same order, but a withdrawal that is proven is an event, not a failure. In a batched
+// pass it is counted (EndedMidPass); the per-session pass reports it as it always did.
+func (p *phase3Shaping) endClosed(ctx context.Context, bridge string, ip net.IP, res *shapingPlanResponse, problem string) {
+	if p.pb == nil {
+		p.failClosed(ctx, bridge, ip, res, problem)
+		return
+	}
+	p.pb.denies = append(p.pb.denies, pendingDeny{bridge: bridge, ip: ip, problem: problem, abort: true, quiet: true})
 }
 
 // classPresent requires the class on both the bridge (download) and its ifb (upload).

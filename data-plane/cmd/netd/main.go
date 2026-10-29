@@ -68,7 +68,17 @@ func main() {
 	rootCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	pool, err := pgxpool.New(rootCtx, dbURL)
+	poolCfg, err := pgxpool.ParseConfig(dbURL)
+	if err == nil {
+		// The pass runs several per-session database calls at once (phase3DBConcurrency); a smaller default pool would queue them behind each other.
+		if poolCfg.MaxConns < phase3DBConcurrency+2 {
+			poolCfg.MaxConns = phase3DBConcurrency + 2
+		}
+	}
+	var pool *pgxpool.Pool
+	if err == nil {
+		pool, err = pgxpool.NewWithConfig(rootCtx, poolCfg)
+	}
 	if err != nil {
 		slog.Error("db open", "err", err)
 		os.Exit(1)
@@ -182,7 +192,7 @@ func main() {
 		authz: p3authz,
 		store: &planStore{path: envOr("NETD_PHASE3_PLAN_STATE", "/var/lib/stayconnect/netd-phase3-plan.json")},
 		// The class creator registers the accounting origin: only it can read the counters before a guest uses it (phase3_origin.go).
-		origins:    &pgOrigins{pool: pool},
+		origins:    timedOrigins{&pgOrigins{pool: pool}},
 		classStore: &classStore{path: envOr("NETD_PHASE3_CLASS_STATE", "/var/lib/stayconnect/netd-phase3-classes.json")},
 		// Write-ahead activation journal, fsynced before a guest is provisionally authorized (phase3_journal.go).
 		journal: &activationJournal{path: envOr("NETD_PHASE3_ACTIVATION_JOURNAL",
@@ -190,14 +200,14 @@ func main() {
 		// Monotonic clock for the activation bound; the wall clock can move backwards and lengthen it.
 		secClock: newSecurityClock(),
 		// Generations come from a durable, appliance-scoped allocator, never process memory or the clock.
-		generations: &pgGenerations{pool: pool},
+		generations: timedGenerations{&pgGenerations{pool: pool}},
 		// Packet-authorization gate: writes only the Phase-3 set, and revocation also flushes the address's
 		// conntrack flows so access ends for open connections too.
 		gate: newFlushingGate(newMACAwareGate(ap), conntrack.New()),
 		// The legacy auth_ipv4 set is kept empty.
 		legacy: newNFTLegacySet(),
 		// Confirmed kernel result, so a Session is only `active` once both halves are in force.
-		enforcement: &pgEnforcement{pool: pool, tenant: p3mode.TenantID, site: p3mode.SiteID},
+		enforcement: timedEnforcement{&pgEnforcement{pool: pool, tenant: p3mode.TenantID, site: p3mode.SiteID}},
 		// DHCP decides who holds an address; without it a reassigned address kept the previous guest's entitlement (phase3_address_owner.go).
 		owner: addressOwner{src: ap.kea},
 		// Kea also locates its lease database so an evidence outage can name the artifact.

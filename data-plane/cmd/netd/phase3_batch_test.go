@@ -114,36 +114,59 @@ func TestNewSessionsAreNotStarvedByActiveOnes(t *testing.T) {
 	}
 }
 
-// New sessions are admitted before routine renewal of the sessions already in force.
-func TestNewSessionsAreAdmittedBeforeRoutineRenewal(t *testing.T) {
+// The order of a pass: the leases that are due are written before ANY database call, then the new sessions are admitted in the same pass. Bookkeeping
+// that waits on the database must never stand between a long session and its renewal.
+func TestLeaseRenewalComesBeforeAnyDatabaseCallAndNewSessionsFollow(t *testing.T) {
 	e, k := newFakeScale(t, 100, false)
 	e.addSessions(100, 105)
 	e.tick(35 * time.Second) // every old lease is due
+	logDB := func(kind string) {
+		k.mu.Lock()
+		k.opLog = append(k.opLog, "DB "+kind)
+		k.mu.Unlock()
+	}
+	e.enf.call, e.org.call = logDB, logDB
+	e.p.generations = slowGenerations{generationAllocator: e.gens, call: logDB}
 	k.mu.Lock()
 	k.opLog = nil
 	k.mu.Unlock()
 	if st := e.pass(); st.res.Failed != 0 {
 		t.Fatalf("%v", st.res.Problems)
 	}
-	firstNew, firstOldWrite := -1, -1
 	k.mu.Lock()
-	defer k.mu.Unlock()
-	for i, op := range k.opLog {
+	opLog := append([]string(nil), k.opLog...)
+	k.mu.Unlock()
+	firstDB, firstRenewal, lastRenewalOfOld := -1, -1, -1
+	for i, op := range opLog {
+		if strings.HasPrefix(op, "DB ") {
+			if firstDB < 0 {
+				firstDB = i
+			}
+			continue
+		}
 		isNew := false
 		for j := 100; j < 105; j++ {
-			if strings.HasSuffix(op, authKey(j)) {
+			if strings.Contains(op, authKey(j)) {
 				isNew = true
 			}
 		}
-		if isNew && firstNew < 0 {
-			firstNew = i
-		}
-		if !isNew && firstOldWrite < 0 {
-			firstOldWrite = i
+		if !isNew {
+			if firstRenewal < 0 {
+				firstRenewal = i
+			}
+			lastRenewalOfOld = i
 		}
 	}
-	if firstNew < 0 || firstOldWrite < 0 || firstNew > firstOldWrite {
-		t.Fatalf("the first write for a new session is #%d, the first routine renewal #%d; new work must come first\n%v", firstNew, firstOldWrite, k.opLog[:8])
+	if firstDB < 0 || firstRenewal < 0 {
+		t.Fatalf("no database call or no renewal in the pass: %v", opLog)
+	}
+	if lastRenewalOfOld > firstDB {
+		t.Fatalf("a renewal (#%d) was written after the first database call (#%d)\n%v", lastRenewalOfOld, firstDB, opLog[:12])
+	}
+	for j := 100; j < 105; j++ {
+		if !e.enf.isActive(scaleSession(j).SessionID) || !hasAuth(k, j) {
+			t.Fatalf("new session %d was not admitted in the same pass", j)
+		}
 	}
 }
 

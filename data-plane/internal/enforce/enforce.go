@@ -125,6 +125,12 @@ func (e *Enforcer) WithAggregateOnlineTime(maxChargeSeconds int) *Enforcer {
 
 func (e *Enforcer) Pool() *pgxpool.Pool { return e.pool }
 
+// EndedListedFor is how long a session that has ended stays in the plan, as one to tear down. Kernel state of an ended session is also removed by netd's stray
+// sweeps, and its durable end is already recorded, so the listing only has to outlast a few submissions. It was an hour, which under sustained churn
+// (300 short sessions a minute) is 18,000 entries: a plan that outgrows netd's 4 MB request limit after about 45 minutes and makes every pass walk, and
+// hand over, thousands of sessions that have nothing left to do.
+const EndedListedFor = 10 * time.Minute
+
 // PlanForSite derives the plan from durable state alone. PENDING_ENFORCEMENT sessions must be included as
 // desired, or the grant would wait forever for an ACTIVE nothing was asked to produce; this is safe because
 // netd admits a guest only after the accountable class and the nft gate are proven.
@@ -143,10 +149,10 @@ func (e *Enforcer) PlanForSite(ctx context.Context, tenant, site string) (Plan, 
 		JOIN iam_v2.entitlements e ON e.id = s.entitlement_id
 		LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id
 		WHERE s.tenant_id=$1 AND s.site_id=$2
-		  AND (s.state IN ('active','PENDING_ENFORCEMENT') OR s.ended > now() - interval '1 hour')
+		  AND (s.state IN ('active','PENDING_ENFORCEMENT') OR s.ended > now() - ($3::int * interval '1 second'))
 		-- TOTAL order, not merely by time: resolveAddressOwnership below keeps the LAST session it sees for
 		-- an address, so two sessions sharing a started timestamp must still arrive in one fixed order.
-		ORDER BY s.started, s.id`, tenant, site)
+		ORDER BY s.started, s.id`, tenant, site, int(EndedListedFor/time.Second))
 	if err != nil {
 		return p, err
 	}

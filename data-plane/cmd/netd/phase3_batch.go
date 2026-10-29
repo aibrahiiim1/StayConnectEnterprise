@@ -238,6 +238,9 @@ type pendingDeny struct {
 	abort bool
 	// errLabel: for a plain hold, the text a failed denial is reported under (the hold itself is reported by the caller).
 	errLabel string
+	// quiet: the access ended in the ordinary way (the window ran out, durable state says ended). Withdrawing it is counted, not reported as a failure,
+	// unless the withdrawal itself cannot be proven.
+	quiet bool
 }
 
 type pendingRenew struct {
@@ -252,9 +255,15 @@ type pendingRenew struct {
 type passBatch struct {
 	denies []pendingDeny
 	renew  map[string]pendingRenew
+	// ends are durable end records still to be written for sessions whose kernel state is already gone (finishTears).
+	ends []pendingEnd
+	// activations are promotion results fetched concurrently ahead of the sequential state machine that consumes them.
+	activations map[string]activationResult
 }
 
-func newPassBatch() *passBatch { return &passBatch{renew: map[string]pendingRenew{}} }
+func newPassBatch() *passBatch {
+	return &passBatch{renew: map[string]pendingRenew{}, activations: map[string]activationResult{}}
+}
 
 func urgentCtx(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.WithoutCancel(ctx), phase3UrgentBudget)
@@ -279,6 +288,20 @@ func (p *phase3Shaping) recentlyProven(key string, epoch, nowBoot int64) bool {
 	}
 	age := nowBoot - m.bootMs
 	return age >= 0 && age < reproveAfter(key)
+}
+
+// phase3ProofMaxAge is how long a proof of durable ACTIVE is trusted for a full-length lease. Re-proof normally comes every 60-90 s; this is the margin
+// for a database that is slow, not a second interval.
+const phase3ProofMaxAge = 5 * time.Minute
+
+// proofFresh: proven on this boot, for this class generation, within phase3ProofMaxAge.
+func (p *phase3Shaping) proofFresh(key string, epoch, nowBoot int64) bool {
+	m, ok := p.provenAt[key]
+	if !ok || m.epoch != epoch {
+		return false
+	}
+	age := nowBoot - m.bootMs
+	return age >= 0 && age < phase3ProofMaxAge.Milliseconds()
 }
 
 func (p *phase3Shaping) provenKnown(key string, epoch int64) bool {
@@ -372,10 +395,15 @@ func (p *phase3Shaping) flushDenies(ctx context.Context, res *shapingPlanRespons
 		}
 	}
 	for i, d := range items {
-		if d.abort {
-			res.Failed++
-			res.Problems = append(res.Problems, d.problem+suffix[i])
+		if !d.abort {
+			continue
 		}
+		if d.quiet && suffix[i] == "" {
+			res.EndedMidPass++
+			continue
+		}
+		res.Failed++
+		res.Problems = append(res.Problems, d.problem+suffix[i])
 	}
 }
 
@@ -556,7 +584,7 @@ func (p *phase3Shaping) tearBatch(ctx context.Context, items []tearItem, stillTo
 			res.Problems = append(res.Problems, "tear "+s.SessionID+": access denied but tc cleanup failed: "+err.Error())
 			continue
 		}
-		if p.markEnded(ctx, s.SessionID, s.EndReason) {
+		if p.queueEnd(ctx, classKey(s.Bridge, s.SessionID), s.SessionID, s.EndReason) {
 			stillTorn[classKey(s.Bridge, s.SessionID)] = true
 		}
 		if minor, ok := shape.MinorForIP(it.ip); ok {
@@ -605,7 +633,7 @@ func (p *phase3Shaping) classifySession(ctx context.Context, bridge string, mino
 	if p.quarantined[key] != nil {
 		return workIndividual
 	}
-	epoch, active := p.epochs[key]
+	_, active := p.epochs[key]
 	_, held := p.classes[key]
 	down, err := p.readClassesForPass(ctx, bridge)
 	if err != nil {
@@ -619,7 +647,7 @@ func (p *phase3Shaping) classifySession(ctx context.Context, bridge string, mino
 	_, u := up[minor]
 	switch {
 	case active && held:
-		if d && u && p.provenKnown(key, epoch) && p.installedMatchesPlan(ctx, bridge, minor, s, "") {
+		if d && u && p.installedMatchesPlan(ctx, bridge, minor, s, "") {
 			return workSteady
 		}
 	case !active && !held:
@@ -661,27 +689,41 @@ func (p *phase3Shaping) provisionBridgeBatched(ctx context.Context, bridge strin
 			p.provisionTail(ctx, bridge, minor, s, view, now, res, pc)
 		}
 	}
-	// 2. Urgent first: sessions failing closed, then new sessions.
+	p.mark("precheck")
+	p.count("n_admit", len(admit))
+	p.count("n_steady", len(steady))
+	// 2. Fail closed first: the sessions whose access must be withdrawn.
 	p.flushDenies(ctx, res)
-	p.admitBatch(ctx, bridge, admit, view, now, res)
+	p.mark("deny_flush")
+	// 3. Then keep every unchanged, already-proven session forwarding. This needs nothing but memory and one nft transaction, so it comes BEFORE anything that
+	// can wait on the database: in the lab the leases of the long sessions lapsed behind admissions and bookkeeping that were stuck on a lock.
+	nowBoot, _ := p.bootNow()
+	for _, c := range steady {
+		p.steadyLease(ctx, bridge, c, nowBoot, view, now, res)
+	}
 	p.flushRenewals(ctx, res)
 	p.flushDenies(ctx, res)
-	// 3. Routine: sessions already in force and unchanged. Bounded by what is left of the pass; their leases have at least phase3LeaseRenewBelow of margin.
+	p.mark("renew")
+	// 4. New sessions.
+	p.admitBatch(ctx, bridge, admit, view, now, res)
+	p.mark("admit")
+	p.flushRenewals(ctx, res)
+	p.flushDenies(ctx, res)
+	p.mark("urgent_flush")
+	// 5. Routine bookkeeping: re-prove the sessions whose proof has aged. Bounded by what is left of the pass; it never delays a lease, which is written above.
 	if len(steady) == 0 {
 		return
 	}
-	for idx, c := range steady {
-		if dl, ok := ctx.Deadline(); ctx.Err() != nil || (ok && time.Until(dl) < p.routineReserveOrDefault()) {
-			left := len(steady) - idx
-			slog.Warn("netd: pass budget nearly exhausted; routine renewal of unchanged sessions deferred to the next pass", "bridge", bridge, "sessions", left)
-			res.Failed++
-			res.Problems = append(res.Problems, fmt.Sprintf("pass budget nearly exhausted on %s: routine renewal of %d unchanged sessions deferred to the next pass", bridge, left))
-			break
-		}
-		p.provisionTail(ctx, bridge, c.minor, c.s, view, now, res, c.pc)
+	if dl, ok := ctx.Deadline(); ctx.Err() != nil || (ok && time.Until(dl) < p.routineReserveOrDefault()) {
+		slog.Warn("netd: pass budget nearly exhausted; the re-proof of unchanged sessions is deferred to the next pass", "bridge", bridge, "sessions", len(steady))
+		p.count("reprove_deferred", len(steady))
+		return
 	}
+	p.reproveSteady(ctx, bridge, steady, view, now, res)
+	p.mark("reprove")
 	p.flushRenewals(ctx, res)
 	p.flushDenies(ctx, res)
+	p.mark("routine_flush")
 }
 
 // admitBatch admits new sessions in chunks of shape.BatchChunk.
@@ -718,26 +760,7 @@ func (p *phase3Shaping) admitChunk(ctx context.Context, bridge string, chunk []b
 	if p.pending == nil {
 		p.pending = map[string]int64{}
 	}
-	var lv []liveCand
-	for _, c := range chunk {
-		key := c.pc.key
-		epoch, have := p.pending[key]
-		if !have {
-			alloc, err := p.allocEpoch(ctx)
-			if err != nil {
-				res.Failed++
-				res.Problems = append(res.Problems, "shape "+c.s.SessionID+": no class generation could be allocated; not made accountable")
-				continue
-			}
-			epoch = alloc
-			p.pending[key] = epoch
-		}
-		// End a previous occupant's series before preparing the new class, so it cannot forward under another identity.
-		if prev, held := p.minorOwner[minorKey(bridge, c.minor)]; held && prev != c.s.SessionID {
-			p.endSeries(bridge, prev)
-		}
-		lv = append(lv, liveCand{c, epoch})
-	}
+	lv := p.admissionAllocs(ctx, bridge, chunk, res)
 	if len(lv) == 0 {
 		return
 	}
@@ -769,16 +792,12 @@ func (p *phase3Shaping) admitChunk(ctx context.Context, bridge string, chunk []b
 	down, derr := p.shp.ReadClasses(ctx, bridge)
 	up, uerr := p.shp.ReadClasses(ctx, ifb)
 	var reg []liveCand
-	for _, l := range lv {
-		if derr != nil || uerr != nil {
+	if derr != nil || uerr != nil {
+		for _, l := range lv {
 			p.failClosed(ctx, bridge, l.pc.ip, res, "class origin not registered for "+l.s.SessionID+": counters unreadable at creation")
-			continue
 		}
-		if problem := p.registerOriginWith(ctx, l.s, l.minor, l.epoch, up, down); problem != "" {
-			p.failClosed(ctx, bridge, l.pc.ip, res, problem)
-			continue
-		}
-		reg = append(reg, l)
+	} else {
+		reg = p.admissionOrigins(ctx, bridge, lv, up, down, res)
 	}
 	if len(reg) == 0 {
 		return
@@ -834,6 +853,12 @@ func (p *phase3Shaping) admitChunk(ctx context.Context, bridge string, chunk []b
 			verified = append(verified, authd[i])
 		}
 	}
+	// The promotions are asked of the database a few at a time; completeAdmission consumes the answers in order.
+	asks := make([]activationAsk, 0, len(verified))
+	for _, l := range verified {
+		asks = append(asks, activationAsk{key: l.pc.key, sessionID: l.s.SessionID, bridge: bridge, minor: l.minor, epoch: l.epoch})
+	}
+	p.prefetchActivations(ctx, asks)
 	for _, l := range verified {
 		l.pc.nowBoot = nowBoot
 		p.completeAdmission(ctx, bridge, l.minor, l.s, view, now, res, l.pc, l.epoch)
