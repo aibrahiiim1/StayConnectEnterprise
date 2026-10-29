@@ -89,7 +89,7 @@ Product-Owner overrides of the list's recommendations are marked **PO**. Test na
 | AD | Disposition | What was done |
 |---|---|---|
 | 47 | IMPLEMENTED; verified live | Cut-off within 5 s as a setting; acctd runs accounting, expiry and a newest-plan submitter as separate tickers. Live, 2026-10-29: a client with a 3 MB allowance downloaded past it; acctd ended the access 2.7 s after the allowance was spent (`reason: DATA`, effective time recorded), and the next new connection was refused. |
-| 48 | IMPLEMENTED (partial) | Per-minute (7 days) and hourly roll-ups; purge time budget as a setting (0175–0177). `public.accounting_records` is not retired (still referenced). Raw delete throughput at design load was **not** measured: the design inserts about 67 samples a second (2,000 devices), the purge is bounded by its budget (default 10 s per run) and continues on the next run, and the sample tier is kept 2 days; a run at that scale on the reference VM is still to do. |
+| 48 | IMPLEMENTED (partial) | Per-minute (7 days) and hourly roll-ups; purge time budget as a setting (0175–0177). `public.accounting_records` is not retired (still referenced). Raw delete throughput was measured at design load on the 1 vCPU test appliance (2026-10-29, scratch database, 3,000,000 samples): about 9,700 samples a second, 95,000 to 100,000 per 10 s run, so the purge removes at least 14 million a day against 5.8 million arriving (`docs/runbooks/DB_BUDGET_MEASUREMENT_PLAN.md`). **Found by that run and fixed:** acctd called the roll-up with its one-day default window under a 30 s statement timeout, so a roll-up stopped for about 10 hours at design load could not catch up; acctd now reads two-hour windows. |
 | 49 | IMPLEMENTED (partial) | Scrubbed one-time codes, room attempts and redirect states are deleted (0178); purposes documented. The guest export's audit read is not bounded (needs a platform-role index). |
 | 50 | IMPLEMENTED (measured; no change needed) | `log_parameter_max_length=0` shipped. **Per-role timeouts already exist** in Gate-P (`statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout` for scd, edged, acctd, netd, pmsd; 30 s on the payment roles): the measurement plan's assumption that there were none was stale. Measured on the 1-vCPU / 8 GiB test appliance (2026-10-29, burst of 500 then 300): PostgreSQL `max_connections` 100 against per-role limits adding to 85, so the "85 against 50" finding does not hold; at most 15 connections in use; no transaction open longer than the 0.4 s sampling step; resident memory 13–27 MiB for scd, portald and acctd, 25–156 MiB for edged (garbage collection moves it) and 18–90 MiB for netd (restarted in between), PostgreSQL backends about 0.7 GiB with shared buffers 2.5 GiB. No pool, timeout or memory limit is changed: nothing measured is near a limit. `MemoryMax` is deliberately not set (an OOM kill of netd would cut enforcement). The 2,000-device generator run of the plan (S1, S10) is not done. |
 | 51 | IMPLEMENTED | Sign-in ceiling follows the licence guest cap (floor 600/min); one-round-trip throttle; Argon2id 64 MiB kept. |
@@ -131,7 +131,7 @@ Product-Owner overrides of the list's recommendations are marked **PO**. Test na
 | Restore checks (P9 M3, P4 CC4) | IMPLEMENTED (schema comparison before swap); restore drills run on Linux containers, see section 10 |
 | Central least privilege (P3 M1, P3 L2) | IMPLEMENTED, section 11 |
 | Enforcement-core redesign (D4-*, D5-M1, D6-H1 step 3, D6-M2 step 2) | partly addressed by AD-47 and AD-53; the rest is not done |
-| Measurements first (D2-M4, D2-L3, P3 M6) | measured on the test appliance for AD-50 and AD-59 (section 10, rows 50 and 59); the 2,000-device generator run is not done |
+| Measurements first (D2-M4, D2-L3, P3 M6) | measured on the test appliance for AD-50 and AD-59 (section 10, rows 50 and 59); the database half of the 2,000-device run is done (S10 insert, roll-up and purge rates, and the roll-up window defect it found); real devices on the network are not |
 
 ## 10. Deployment and verification (2026-10-29)
 
@@ -169,10 +169,10 @@ simultaneous sign-in attempts without a busy answer (AD-26).
 
 **Still not verified, and why**
 
-* The 2,000-device generator run (AD-48 delete throughput, AD-50 S1/S10) and the 2 vCPU / 4 GB reference machine: no such machine or generator run was available; the test appliance has 1 vCPU.
-* An offline *activation package* (first activation of a waiting appliance): the test appliance is already activated and a second waiting appliance is not available.
+* 2,000 real devices moving counters through the whole path (AD-50 S1) and the 2 vCPU / 4 GB reference machine: no such generator or machine was available; the test appliance has 1 vCPU. The database half (S10 insert, roll-up and purge rates at 2,000 devices) was measured in a scratch database on the test appliance.
+* A first activation *by package* that succeeds: it needs a second, waiting appliance, which is not available. What was done: the appliance's offline-request is refused on the activated appliance (409), a forged package is refused (403, signature invalid), and the Central and scd package tests pass (Central offline accept matrix and golden vector; scd, on Linux, verify-before-adopt and the revoked-assignment refusal).
 * The room-and-reservation Post-stay flow against a real PMS feed: the PMS interface is not enabled on the test appliance and live PMS traffic was not to be started for evidence; it is covered by the isolated database tests and scd's end-to-end test.
-* The Admin Console pages in a browser against the test appliance (the image upload page, the new Client access protection and licence clock pages): the pages are covered by their UI tests and every API they call was exercised; no browser session was driven.
+* The image upload page in a browser (its API and optimiser were exercised). Driven in a browser on 2026-10-29: Client access protection (a wrong password was refused with 401 and changed nothing; the right one saved, showed version and operator, and was restored), Appliance and licence with the licence clock card, Sign-in methods, and Central's Team page with the registration limits: each rendered with no console error and no failed API call.
 
 ## 11. Central least privilege (P3 M1, P3 L2): Central migration 0063
 

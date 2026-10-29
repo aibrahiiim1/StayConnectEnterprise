@@ -43,10 +43,9 @@ proxy refuses them), so deployments run from the workstation.
   kept; guessable short digit vouchers behind a MAC-rotating device), AD-37 step 4 (hotel-wide feed rule), AD-8 (three parts);
   AD-65 (archive of a deleted appliance's history, not RESTRICT plus soft delete) was **accepted by the Product Owner**. AD-59
   was measured and decided (keep the Node hop). The per-item answer, with the live evidence, is
-  [`docs/AUDIT_DECISION_DISPOSITIONS.md`](docs/AUDIT_DECISION_DISPOSITIONS.md). **Evidence that does not exist yet:** the
-  2,000-device generator run on a 2 vCPU / 4 GB machine (AD-48 delete throughput, AD-50 S1/S10); an offline *activation
-  package* (first activation of a waiting appliance); the Post-stay flow against a real PMS feed; the new console pages driven
-  in a browser. **Central's database** is reached by ctrlapi as the least-privilege role `ctrlapi_rt` (migration 0063,
+  [`docs/AUDIT_DECISION_DISPOSITIONS.md`](docs/AUDIT_DECISION_DISPOSITIONS.md). **Evidence that does not exist yet:** 2,000 real devices
+  moving counters on a 2 vCPU / 4 GB machine (AD-50 S1; the database half of S10 was measured); a first activation *by package*
+  that succeeds (needs a second waiting appliance); the Post-stay flow against a real PMS feed. **Central's database** is reached by ctrlapi as the least-privilege role `ctrlapi_rt` (migration 0063,
   [`docs/runbooks/CENTRAL_DB_LEAST_PRIVILEGE.md`](docs/runbooks/CENTRAL_DB_LEAST_PRIVILEGE.md)); a migration that adds an
   append-only Central table must list it in `central_apply_runtime_grants()`.
 * Central silence only raises the `CloudStale` warning once the licence's `offline_grace_days` (default 30) pass; 48 hours is

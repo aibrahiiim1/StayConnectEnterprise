@@ -81,7 +81,10 @@ func (e *Enforcer) RollupAccountingUsage(ctx context.Context, tenant, site strin
 		return 0, nil
 	}
 	var n int64
-	err = e.pool.QueryRow(ctx, `SELECT iam_v2.rollup_accounting_usage($1,$2)`, tenant, site).Scan(&n)
+	// A window, not the function's one-day default: acctd's role cancels a statement after 30 s, and a day of samples at
+	// the design load (2,000 devices) is several million rows. Measured on a 1 vCPU appliance: about 85,000 rows a second,
+	// so two hours (about 480,000 rows) take some six seconds; the caller repeats until a window is empty.
+	err = e.pool.QueryRow(ctx, `SELECT iam_v2.rollup_accounting_usage($1,$2,interval '2 hours')`, tenant, site).Scan(&n)
 	return n, err
 }
 
