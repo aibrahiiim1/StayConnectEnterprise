@@ -42,4 +42,17 @@ Record the numbers in the change that writes the values, with the VM size and th
 | Load average during the second burst | 2.2 on one core |
 | Console API through Caddy and Node, against straight to edged (AD-59) | 8.2 ms against 2.9 ms (`/central/status`) and 9.8 against 4.4 ms (`/vouchers?limit=5`) at one caller; about 110 requests a second against 270 at sixteen callers, the load generator sharing the core |
 
-What is not measured: 2,000 devices moving counters, 300 successful sign-ins a minute for an hour, the purge's delete rate at that scale (S10), table sizes after 24 hours, and the 2 vCPU / 4 GB target machine. Those remain the plan above.
+## Measured, S10 accounting load, test appliance, 2026-10-29
+
+A scratch database (a schema-only copy of `iam_v2`, dropped afterwards; the live data was not touched) on the same 1 vCPU appliance, loaded with 2,000 sessions and 3,000,000 samples spread over 3 days. This is the database half of the design load; it is not 2,000 real devices on the network.
+
+| Observation | Value |
+|---|---|
+| Design arrival rate | about 67 samples a second, 5.8 million a day (2,000 devices, 10 % moving counters per pass) |
+| Bulk insert | 3,000,000 rows in 45 s; 733 MB with its three indexes |
+| Roll-up read | 2.17 million samples in 26 s (about 85,000 a second) once the minute and hour rows existed; the first pass that creates them ran about 25,000 a second. 3,000,000 samples became 3,000,000 minute rows (one sample per device per minute in this data) and 146,000 hour rows |
+| Purge delete rate | about 9,700 raw samples a second: one run (budget 10 s, batch 5,000) removed 95,000 to 100,000 rows and stopped on its budget |
+| Does the purge keep up | acctd runs it every 10 minutes, up to 20 calls of the function each; at the measured rate one run removes at least 97,000 rows, so 144 runs a day remove at least 14 million against 5.8 million arriving: about 2.4 times the arrival rate on one core, with the work spread so no run holds a long transaction |
+| Found: roll-up backlog and the 30 s timeout | acctd's database role cancels a statement after 30 s and acctd called the roll-up with the function's one-day default window. A backlog of 2.17 million samples took 26 s, so a roll-up that had stopped for about 10 hours at design load could not finish inside the timeout and would have failed every minute. acctd now reads in two-hour windows (about 480,000 samples, 6 to 12 s here) and repeats until a window is empty, so a stop of any length is caught up in steps |
+
+Still not measured: real devices moving counters through the whole path, 300 successful sign-ins a minute for an hour, table sizes after 24 hours of real traffic, and the 2 vCPU / 4 GB target machine.
