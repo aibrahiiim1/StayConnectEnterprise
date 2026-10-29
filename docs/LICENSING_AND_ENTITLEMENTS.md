@@ -212,6 +212,20 @@ offline for the year. Grace only matters when validity lapses while offline:
 `grace_period_days` of full service, then Expired. Worked example:
 [OFFLINE_OPERATION.md](OFFLINE_OPERATION.md).
 
+**Silence from Central never switches a valid licence off** (confirmed 2026-10-29, no change of behaviour). Two different
+numbers are easy to confuse:
+
+* `offline_grace_days` (default 30, set per licence) is how long Central may stay silent before the **CloudStale warning**
+  is raised in the Admin Console. It is a flag, not a state: the licence stays Active, new sessions are still admitted, and
+  nothing is deactivated. Only an authenticated revocation, a suspension, or the licence's own dates change what the
+  appliance admits.
+* **48 hours** is the clock-rollback tolerance of section 7 (how far the wall clock may move back before the stored
+  high-water time is used instead). It has nothing to do with Central's reachability.
+
+A signed offline licence file works with no contact with Central until its own expiry and revocation rules say otherwise;
+importing one is single-use and reconciles with Central the next time the appliance is online.
+(Tests: `license/grace_period_acceptance_test.go`, `license/grace_zero_test.go`, `license/license_test.go` `TestCloudStaleWarning`.)
+
 ## 7. Rollback protections (`license/store.go`)
 
 - **License rollback:** installing a document whose `license_version` is lower

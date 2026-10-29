@@ -30,6 +30,7 @@ const LABELS: Record<string, string> = {
   device_retention_days: "Keep unused devices for",
   portal_image_max_edge_px: "Portal images: longest side",
   portal_image_quality: "Portal images: quality",
+  post_stay_signin_days: "Post-stay sign-in: days after check-out",
 };
 
 export function SigninLimitsCard({ canEdit }: { canEdit: boolean }) {

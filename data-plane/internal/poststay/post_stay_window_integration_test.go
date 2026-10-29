@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 )
 
 func setCheckout(t *testing.T, f fx, days int) {
@@ -24,8 +25,15 @@ func setCheckout(t *testing.T, f fx, days int) {
 	if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation('stay')`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tx.Exec(ctx, `UPDATE iam_v2.stays SET effective_checkout_at = now() - make_interval(days => $2) WHERE id=$1`, f.stay, days); err != nil {
-		t.Fatalf("move the check-out: %v", err)
+	// The check-out time is immutable inside an episode, so the stay is reinstated (a new episode) and checked out again
+	// at the time wanted, as internal/checkout does it.
+	if _, err := tx.Exec(ctx, `UPDATE iam_v2.stays SET status='IN_HOUSE', effective_checkout_at=NULL, lifecycle_version=lifecycle_version+1
+		WHERE id=$1`, f.stay); err != nil {
+		t.Fatalf("reinstate: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE iam_v2.stays SET status='CHECKED_OUT', posting_allowed=false,
+		effective_checkout_at = now() - make_interval(days => $2) WHERE id=$1`, f.stay, days); err != nil {
+		t.Fatalf("check out in the past: %v", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatal(err)
@@ -77,7 +85,7 @@ func TestIntegration_AD36_AStayPastTheWindowOpensNothing(t *testing.T) {
 	authorizeDevice(t, p, f)
 	fresh := newDevice(t, p, f, "02:00:00:00:00:91")
 	setCheckout(t, f, 10)
-	s := store(t, p)
+	s := storeAtFixedTime(t, p, time.Now().Add(-200*time.Minute))
 	ctx := context.Background()
 
 	for name, r := range map[string]VerifyRequest{
@@ -110,7 +118,7 @@ func TestIntegration_AD36_TheNextOccupantOfTheRoomIsAnotherStay(t *testing.T) {
 	authorizeDevice(t, p, f)
 	next := addStay(t, f, f.iface, "R2", "IN_HOUSE", "101", "BABBAGE")
 	newcomer := newDevice(t, p, f, "02:00:00:00:00:92")
-	s := store(t, p)
+	s := storeAtFixedTime(t, p, time.Now().Add(-300*time.Minute))
 	ctx := context.Background()
 
 	profile, err := s.Verify(ctx, req(f, f.device, "101", "R1", ""))
@@ -151,7 +159,7 @@ func TestIntegration_AD36_AnotherPMSInterfaceIsNotTheSameStay(t *testing.T) {
 	}
 	second := addStay(t, f, other, "R1", "CHECKED_OUT", "101", "LOVELACE")
 	fresh := newDevice(t, p, f, "02:00:00:00:00:93")
-	s := store(t, p)
+	s := storeAtFixedTime(t, p, time.Now().Add(-400*time.Minute))
 
 	if _, err := s.Verify(ctx, req(f, fresh, "101", "R1", "LOVELACE")); !errors.Is(err, ErrNotAuthenticable) {
 		t.Fatalf("a new device matching two stays on two interfaces must be refused: %v", err)

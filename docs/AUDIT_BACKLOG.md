@@ -1,5 +1,7 @@
 # Audit backlog: backend audit and performance audit
 
+> **Closure round, 2026-10-29 (D82).** The remaining actionable items of the register were worked: the Root CA pin is installed by the installer against a fingerprint (AD-2), the Admin Console and Central screens for the enforcement policy, the registration cap and the licence clock reset exist, post-stay sign-in has a bounded window (AD-36), the netd unit is hardened (AD-28 b), and the measurements of AD-47, AD-24, AD-26, AD-50, AD-58 and AD-59 were taken on the test appliance. [`AUDIT_DECISION_DISPOSITIONS.md`](AUDIT_DECISION_DISPOSITIONS.md) is the current answer, row by row.
+>
 > **Update, 2026-10-29 (T0267, D81).** The Product Owner decided AD-1 to AD-68 and the decisions were implemented. The disposition of each decision is in [`AUDIT_DECISION_DISPOSITIONS.md`](AUDIT_DECISION_DISPOSITIONS.md). The per-row statuses below are those of T0266 and were not rewritten row by row; where a row's remainder was an `AD-n` decision, the register is the current answer.
 
 **What this is.** Every finding from the two audit report sets, in one place, each with an honest status. The source folders are being removed from the current tree, but they stay in Git history. Each row points back to its source.
@@ -18,7 +20,7 @@ In the tables below, "P1 B2" means batch B2 in that audit's Phase 1 file. Backen
 
 This is the state after the **2026-10-28 remediation mission**. Eight workstreams (Central, scd and appliance foundations, portald, acctd and payments, pmsd, netd, edged and hotel-admin, DB and tooling) re-checked every finding against current master (`55c01890`) and fixed what needed no new Product-Owner decision. Their commits are merged on branch **`claude/vigilant-keller-sag14r`**. Appliance migrations 0159–0161 and Central migrations 0057–0058 are on that branch too.
 
-**Nothing is deployed.** The delivery environment cannot reach the test appliance. FIXED means fixed in code (delivered to master through the remediation PR), with a test or cited code evidence. It does not mean deployed to the test appliance.
+**Deployment (as of T0266, superseded).** At T0266 nothing was deployed. Since 2026-10-29 the audit-decision release runs on Central and on the test appliance (see the dispositions file, section 10). FIXED means fixed in code (delivered to master through the remediation PR), with a test or cited code evidence; the dispositions file says where a result was also seen live.
 
 1. **Evidence.** Each status comes from the workstream result records: the commit SHA on the branch, plus the test name, migration number or file:line. Every cited SHA was checked to be on `origin/master..claude/vigilant-keller-sag14r`. Commits from before the mission (`60e15df7`, `490321c1`, `85f1b1c4`, …) are cited only for ALREADY-FIXED rows and for the first half of a finding.
 2. **When workstreams disagree.** A finding reported by several workstreams takes the owning workstream's outcome. A handed-off finding takes the outcome of the workstream that received it. Coordinator decisions override both:
