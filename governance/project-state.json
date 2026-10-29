@@ -1362,7 +1362,7 @@
       "dispositions": "docs/AUDIT_DECISION_DISPOSITIONS.md"
     }
   },
-  "latest_transition_id": "T0267",
+  "latest_transition_id": "T0268",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1858,16 +1858,16 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "AUDIT_DECISIONS_IMPLEMENTATION",
+    "kind": "AUDIT_DECISIONS_UPGRADE_PATH_FIX",
     "decision": "D81 (Product-Owner mission of 2026-10-29: implement audit decisions AD-1 to AD-68 end to end).",
-    "decision_note": "Disposition of every item in docs/AUDIT_DECISION_DISPOSITIONS.md. Appliance migrations 0162-0178, Central migrations 0059-0062, Go 1.26.10. Not yet deployed at this receipt.",
-    "manifest": "docs/manifests/AuditDecisions-change-manifest.md",
-    "base": "3b0b47cc442429d08c2eba9642c0441fc5bcf4f7",
-    "base_note": "Master after the merge of PR #264.",
-    "transition": "T0267",
-    "previous_delivery": "T0266",
-    "branch": "delivery/audit-decisions-ad1-68",
-    "note": "T0267. Go-Live not authorised."
+    "decision_note": "Upgrade-path fix found by deploying T0267 to the test appliance: platform migrations are applied as the platform role (edge-migrate.sh --platform-migration).",
+    "manifest": "docs/manifests/AuditDecisionsUpgradePath-change-manifest.md",
+    "base": "ee2faf881d89ca95091e16e893cd11bd245ed347",
+    "base_note": "Master after the merge of PR #265.",
+    "transition": "T0268",
+    "previous_delivery": "T0267",
+    "branch": "delivery/audit-decisions-upgrade-path",
+    "note": "T0268. Go-Live not authorised."
   },
   "onboarding_reconciliation": {
     "decision": "D37",

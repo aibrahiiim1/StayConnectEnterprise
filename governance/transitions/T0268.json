@@ -1,0 +1,31 @@
+{
+  "transition_id": "T0268",
+  "seq": 268,
+  "timestamp": "2026-10-29T04:27:52Z",
+  "timestamp_derivation": "Computed from the session clock after the fix was validated, before the commit that introduces this receipt.",
+  "record_type": "AUDIT_DECISIONS_UPGRADE_PATH_FIX",
+  "authorisation": "D81, the Product Owner's mission of 2026-10-29.",
+  "finding": "Deploying T0267 to the test appliance 172.21.96.97 with appliance-install.sh --upgrade stopped at migration 0162: permission denied for table tenants. Migrations are applied as the least-privilege role iam_v2_owner, which holds no CREATE on public by design, and five of the new migrations (0163, 0166, 0173, 0174, 0178) change the platform schema. The full-schema harness applied migrations as the superuser, so it could not see this. The upgrade stopped safely: 0159-0161 applied, 0162 not applied, no binary replaced.",
+  "fix": "A migration that must change the platform schema carries '-- edge-migrate: platform'. apply-pending-migrations.sh applies only those as the platform role through edge-migrate.sh --platform-migration, which lifts only the live-site role gates (non-superuser, no public CREATE, no ledger UPDATE) and only for one named migration whose marker is present and whose content is pinned by sha256; the backup, advisory locks, gap check and ledger row are unchanged. The tenants notify trigger is also created by Gate-P. The full-schema harness can now build from an earlier baseline and apply migrations as the live apply role (FULLSCHEMA_APPLY_ROLE).",
+  "verification": "A local upgrade path built from the previous baseline with every migration applied as the live apply role (platform ones as the superuser) reaches 0178 and reconciles Gate-P; the migration-runner selftest passes with 59 cases including case 13 (refused without the marker, refused without a pinned sha256, the least-privilege role still cannot change public, a marked and pinned migration applies and records its ledger row).",
+  "deployment": "At the time of this receipt the test appliance is at migration 0161 with the previous release's binaries; Central runs release ee2faf881d89 (recorded by the deployment receipt).",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "ee2faf881d89ca95091e16e893cd11bd245ed347",
+  "previous_delivery": "T0267",
+  "decision": "D81",
+  "go_live": "NOT authorised."
+}
