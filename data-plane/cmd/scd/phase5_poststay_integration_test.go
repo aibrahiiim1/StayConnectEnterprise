@@ -2,7 +2,7 @@
 
 package main
 
-// Post-stay PIN end to end on scd: room sign-in, checkout, PIN issue, verify, post-stay package, enforced SESSION.
+// Post-stay end to end on scd: room sign-in, checkout, the room + reservation check (AD-36), post-stay package, enforced SESSION.
 // Calls carry exactly the bodies portald forwards (phase5_poststay_handlers.go); scd uses DisallowUnknownFields
 // so drift fails here. The portald half is pinned in cmd/portald/phase5_poststay_flow_test.go. No real guest data.
 
@@ -35,7 +35,7 @@ func newPostStayFixture(t *testing.T) *postStayFixture {
 	}
 	pf := &postStayFixture{authFixture: f, ps: &phase5PostStay{
 		srv: f.srv, p3: f.p3, store: poststay.New(f.pool, thr), ctxs: authctx.NewStore(f.pool),
-		contextTTL: 10 * time.Minute, pinValid: 24 * time.Hour,
+		contextTTL: 10 * time.Minute,
 	}}
 	// Two free post-stay packages and one priced one, which must never be offered.
 	mk := func(code string, price int64, methods string) string {
@@ -67,6 +67,11 @@ func newPostStayFixture(t *testing.T) *postStayFixture {
 
 func (f *postStayFixture) device() map[string]string {
 	return map[string]string{"ip": f.net.guestIP, "mac": f.net.mac}
+}
+
+// answers is what the guest types: the room and the reservation of the stay the fixture's device signed in on.
+func (f *postStayFixture) answers() map[string]any {
+	return map[string]any{"device": f.device(), "room": "412", "reservation": "RES-4001"}
 }
 
 func psCall(t *testing.T, h http.HandlerFunc, body map[string]any) psResponse {
@@ -124,21 +129,15 @@ func (f *postStayFixture) signInByRoomThenCheckOut(t *testing.T) {
 	}
 }
 
-func TestIntegration_PostStay_PINToEnforcedSessionEndToEnd(t *testing.T) {
+func TestIntegration_PostStay_RoomAndReservationToEnforcedSessionEndToEnd(t *testing.T) {
 	f := newPostStayFixture(t)
 	f.signInByRoomThenCheckOut(t)
 	defer f.startEnforcementOwnerAtEpoch(t, 2)()
 
-	// issue
-	iss := psCall(t, f.ps.issueHandler, map[string]any{"device": f.device()})
-	if iss.Outcome != psOutcomeIssued || iss.PIN == "" {
-		t.Fatalf("no PIN was issued for a checked-out stay this device signed in on: %+v", iss)
-	}
-
-	// verify: the reply carries the grantable packages
-	ver := psCall(t, f.ps.verifyHandler, map[string]any{"device": f.device(), "pin": iss.PIN})
+	// verify: the room and reservation of the stay this device signed in on; the reply carries the grantable packages
+	ver := psCall(t, f.ps.verifyHandler, f.answers())
 	if ver.Outcome != psOutcomeVerified || ver.AuthContextID == "" {
-		t.Fatalf("the PIN did not verify: %+v", ver)
+		t.Fatalf("the room and reservation did not verify: %+v", ver)
 	}
 	got := map[string]bool{}
 	for _, o := range ver.Offers {
@@ -192,8 +191,7 @@ func TestIntegration_PostStay_ConversionWithoutAPackageIsRefused(t *testing.T) {
 	f.signInByRoomThenCheckOut(t)
 	defer f.startEnforcementOwnerAtEpoch(t, 2)()
 
-	iss := psCall(t, f.ps.issueHandler, map[string]any{"device": f.device()})
-	ver := psCall(t, f.ps.verifyHandler, map[string]any{"device": f.device(), "pin": iss.PIN})
+	ver := psCall(t, f.ps.verifyHandler, f.answers())
 	if ver.Outcome != psOutcomeVerified {
 		t.Fatalf("verify: %+v", ver)
 	}
@@ -211,7 +209,7 @@ func TestIntegration_PostStay_ConversionWithoutAPackageIsRefused(t *testing.T) {
 	}
 }
 
-// A site with no free post-stay package issues no context: the PIN verifies but nothing could be granted.
+// A site with no free post-stay package issues no context: the check passes but nothing could be granted.
 func TestIntegration_PostStay_NoGrantablePackageMeansNoContext(t *testing.T) {
 	f := newPostStayFixture(t)
 	f.signInByRoomThenCheckOut(t)
@@ -220,8 +218,7 @@ func TestIntegration_PostStay_NoGrantablePackageMeansNoContext(t *testing.T) {
 		WHERE tenant_id=$1 AND site_id=$2 AND code IN ('PS-A','PS-B')`, f.tenant, f.site); err != nil {
 		t.Fatal(err)
 	}
-	iss := psCall(t, f.ps.issueHandler, map[string]any{"device": f.device()})
-	if ver := psCall(t, f.ps.verifyHandler, map[string]any{"device": f.device(), "pin": iss.PIN}); ver.Outcome != psOutcomeUnavailab || ver.AuthContextID != "" {
+	if ver := psCall(t, f.ps.verifyHandler, f.answers()); ver.Outcome != psOutcomeUnavailab || ver.AuthContextID != "" {
 		t.Fatalf("verify on a site with nothing to grant answered %+v", ver)
 	}
 }

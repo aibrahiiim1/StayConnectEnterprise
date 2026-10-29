@@ -103,7 +103,12 @@ func TestTheScdClientKeepsIdleConnectionsForABurst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tr, ok := h.scd.Transport.(*http.Transport)
+	// AD-35: the transport is wrapped by the one-retry-on-busy layer (busy_retry.go); the connection pool is underneath it.
+	retry, isRetry := h.scd.Transport.(*busyRetry)
+	if !isRetry {
+		t.Fatalf("scd transport is not wrapped by the busy retry: %T", h.scd.Transport)
+	}
+	tr, ok := retry.next.(*http.Transport)
 	if !ok || tr.MaxIdleConnsPerHost < 32 || tr.IdleConnTimeout != 90*time.Second {
 		t.Fatalf("scd transport: %+v", h.scd.Transport)
 	}
@@ -183,8 +188,7 @@ func TestEverySecretMessageAndDeviceRouteIsDamped(t *testing.T) {
 		want string
 	}{
 		"phase3":         {js("/auth/pms/phase3", `{"room":"101","verification":"Smith","request_id":"11111111-2222-4333-8444-555555555555"}`), guestAuthRateLimitedUnknownMessage},
-		"post-stay":      {js("/auth/post-stay-pin", `{"pin":"ABCD2345"}`), guestAuthRateLimitedUnknownMessage},
-		"issue":          {js("/poststay/issue", `{}`), guestAuthRateLimitedUnknownMessage},
+		"post-stay":      {js("/auth/post-stay", `{"room":"101","reservation":"R1"}`), guestAuthRateLimitedUnknownMessage},
 		"device list":    {js("/devices/list", `{}`), deviceMessage},
 		"device release": {js("/devices/release", `{"device_id":"d"}`), deviceMessage},
 	}

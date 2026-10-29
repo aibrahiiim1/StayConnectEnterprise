@@ -3,7 +3,7 @@
 package main
 
 // Operator post-stay API against the real router, RBAC middleware and database.
-// Reset rotates an active profile's credential; revoke ends post-stay access for the stay episode and is terminal.
+// Revoke ends post-stay access for the stay episode and is terminal. There is no PIN reset (AD-36).
 // Each guard (permission, step-up, bounded reason, session-derived audit actor) is tested by removing it.
 
 import (
@@ -115,14 +115,10 @@ func TestIntegration_PostStayAPI_MutationsRequireTheFullWeight(t *testing.T) {
 		body map[string]any
 		want int
 	}{
-		{"reset with no reason", base + "/reset",
-			map[string]any{"password": f.password}, http.StatusBadRequest},
-		{"reset with a too-short reason", base + "/reset",
+		{"revoke with a too-short reason", base + "/revoke",
 			map[string]any{"password": f.password, "reason": "x"}, http.StatusBadRequest},
-		{"reset with the wrong password", base + "/reset",
-			map[string]any{"password": "not-the-password", "reason": "guest lost the PIN"}, http.StatusUnauthorized},
-		{"reset with NO password", base + "/reset",
-			map[string]any{"reason": "guest lost the PIN"}, http.StatusUnauthorized},
+		{"revoke with NO password", base + "/revoke",
+			map[string]any{"reason": "guest asked"}, http.StatusUnauthorized},
 		{"revoke with no reason", base + "/revoke",
 			map[string]any{"password": f.password}, http.StatusBadRequest},
 		{"revoke with the wrong password", base + "/revoke",
@@ -137,15 +133,13 @@ func TestIntegration_PostStayAPI_MutationsRequireTheFullWeight(t *testing.T) {
 		}
 	}
 	// ...and the profile is untouched by every one of those refusals.
-	var gen int
 	var status string
 	if err := f.pool.QueryRow(context.Background(),
-		`SELECT pin_generation, status FROM iam_v2.post_stay_profiles WHERE id=$1`, profile).
-		Scan(&gen, &status); err != nil {
+		`SELECT status FROM iam_v2.post_stay_profiles WHERE id=$1`, profile).Scan(&status); err != nil {
 		t.Fatalf("read back: %v", err)
 	}
-	if gen != 1 || status != "ACTIVE" {
-		t.Fatalf("a refused mutation changed the profile: generation=%d status=%s", gen, status)
+	if status != "ACTIVE" {
+		t.Fatalf("a refused mutation changed the profile: status=%s", status)
 	}
 }
 
@@ -169,64 +163,27 @@ func TestIntegration_PostStayAPI_RBAC(t *testing.T) {
 	if code, _ := g.doRaw(t, http.MethodGet, "/post-stay-profiles/", nil); code != http.StatusOK {
 		t.Fatalf("a viewer could not read the list: %d", code)
 	}
-	if code, _ := g.doRaw(t, http.MethodPost, "/post-stay-profiles/"+prof2+"/reset",
-		map[string]any{"password": g.password, "reason": "viewer should not rotate"}); code != http.StatusForbidden {
-		t.Fatalf("a viewer rotated a credential: %d", code)
+	if code, _ := g.doRaw(t, http.MethodPost, "/post-stay-profiles/"+prof2+"/revoke",
+		map[string]any{"password": g.password, "reason": "viewer should not revoke"}); code != http.StatusForbidden {
+		t.Fatalf("a viewer revoked a profile: %d", code)
 	}
 }
 
-// RESET IS A ROTATION. Same profile, same episode, new secret, audited.
-func TestIntegration_PostStayAPI_ResetRotates(t *testing.T) {
+// There is no reset route: a PIN is not issued or rotated any more, so the path does not exist.
+func TestIntegration_PostStayAPI_ThereIsNoPINReset(t *testing.T) {
 	f := newPostStayAPI(t)
 	_, profile := seedProfile(t, f)
-	code, body := f.do(t, http.MethodPost, "/post-stay-profiles/"+profile+"/reset",
+	code, raw := f.doRaw(t, http.MethodPost, "/post-stay-profiles/"+profile+"/reset",
 		map[string]any{"password": f.password, "reason": "guest lost the printout"})
-	if code != http.StatusOK {
-		t.Fatalf("reset: %d %v", code, body)
+	if code != http.StatusNotFound && code != http.StatusMethodNotAllowed {
+		t.Fatalf("a PIN reset route still answers: %d %s", code, raw)
 	}
-	pin, _ := body["pin"].(string)
-	if pin == "" {
-		t.Fatalf("reset returned no PIN: %v", body)
-	}
-	if notice, _ := body["notice"].(string); !strings.Contains(strings.ToLower(notice), "shown once") {
-		t.Fatalf("the reset response does not tell the operator the PIN is shown once: %v", body)
-	}
-
-	var gen int
-	var status, hash string
-	if err := f.pool.QueryRow(context.Background(),
-		`SELECT pin_generation, status, pin_hash FROM iam_v2.post_stay_profiles WHERE id=$1`, profile).
-		Scan(&gen, &status, &hash); err != nil {
-		t.Fatalf("read back: %v", err)
-	}
-	if gen != 2 {
-		t.Fatalf("reset did not mint a new generation: %d", gen)
-	}
-	if status != "ACTIVE" {
-		t.Fatalf("reset changed the profile status to %s; rotation is not termination", status)
-	}
-	if strings.Contains(hash, pin) {
-		t.Fatalf("the stored hash contains the returned plaintext")
-	}
-	// The audit records the rotation and NEVER the secret.
-	var action, payload string
-	if err := f.pool.QueryRow(context.Background(),
-		`SELECT action, payload::text FROM public.audit_log WHERE target_id=$1 ORDER BY ts DESC LIMIT 1`,
-		profile).Scan(&action, &payload); err != nil {
-		t.Fatalf("audit: %v", err)
-	}
-	if action != "poststay.pin_reset" {
-		t.Fatalf("audit action = %q", action)
-	}
-	if strings.Contains(payload, pin) {
-		t.Fatalf("the audit payload contains the PIN: %s", payload)
-	}
-	if !strings.Contains(payload, "guest lost the printout") {
-		t.Fatalf("the audit payload lost the reason: %s", payload)
+	if strings.Contains(raw, "\"pin\"") {
+		t.Fatalf("a PIN was returned: %s", raw)
 	}
 }
 
-// REVOKE IS TERMINAL. Not a stronger reset: it cannot be undone, and it cannot be rotated out of.
+// REVOKE IS TERMINAL. It cannot be undone.
 func TestIntegration_PostStayAPI_RevokeIsTerminal(t *testing.T) {
 	f := newPostStayAPI(t)
 	_, profile := seedProfile(t, f)
@@ -247,15 +204,6 @@ func TestIntegration_PostStayAPI_RevokeIsTerminal(t *testing.T) {
 		t.Fatalf("revoke left status=%s reason=%v", status, reason)
 	}
 
-	// A revoked profile cannot be rotated back into service.
-	code, raw := f.doRaw(t, http.MethodPost, base+"/reset",
-		map[string]any{"password": f.password, "reason": "undo the revocation"})
-	if code != http.StatusConflict {
-		t.Fatalf("a revoked profile was reset: %d %s", code, raw)
-	}
-	if strings.Contains(raw, "\"pin\"") {
-		t.Fatalf("the refused reset returned a PIN")
-	}
 	// ...and revoking twice is refused rather than silently repeated, so the audit shows ONE termination.
 	if code, _ := f.doRaw(t, http.MethodPost, base+"/revoke",
 		map[string]any{"password": f.password, "reason": "again"}); code != http.StatusConflict {

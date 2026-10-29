@@ -38,6 +38,7 @@ func (s *server) runDataRetention(ctx context.Context) {
 	_, _ = s.retentionPasses(ctx, dataRetentionMaxPasses)
 	s.runStaffRetention(ctx)
 	s.runLeftovers(ctx)
+	s.pruneIdleDevices(ctx)
 }
 
 var dataRetentionPassFn = func(s *server, ctx context.Context, fn string) (int, error) { return s.dataRetentionPass(ctx, fn) }

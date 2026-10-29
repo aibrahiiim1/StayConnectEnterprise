@@ -60,6 +60,9 @@ func (a *Authenticator) authAccount(ctx context.Context, req Request) (Result, e
 		return deny(MethodAccount, reason), nil
 	}
 	if ok, err := verifyArgon2id(req.Secret, first.hash); err != nil || !ok {
+		if CodeOf(err) == ErrBusy {
+			return Result{}, err
+		}
 		return deny(MethodAccount, "invalid_credentials"), nil
 	}
 	var res Result
@@ -385,6 +388,9 @@ var dummyArgon2 = passwordhash.Dummy()
 func verifyArgon2id(pw, encoded string) (bool, error) {
 	ok, err := passwordhash.Verify(pw, encoded)
 	if err != nil {
+		if errors.Is(err, passwordhash.ErrBusy) {
+			return false, &Error{Code: ErrBusy, Msg: "password check capacity"}
+		}
 		return false, &Error{Code: ErrInvalidCred, Msg: err.Error()}
 	}
 	return ok, nil

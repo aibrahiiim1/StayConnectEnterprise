@@ -51,13 +51,13 @@ func pageBodies(t *testing.T) [][]string {
 	return out
 }
 
-func TestPostStayPageSendsThePINThenTheContextAndTheChosenPackage(t *testing.T) {
+func TestPostStayPageSendsTheRoomAndReservationThenTheContextAndTheChosenPackage(t *testing.T) {
 	bodies := pageBodies(t)
 	if len(bodies) != 2 {
-		t.Fatalf("the page makes %d post-stay calls, want 2 (the PIN, then the choice): %v", len(bodies), bodies)
+		t.Fatalf("the page makes %d post-stay calls, want 2 (the room and reservation, then the choice): %v", len(bodies), bodies)
 	}
-	if strings.Join(bodies[0], ",") != "pin" {
-		t.Fatalf("the PIN call sends %v, want exactly {pin}", bodies[0])
+	if strings.Join(bodies[0], ",") != "room,reservation,last_name" {
+		t.Fatalf("the check call sends %v, want exactly {room, reservation, last_name}", bodies[0])
 	}
 	if strings.Join(bodies[1], ",") != "auth_context_id,package_revision_id" {
 		t.Fatalf("the choice call sends %v, want {auth_context_id, package_revision_id}: without the package "+
@@ -83,7 +83,7 @@ func build(keys []string, vals map[string]string) string {
 func TestPostStayChoiceFlowThroughPortald(t *testing.T) {
 	bodies := pageBodies(t)
 	s := &pathStub{answers: map[string]any{
-		"/v1/phase5/auth/post-stay-pin": map[string]any{"outcome": "VERIFIED", "auth_context_id": "ctx-1",
+		"/v1/phase5/auth/post-stay": map[string]any{"outcome": "VERIFIED", "auth_context_id": "ctx-1",
 			"offers": []map[string]any{
 				{"package_revision_id": "pkg-a", "code": "PS-A", "down_kbps": 5000},
 				{"package_revision_id": "pkg-b", "code": "PS-B", "down_kbps": 10000}}},
@@ -91,15 +91,15 @@ func TestPostStayChoiceFlowThroughPortald(t *testing.T) {
 	}}
 	h := pathStubHandler(t, s)
 
-	_, out := postStayPost(t, h, "/auth/post-stay-pin", build(bodies[0], map[string]string{"pin": "K7M4RTQX"}))
+	_, out := postStayPost(t, h, "/auth/post-stay", build(bodies[0], map[string]string{"room": "101", "reservation": "R1"}))
 	if !out.OK || !out.NeedsChoice || out.AuthContextID != "ctx-1" || len(out.Choices) != 2 {
-		t.Fatalf("a verified PIN with two packages did not ask the guest to choose: %+v", out)
+		t.Fatalf("a verified check with two packages did not ask the guest to choose: %+v", out)
 	}
-	if s.calls[0] != "/v1/phase5/auth/post-stay-pin" || s.bodies[0]["pin"] != "K7M4RTQX" {
+	if s.calls[0] != "/v1/phase5/auth/post-stay" || s.bodies[0]["room"] != "101" || s.bodies[0]["reservation"] != "R1" {
 		t.Fatalf("verify hop = %v %v", s.calls, s.bodies)
 	}
 
-	_, out2 := postStayPost(t, h, "/auth/post-stay-pin", build(bodies[1], map[string]string{
+	_, out2 := postStayPost(t, h, "/auth/post-stay", build(bodies[1], map[string]string{
 		"auth_context_id": out.AuthContextID, "package_revision_id": out.Choices[1].PackageRevisionID}))
 	if !out2.OK || out2.SessionID != "sess-1" || out2.RedirectTo != "/success" {
 		t.Fatalf("the choice did not connect the guest: %+v", out2)
@@ -123,12 +123,12 @@ func TestPostStayChoiceFlowThroughPortald(t *testing.T) {
 // One offer is not a choice: portald converts it in the same request.
 func TestPostStaySingleOfferConvertsAtOnce(t *testing.T) {
 	s := &pathStub{answers: map[string]any{
-		"/v1/phase5/auth/post-stay-pin": map[string]any{"outcome": "VERIFIED", "auth_context_id": "ctx-1",
+		"/v1/phase5/auth/post-stay": map[string]any{"outcome": "VERIFIED", "auth_context_id": "ctx-1",
 			"offers": []map[string]any{{"package_revision_id": "pkg-a", "code": "PS-A"}}},
 		"/v1/phase5/poststay/convert": map[string]any{"outcome": "GRANTED", "session_id": "sess-1", "entitlement_id": "ent-1"},
 	}}
 	h := pathStubHandler(t, s)
-	_, out := postStayPost(t, h, "/auth/post-stay-pin", `{"pin":"K7M4RTQX"}`)
+	_, out := postStayPost(t, h, "/auth/post-stay", `{"room":"101","reservation":"R1"}`)
 	if !out.OK || out.SessionID != "sess-1" {
 		t.Fatalf("a single post-stay package was not converted at once: %+v", out)
 	}
@@ -145,7 +145,7 @@ func TestPostStayGrantWithoutASessionIsRefused(t *testing.T) {
 	} {
 		s := &pathStub{answers: map[string]any{"/v1/phase5/poststay/convert": answer}}
 		h := pathStubHandler(t, s)
-		_, out := postStayPost(t, h, "/auth/post-stay-pin", `{"auth_context_id":"ctx-1","package_revision_id":"pkg-a"}`)
+		_, out := postStayPost(t, h, "/auth/post-stay", `{"auth_context_id":"ctx-1","package_revision_id":"pkg-a"}`)
 		if out.OK || out.SessionID != "" {
 			t.Fatalf("scd answer %v reached the guest as success: %+v", answer, out)
 		}
@@ -154,9 +154,9 @@ func TestPostStayGrantWithoutASessionIsRefused(t *testing.T) {
 
 func TestPostStayVerifiedWithoutOffersIsTheUniformAnswer(t *testing.T) {
 	s := &pathStub{answers: map[string]any{
-		"/v1/phase5/auth/post-stay-pin": map[string]any{"outcome": "VERIFIED", "auth_context_id": "ctx-1"}}}
+		"/v1/phase5/auth/post-stay": map[string]any{"outcome": "VERIFIED", "auth_context_id": "ctx-1"}}}
 	h := pathStubHandler(t, s)
-	_, out := postStayPost(t, h, "/auth/post-stay-pin", `{"pin":"K7M4RTQX"}`)
+	_, out := postStayPost(t, h, "/auth/post-stay", `{"room":"101","reservation":"R1"}`)
 	if out.OK || out.AuthContextID != "" {
 		t.Fatalf("a verification with nothing to grant reached the guest: %+v", out)
 	}

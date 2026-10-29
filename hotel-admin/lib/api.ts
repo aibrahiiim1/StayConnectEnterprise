@@ -1306,7 +1306,12 @@ export type BackupSettings = {
 
 export type PortalAsset = {
   name: string; url: string; size_bytes: number; uploaded_at: string; in_use: boolean;
+  /** "ready" once stored; "optimising" while the appliance scales and compresses it (no url yet); "failed" with a reason. */
+  status?: "ready" | "optimising" | "failed"; reason?: string;
 };
+
+/** The hard upload limit for portal images, enforced by the appliance as well. */
+export const PORTAL_IMAGE_MAX_BYTES = 1024 * 1024;
 
 export type SysNetAudit = {
   at: string;

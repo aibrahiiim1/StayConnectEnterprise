@@ -12,9 +12,11 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -72,6 +74,9 @@ type Store struct {
 	key    []byte
 	window time.Duration
 	now    func() time.Time
+	// noCharge is set once the database reports it has no public.auth_throttle_charge (a database that predates
+	// migration 0171); Allow then uses the multi-statement path below. Any other error denies.
+	noCharge atomic.Bool
 }
 
 // New builds a Store. key must be at least 16 bytes; window is the fixed-window length.
@@ -180,6 +185,18 @@ func (s *Store) Allow(ctx context.Context, rules ...Rule) (Decision, error) {
 	now := s.now().UTC()
 	ws := s.windowStart(now)
 	wl := int(s.window / time.Second)
+	if !s.noCharge.Load() {
+		d, err := s.allowOneTrip(ctx, entries, now, ws, wl)
+		if err == nil {
+			return d, nil
+		}
+		var pgErr *pgconn.PgError
+		if !(errors.As(err, &pgErr) && pgErr.Code == "42883") {
+			return Decision{Reason: ScopeEndpoint}, err
+		}
+		s.noCharge.Store(true)
+		slog.Warn("throttle: auth_throttle_charge is missing (database predates migration 0171); using the multi-statement path")
+	}
 	allowed := true
 	var reason ScopeKind
 	var worstRetry time.Duration
@@ -250,6 +267,31 @@ func (s *Store) Allow(ctx context.Context, rules ...Rule) (Decision, error) {
 		return Decision{Reason: ScopeEndpoint}, fmt.Errorf("throttle: commit: %w", err)
 	}
 	return Decision{Allowed: allowed, RetryAfter: worstRetry, Reason: reason}, nil
+}
+
+// allowOneTrip charges every rule in one database round trip (AD-51; migration 0171), a port of the loop below.
+func (s *Store) allowOneTrip(ctx context.Context, entries []chargeable, now, ws time.Time, wl int) (Decision, error) {
+	n := len(entries)
+	kinds, keys, methods := make([]string, n), make([]string, n), make([]string, n)
+	limits, blocks, globals := make([]int32, n), make([]int32, n), make([]bool, n)
+	for i, e := range entries {
+		kinds[i], keys[i], methods[i] = string(e.kind), e.sk, e.method
+		limits[i], blocks[i], globals[i] = int32(e.limit), int32(e.block/time.Second), e.global
+	}
+	var allowed bool
+	var retryMS int64
+	var reason *string
+	if err := s.db.QueryRow(ctx,
+		`SELECT allowed, retry_milliseconds, reason
+		   FROM public.auth_throttle_charge($1::text[],$2::text[],$3::text[],$4::int[],$5::int[],$6::bool[],$7,$8,$9)`,
+		kinds, keys, methods, limits, blocks, globals, now, ws, wl).Scan(&allowed, &retryMS, &reason); err != nil {
+		return Decision{}, fmt.Errorf("throttle: charge: %w", err)
+	}
+	d := Decision{Allowed: allowed, RetryAfter: time.Duration(retryMS) * time.Millisecond}
+	if reason != nil {
+		d.Reason = ScopeKind(*reason)
+	}
+	return d, nil
 }
 
 // Cleanup deletes expired buckets, never one with an unexpired blocked_until.

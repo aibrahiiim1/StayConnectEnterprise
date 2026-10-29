@@ -2,6 +2,7 @@ package whatsapp
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,8 +25,9 @@ func TestStubInAProductionBuildWithholdsTheCode(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "wa.log")
 	st := NewStub(p)
 	st.redact = true
-	if err := st.Send(context.Background(), Message{To: "+15551234567", Code: testCode, TTLMinutes: 10}); err != nil {
-		t.Fatal(err)
+	// AD-35: a production stub delivers nothing and says so.
+	if err := st.Send(context.Background(), Message{To: "+15551234567", Code: testCode, TTLMinutes: 10}); !errors.Is(err, ErrNotDelivered) {
+		t.Fatalf("a production stub reported %v, want ErrNotDelivered", err)
 	}
 	b, _ := os.ReadFile(p)
 	if strings.Contains(string(b), testCode) || strings.Contains(string(b), "+15551234567") {

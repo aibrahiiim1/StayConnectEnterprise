@@ -102,3 +102,27 @@ func TestReservationIsTrimOnlyByDesign(t *testing.T) {
 		t.Fatal("Reservation must NOT case-fold: it is an opaque PMS identifier, not a name")
 	}
 }
+
+// AD-33: a name stored decomposed and the same name typed precomposed (and the reverse) are the same value.
+func TestCanonicallyEquivalentSpellingsAgree(t *testing.T) {
+	const decomposed = "Mu\u0308ller" // u + combining diaeresis
+	const precomposed = "M\u00fcller"
+	for _, c := range []struct{ stored, typed string }{
+		{decomposed, precomposed}, {precomposed, decomposed}, {decomposed, "m\u00dcLLER"}, {" " + decomposed + " ", "MULLER" + ""},
+	} {
+		got, want := Name(c.stored), Name(c.typed)
+		if c.typed == "MULLER" {
+			// NFC is not accent stripping: "Muller" is a different name from "M\u00fcller".
+			if got == want {
+				t.Fatalf("%q and %q must stay different values", c.stored, c.typed)
+			}
+			continue
+		}
+		if got != want {
+			t.Fatalf("Name(%q)=%q, Name(%q)=%q: canonically equivalent spellings must agree", c.stored, got, c.typed, want)
+		}
+	}
+	if Room("12\u0301b") != Room("12\u0301B") {
+		t.Fatal("Room is not case-folded after NFC")
+	}
+}

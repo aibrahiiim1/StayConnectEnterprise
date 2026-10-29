@@ -22,10 +22,10 @@ const authWindow = time.Minute
 
 // Abuse dampers behind the operator-visible sign-in protection settings; deliberately not settings themselves.
 const (
-	throttleEndpointPerWindow = 600              // appliance-wide, all methods, all clients (global)
-	throttleClientPerWindow   = 30               // one source IP, or one device, for one method
-	throttleIdentityPerWindow = 10               // one identity from one client, for one method
-	throttleBlock             = 15 * time.Minute // a client-scoped cap, once exceeded, blocks this long
+	throttleEndpointPerWindow = signinCeilingFloor // the floor of the appliance-wide ceiling; the effective value is signinCeiling (AD-51)
+	throttleClientPerWindow   = 30                 // one source IP, or one device, for one method
+	throttleIdentityPerWindow = 10                 // one identity from one client, for one method
+	throttleBlock             = 15 * time.Minute   // a client-scoped cap, once exceeded, blocks this long
 )
 
 // identityPerClient scopes the identity throttle to the identity plus the client making the attempt; the store HMACs it.
@@ -174,12 +174,23 @@ func referencedOTPGenerations(ctx context.Context, pool *pgxpool.Pool) ([]int, e
 // throttleGuard charges the durable throttle for one auth attempt and fails closed (deny) on store error; a no-op allow when disabled.
 // method must be a known throttle method; identity is an already-non-sensitive selector ("" skips it).
 func (s *server) throttleGuard(ctx context.Context, method string, ip net.IP, mac net.HardwareAddr, identity string) (bool, time.Duration) {
+	return s.throttleCharge(ctx, method, ip, mac, identity, true)
+}
+
+// throttleGuardNoCeiling is the second step of a two-step sign-in (the one-time code's verify): the client's own limits
+// still apply, but the appliance-wide ceiling was charged at issue, so one guest is not counted twice against it (AD-51).
+func (s *server) throttleGuardNoCeiling(ctx context.Context, method string, ip net.IP, mac net.HardwareAddr, identity string) (bool, time.Duration) {
+	return s.throttleCharge(ctx, method, ip, mac, identity, false)
+}
+
+func (s *server) throttleCharge(ctx context.Context, method string, ip net.IP, mac net.HardwareAddr, identity string, ceiling bool) (bool, time.Duration) {
 	if s.authThrottle == nil {
 		return true, 0
 	}
-	rules := []throttle.Rule{
+	var rules []throttle.Rule
+	if ceiling {
 		// Endpoint-wide damper, charged only when the client's own rules allowed the attempt, so one blocked client cannot use up the shared budget.
-		{Kind: throttle.ScopeEndpoint, Value: "auth", Method: throttle.MethodAny, Limit: throttleEndpointPerWindow, Global: true},
+		rules = append(rules, throttle.Rule{Kind: throttle.ScopeEndpoint, Value: "auth", Method: throttle.MethodAny, Limit: s.signinCeiling(ctx), Global: true})
 	}
 	if ip != nil {
 		rules = append(rules, throttle.Rule{Kind: throttle.ScopeIP, Value: ip.String(), Method: method, Limit: throttleClientPerWindow, Block: throttleBlock})

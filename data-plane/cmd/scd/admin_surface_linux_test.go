@@ -139,7 +139,7 @@ func TestTheGuestSurfaceStaysOpenToPortald(t *testing.T) {
 		"/v1/commerce/packages",
 		"/v1/sessions/activate",
 		"/v1/phase3/auth/pms/resolve",
-		"/v1/phase5/auth/post-stay-pin",
+		"/v1/phase5/auth/post-stay",
 		"/v1/phase6/devices/list",
 		"/v1/sessions/revoke",
 	} {

@@ -6,7 +6,7 @@
 // Safety is the server's: every change goes to /portal-branding/validate and the preview renders the sanitised fields.
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { api, ApiError, ListResp, PortalAsset } from "@/lib/api";
+import { api, ApiError, ListResp, PortalAsset, PORTAL_IMAGE_MAX_BYTES } from "@/lib/api";
 import { PageHeader, PageShell } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -247,13 +247,40 @@ export default function PortalSettingsPage() {
   }
 
   async function upload(field: ImageKey, file: File) {
+    if (file.size > PORTAL_IMAGE_MAX_BYTES) {
+      toast.error("Image too large", "An image must be 1 MB or smaller. Choose a smaller file or save it at a lower quality first.");
+      return;
+    }
     setUploading(field); setSaveErr(null);
     try {
       // Use the API client, which knows where edged is; a hand-written URL once broke uploads (see api.upload).
+      const before = new Set(assets.map((x) => x.name));
       const a = await api.upload<PortalAsset>("/portal-assets", file);
-      set(field, a.url);
-      const list = await api.get<ListResp<PortalAsset>>("/portal-assets");
+      // The appliance now scales and compresses the file in the background; its final name is known only when that ends.
+      let list = await api.get<ListResp<PortalAsset>>("/portal-assets");
       setAssets(list.data ?? []);
+      let final: PortalAsset | undefined;
+      for (let i = 0; i < 40; i++) {
+        const items = list.data ?? [];
+        const mine = items.find((x) => x.name === a.name);
+        if (mine?.status === "failed") {
+          toast.error("The image could not be optimised", mine.reason ?? "it could not be processed");
+          return;
+        }
+        if (!mine) {
+          const ready = items.filter((x) => (x.status ?? "ready") === "ready" && x.url);
+          final = ready.find((x) => !before.has(x.name)) ?? ready[0];
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 1500));
+        list = await api.get<ListResp<PortalAsset>>("/portal-assets");
+      }
+      setAssets(list.data ?? []);
+      if (!final) {
+        toast.error("Still optimising", "The image is being prepared. Check again in a moment.");
+        return;
+      }
+      set(field, final.url);
       toast.success(`${IMAGE_LABEL[field]} uploaded`, "Save changes to show it to clients.");
     } catch (e) {
       toast.error("Upload failed", e instanceof ApiError ? e.message : "the image could not be uploaded");
@@ -287,7 +314,8 @@ export default function PortalSettingsPage() {
   const tpl = templateById(d.template_id);
   const opts = d.template_options ?? {};
   const inUse = new Set([d.logo_url, d.background_url, d.hero_image_url].filter(Boolean));
-  const unused = assets.filter((a) => !a.in_use && !inUse.has(a.url));
+  const unused = assets.filter((a) => (a.status ?? "ready") === "ready" && !a.in_use && !inUse.has(a.url));
+  const optimising = assets.filter((a) => a.status === "optimising");
   const advancedCount = (d.custom_css?.trim() ? 1 : 0) + (d.custom_html?.trim() ? 1 : 0);
   const sectionHasIssue = (s: Section) => {
     const fields: Record<Section, string[]> = {
@@ -510,9 +538,14 @@ export default function PortalSettingsPage() {
                     src={assetSrc(d.background_url)} busy={uploading === "background_url"} writable={writable} wide
                     onPick={(f) => upload("background_url", f)} onClear={() => set("background_url", "")} error={fieldError("background_url")} />
                   <p className="text-xs text-muted-foreground">
-                    PNG, JPEG, WebP or GIF, up to 8&nbsp;MB. SVG is refused: it can carry script, and this page
+                    PNG, JPEG, WebP or GIF, up to 1&nbsp;MB; larger sides are scaled down and the file is compressed for you. SVG is refused: it can carry script, and this page
                     collects {collectedDetails(hospitality)}.
                   </p>
+                  {optimising.length > 0 && (
+                    <p role="status" className="text-xs text-muted-foreground">
+                      Optimising {optimising.length === 1 ? "an image" : `${optimising.length} images`}: it is being scaled and compressed and will appear here when ready.
+                    </p>
+                  )}
                   {unused.length > 0 && (
                     <div className="border-t border-border pt-4">
                       <h3 className="text-label">Previously uploaded</h3>
@@ -765,7 +798,7 @@ function ImageField({ label, help, src, busy, writable, wide, error, onPick, onC
               busy && "pointer-events-none opacity-50",
             )}>
               <Upload aria-hidden />
-              {busy ? "Uploading…" : src ? `Replace ${label.toLowerCase()}` : `Upload ${label.toLowerCase()}`}
+              {busy ? "Uploading and optimising…" : src ? `Replace ${label.toLowerCase()}` : `Upload ${label.toLowerCase()}`}
               <input type="file" className="sr-only" disabled={busy}
                 accept="image/png,image/jpeg,image/webp,image/gif"
                 aria-label={`Upload ${label.toLowerCase()}`}

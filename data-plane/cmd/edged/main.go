@@ -61,9 +61,12 @@ func envOr(k, d string) string {
 }
 
 type server struct {
-	db        *pgxpool.Pool
-	propsOnce sync.Once
-	props     *proposalStore
+	db *pgxpool.Pool
+	// assetOpt turns an uploaded portal image into its stored form in the background (AD-58); created on first use.
+	assetOptOnce sync.Once
+	assetOpt     *assetOptimiser
+	propsOnce    sync.Once
+	props        *proposalStore
 	// dbDefaultPassword warns while the database accepts its default superuser password.
 	dbDefaultPassword *defaultDBPasswordCheck
 	scd               *scdClient
@@ -360,6 +363,11 @@ func main() {
 			r.Route("/device-settings", func(r chi.Router) {
 				r.Use(s.resourcePermission("auth-methods"))
 				r.Mount("/", s.deviceSettingsRoutes())
+			})
+			// One-time-code caps, the sign-in ceiling, the room-pause exemption, device retention and the uploaded-image limits (0170).
+			r.Route("/signin-capacity-settings", func(r chi.Router) {
+				r.Use(s.resourcePermission("auth-methods"))
+				r.Mount("/", s.signinCapacityRoutes())
 			})
 			// Retention removes history when shortened, so it sits under the "backups" key (site administrators write).
 			r.Route("/accounting-retention", func(r chi.Router) {

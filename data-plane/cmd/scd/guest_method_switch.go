@@ -39,7 +39,17 @@ func methodSwitchOn(cfg *tenantcfg.AuthMethods, method string) bool {
 func (s *server) guestMethodSwitches(ctx context.Context) (*tenantcfg.AuthMethods, bool) {
 	load := s.methodSwitches
 	if load == nil {
-		load = func(ctx context.Context) (*tenantcfg.AuthMethods, error) { return tenantcfg.Load(ctx, s.db, s.tenID) }
+		// Cached for settingsCacheTTL and cleared by the database's notification when the switches change (AD-52). A
+		// test that supplies its own loader is never cached.
+		load = func(ctx context.Context) (*tenantcfg.AuthMethods, error) {
+			v, err := s.settings.get("tenant-auth-methods", func() (any, error) { return tenantcfg.Load(ctx, s.db, s.tenID) })
+			if err != nil {
+				return nil, err
+			}
+			// A copy: the licence is applied to it below and must not leak into the cached value.
+			c := *(v.(*tenantcfg.AuthMethods))
+			return &c, nil
+		}
 	}
 	cfg, err := load(ctx)
 	if err != nil {

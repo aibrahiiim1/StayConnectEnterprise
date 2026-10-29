@@ -2,6 +2,15 @@
 //
 // The voucher lookup normalizer folds I/L->1, O->0 and drops U, so a code containing any of them could never be
 // redeemed; those four characters are always excluded.
+//
+// ModeComplex is an alias of ModeAlnum (AD-29): there is no symbol or mixed-case alphabet, the voucher lookup
+// normaliser is case-folding, so a "complex" code can never be richer than letters plus digits. It is accepted as
+// input for compatibility and is normalised to "alnum".
+//
+// ACCEPTED RESIDUAL RISK (Product-Owner decision on AD-29, not fixed): the voucher format is unchanged. There is no
+// length floor, so a short digits-only voucher (for example 6 digits) can in principle be guessed by a device that
+// rotates its MAC address. The per-device and per-network sign-in throttles reduce but do not remove that exposure;
+// hotels that want more margin should issue longer alphanumeric codes.
 package codegen
 
 import (
@@ -46,7 +55,7 @@ func Alphabet(mode string, excludeAmbiguous bool) string {
 		base = "0123456789"
 	case ModeLetters:
 		base = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-	default: // alnum, complex
+	default: // alnum (complex is an alias, see the package comment)
 		base = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	}
 	remove := alwaysExclude
@@ -77,7 +86,9 @@ func Normalize(s string) string {
 func (o Options) normalized() (Options, string, error) {
 	o.Mode = strings.ToLower(strings.TrimSpace(o.Mode))
 	switch o.Mode {
-	case ModeNumbers, ModeLetters, ModeAlnum, ModeComplex:
+	case ModeNumbers, ModeLetters, ModeAlnum:
+	case ModeComplex:
+		o.Mode = ModeAlnum
 	case "":
 		o.Mode = ModeAlnum
 	default:
