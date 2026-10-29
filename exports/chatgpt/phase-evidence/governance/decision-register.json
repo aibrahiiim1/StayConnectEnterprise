@@ -1214,6 +1214,19 @@
       "authorization_evidence": "The Product Owner's mission of 2026-10-29 (GOAL: complete the approved remediation of audit decisions AD-1 through AD-68 end to end, using current master as the baseline).",
       "does_not_authorize": "Go-Live, real-money transactions, live payment-provider calls, PMS financial posting, contacting retired environments, changes to unnamed environments, or weakening validation. Deployment targets are OneGate Central 41.128.240.133 (private 172.21.96.96) and the test appliance 172.21.96.97 only.",
       "implementation": "Branch delivery/audit-decisions-ad1-68, recorded by T0267: seven workstreams merged; appliance migrations 0162-0178 and Central migrations 0059-0062; Go 1.26.10; docs/AUDIT_DECISION_DISPOSITIONS.md records each item's disposition."
+    },
+    {
+      "id": "D82",
+      "decided_on": "2026-10-29",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-10-29",
+      "status": "ACTIVE",
+      "title": "CLOSURE OF THE AUDIT-DECISION MISSION (2026-10-29). The Product Owner accepted the implemented atomic archival of deleted-appliance history instead of RESTRICT plus soft delete (AD-65, final; its historical protections and regression tests stay); recorded that the old Gmail password was changed (AD-14, owner statement, not independently verified); confirmed the local-first licensing contract (Central silence is a warning, signed offline licences keep working until their own expiry and revocation rules, no new licensing semantics); kept the voucher format and its accepted residual risk (AD-29); fixed the Post-stay contract as room number plus reservation number bound to the original stay and PMS interface with extra verification for a new or risky device, the surname alone never presented as strong proof (AD-36); kept the 1 MB automatic image optimisation (AD-58); and preserved all accepted risks and dispositions (AD-8, AD-25, AD-37, AD-59). The remaining work was authorised under the original mission: automated Root CA pin installation against a fingerprint, the missing Admin Console and Central screens, verification of post-stay, the image optimiser, the cut-off, conntrack, restore drills, offline licensing and database performance, review of the platform-migration mechanism, and Central database least privilege.",
+      "authorization_evidence": "The Product Owner's continuation of 2026-10-29 (GOAL: continue and fully close the existing AD-1 to AD-68 mission, starting from current master).",
+      "does_not_authorize": "Go-Live, production guest cutover, live card transactions, PMS posting or configuration changes, a new Root CA ceremony, networking topology changes, contact with retired hosts, or weakening any gate. Deployment targets remain OneGate Central 41.128.240.133 (private 172.21.96.96) and the test appliance 172.21.96.97.",
+      "implementation": "Branch delivery/audit-closure, recorded by T0270: Root CA pin against a fingerprint in appliance-install.sh and install-appliance-root-ca.sh; platform migrations must match the installed release record; Hotel Admin Client access protection page and licence clock card; Central registration-limit card; post-stay sign-in window setting (migration 0179) with isolated tests; netd unit hardening; baseline regenerated through 0179; docs/AUDIT_DECISION_DISPOSITIONS.md updated with the live evidence."
     }
   ]
 }
