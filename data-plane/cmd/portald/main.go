@@ -70,6 +70,9 @@ type handler struct {
 	// designs caches the published portal design briefly; nil disables it.
 	designs *designCache
 
+	// accessQuiet remembers, per client address, that scd had no access-ended notice to show (AD-57); nil disables it.
+	accessQuiet *quietCache
+
 	// clock drives the Phase-3 response-time budget; nil is the real clock and only tests set it.
 	clock phase3Clock
 
@@ -113,6 +116,7 @@ func newHandler(c cfg) (*handler, error) {
 		arpNudge:    defaultArpNudge,
 		commerceCfg: commCfg,
 		designs:     &designCache{},
+		accessQuiet: newQuietCache(),
 		portalTLS:   &tlsStateHolder{},
 		signIns:     newSignInDamper(),
 	}
