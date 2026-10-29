@@ -348,9 +348,13 @@ COMMENT ON FUNCTION public.ledger_apply(jsonb, boolean) IS
 -- Ownership and grants (mirrored in deploy/gatep/svc-guest-data-rights-grants.sql).
 -- ---------------------------------------------------------------------------------------------------------
 REVOKE ALL ON iam_v2.ledger_mac_key FROM PUBLIC;
-REVOKE ALL ON FUNCTION iam_v2.ledger_mac_of(text), iam_v2.ledger_receipt_of(text), iam_v2.ledger_mac_ok(text,text),
-  iam_v2.ledger_mac_key_get(), iam_v2.ledger_mac_key_install(text), iam_v2.ledger_seal_legacy(uuid,uuid),
-  iam_v2.ledger_confirm_checked(text[],text[]) FROM PUBLIC;
+REVOKE ALL ON FUNCTION iam_v2.ledger_mac_of(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION iam_v2.ledger_receipt_of(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION iam_v2.ledger_mac_ok(text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION iam_v2.ledger_mac_key_get() FROM PUBLIC;
+REVOKE ALL ON FUNCTION iam_v2.ledger_mac_key_install(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION iam_v2.ledger_seal_legacy(uuid,uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION iam_v2.ledger_confirm_checked(text[],text[]) FROM PUBLIC;
 
 DO $g$
 BEGIN
