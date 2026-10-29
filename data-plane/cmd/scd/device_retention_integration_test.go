@@ -24,23 +24,27 @@ func TestIntegration_PruneIdleDevicesKeepsDevicesReferencedByCompositeKeys(t *te
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	if _, err := pool.Exec(ctx, `SELECT 1 FROM pg_proc WHERE proname = 'prune_idle_devices'`); err != nil {
+	var have bool
+	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'prune_idle_devices')`).Scan(&have); err != nil || !have {
 		t.Skip("prune_idle_devices is not in this database")
 	}
 	const tenant, site = "44444444-4444-4444-4444-444444444444", "55555555-5555-5555-5555-555555555555"
 
 	cleanup := func() {
-		_, _ = pool.Exec(ctx, `DROP TABLE IF EXISTS public.zz_prune_ref`)
+		_, _ = pool.Exec(ctx, `DROP TABLE IF EXISTS iam_v2.zz_prune_ref`)
 		_, _ = pool.Exec(ctx, `DELETE FROM iam_v2.devices WHERE tenant_id=$1 AND site_id=$2`, tenant, site)
 	}
 	cleanup()
 	t.Cleanup(cleanup)
 
-	if _, err := pool.Exec(ctx, `CREATE TABLE public.zz_prune_ref (
+	if _, err := pool.Exec(ctx, `CREATE TABLE iam_v2.zz_prune_ref (
 		tenant_id uuid NOT NULL, site_id uuid NOT NULL, device_id uuid NOT NULL,
 		FOREIGN KEY (tenant_id, site_id, device_id) REFERENCES iam_v2.devices (tenant_id, site_id, id))`); err != nil {
 		t.Fatalf("scratch referencing table: %v", err)
 	}
+
+	// The function runs as the schema owner, as it does for every real table that refers to a device.
+	_, _ = pool.Exec(ctx, `GRANT SELECT ON iam_v2.zz_prune_ref TO iam_v2_owner`)
 
 	var kept, gone string
 	for i, dst := range []*string{&kept, &gone} {
@@ -51,7 +55,7 @@ func TestIntegration_PruneIdleDevicesKeepsDevicesReferencedByCompositeKeys(t *te
 			t.Fatalf("seed device: %v", err)
 		}
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO public.zz_prune_ref VALUES ($1,$2,$3)`, tenant, site, kept); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO iam_v2.zz_prune_ref VALUES ($1,$2,$3)`, tenant, site, kept); err != nil {
 		t.Fatal(err)
 	}
 
