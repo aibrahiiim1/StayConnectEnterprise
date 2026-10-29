@@ -3,6 +3,8 @@ package api
 import (
 	"net/http"
 	"testing"
+
+	"github.com/stayconnect/enterprise/control-plane/internal/testdb"
 )
 
 // Audit Phase 1 L6: an overdue retirement becomes terminal_delivery_failed only together with its alert.
@@ -17,7 +19,7 @@ func TestTerminalTimeoutStateAndAlertCommitTogether(t *testing.T) {
 	if _, err := f.pool.Exec(f.ctx, `UPDATE appliance_terminal_delivery SET timeout_at = now() - interval '1 minute' WHERE appliance_id=$1`, app); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.pool.Exec(f.ctx, `CREATE FUNCTION test_refuse_alert() RETURNS trigger LANGUAGE plpgsql AS $$
+	if _, err := testdb.OwnerPool(t, f.pool).Exec(f.ctx, `CREATE FUNCTION test_refuse_alert() RETURNS trigger LANGUAGE plpgsql AS $$
         BEGIN RAISE EXCEPTION 'refused by test'; END $$;
         CREATE TRIGGER test_refuse_alert BEFORE INSERT ON appliance_security_alerts FOR EACH ROW EXECUTE FUNCTION test_refuse_alert()`); err != nil {
 		t.Fatal(err)
@@ -28,7 +30,7 @@ func TestTerminalTimeoutStateAndAlertCommitTogether(t *testing.T) {
 	if n := f.count(`SELECT count(*) FROM appliance_terminal_delivery WHERE appliance_id=$1 AND delivery_state='terminal_delivery_pending'`, app); n != 1 {
 		t.Fatal("without its alert the delivery must stay pending, to be retried")
 	}
-	if _, err := f.pool.Exec(f.ctx, `DROP TRIGGER test_refuse_alert ON appliance_security_alerts`); err != nil {
+	if _, err := testdb.OwnerPool(t, f.pool).Exec(f.ctx, `DROP TRIGGER test_refuse_alert ON appliance_security_alerts`); err != nil {
 		t.Fatal(err)
 	}
 	if n, err := ReconcileTerminalTimeouts(f.ctx, f.base); err != nil || n != 1 {

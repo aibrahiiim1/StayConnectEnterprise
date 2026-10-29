@@ -42,6 +42,9 @@ services:
     command: ["postgres", "-c", "log_min_error_statement=panic", "-c", "log_error_verbosity=terse",
               "-c", "log_parameter_max_length=0", "-c", "log_parameter_max_length_on_error=0"]
     environment:
+      # The OWNER (and image superuser): migrations, pg_dump/pg_restore, first-admin seeding. ctrlapi does NOT connect as
+      # this role: it uses ctrlapi_rt, created by migration 0063 with a password central-install.sh / central-deploy.sh
+      # set from secrets/ctrlapi_db_password (docs/runbooks/CENTRAL_DB_LEAST_PRIVILEGE.md).
       POSTGRES_USER: stayconnect
       POSTGRES_DB: stayconnect
       # Read by the image's entrypoint (as root, before it drops to postgres) and used only on first init.

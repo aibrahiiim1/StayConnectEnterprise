@@ -46,7 +46,7 @@
 |---|---|
 | **ctrlapi** | `stayconnect-ctrlapi.service` → `/opt/stayconnect/bin/ctrlapi serve`, root (it writes the mTLS certificate and, on a new Central, the CA under `/etc/stayconnect`), sandboxed; env `/etc/stayconnect/ctrlapi.env` (from [`deploy/env/ctrlapi.env.example`](../deploy/env/ctrlapi.env.example)) then `/etc/stayconnect/central-endpoint.env`. Stateless; one replica. |
 | **cloud-admin** | `stayconnect-cloud-admin.service` → `node server.js` in `/opt/stayconnect/cloud-admin-current`, user `stayconnect`, `127.0.0.1:3000`, sandboxed, 512 MB cap. Node ≥ 18.17 at `/usr/bin/node` (built with 20). |
-| **Postgres + Redis** | [`deploy/compose/central-infra.yml`](../deploy/compose/central-infra.yml), project `stayconnect-central`: `sc-central-pg` (`timescale/timescaledb:2.16.1-pg16`) and `sc-central-redis` (`redis:7-alpine`, password, AOF), both on 127.0.0.1 only, passwords from `/opt/stayconnect/central/secrets/{db_password,redis_password}`. **No NATS.** |
+| **Postgres + Redis** | [`deploy/compose/central-infra.yml`](../deploy/compose/central-infra.yml), project `stayconnect-central`: `sc-central-pg` (`timescale/timescaledb:2.16.1-pg16`) and `sc-central-redis` (`redis:7-alpine`, password, AOF), both on 127.0.0.1 only, passwords from `/opt/stayconnect/central/secrets/{db_password,redis_password}` (`db_password` is the database owner `stayconnect`; ctrlapi connects as the least-privilege role `ctrlapi_rt` with `ctrlapi_db_password`, see [CENTRAL_DB_LEAST_PRIVILEGE](runbooks/CENTRAL_DB_LEAST_PRIVILEGE.md)). **No NATS.** |
 | **Caddy** | `stayconnect-caddy.service` (from `deploy/caddy/stayconnect-caddy.central.service`), user `caddy`, config rendered from the [`Caddyfile.central`](../deploy/caddy/Caddyfile.central) template. The apt package's own `caddy.service` is masked. |
 | **Database backup** | `stayconnect-central-backup.timer` (daily, 02:15) runs `central-backup.sh`: `pg_dump -Fc` to `/opt/stayconnect/backups/db/central-<stamp>-scheduled.dump.age` (0600), proven readable before it counts, then encrypted with `age` to the public keys in `/etc/stayconnect/backup-recipients.txt` (`age1…`, `ssh-ed25519` or `ssh-rsa`; while that file does not exist the dump stays a plain `.dump` and the run warns; once it exists, a dump that cannot be encrypted to it, or a file with no usable key, fails the backup). The installer runs it once immediately. **Local only** — see §9. |
 | **Backup retention** | `stayconnect-backup-cleanup.timer` (daily) and every backup run apply `/etc/stayconnect/backup-retention.conf` (`KEEP_DB` dumps, newest never deleted, `backup-retention.pins` never deleted; also rollback binaries and console releases) and write `/opt/stayconnect/backup-retention-status.json` — what *System → Backup health* (`GET /cloud/v1/backup-health`) shows. |
@@ -90,7 +90,7 @@ it cannot drift from what appliances are told to dial. Central initiates **no** 
 /opt/stayconnect/releases/central/<release>/  tooling of each installed release (deploy/, migrations, RELEASE.json)
 /opt/stayconnect/central/tooling              -> the current one; run operational scripts from here
 /opt/stayconnect/central/compose/central-infra.yml
-/opt/stayconnect/central/secrets/             db_password, redis_password               (0700 / 0600)
+/opt/stayconnect/central/secrets/             db_password, ctrlapi_db_password, redis_password   (0700 / 0600)
 /opt/stayconnect/central/tls/                 internal TLS CA + :443 certificate          (0700)
 /opt/stayconnect/central/appliance-trust/     PUBLIC material for appliance provisioning + FINGERPRINTS.txt
 /opt/stayconnect/central/DEPLOYED.json        what is running, read back from the installed files
@@ -234,7 +234,10 @@ sudo bash /opt/stayconnect/central/tooling/deploy/scripts/central-deploy.sh roll
 
 `deploy`: verify the release → `central-backup.sh --reason pre-<sha12>` (`/opt/stayconnect/backups/db/central-<stamp>-pre-<sha12>.dump`,
 same place, pattern and retention as the daily backup, checked readable) → back up the binary and `ctrlapi.env` → stop ctrlapi → `central-migrate.sh up` + `verify` with the new
-release's migrations → install binary + changed units → start (`--no-block`), poll `/readyz`, require the running
+release's migrations → **set up the ctrlapi database role** (`central_apply_runtime_grants()`, password from the
+generated `secrets/ctrlapi_db_password`, a proven login, and only then `CTRLAPI_DB_URL` rewritten with the previous
+`ctrlapi.env` kept as `ctrlapi.env.bak-dbrole-<stamp>`; see the [least-privilege runbook](runbooks/CENTRAL_DB_LEAST_PRIVILEGE.md))
+→ install binary + changed units → start (`--no-block`), poll `/readyz`, require the running
 binary to embed the release commit → re-render the Caddyfile from the template and restart Caddy only if it
 changed (validated first) → new console release dir, atomic `current`/`previous` switch, wait until it serves the
 new `BUILD_ID` → **smoke** → `DEPLOYED.json` → retention. A failure after the migration rolls ctrlapi and the
@@ -266,6 +269,12 @@ bash /opt/stayconnect/central/tooling/deploy/scripts/central-deploy.sh rollback 
 ```
 
 Never `pg_restore --clean` a TimescaleDB database: it drops the extension and every hypertable with it.
+
+A dump taken before migration 0063 carries no `ctrlapi_rt` grants. After restoring one, either put the previous env
+file back (`cp -p /etc/stayconnect/ctrlapi.env.bak-dbrole-<stamp> /etc/stayconnect/ctrlapi.env`, ctrlapi then connects as
+the owner again) or, once the restored database has 0063 applied by the next deploy, let `central-deploy.sh` re-create the
+grants. A dump taken after 0063 restores with its grants; `central-install.sh --mode restore` restores with `--no-acl` and
+re-asserts them itself.
 
 ### 7.1 Before deploying a release with the 2026-10-28 audit remediation
 

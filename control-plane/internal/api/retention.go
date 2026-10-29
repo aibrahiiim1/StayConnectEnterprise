@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -35,11 +36,22 @@ var (
 	retentionDisabledAccount = settingBounds{Default: 24, Min: 1, Max: 120, Unit: "months"}
 )
 
+// ForgetQueuedAuditEmails scrubs the emails central_forget_actor queued from the audit log payloads (migration 0063,
+// audit P3 L2). It runs outside the transaction that removed the user; a failure is only logged, the queue keeps the
+// email and the next housekeeping pass tries again.
+func ForgetQueuedAuditEmails(ctx context.Context, b *Base) {
+	if _, err := b.DB.Exec(ctx, `SELECT central_forget_audit_apply()`); err != nil {
+		slog.Warn("audit scrub of removed users failed; it is retried by the next housekeeping pass", "err", err)
+	}
+}
+
 func ApplyRetention(ctx context.Context, b *Base) (map[string]int64, error) {
 	var raw []byte
 	if err := b.DB.QueryRow(ctx, `SELECT central_retention_apply()`).Scan(&raw); err != nil {
 		return nil, err
 	}
+	// Removed users' emails queued by accounts this run anonymised (and any a failed request left behind).
+	ForgetQueuedAuditEmails(ctx, b)
 	out := map[string]int64{}
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return nil, err

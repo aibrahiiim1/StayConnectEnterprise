@@ -62,6 +62,17 @@ if printf '%s' "$out" | grep -q "$n applied, 0 pending, 0 modified\$"; then
 else bad "status: $(printf '%s' "$out" | tail -1)"; fi
 run real "$REAL" verify >/dev/null 2>&1 && ok "verify passes after up" || bad "verify fails after up"
 
+# ---- 1b. the runtime role (0063, audit P3 M1) runs the read-only commands, and cannot apply
+if [ "$(Q real "SELECT count(*) FROM pg_roles WHERE rolname = 'ctrlapi_rt'")" = 1 ]; then
+  rt() { PGUSER=ctrlapi_rt run "$@"; }
+  rt real "$REAL" verify >/dev/null 2>&1 && ok "ctrlapi_rt: verify passes (no DDL attempted on a complete ledger)" || bad "ctrlapi_rt: verify fails"
+  out="$(rt real "$REAL" status 2>&1)"
+  printf '%s' "$out" | grep -q "$n applied, 0 pending, 0 modified\$" && ok "ctrlapi_rt: status is clean" || bad "ctrlapi_rt: status: $(printf '%s' "$out" | tail -1)"
+  M0="$T/m0"; mkdir -p "$M0"; cp "$REAL"/*.sql "$M0/"; printf 'CREATE TABLE rt_must_not_exist (id int);\n' > "$M0/9999_rt_probe.up.sql"
+  rt real "$M0" up >/dev/null 2>&1 && bad "ctrlapi_rt applied a migration" || ok "ctrlapi_rt: cannot apply a migration"
+  [ "$(Q real "SELECT to_regclass('public.rt_must_not_exist') IS NULL")" = t ] && ok "ctrlapi_rt: nothing was created" || bad "ctrlapi_rt created a table"
+else bad "migration 0063 did not create the ctrlapi_rt role"; fi
+
 # ---- 2. a session that dies before COMMIT
 M="$T/m"; mkdir -p "$M"
 cat > "$M/0001_first.up.sql" <<'SQL'

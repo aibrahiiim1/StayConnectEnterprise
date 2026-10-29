@@ -108,6 +108,13 @@ checksum() {
 # Central's table has only (version, applied_at); the extra columns are added, never recreated, so its 32
 # rows of genuine history survive.
 ensure_ledger() {
+  # A complete ledger needs no DDL. This keeps the read-only commands (status, verify; central-preflight.sh runs verify
+  # with CTRLAPI_DB_URL) working for a role that cannot CREATE or ALTER (0063): CREATE TABLE IF NOT EXISTS is refused
+  # for want of CREATE on the schema even when the table exists.
+  if [ "$(Q "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'schema_migrations'
+              AND column_name IN ('version','applied_at','name','checksum','applied_by','adopted')" 2>/dev/null)" = 6 ]; then
+    return 0
+  fi
   PSQL -q -c "
     SET client_min_messages = warning;
     CREATE TABLE IF NOT EXISTS schema_migrations (
