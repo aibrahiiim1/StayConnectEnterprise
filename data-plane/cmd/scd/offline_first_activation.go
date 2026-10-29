@@ -207,7 +207,18 @@ func verifyPackageAssignment(pkg *activation.Package, identityPubB64, serial str
 	if !assignment.Grants(doc.State) {
 		return nil, "the signed assignment does not assign this appliance to a site"
 	}
-	reg, _ := currentRegistryOnDisk()
+	// The registry that judges this assignment: the one the package carries (vetted against the PINNED root and the held registry's
+	// version), else whatever is on disk, exactly as before the package could carry one.
+	var reg *assignment.Registry
+	vr, vreason := vetPackageRegistry(pkg, now)
+	if vreason != "" {
+		return nil, vreason
+	}
+	if vr != nil {
+		reg = vr.sr.Registry()
+	} else {
+		reg, _ = currentRegistryOnDisk()
+	}
 	have := int64(0)
 	if rec, err := store.Load(); err == nil && rec != nil {
 		have = rec.Version
@@ -217,6 +228,114 @@ func verifyPackageAssignment(pkg *activation.Package, identityPubB64, serial str
 		return nil, "the signed assignment inside it could not be verified (" + reason + ")"
 	}
 	return &doc, ""
+}
+
+// vettedRegistry is a registry carried in a package that passed every check a downloaded one passes.
+type vettedRegistry struct {
+	sr    *assignment.SignedRegistry
+	store *assignment.RegistryStore
+	noop  bool // the identical registry is already held; nothing to write
+}
+
+// vetPackageRegistry returns nil, "" when the package carries no registry (behaviour is then exactly as before the field existed). A carried
+// registry is NEVER trusted for arriving in a signed package: it must verify against the root key pinned on THIS appliance (signature, validity
+// window) and must not be older than the registry held (RegistryStore.Check, the rules of the online path). Nothing is written here.
+func vetPackageRegistry(pkg *activation.Package, now time.Time) (*vettedRegistry, string) {
+	if len(pkg.AssignmentRegistry) == 0 || string(pkg.AssignmentRegistry) == "null" {
+		return nil, ""
+	}
+	store := registryStoreOnDisk()
+	if store == nil {
+		return nil, "the package carries an assignment trust registry, but this appliance has no registry root key installed to verify it with"
+	}
+	var sr assignment.SignedRegistry
+	if err := json.Unmarshal(pkg.AssignmentRegistry, &sr); err != nil {
+		return nil, "the assignment trust registry inside the package is unreadable"
+	}
+	noop, reason := store.Check(&sr, now)
+	if reason != "" {
+		return nil, "the assignment trust registry inside the package was refused (" + reason + ")"
+	}
+	return &vettedRegistry{sr: &sr, store: store, noop: noop}, ""
+}
+
+// registryUndoPath holds what the registry files were before an activation replaced them, written durably BEFORE the registry is touched, so a
+// rolled-back or crashed activation can put them back (activation-in-progress.json alone cannot say what to restore).
+func (s *server) registryUndoPath() string {
+	return filepath.Join(envOr("SCD_IDENTITY_DIR", "/etc/stayconnect/identity"), "activation-registry-undo.json")
+}
+
+type registryUndo struct {
+	HadFile   bool   `json:"had_file"`
+	Prior     []byte `json:"prior,omitempty"`
+	HadMarker bool   `json:"had_marker"`
+}
+
+// adoptPackageRegistry persists a vetted registry through the same RegistryStore.Adopt the online path uses and returns the function that undoes it.
+func (s *server) adoptPackageRegistry(vr *vettedRegistry) (undo func(), err error) {
+	if vr == nil || vr.noop {
+		return func() {}, nil
+	}
+	path := assignmentRegistryPath()
+	snap := registryUndo{}
+	if b, e := os.ReadFile(path); e == nil {
+		snap.HadFile, snap.Prior = true, b
+	}
+	if _, e := os.Stat(path + ".adopted"); e == nil {
+		snap.HadMarker = true
+	}
+	sb, _ := json.Marshal(snap)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, errors.New("could not prepare the registry location: " + err.Error())
+	}
+	if err := writeFileSync(s.registryUndoPath(), sb, 0o600); err != nil {
+		return nil, errors.New("could not record the registry undo state: " + err.Error())
+	}
+	undo = func() { s.restoreRegistryFromUndo() }
+	adopted, reason := vr.store.Adopt(vr.sr, time.Now())
+	if reason != "" || !adopted {
+		undo()
+		if reason == "" {
+			reason = "not adopted"
+		}
+		return nil, errors.New("assignment trust registry refused: " + reason)
+	}
+	return undo, nil
+}
+
+// restoreRegistryFromUndo puts the registry files back as the undo record describes and removes the record. If a file cannot be restored the record
+// stays, so the boot recovery tries again.
+func (s *server) restoreRegistryFromUndo() {
+	raw, err := os.ReadFile(s.registryUndoPath())
+	if err != nil {
+		return
+	}
+	var snap registryUndo
+	if json.Unmarshal(raw, &snap) != nil {
+		slog.Error("registry undo record is unreadable; leaving the registry as it is")
+		_ = os.Remove(s.registryUndoPath())
+		return
+	}
+	path := assignmentRegistryPath()
+	ok := true
+	if snap.HadFile {
+		if err := writeFileSync(path, snap.Prior, 0o644); err != nil {
+			slog.Error("could not restore the previous assignment trust registry", "err", err)
+			ok = false
+		}
+	} else if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		slog.Error("could not remove the assignment trust registry written by a failed activation", "err", err)
+		ok = false
+	}
+	if !snap.HadMarker {
+		if err := os.Remove(path + ".adopted"); err != nil && !os.IsNotExist(err) {
+			slog.Error("could not remove the registry adoption marker written by a failed activation", "err", err)
+			ok = false
+		}
+	}
+	if ok {
+		_ = os.Remove(s.registryUndoPath())
+	}
 }
 
 // applianceauthKeyIDFromB64 is the hex identity-key fingerprint assignment and licence carry (not the base64url form the activation envelope uses; see internal/activation.KeyID).
@@ -260,13 +379,25 @@ func (s *server) applyActivationPackage(r *http.Request, pkg *activation.Package
 	if doc.TenantID != pkg.TenantID || doc.SiteID != pkg.SiteID {
 		return errors.New("the signed assignment disagrees with the package about tenant or site")
 	}
+	// 2a. The signed trust registry the package carries (if any), vetted AGAIN against the pinned root and the held version at the moment of
+	// writing, persisted with the rest or not at all. Written before the assignment so a boot after this step can verify it.
+	vr, vreason := vetPackageRegistry(pkg, time.Now())
+	if vreason != "" {
+		return errors.New(vreason)
+	}
+	undoRegistry, err := s.adoptPackageRegistry(vr)
+	if err != nil {
+		return err
+	}
 	if err := s.assignmentStore().Adopt(&doc); err != nil {
+		undoRegistry()
 		return errors.New("signed assignment refused: " + err.Error())
 	}
 	undoAssignment := func() {
 		if err := s.assignmentStore().Clear(); err != nil {
 			slog.Error("could not roll back the assignment after a failed activation", "err", err)
 		}
+		undoRegistry()
 	}
 	// 3. Trust material, so this appliance can later reach Central over mTLS.
 	if pkg.CABundlePEM != "" {
@@ -298,6 +429,7 @@ func (s *server) applyActivationPackage(r *http.Request, pkg *activation.Package
 	}
 	// 6. Clearing the journal makes the activation done; a crash before is recovered at next boot, after has nothing to recover.
 	_ = os.Remove(s.activationJournalPath())
+	_ = os.Remove(s.registryUndoPath())
 	return nil
 }
 
@@ -307,7 +439,9 @@ func (s *server) recoverInterruptedActivation() {
 	path := s.activationJournalPath()
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return // nothing was in flight
+		// No journal: nothing was in flight. An undo record left without one means the activation finished and only its removal was lost.
+		_ = os.Remove(s.registryUndoPath())
+		return
 	}
 	var pkg activation.Package
 	if json.Unmarshal(raw, &pkg) != nil {
@@ -315,6 +449,7 @@ func (s *server) recoverInterruptedActivation() {
 		// Roll back to unassigned, which is the safe half of the two allowed outcomes.
 		slog.Error("activation journal is unreadable; rolling back to unassigned")
 		_ = s.assignmentStore().Clear()
+		s.restoreRegistryFromUndo()
 		_ = os.Remove(path)
 		return
 	}
@@ -329,6 +464,7 @@ func (s *server) recoverInterruptedActivation() {
 		slog.Info("interrupted offline activation was complete; clearing the journal",
 			"package_id", pkg.PackageID)
 		_ = os.Remove(path)
+		_ = os.Remove(s.registryUndoPath())
 	default:
 		// Partial: clear the assignment so the appliance is plainly unassigned, but leave the single-use ledger entry: the package was spent and re-using it is the replay the ledger prevents.
 		slog.Warn("offline activation was interrupted and is incomplete; rolling back to unassigned",
@@ -337,6 +473,8 @@ func (s *server) recoverInterruptedActivation() {
 		if err := s.assignmentStore().Clear(); err != nil {
 			slog.Error("could not clear the assignment during activation rollback", "err", err)
 		}
+		// The registry this activation wrote goes too: a rolled-back activation leaves no new trust material behind.
+		s.restoreRegistryFromUndo()
 		_ = os.Remove(path)
 	}
 }

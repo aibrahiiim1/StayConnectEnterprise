@@ -107,7 +107,11 @@ type Package struct {
 	ExpiresAt   int64  `json:"expires_at"`
 	Nonce       string `json:"nonce"`
 	SignerKeyID string `json:"signer_key_id"`
-	Signature   string `json:"signature"`
+	// AssignmentRegistry is the vendor-signed assignment-signing-key registry document (assignment.SignedRegistry) exactly as Central serves it
+	// to appliances. OPTIONAL: omitted from the signed bytes when empty, so a package without it signs and verifies exactly as before. The
+	// appliance NEVER trusts it because the package is signed: it verifies it against its own pinned registry-root key.
+	AssignmentRegistry json.RawMessage `json:"assignment_registry,omitempty"`
+	Signature          string          `json:"signature"`
 }
 
 type packageSignView struct {
@@ -129,13 +133,15 @@ type packageSignView struct {
 	ExpiresAt       int64           `json:"expires_at"`
 	Nonce           string          `json:"nonce"`
 	SignerKeyID     string          `json:"signer_key_id"`
+	// Last and omitempty: a package without a registry keeps the pre-field signed bytes.
+	AssignmentRegistry json.RawMessage `json:"assignment_registry,omitempty"`
 }
 
 func packageSigningBytes(p *Package) []byte {
 	b, _ := json.Marshal(packageSignView{
 		p.SchemaVersion, p.PackageID, p.RequestID, p.RequestNonce, p.ApplianceID, p.Serial,
 		p.IdentityKeyFpr, p.TenantID, p.SiteID, p.Assignment, p.LicenseEnvelope, p.Entitlements,
-		p.CABundlePEM, p.CentralBase, p.IssuedAt, p.ExpiresAt, p.Nonce, p.SignerKeyID,
+		p.CABundlePEM, p.CentralBase, p.IssuedAt, p.ExpiresAt, p.Nonce, p.SignerKeyID, p.AssignmentRegistry,
 	})
 	return b
 }

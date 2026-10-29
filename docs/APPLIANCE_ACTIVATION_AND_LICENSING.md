@@ -128,14 +128,29 @@ For an appliance that has **never** been activated and has no route to the contr
 3. **Admin Console → same place → Upload activation package.** Done.
 
 The package carries everything first activation needs: the **signed assignment** (the only authority for
-tenant and site), the **trust material**, and the **signed licence**. It is bound to that exact request and
-that exact identity key, single-use and expiring.
+tenant and site), the **trust material** (the CA bundle, and the **signed assignment trust registry** — the
+list of assignment-signing keys, signed by Central's registry root key), and the **signed licence**. It is
+bound to that exact request and that exact identity key, single-use and expiring.
+
+The registry is in the package because a never-online appliance cannot fetch it: online, the appliance
+downloads it from Central, and without one it cannot tell a genuine assignment from a forged one. The registry
+is **not trusted because the package is signed.** The appliance verifies it against the registry root public key
+pinned on the appliance itself (`assignment-registry-root.pub`), by the same rules as a downloaded one:
+signature, validity window, and anti-rollback (a registry older than the one already held is refused; the same
+version is accepted only if identical; a newer one replaces the held one, which is kept as the previous). Only
+then does it judge the assignment, and it is written to disk as one step of the all-or-nothing apply below —
+never earlier. A package without a registry (issued before Central carried it, or while registry signing is
+off) is judged against the registry already on the appliance, exactly as before. **Limitation:** a registry
+carried in a package is as old as the package; the appliance fetches a newer one as soon as it can reach
+Central, and until then it trusts the keys that were current when the package was issued.
 
 **What is refused, with nothing changed on the appliance:** a package for another appliance, one that answers
 a different request, a replayed or stale nonce, a serial mismatch, an expired file, a file edited after
-signing, one signed by anything but the vendor key, one carrying no signed assignment, and any package
-offered to an appliance that is *already* assigned — that is a lifecycle action with its own authority, not
-something a USB stick may do.
+signing, one signed by anything but the vendor key, one carrying no signed assignment, a carried registry that
+is not signed by the pinned registry root, was altered, is expired or not yet valid, or is older than the one
+held (or any carried registry on an appliance with no registry root key installed), a signed assignment that
+no key in the registry verifies, and any package offered to an appliance that is *already* assigned — that is
+a lifecycle action with its own authority, not something a USB stick may do.
 
 Applying is all-or-nothing, including through a power cut. The package is journalled and fsynced before a
 single durable change, and the journal is removed only once everything has landed. On the next boot an
@@ -145,8 +160,10 @@ but unlicensed or licensed with no identity, never survives a restart; that stat
 one outcome worth engineering against.
 
 Within a normal run the same holds: single-use is claimed first, so a package cannot be reused even if a
-later step fails; the assignment is rolled back if the trust material or licence is refused; and the identity
-is adopted **last**. A rolled-back activation does not release its package — it was spent, and reusing it
+later step fails; the assignment is rolled back if the trust material or licence is refused (and the registry
+files are put back exactly as they were, or removed if there were none — the previous contents are recorded
+durably before the registry is touched, so a power cut rolls back the same way); and the identity is adopted
+**last**. A rolled-back activation does not release its package — it was spent, and reusing it
 would be the replay the ledger exists to prevent, so generate a fresh one.
 
 ## What each state means

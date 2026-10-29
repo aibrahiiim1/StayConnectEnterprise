@@ -1,0 +1,4 @@
+package activation
+
+const goldenRegistryPackageBytes = "{\"schema_version\":1,\"package_id\":\"pkg-1\",\"request_id\":\"req-1\",\"request_nonce\":\"n\",\"appliance_id\":\"app-1\",\"serial\":\"SC-1\",\"identity_key_fingerprint\":\"aa\",\"tenant_id\":\"t\",\"site_id\":\"s\",\"assignment\":{\"a\":1},\"license_envelope\":{\"l\":1},\"entitlements\":{},\"ca_bundle_pem\":\"CA\",\"central_base\":\"https://c\",\"issued_at\":100,\"expires_at\":200,\"nonce\":\"pn\",\"signer_key_id\":\"Vkdap1RjR0w\",\"assignment_registry\":{\"registry_version\":3,\"keys\":[{\"key_id\":\"k\",\"public_key\":\"p\",\"state\":\"active\",\"added_at\":\"x\"}],\"signer_key_id\":\"r\",\"signature\":\"s\"}}"
+const goldenRegistryPackageSignature = "jd9rN0N/wa1BSQevNZb2DgEsZgbl8GbqB31zvqQrVLwkq4b4FpEkx/MOZCM+OCxkyTjZCRMEs6f8d+V9/7V3Bw"
