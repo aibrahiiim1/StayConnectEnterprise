@@ -7,6 +7,7 @@ import (
 	"context"
 	"log/slog"
 	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -209,10 +210,71 @@ type flushingGate struct {
 	mu sync.Mutex
 	// clean marks bridge|ip keys flushed since their last revocation; absent means unknown, and unknown is flushed.
 	clean map[string]bool
+
+	// seen is the authorizations the previous successful List showed (AD-24 b). An address that was there and is not now has LEFT
+	// the set without a Revoke through this gate: its lease lapsed in the kernel (the producer stopped, a plan was lost, a restart
+	// dropped a renewal). The forward chain accepts established flows before the authorization sets, so removing the element did
+	// not end its open flows; they are ended here, scoped to those addresses only, never the whole table.
+	seen map[string]net.IP
+	// flushLapsed is the off-switch (NETD_FLUSH_LAPSED=false).
+	flushLapsed bool
 }
 
 func newFlushingGate(g gate, f conntrack.Flusher) *flushingGate {
-	return &flushingGate{gate: g, flows: f, clean: map[string]bool{}}
+	return &flushingGate{gate: g, flows: f, clean: map[string]bool{}, seen: map[string]net.IP{}, flushLapsed: os.Getenv("NETD_FLUSH_LAPSED") != "false"}
+}
+
+// List is the inner gate's, plus the AD-24 (b) sweep of addresses that left the set since the previous list.
+func (g *flushingGate) List(ctx context.Context) ([]gateElem, error) {
+	elems, err := g.gate.List(ctx)
+	if err != nil {
+		return nil, err // an unreadable set is unknown: nothing is concluded from it
+	}
+	now := make(map[string]net.IP, len(elems))
+	liveIPs := map[string]bool{}
+	for _, e := range elems {
+		now[gateKey(e.Bridge, e.IP)] = e.IP
+		liveIPs[e.IP.String()] = true
+	}
+	g.mu.Lock()
+	var lapsed []net.IP
+	var lapsedKeys []string
+	for k, ip := range g.seen {
+		if _, still := now[k]; still || liveIPs[ip.String()] {
+			continue
+		}
+		if g.clean[k] {
+			continue // revoked through this gate, and its flows were already ended
+		}
+		lapsed = append(lapsed, ip)
+		lapsedKeys = append(lapsedKeys, k)
+	}
+	g.seen = now
+	enabled, flows := g.flushLapsed, g.flows
+	g.mu.Unlock()
+	if len(lapsed) == 0 || !enabled || flows == nil {
+		return elems, nil
+	}
+	n, ferr := flows.FlushAddrs(ctx, lapsed)
+	if ferr != nil {
+		// Retried on the next list: the keys go back so the sweep sees them as "still to flush".
+		slog.Error("netd: authorizations lapsed but the addresses' open flows could not be ended; retrying next pass", "addresses", len(lapsed), "err", ferr)
+		g.mu.Lock()
+		for i, k := range lapsedKeys {
+			g.seen[k] = lapsed[i]
+		}
+		g.mu.Unlock()
+		return elems, nil
+	}
+	if n > 0 {
+		slog.Info("netd: ended the open flows of addresses whose authorization lapsed", "addresses", len(lapsed), "flows", n)
+	}
+	g.mu.Lock()
+	for _, k := range lapsedKeys {
+		g.clean[k] = true
+	}
+	g.mu.Unlock()
+	return elems, nil
 }
 
 // BindMAC passes the device address to a wrapped gate that can use it.
