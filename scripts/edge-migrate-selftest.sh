@@ -742,7 +742,9 @@ cp "$WORK/0099.keep" "$MIGDIR/0099_selftest_noop.up.sql"; undo
 
 echo "== 12. no-transaction mode: CREATE INDEX CONCURRENTLY with a separate ledger step (AD-62) =="
 Q "CREATE TABLE IF NOT EXISTS iam_v2.edge_selftest_big(id int, v int);" >/dev/null
-Q "GRANT ALL ON iam_v2.edge_selftest_big TO edge_apply;" >/dev/null
+# CREATE INDEX needs the table's owner, and the apply role is the one that runs the migration.
+Q "ALTER TABLE iam_v2.edge_selftest_big OWNER TO edge_apply;" >/dev/null
+ledger_reset; mk_commerce
 mk_notx(){ printf '%s\n' "$@" > "$MIGDIR/0099_selftest_noop.up.sql"; PSHA="$(sha256sum "$MIGDIR/0099_selftest_noop.up.sql" | awk '{print $1}')"; }
 run_notx(){ EDGE_PSQL="$PSQL" bash "$RUN" --apply-role edge_apply --only 0099_selftest_noop --expect-db "$DB" --target-kind live-site \
         --ack-target I_UNDERSTAND_LIVE_DARK_SITE_MIGRATION --expect-sha256 "$PSHA" 2>&1; }
