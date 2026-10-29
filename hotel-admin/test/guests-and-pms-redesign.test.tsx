@@ -211,11 +211,12 @@ describe("Guest accounts", () => {
     await chooseInRow(document.body, /password/i);
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByLabelText(/generate a strong password/i));
+    await user.type(within(dialog).getByLabelText(/reason/i), "forgot it at the desk");
     await user.click(within(dialog).getByRole("button", { name: "Set password" }));
 
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith("/guest-accounts/ga-1/set-password", {
-        password: "", generate: true, disconnect_sessions: false,
+        password: "", generate: true, disconnect_sessions: false, reason: "forgot it at the desk",
       }),
     );
     expect(await screen.findByText("Password for room101")).toBeTruthy();

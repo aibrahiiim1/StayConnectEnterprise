@@ -359,7 +359,7 @@ func TestIntegration_SetPassword_BodyWithDisconnectFlagIsAccepted(t *testing.T) 
 	}
 	id := body["account"].(map[string]any)["id"].(string)
 	st, body = f.do(t, "POST", "/guest-accounts/"+id+"/set-password",
-		map[string]any{"password": "pw-two", "generate": false, "disconnect_sessions": false})
+		map[string]any{"reason": "desk reset for the client", "password": "pw-two", "generate": false, "disconnect_sessions": false})
 	if st != 200 || body["status"] != "password_set" {
 		t.Fatalf("set-password with disconnect_sessions = %d %v", st, body)
 	}
@@ -381,7 +381,7 @@ func TestIntegration_SetPassword_DisconnectsOnlyWhenTicked(t *testing.T) {
 
 	// Unticked: the password changes and the device stays online.
 	st, body := f.do(t, "POST", "/guest-accounts/"+acct+"/set-password",
-		map[string]any{"password": "fresh-one", "disconnect_sessions": false})
+		map[string]any{"reason": "desk reset for the client", "password": "fresh-one", "disconnect_sessions": false})
 	if st != 200 {
 		t.Fatalf("set-password = %d %v", st, body)
 	}
@@ -408,7 +408,7 @@ func TestIntegration_SetPassword_DisconnectsOnlyWhenTicked(t *testing.T) {
 
 	// Ticked, with a generated password: the device goes off and the entitlement is untouched.
 	st, body = f.do(t, "POST", "/guest-accounts/"+acct+"/set-password",
-		map[string]any{"generate": true, "disconnect_sessions": true})
+		map[string]any{"reason": "desk reset for the client", "generate": true, "disconnect_sessions": true})
 	if st != 200 || body["disconnected_sessions"] != float64(1) {
 		t.Fatalf("ticked reset = %d %v", st, body)
 	}
@@ -445,7 +445,7 @@ func TestIntegration_SetPassword_RefusesWhenEnforcementIsUnavailable(t *testing.
 	}
 
 	st, body := f.do(t, "POST", "/guest-accounts/"+acct+"/set-password",
-		map[string]any{"password": "never-applied", "disconnect_sessions": true})
+		map[string]any{"reason": "desk reset for the client", "password": "never-applied", "disconnect_sessions": true})
 	if st != 503 || body["error"] != "enforcement_unavailable" {
 		t.Fatalf("refusal = %d %v", st, body)
 	}
@@ -464,7 +464,7 @@ func TestIntegration_SetPassword_RefusesWhenEnforcementIsUnavailable(t *testing.
 	// With nothing online the unavailable channel is not a refusal.
 	acct2, _, _ := seedAccountWithSessions(t, f, "pwnoscd2", 1)
 	if st, b := f.do(t, "POST", "/guest-accounts/"+acct2+"/set-password",
-		map[string]any{"password": "applied-fine", "disconnect_sessions": true}); st != 200 ||
+		map[string]any{"reason": "desk reset for the client", "password": "applied-fine", "disconnect_sessions": true}); st != 200 ||
 		b["disconnected_sessions"] != float64(0) {
 		t.Fatalf("reset with nothing online = %d %v", st, b)
 	}
