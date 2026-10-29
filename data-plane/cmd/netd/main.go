@@ -115,6 +115,9 @@ func main() {
 	// config at boot, so otherwise the auth set and any bridge netplan did not recreate would drift from the DB.
 	// A previous run that stopped mid-apply left its revision in 'applying', which holds the single in-flight slot against every later change and which
 	// nothing else would ever move. It is rolled back first, then the confirmed configuration is re-asserted over whatever that left.
+	if dbUp {
+		ap.refreshEnforcementPolicy(rootCtx)
+	}
 	ap.loadIncompleteMarker(rootCtx)
 	ap.ReclaimInterruptedOnBoot(rootCtx)
 	ap.ReconcileActiveOnBoot(rootCtx)
@@ -165,6 +168,8 @@ func main() {
 		}
 	}
 	p3shaping := &phase3Shaping{
+		// AD-53: an unchanged plan only refreshes validity between full walks; NETD_PLAN_FASTPATH=false walks every submission.
+		fastPath: os.Getenv("NETD_PLAN_FASTPATH") != "false",
 		shp:   shape.New(),
 		mode:  p3mode,
 		authz: p3authz,
@@ -181,7 +186,7 @@ func main() {
 		generations: &pgGenerations{pool: pool},
 		// Packet-authorization gate: writes only the Phase-3 set, and revocation also flushes the address's
 		// conntrack flows so access ends for open connections too.
-		gate: newFlushingGate(newNFTGate(), conntrack.New()),
+		gate: newFlushingGate(newMACAwareGate(ap), conntrack.New()),
 		// The legacy auth_ipv4 set is kept empty.
 		legacy: newNFTLegacySet(),
 		// Confirmed kernel result, so a Session is only `active` once both halves are in force.
@@ -214,6 +219,8 @@ func main() {
 			return writerguard.Verify(ctx, pool, writerguard.Phase3Requirements())
 		},
 	}.loop(rootCtx, 30*time.Second)
+	// Lease renewal between full walks (AD-53); a no-op while the fast path is off or not in force.
+	go p3shaping.renewLoop(rootCtx, phase3RenewEvery)
 	slog.Info("netd phase3 shaping writer", "active", p3mode.Active, "producer_authenticated", p3authz.configured)
 
 	// Watchdog: rolls back pending revisions past their deadline; also runs at boot to recover from a crash.

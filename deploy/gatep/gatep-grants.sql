@@ -322,6 +322,8 @@ GRANT EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) TO svc_acctd;
 \ir svc-pmsd-iamv2-connector-grants.sql
 -- The HTTPS portal and sealed social secrets (0116).
 \ir svc-portal-https-grants.sql
+-- Enforcement policy: private-network reach, MAC binding, cut-off (0190).
+\ir svc-enforcement-policy-grants.sql
 -- Email accounts: self-service registration, verification and reset (0117).
 \ir svc-self-service-grants.sql
 -- Device management: client replacement and release, staff slot release and fresh sign-in (0118).

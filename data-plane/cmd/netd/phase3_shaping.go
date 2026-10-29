@@ -111,6 +111,12 @@ type phase3Shaping struct {
 	passClasses map[string]map[int]shape.ClassBytes
 	// passGroups records the SHARED group classes already re-rated in this pass, so a group is re-rated once per pass, not once per device.
 	passGroups map[string]bool
+
+	// fastPath enables AD-53 (phase3_fastpath.go): an unchanged plan only refreshes validity between full walks.
+	fastPath bool
+	// memo is the last full walk; walkRenewable is the one being built by the walk in progress.
+	memo          walkMemo
+	walkRenewable map[string]renewSession
 }
 
 type passLeases struct {
@@ -212,15 +218,36 @@ func (p *phase3Shaping) submit(ctx context.Context, env shapeplan.Envelope, now 
 		return shapingPlanResponse{Accepted: false, Reason: reason}, errPlanRefused{reason}
 	}
 
-	res := p.reconcileLocked(ctx, env, now)
-	res.Accepted = true
-	res.PlanGeneration = env.PlanGeneration
-
 	accepted := shapeplan.Accepted{
 		Generation: env.PlanGeneration, Hash: env.DesiredStateHash,
 		TenantID: env.TenantID, SiteID: env.SiteID,
 		AcceptedAt: now.UTC(), ExpiresAt: env.ExpiresAt.UTC(),
 	}
+	if storeProblem == "" && p.fastPathApplies(env, now) {
+		// Nothing changed since the last clean full walk: refresh the plan's validity and stop. The kernel leases are kept
+		// alive by renewDue, bounded by this very validity.
+		res := p.memo.res
+		res.Accepted, res.PlanGeneration, res.Problems, res.Degraded = true, env.PlanGeneration, nil, false
+		p.lastAccepted, p.hasAccepted = accepted, true
+		if p.store != nil {
+			if err := p.store.save(accepted); err != nil {
+				res.Degraded = true
+				res.Problems = append(res.Problems, "the accepted plan generation was not saved durably: "+err.Error()+
+					"; the plan is applied but not reported converged")
+				return res, nil
+			}
+		}
+		p.lastConverged, p.hasConverged = accepted, true
+		return res, nil
+	}
+
+	p.walkRenewable = map[string]renewSession{}
+	res := p.reconcileLocked(ctx, env, now)
+	res.Accepted = true
+	res.PlanGeneration = env.PlanGeneration
+	p.memo = walkMemo{hash: env.DesiredStateHash, at: now, clean: !res.Degraded && len(res.Problems) == 0 && res.Failed == 0,
+		res: res, renewable: p.walkRenewable}
+	p.walkRenewable = nil
 	// Admission advances even on partial application so a replay of an older generation cannot reinstate revoked access.
 	// Resubmitting the same generation and hash is allowed so the producer can retry until the kernel converges.
 	p.lastAccepted, p.hasAccepted = accepted, true

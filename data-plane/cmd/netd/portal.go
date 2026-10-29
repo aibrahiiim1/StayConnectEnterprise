@@ -51,6 +51,7 @@ func (a *applier) renderTopo() netcfg.Topology {
 	t.MgmtAddr = a.resolveMgmtAddr(t.MgmtAddr)
 	t.PortalVIP = a.portal.vip
 	t.PortalTLS = a.portal.tls
+	a.applyPolicy(&t)
 	return t
 }
 

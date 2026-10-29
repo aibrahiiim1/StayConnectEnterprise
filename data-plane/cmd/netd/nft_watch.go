@@ -110,6 +110,8 @@ func (a *applier) reassertNftStructure(ctx context.Context, trigger string) {
 	// The operation lock closes the window between the check above and the read below: an apply publishes its intent while holding it, so
 	// this tick either renders the intent in force BEFORE the apply, or waits for the next tick. It can never install an intent that an apply has
 	// published but not yet proven, or one that a failed apply has not yet put back.
+	// The audited policy is re-read before the render so a changed setting reaches the kernel within one tick (enforcement_policy.go).
+	a.refreshEnforcementPolicy(ctx)
 	if !a.opMu.TryLock() {
 		return
 	}

@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/enforce"
@@ -42,6 +43,11 @@ type phase3 struct {
 	scope     planScope
 	plans     *planCounter
 	lastPurge time.Time
+
+	// smu guards degraded, expiryDegraded and lastSubmitOK, which the submitter and the expiry ticker write while the
+	// accounting ticker reads them for the health report.
+	smu          sync.Mutex
+	lastSubmitOK time.Time
 }
 
 // newPhase3 returns nil while the enforcement plane is off. It must not be gated on Checkout Grace: the shaping
@@ -83,26 +89,28 @@ func aggregateChargeBoundSeconds(tickSeconds int) int {
 }
 
 // enforceExpiries is idempotent, so running it every tick costs one query when nothing has expired.
-func (p *phase3) enforceExpiries(ctx context.Context) {
+// It reports how many entitlements it ended, so the caller can submit the new plan at once instead of at the next tick.
+func (p *phase3) enforceExpiries(ctx context.Context) int {
 	if p == nil {
-		return
+		return 0
 	}
 	due, err := p.enf.EnforceExpiries(ctx, p.tenant, p.site)
 	// Audit P4 M3: an entitlement skipped by several sweeps in a row is surfaced on health, not only logged.
-	p.expiryDegraded = ""
+	p.setExpiryDegraded("")
 	if p.enf.StuckExpiries() > 0 {
-		p.expiryDegraded = reasonExpiryStuck
+		p.setExpiryDegraded(reasonExpiryStuck)
 	}
 	if err != nil {
 		// Loud, but it must not stop the loop; the next tick retries.
 		slog.Error("phase3: expiry enforcement failed", "err", err)
-		return
+		return 0
 	}
 	for _, x := range due {
 		slog.Info("phase3: access ended at its true time",
 			"entitlement", x.EntitlementID, "reason", x.Reason, "effective_at", x.At,
 			"sessions_ended", x.Sessions, "devices_revoked", x.Devices)
 	}
+	return len(due)
 }
 
 // enforceSessionLimits ends sessions past their plan's idle or maximum-session limit. Idle is judged only when
@@ -217,25 +225,25 @@ func (p *phase3) reconcileShaping(ctx context.Context, netd planSubmitter, fallb
 	env, err := p.buildEnvelope(plan, p.managedBridges(ctx), fallbackBridge, time.Now())
 	if err != nil {
 		// Audit P6 M2: never submit a generation that is not durably saved; report it on health instead.
-		p.degraded = "shaping plan not submitted: " + err.Error()
+		p.setDegraded("shaping plan not submitted: " + err.Error())
 		slog.Error("phase3: the plan generation could not be saved; plan not submitted", "err", err)
 		return
 	}
 	res, err := netd.SubmitShapingPlan(ctx, env)
 	if err != nil {
 		// Re-derived next tick; what must not happen is pretending it was applied.
-		p.degraded = "shaping plan not applied: " + err.Error()
+		p.setDegraded("shaping plan not applied: " + err.Error())
 		slog.Warn("phase3: could not submit the shaping plan to netd", "err", err)
 		return
 	}
 	if !res.Accepted {
 		// A contract or scope problem, not a kernel one: the same plan will be refused again.
-		p.degraded = "netd refused the shaping plan: " + res.Reason
+		p.setDegraded("netd refused the shaping plan: " + res.Reason)
 		slog.Error("phase3: netd refused the shaping plan", "reason", res.Reason)
 		return
 	}
 	if res.Degraded {
-		p.degraded = "netd applied the plan with problems"
+		p.setDegraded("netd applied the plan with problems")
 		slog.Warn("phase3: netd applied the shaping plan with problems",
 			"failed", res.Failed, "torn_down", res.TornDown, "strays_removed", res.StraysRemoved, "shaped", res.Shaped)
 		return
@@ -244,7 +252,10 @@ func (p *phase3) reconcileShaping(ctx context.Context, netd planSubmitter, fallb
 		// Not an error, but never silent: the kernel was forwarding for a session durable state lacks.
 		slog.Warn("phase3: reconciliation removed shaping classes with no live session", "count", res.StraysRemoved)
 	}
-	p.degraded = ""
+	p.setDegraded("")
+	p.smu.Lock()
+	p.lastSubmitOK = time.Now()
+	p.smu.Unlock()
 }
 
 // managedBridges reads bridges from network configuration, not live sessions: a class left on a bridge with no
@@ -277,7 +288,23 @@ func (p *phase3) Degraded() string {
 	if p == nil {
 		return ""
 	}
+	p.smu.Lock()
+	defer p.smu.Unlock()
 	return p.degraded
+}
+
+// setDegraded and setExpiryDegraded are the only writers of the two health strings that cross loops (the plan submitter and
+// the expiry ticker run beside the accounting ticker, AD-47).
+func (p *phase3) setDegraded(s string) {
+	p.smu.Lock()
+	p.degraded = s
+	p.smu.Unlock()
+}
+
+func (p *phase3) setExpiryDegraded(s string) {
+	p.smu.Lock()
+	p.expiryDegraded = s
+	p.smu.Unlock()
 }
 
 // degradedSummary is the one line the health supervisor sees; a dark arm is never degraded.
@@ -285,12 +312,19 @@ func (p *phase3) degradedSummary() string {
 	if p == nil {
 		return ""
 	}
-	if p.acctDegraded == "" && p.degraded == "" && p.expiryDegraded == "" && !p.lastPassOK.IsZero() &&
+	p.smu.Lock()
+	degraded, expiryDegraded, lastSubmit := p.degraded, p.expiryDegraded, p.lastSubmitOK
+	p.smu.Unlock()
+	if p.acctDegraded == "" && degraded == "" && expiryDegraded == "" && !p.lastPassOK.IsZero() &&
 		time.Since(p.lastPassOK) > accountingFreshness {
 		return reasonNoRecentPass
 	}
+	// The plan submitter is its own loop now: if it stops, nothing else notices, and netd's leases lapse with the plan.
+	if !lastSubmit.IsZero() && time.Since(lastSubmit) > planValidity && degraded == "" {
+		degraded = reasonSubmitterStalled
+	}
 	var parts []string
-	for _, s := range []string{p.acctDegraded, p.degraded, p.expiryDegraded} {
+	for _, s := range []string{p.acctDegraded, degraded, expiryDegraded} {
 		if s != "" {
 			parts = append(parts, s)
 		}

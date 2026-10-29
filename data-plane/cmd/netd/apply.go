@@ -102,6 +102,15 @@ type applier struct {
 	nftMu sync.Mutex
 	// mgmtAddrFn reads an interface's primary IPv4 for NETD_MGMT_ADDR=auto (nft_watch.go). nil = the live system.
 	mgmtAddrFn func(iface string) string
+
+	// policyMu guards the enforcement policy (enforcement_policy.go): the audited settings the ruleset and the gate act on.
+	policyMu       sync.Mutex
+	policy         enforcementPolicy
+	policyLoaded   bool
+	policyUpstream []string
+	policyErr      string
+	// upstreamFn reads the appliance's own WAN gateway and resolvers; nil = the live system.
+	upstreamFn func() []string
 	// Further seams (portal address, HTTPS state, host addresses, portal link, Kea socket, editable intent) default to the database,
 	// `ip -j -4 addr`, /sys/class/net and the real Kea socket.
 	portalIPFn   func(ctx context.Context) (string, error)

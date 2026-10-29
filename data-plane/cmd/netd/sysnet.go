@@ -151,6 +151,8 @@ type sysNetState struct {
 }
 
 type pendingSysNet struct {
+	// RevisionID names the pending change so a confirm or rollback can say which one it reviewed (AD-28).
+	RevisionID    string `json:"revision_id,omitempty"`
 	DeadlineUnix  int64  `json:"deadline_unix"`
 	ManagementURL string `json:"management_url"`
 	BackupPath    string `json:"backup_path"`
@@ -223,7 +225,7 @@ func (m *sysNetMgr) readState(ctx context.Context) sysNetState {
 	s.LAN.Members = bridgeMembers(m.lanBr)
 
 	if pc, ok := m.readPending(); ok {
-		s.Pending = &pendingSysNet{DeadlineUnix: pc.Deadline, ManagementURL: pc.MgmtURL, BackupPath: pc.Backup}
+		s.Pending = &pendingSysNet{RevisionID: pc.RevisionID, DeadlineUnix: pc.Deadline, ManagementURL: pc.MgmtURL, BackupPath: pc.Backup}
 	}
 	return s
 }
@@ -399,11 +401,23 @@ func (m *sysNetMgr) apply(ctx context.Context, p sysnet.Proposal, actor, actorID
 // confirm takes the change lock, so it cannot interleave with an apply still verifying or a rollback in progress (audit
 // Phase 8 L14): once it holds the lock, the marker it reads is the settled state.
 func (m *sysNetMgr) confirm(ctx context.Context, actor, actorID, srcIP string) error {
+	return m.confirmRevision(ctx, actor, actorID, srcIP, "")
+}
+
+// errRevisionMismatch: the caller named a revision other than the pending one. Keeping the pending change on the word of
+// a console that was looking at an older one would confirm a change the operator never saw (audit Phase 8 L14).
+var errRevisionMismatch = errors.New("the pending network change is a different revision from the one named; reload and review it")
+
+// confirmRevision is confirm for a caller that names the revision it reviewed; "" keeps the earlier unnamed behaviour.
+func (m *sysNetMgr) confirmRevision(ctx context.Context, actor, actorID, srcIP, revisionID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	pc, ok := m.readPending()
 	if !ok {
 		return fmt.Errorf("no pending network change to confirm")
+	}
+	if revisionID != "" && revisionID != pc.RevisionID {
+		return errRevisionMismatch
 	}
 	if pc.RollbackAttempts > 0 {
 		return fmt.Errorf("the change was already timed out and its rollback is being retried; there is nothing to confirm")
@@ -417,6 +431,11 @@ func (m *sysNetMgr) confirm(ctx context.Context, actor, actorID, srcIP string) e
 
 // rollback undoes the pending change and nothing else: a confirmed change is the configuration, and going back from it is a new change.
 func (m *sysNetMgr) rollback(ctx context.Context, actor, actorID, srcIP string) error {
+	return m.rollbackRevision(ctx, actor, actorID, srcIP, "")
+}
+
+// rollbackRevision is rollback for a caller that names the revision it means to undo; "" keeps the earlier unnamed behaviour.
+func (m *sysNetMgr) rollbackRevision(ctx context.Context, actor, actorID, srcIP, revisionID string) error {
 	if !m.mu.TryLock() {
 		return fmt.Errorf("another network change is in progress")
 	}
@@ -424,6 +443,9 @@ func (m *sysNetMgr) rollback(ctx context.Context, actor, actorID, srcIP string) 
 	pc, ok := m.readPending()
 	if !ok {
 		return errNothingPending
+	}
+	if revisionID != "" && revisionID != pc.RevisionID {
+		return errRevisionMismatch
 	}
 	bk := pc.Backup
 	if bk == "" {
@@ -593,9 +615,18 @@ func (m *sysNetMgr) verify(w sysnet.WANConfig, l sysnet.LANConfig) map[string]bo
 	v := map[string]bool{}
 	// In DHCP mode the address is the server's choice: checking the old static one would roll back a working change (audit Phase 8 L14).
 	v["wan_ip"] = w.Mode == "dhcp" || w.IP == "" || ifaceHasIP(w.Interface, w.IP)
-	v["gateway"] = w.Gateway == "" || ping(w.Gateway)
+	// The gateway the change put in force. In DHCP mode the proposal carries none, so the one the server handed out is read
+	// from the routing table and must answer too; when none can be found the check is not invented (AD-28).
+	gw := w.Gateway
+	if gw == "" && w.Mode == "dhcp" {
+		gw = defaultGatewayFor(w.Interface)
+	}
+	v["gateway"] = gw == "" || ping(gw)
+	v["default_route"] = gw != ""
 	v["internet"] = ping("8.8.8.8")
 	v["dns"] = resolves("github.com")
+	// Reported, not critical: the resolvers the appliance will use (configured, or handed out by DHCP) and whether any exists.
+	v["dns_servers"] = len(effectiveDNS(w)) > 0
 	v["lan_bridge"] = ifaceHasIP(l.Bridge, l.IP)
 	v["lan_member"] = ifaceMaster(l.PhysicalInterface) == l.Bridge
 	// The console must answer at the new WAN address on 443, which is what the operator's browser reaches; a loopback probe is up whatever the network looks like.
@@ -675,23 +706,36 @@ func (s *server) sysnetApply(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) sysnetConfirm(w http.ResponseWriter, r *http.Request) {
-	var req struct{ Actor, ActorID, SourceIP string }
+	var req struct {
+		Actor, ActorID, SourceIP string
+		// edged sends the revision under both spellings (resources_sysnetwork.go).
+		RevisionID      string
+		RevisionIDSnake string `json:"revision_id"`
+	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	actor, actorID, srcIP := s.callers.actorFor(r.Context(), req.Actor, req.ActorID, req.SourceIP)
-	if err := s.sn.confirm(changeCtx(r), actor, actorID, srcIP); err != nil {
-		writeJSON(w, 400, map[string]string{"error": err.Error()})
+	if err := s.sn.confirmRevision(changeCtx(r), actor, actorID, srcIP, firstNonEmpty(req.RevisionID, req.RevisionIDSnake)); err != nil {
+		code := 400
+		if errors.Is(err, errRevisionMismatch) {
+			code = 409
+		}
+		writeJSON(w, code, map[string]string{"error": err.Error()})
 		return
 	}
 	writeJSON(w, 200, map[string]string{"state": "confirmed"})
 }
 
 func (s *server) sysnetRollback(w http.ResponseWriter, r *http.Request) {
-	var req struct{ Actor, ActorID, SourceIP string }
+	var req struct {
+		Actor, ActorID, SourceIP string
+		RevisionID               string
+		RevisionIDSnake          string `json:"revision_id"`
+	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	actor, actorID, srcIP := s.callers.actorFor(r.Context(), req.Actor, req.ActorID, req.SourceIP)
-	if err := s.sn.rollback(changeCtx(r), actor, actorID, srcIP); err != nil {
+	if err := s.sn.rollbackRevision(changeCtx(r), actor, actorID, srcIP, firstNonEmpty(req.RevisionID, req.RevisionIDSnake)); err != nil {
 		code := 400
-		if errors.Is(err, errNothingPending) {
+		if errors.Is(err, errNothingPending) || errors.Is(err, errRevisionMismatch) {
 			code = 409
 		}
 		writeJSON(w, code, map[string]string{"error": err.Error()})
@@ -871,6 +915,21 @@ func maskString(prefix int) string {
 	}
 	m := net.CIDRMask(prefix, 32)
 	return fmt.Sprintf("%d.%d.%d.%d", m[0], m[1], m[2], m[3])
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+// effectiveDNS is the resolvers in force on the WAN: the configured ones, or in DHCP mode the ones the server handed out.
+func effectiveDNS(w sysnet.WANConfig) []string {
+	if len(w.DNS) > 0 && w.Mode != "dhcp" {
+		return w.DNS
+	}
+	return ifaceDNS(w.Interface)
 }
 
 func ping(ip string) bool {
