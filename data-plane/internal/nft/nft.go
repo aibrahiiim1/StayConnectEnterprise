@@ -5,6 +5,7 @@
 package nft
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net"
@@ -30,6 +31,8 @@ type Client struct {
 
 	// exec runs one nft invocation; a field so tests can prove the exact command strings without a kernel.
 	exec func(ctx context.Context, name string, args ...string) ([]byte, error)
+	// execIn runs one nft invocation with a script on stdin (`nft -f -`); see batch.go.
+	execIn func(ctx context.Context, stdin []byte, name string, args ...string) ([]byte, error)
 
 	mu sync.Mutex
 	// concatBySet caches the probed key type per set: auth_ipv4 and phase3_auth_ipv4 are independent, so one shared flag
@@ -42,7 +45,19 @@ func realExec(ctx context.Context, name string, args ...string) ([]byte, error) 
 }
 
 func New() *Client {
-	return &Client{NftPath: "/usr/sbin/nft", exec: realExec, concatBySet: map[string]bool{}}
+	return &Client{NftPath: "/usr/sbin/nft", exec: realExec, execIn: realExecStdin, concatBySet: map[string]bool{}}
+}
+
+// NewWithExec builds a client over caller-supplied executors, so a test or a harness can count or simulate every nft invocation.
+func NewWithExec(e func(ctx context.Context, name string, args ...string) ([]byte, error),
+	in func(ctx context.Context, stdin []byte, name string, args ...string) ([]byte, error)) *Client {
+	return &Client{NftPath: "/usr/sbin/nft", exec: e, execIn: in, concatBySet: map[string]bool{}}
+}
+
+func realExecStdin(ctx context.Context, stdin []byte, name string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Stdin = bytes.NewReader(stdin)
+	return cmd.CombinedOutput()
 }
 
 // probeConcatIn detects a set's key type once per set (cached). Best-effort: on any error it assumes IP-only

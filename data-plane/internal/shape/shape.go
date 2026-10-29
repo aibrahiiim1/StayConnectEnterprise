@@ -35,8 +35,10 @@ type Client struct {
 
 	// exec is a field so tests can assert the tc commands without a kernel.
 	exec func(ctx context.Context, name string, args ...string) ([]byte, error)
+	// execIn runs one invocation with a script on stdin (`tc -batch -`); see batch.go.
+	execIn func(ctx context.Context, stdin []byte, name string, args ...string) ([]byte, error)
 
-	mu         sync.Mutex
+	mu        sync.Mutex
 	infraReady map[string]bool // bridge -> ingress/IFB redirect established this process
 	bridgeMu   map[string]*sync.Mutex
 }
@@ -50,9 +52,25 @@ func New() *Client {
 		TCPath:     "/usr/sbin/tc",
 		IPPath:     "/usr/sbin/ip",
 		exec:       realExec,
+		execIn:     realExecStdin,
 		infraReady: map[string]bool{},
 		bridgeMu:   map[string]*sync.Mutex{},
 	}
+}
+
+// NewWithExec builds a client over caller-supplied executors, so a test or a harness can count or simulate every tc/ip invocation.
+func NewWithExec(e func(ctx context.Context, name string, args ...string) ([]byte, error),
+	in func(ctx context.Context, stdin []byte, name string, args ...string) ([]byte, error)) *Client {
+	return &Client{
+		TCPath: "/usr/sbin/tc", IPPath: "/usr/sbin/ip", exec: e, execIn: in,
+		infraReady: map[string]bool{}, bridgeMu: map[string]*sync.Mutex{},
+	}
+}
+
+func realExecStdin(ctx context.Context, stdin []byte, name string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Stdin = bytes.NewReader(stdin)
+	return cmd.CombinedOutput()
 }
 
 func MinorForIP(ip net.IP) (int, bool) {
