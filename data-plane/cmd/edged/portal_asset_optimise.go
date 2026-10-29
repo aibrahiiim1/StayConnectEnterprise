@@ -236,12 +236,49 @@ type assetOptimiser struct {
 	dir     string
 	params  func() optimiseParams
 	failed  map[string]string // pending id -> reason, kept until the operator clears it by uploading again
+	// done maps a pending id to the name its optimised file was stored under, so a client that uploaded several images at
+	// once can tell which result is its own (the name is a hash of the optimised bytes, so it cannot be guessed from the id).
+	// Bounded to the most recent assetDoneKeep entries.
+	done      map[string]string
+	doneOrder []string
 	wake    chan struct{}
 	started sync.Once
 }
 
 func newAssetOptimiser(dir string, params func() optimiseParams) *assetOptimiser {
-	return &assetOptimiser{dir: dir, params: params, failed: map[string]string{}, wake: make(chan struct{}, 1)}
+	return &assetOptimiser{dir: dir, params: params, failed: map[string]string{}, done: map[string]string{}, wake: make(chan struct{}, 1)}
+}
+
+// assetDoneKeep is how many finished uploads the optimiser remembers the final name of.
+const assetDoneKeep = 256
+
+// resolved reports the final name of a finished upload, whether it is still pending, or the reason it failed.
+func (o *assetOptimiser) resolved(id string) (name string, state string, why string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if n, ok := o.done[id]; ok {
+		return n, "ready", ""
+	}
+	if w, ok := o.failed[id]; ok {
+		return "", "failed", w
+	}
+	if _, err := os.Stat(filepath.Join(o.pendingDir(), id)); err == nil {
+		return "", "optimising", ""
+	}
+	return "", "unknown", ""
+}
+
+func (o *assetOptimiser) remember(id, name string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if _, ok := o.done[id]; !ok {
+		o.doneOrder = append(o.doneOrder, id)
+	}
+	o.done[id] = name
+	for len(o.doneOrder) > assetDoneKeep {
+		delete(o.done, o.doneOrder[0])
+		o.doneOrder = o.doneOrder[1:]
+	}
 }
 
 func (o *assetOptimiser) pendingDir() string { return filepath.Join(o.dir, assetPendingDir) }
@@ -342,5 +379,6 @@ func (o *assetOptimiser) process(id string) error {
 	if err := writeFileAtomically(o.dir, name, out, 0o644); err != nil {
 		return err
 	}
+	o.remember(id, name)
 	return os.Remove(src)
 }

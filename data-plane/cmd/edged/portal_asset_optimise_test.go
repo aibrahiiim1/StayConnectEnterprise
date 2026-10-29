@@ -178,3 +178,37 @@ func TestPendingUploadBecomesAStoredAsset(t *testing.T) {
 		t.Fatalf("stored width %d, want 500", w)
 	}
 }
+
+// Two uploads in flight at once each get their own result: the optimiser remembers which stored name an id became.
+func TestEachUploadResolvesToItsOwnStoredAsset(t *testing.T) {
+	dir := t.TempDir()
+	o := newAssetOptimiser(dir, func() optimiseParams { return optimiseParams{MaxEdge: 500, Quality: 80} })
+	a, err := o.enqueue(encodeJPEG(t, noisyImage(1000, 500, false), 90), ".jpg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := o.enqueue(encodeJPEG(t, noisyImage(900, 450, true), 90), ".jpg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	var na, nb string
+	for {
+		var sa, sb string
+		na, sa, _ = o.resolved(a)
+		nb, sb, _ = o.resolved(b)
+		if sa == "ready" && sb == "ready" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("states %q and %q after 10 s", sa, sb)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if na == "" || nb == "" || na == nb {
+		t.Fatalf("each upload needs its own stored name, got %q and %q", na, nb)
+	}
+	if _, state, _ := o.resolved("no-such-upload"); state != "unknown" {
+		t.Fatalf("an unknown id must read as unknown, got %q", state)
+	}
+}

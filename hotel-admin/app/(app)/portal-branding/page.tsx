@@ -254,27 +254,27 @@ export default function PortalSettingsPage() {
     setUploading(field); setSaveErr(null);
     try {
       // Use the API client, which knows where edged is; a hand-written URL once broke uploads (see api.upload).
-      const before = new Set(assets.map((x) => x.name));
       const a = await api.upload<PortalAsset>("/portal-assets", file);
-      // The appliance now scales and compresses the file in the background; its final name is known only when that ends.
-      let list = await api.get<ListResp<PortalAsset>>("/portal-assets");
-      setAssets(list.data ?? []);
-      let final: PortalAsset | undefined;
+      // The appliance now scales and compresses the file in the background. Its final name is asked for by the id THIS upload
+      // returned, so two uploads in flight at once (a logo and a background) can never take each other's result.
+      let final: { url: string } | undefined;
       for (let i = 0; i < 40; i++) {
-        const items = list.data ?? [];
-        const mine = items.find((x) => x.name === a.name);
-        if (mine?.status === "failed") {
-          toast.error("The image could not be optimised", mine.reason ?? "it could not be processed");
+        let r: { status: string; url?: string; reason?: string };
+        try {
+          r = await api.get<{ status: string; url?: string; reason?: string }>(`/portal-assets/${encodeURIComponent(a.name)}/resolved`);
+        } catch (e) {
+          // The appliance forgets an upload's result if it restarts meanwhile; the image itself is stored, so say that.
+          if (e instanceof ApiError && e.status === 404) break;
+          throw e;
+        }
+        if (r.status === "failed") {
+          toast.error("The image could not be optimised", r.reason ?? "it could not be processed");
           return;
         }
-        if (!mine) {
-          const ready = items.filter((x) => (x.status ?? "ready") === "ready" && x.url);
-          final = ready.find((x) => !before.has(x.name)) ?? ready[0];
-          break;
-        }
-        await new Promise((r) => setTimeout(r, 1500));
-        list = await api.get<ListResp<PortalAsset>>("/portal-assets");
+        if (r.status === "ready" && r.url) { final = { url: r.url }; break; }
+        await new Promise((res) => setTimeout(res, 1500));
       }
+      const list = await api.get<ListResp<PortalAsset>>("/portal-assets");
       setAssets(list.data ?? []);
       if (!final) {
         toast.error("Still optimising", "The image is being prepared. Check again in a moment.");

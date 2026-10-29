@@ -55,6 +55,8 @@ func (s *server) portalAssetRoutes() http.Handler {
 	// The bytes for Hotel Admin: the portal serves /assets/<name> on the guest network, which is a different origin
 	// from the admin, so thumbnails and previews read the file back through the authenticated operator API.
 	r.Get("/{name}/raw", s.rawPortalAsset)
+	// What an upload became: the answer to "which of the files I just sent is this one", for a client that sent several.
+	r.Get("/{name}/resolved", s.resolvedPortalAsset)
 	r.Delete("/{name}", s.deletePortalAsset)
 	return r
 }
@@ -139,6 +141,23 @@ func (s *server) listPortalAssets(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Uploaded > out[j].Uploaded })
 	writeList(w, out)
+}
+
+// resolvedPortalAsset answers for ONE upload (the id the upload returned): "optimising", "failed" with the reason, or "ready"
+// with the stored name and URL. Unknown ids answer 404, so a client never takes another upload's result for its own.
+func (s *server) resolvedPortalAsset(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "name")
+	name, state, why := s.assetOptimiser().resolved(id)
+	switch state {
+	case "ready":
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ready", "name": name, "url": "/assets/" + name})
+	case "failed":
+		writeJSON(w, http.StatusOK, map[string]any{"status": "failed", "reason": why})
+	case "optimising":
+		writeJSON(w, http.StatusOK, map[string]any{"status": "optimising"})
+	default:
+		jsonErr(w, http.StatusNotFound, "not_found", "no such upload")
+	}
 }
 
 func (s *server) uploadPortalAsset(w http.ResponseWriter, r *http.Request) {
