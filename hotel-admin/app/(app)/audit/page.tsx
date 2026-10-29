@@ -88,6 +88,8 @@ export default function ActivityPage() {
   const path = useMemo(() => {
     const p = new URLSearchParams();
     if (range.hours) p.set("from", new Date(anchor - range.hours * 3600_000).toISOString());
+    // "Everything" is asked for explicitly: the server's default is the last 30 days (audit AD-56).
+    else p.set("window", "all");
     if (filterReady && codes) p.set("action", codes.join(","));
     return `/audit?${p.toString()}`;
   }, [range, anchor, filterReady, codes]);

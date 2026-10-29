@@ -567,6 +567,8 @@ type auditActionCount struct {
 type auditPage struct {
 	pagedList[auditRow]
 	Actions []auditActionCount `json:"actions"`
+	// Window is the default period applied when the caller gave no ?from (AD-56): 30 days, ?window=all for everything.
+	Window listWindowInfo `json:"window"`
 }
 
 func (s *server) auditRoutes() http.Handler {
@@ -605,9 +607,22 @@ func (s *server) auditRoutes() http.Handler {
 			n, h := bind(v), bind(hiddenLike)
 			period += fmt.Sprintf(` AND (actor_id = $%[1]d OR (target_id = $%[1]d AND NOT action LIKE ANY($%[2]d)))`, n, h)
 		}
+		winInfo := listWindowInfo{DefaultDays: defaultListWindowDays}
 		if v := qv.Get("from"); v != "" {
 			if t, err := time.Parse(time.RFC3339, v); err == nil {
 				period += fmt.Sprintf(` AND ts >= $%d`, bind(t))
+				winInfo.Since = &t
+			}
+		} else {
+			// No explicit start: the default window, or the whole history on request (AD-56).
+			since, info, werr := parseListWindow(qv, time.Now())
+			if werr != nil {
+				jsonErr(w, http.StatusBadRequest, "bad_request", werr.Error())
+				return
+			}
+			winInfo = info
+			if since != nil {
+				period += fmt.Sprintf(` AND ts >= $%d`, bind(*since))
 			}
 		}
 		if v := qv.Get("to"); v != "" {
@@ -713,7 +728,7 @@ func (s *server) auditRoutes() http.Handler {
 			jsonErr(w, http.StatusInternalServerError, "internal", "the audit trail could not be read")
 			return
 		}
-		writeJSON(w, http.StatusOK, auditPage{pagedList: newPagedList(out, more, pg, &total), Actions: actions})
+		writeJSON(w, http.StatusOK, auditPage{pagedList: newPagedList(out, more, pg, &total), Actions: actions, Window: winInfo})
 	})
 	return r
 }
