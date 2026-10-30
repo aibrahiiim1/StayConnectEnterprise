@@ -1,6 +1,6 @@
 package poststay
 
-// Persistent evidence of post-stay sign-in. Every refusal, and each grant or join of the post-stay entitlement, is a row
+// Persistent evidence of After Check-out sign-in. Every refusal, and each join of the After Check-out entitlement, is a row
 // in public.audit_log (the appliance's existing append-only audit table; svc_scd holds INSERT on it), so an operator can
 // see guessing against a room and tell the one-time Post-Stay benefit from a device simply joining it.
 //
@@ -26,8 +26,7 @@ import (
 const (
 	AuditActionRefused           = "post_stay.signin_refused"
 	AuditActionRefusalsDropped   = "post_stay.signin_refusals_suppressed"
-	AuditActionBenefitGranted    = "post_stay.benefit_granted"
-	AuditActionEntitlementJoined = "post_stay.entitlement_joined"
+	AuditActionEntitlementJoined = "post_stay.entitlement_joined" // a previously authorised device came back onto the stay's After Check-out entitlement
 )
 
 // Refusal reason codes: a closed list, so a row never carries text taken from a request or an error.
@@ -37,10 +36,9 @@ const (
 	RefusalMalformed        = "MALFORMED"
 	RefusalLicense          = "LICENSE_REFUSED"
 	RefusalDeviceUnresolved = "DEVICE_UNRESOLVED"
-	RefusalNoPackage        = "NO_GRANTABLE_PACKAGE"
 	RefusalContext          = "CONTEXT_REFUSED"
-	RefusalBenefitSpent     = "BENEFIT_ALREADY_GRANTED" // the once-per-stay benefit was used; a device cannot get it again
-	RefusalNotJoinable      = "ENTITLEMENT_NOT_JOINABLE"
+	RefusalNoLineage        = "NO_AUTHORIZATION_LINEAGE" // the device was not authorised on this stay before check-out (or was removed)
+	RefusalNotJoinable      = "ENTITLEMENT_NOT_JOINABLE" // no live After Check-out entitlement: ended, exhausted, never granted
 	RefusalDeviceLimit      = "DEVICE_LIMIT_REACHED"
 	RefusalCapacity         = "LICENSED_CAPACITY"
 	RefusalEnforcement      = "ENFORCEMENT_NOT_CONFIRMED"
@@ -49,8 +47,8 @@ const (
 
 // Route says which proof the attempt was judged by.
 const (
-	RouteKnownDevice = "known_device" // the device was on a stay: room + reservation against that stay
-	RouteNewDevice   = "new_device"   // no stay of its own: room + reservation + last name
+	RouteKnownDevice = "known_device" // the device was authorised on a stay that holds After Check-out access: room + reservation against that stay
+	RouteNewDevice   = "new_device"   // no such stay: the attempt is counted and refused, whatever it typed
 )
 
 // RefusalEvent is what the caller knows; Device/IP/Room/Reservation are fingerprinted or reduced before they are stored.

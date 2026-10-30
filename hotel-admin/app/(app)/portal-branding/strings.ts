@@ -128,7 +128,6 @@ export const PORTAL_STRINGS: PortalString[] = [
   { group: "Messages", key: "err.acct.limit", english: "This device cannot create another account today. Sign in to an existing account, or contact the site team for assistance.", module: "email_otp" },
 
   { group: "Post-stay", key: "poststay.hint", english: "The room number and reservation number of the stay you checked out of", module: "hospitality" },
-  { group: "Post-stay", key: "poststay.lasthint", english: "Needed only if this is not the device you used during your stay", module: "hospitality" },
 
   { group: "Buttons", key: "btn.login", english: "Login" },
   { group: "Buttons", key: "btn.submit", english: "Submit" },

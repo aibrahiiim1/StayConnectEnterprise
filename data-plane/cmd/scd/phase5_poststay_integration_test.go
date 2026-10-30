@@ -2,8 +2,9 @@
 
 package main
 
-// Post-stay end to end on scd: room sign-in, checkout, the room + reservation check (AD-36), post-stay package, enforced SESSION.
-// Calls carry exactly the bodies portald forwards (phase5_poststay_handlers.go); scd uses DisallowUnknownFields
+// After Check-out sign-in end to end on scd: room sign-in, checkout, the room + reservation check (AD-36 as amended 2026-10-30),
+// the rejoin of the stay's ONE After Check-out entitlement, enforced SESSION. There is no package to choose and nothing is
+// granted here. Calls carry exactly the bodies portald forwards (phase5_poststay_handlers.go); scd uses DisallowUnknownFields
 // so drift fails here. The portald half is pinned in cmd/portald/phase5_poststay_flow_test.go. No real guest data.
 
 import (
@@ -22,8 +23,9 @@ import (
 
 type postStayFixture struct {
 	*authFixture
-	ps               *phase5PostStay
-	pkgA, pkgB, paid string
+	ps *phase5PostStay
+	// afterCheckoutEnt is the stay's After Check-out entitlement once grantAfterCheckout has run.
+	afterCheckoutEnt string
 }
 
 func newPostStayFixture(t *testing.T) *postStayFixture {
@@ -33,36 +35,60 @@ func newPostStayFixture(t *testing.T) *postStayFixture {
 	if err != nil {
 		t.Fatalf("throttle: %v", err)
 	}
-	pf := &postStayFixture{authFixture: f, ps: &phase5PostStay{
+	return &postStayFixture{authFixture: f, ps: &phase5PostStay{
 		srv: f.srv, p3: f.p3, store: poststay.New(f.pool, thr), ctxs: authctx.NewStore(f.pool),
 		contextTTL: 10 * time.Minute,
 	}}
-	// Two free post-stay packages and one priced one, which must never be offered.
-	mk := func(code string, price int64, methods string) string {
-		var rev, pkg string
-		if err := f.pool.QueryRow(context.Background(), `WITH
-		  ip AS (INSERT INTO iam_v2.internet_packages(id,tenant_id,site_id,code,active)
-		         SELECT gen_random_uuid(), $1, $2, $3, true RETURNING id),
-		  ipr AS (INSERT INTO iam_v2.internet_package_revisions(id,tenant_id,site_id,package_id,revision_no,
-		            service_plan_revision_id,package_type,price_minor,settlement_methods,duration_policy)
-		          SELECT gen_random_uuid(), $1, $2, ip.id, 1,
-		                 (SELECT service_plan_revision_id FROM iam_v2.internet_package_revisions WHERE id=$4),
-		                 'POST_STAY', $5, $6::text[], '{"duration_minutes":120}'::jsonb FROM ip RETURNING id, package_id)
-		SELECT id::text, package_id::text FROM ipr`,
-			f.tenant, f.site, code, f.pkgRev, price, methods).Scan(&rev, &pkg); err != nil {
-			t.Fatalf("seed post-stay package %s: %v", code, err)
-		}
-		// A data-modifying CTE cannot see its sibling's insert, so the current-revision pointer is its own step.
-		if _, err := f.pool.Exec(context.Background(),
-			`UPDATE iam_v2.internet_packages SET current_revision_id=$1 WHERE id=$2`, rev, pkg); err != nil {
-			t.Fatalf("publish post-stay package %s: %v", code, err)
-		}
-		return rev
+}
+
+// grantAfterCheckout writes what the checkout converter writes for a stay that held an active entitlement at the boundary: one
+// After Check-out entitlement, ending in two hours, carrying over the device that was on the stay. (internal/checkout's own
+// tests run the real converter; this harness has no PMS event stream.)
+func (f *postStayFixture) grantAfterCheckout(t *testing.T, device string) {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := f.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
 	}
-	pf.pkgA = mk("PS-A", 0, "{NOT_REQUIRED}")
-	pf.pkgB = mk("PS-B", 0, "{NOT_REQUIRED}")
-	pf.paid = mk("PS-PAID", 500, "{PMS_POSTING}")
-	return pf
+	defer func() { _ = tx.Rollback(ctx) }()
+	for _, fam := range []string{"commerce_intent", "device_auth"} {
+		if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation($1)`, fam); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var purchase string
+	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.purchases
+		(tenant_id,site_id,package_revision_id,pms_interface_id,stay_id,trigger,amount_minor,state,checkout_episode)
+		VALUES ($1,$2,$3,(SELECT pms_interface_id FROM iam_v2.stays WHERE id=$4),$4,'CHECKOUT_GRACE',0,'GRANTED',1) RETURNING id::text`,
+		f.tenant, f.site, f.pkgRev, f.stay).Scan(&purchase); err != nil {
+		t.Fatalf("after-checkout purchase: %v", err)
+	}
+	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.entitlements
+		(tenant_id,site_id,stay_id,pms_interface_id,purchase_id,policy_snapshot,service_plan_revision_id,package_revision_id,
+		 time_accounting_mode,end_mode,window_ends_at,status,activated_at)
+		SELECT $1,$2,$3,(SELECT pms_interface_id FROM iam_v2.stays WHERE id=$3),$4,'{}'::jsonb, ipr.service_plan_revision_id, $5,
+		       'VALIDITY_WINDOW','GRACE_AFTER_CHECKOUT', now()+interval '2 hours','ACTIVE', now()
+		  FROM iam_v2.internet_package_revisions ipr WHERE ipr.id=$5 RETURNING id::text`,
+		f.tenant, f.site, f.stay, purchase, f.pkgRev).Scan(&f.afterCheckoutEnt); err != nil {
+		t.Fatalf("after-checkout entitlement: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT iam_v2.apply_entitlement_transition($1,'ACTIVE',now(),'GRACE_CONVERSION')`, f.afterCheckoutEnt); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.entitlement_devices
+		(tenant_id,site_id,entitlement_id,device_id,status,grandfathered,first_authorized,last_authorized)
+		VALUES ($1,$2,$3,$4,'AUTHORIZED',true,now(),now())`, f.tenant, f.site, f.afterCheckoutEnt, device); err != nil {
+		t.Fatalf("carry the device over: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.entitlement_device_authorizations
+		(tenant_id,site_id,entitlement_id,device_id,seq,authorized_at) VALUES ($1,$2,$3,$4,1,now())`,
+		f.tenant, f.site, f.afterCheckoutEnt, device); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func (f *postStayFixture) device() map[string]string {
@@ -88,7 +114,7 @@ func psCall(t *testing.T, h http.HandlerFunc, body map[string]any) psResponse {
 
 // signInByRoomThenCheckOut gives the device a room-sign-in lineage, then checks the stay out as the checkout
 // path does (entitlement terminated, device interval closed, session ended, CHECKED_OUT with posting off).
-func (f *postStayFixture) signInByRoomThenCheckOut(t *testing.T) {
+func (f *postStayFixture) signInByRoomThenCheckOut(t *testing.T) string {
 	t.Helper()
 	soleOccupant(t, f.authFixture)
 	stopRoomOwner := f.startEnforcementOwner(t)
@@ -127,99 +153,93 @@ func (f *postStayFixture) signInByRoomThenCheckOut(t *testing.T) {
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatalf("checkout commit: %v", err)
 	}
+	var device string
+	if err := f.pool.QueryRow(ctx, `SELECT device_id::text FROM iam_v2.sessions WHERE id=$1`, g.SessionID).Scan(&device); err != nil {
+		t.Fatalf("the room session's device: %v", err)
+	}
+	return device
 }
 
 func TestIntegration_PostStay_RoomAndReservationToEnforcedSessionEndToEnd(t *testing.T) {
 	f := newPostStayFixture(t)
-	f.signInByRoomThenCheckOut(t)
+	device := f.signInByRoomThenCheckOut(t)
+	f.grantAfterCheckout(t, device)
 	defer f.startEnforcementOwnerAtEpoch(t, 2)()
 
-	// verify: the room and reservation of the stay this device signed in on; the reply carries the grantable packages
+	// verify: the room and reservation of the stay this device signed in on. There are no offers: nothing is granted here.
 	ver := psCall(t, f.ps.verifyHandler, f.answers())
 	if ver.Outcome != psOutcomeVerified || ver.AuthContextID == "" {
 		t.Fatalf("the room and reservation did not verify: %+v", ver)
 	}
-	got := map[string]bool{}
-	for _, o := range ver.Offers {
-		got[o.PackageRevisionID] = true
-	}
-	if len(ver.Offers) != 2 || !got[f.pkgA] || !got[f.pkgB] {
-		t.Fatalf("offers = %+v, want exactly the two free post-stay packages", ver.Offers)
-	}
-	if got[f.paid] {
-		t.Fatal("a priced post-stay package was offered; the conversion grants zero-price only")
-	}
 
-	// convert
-	conv := psCall(t, f.ps.convertHandler, map[string]any{
-		"device": f.device(), "auth_context_id": ver.AuthContextID, "package_revision_id": f.pkgB})
+	// convert: no package in the body (a package field is refused like any unknown field)
+	if out := psCall(t, f.ps.convertHandler, map[string]any{
+		"device": f.device(), "auth_context_id": ver.AuthContextID, "package_revision_id": "00000000-0000-0000-0000-000000000001"}); out.Outcome != psOutcomeUnavailab {
+		t.Fatalf("a conversion carrying a package was answered %+v", out)
+	}
+	conv := psCall(t, f.ps.convertHandler, map[string]any{"device": f.device(), "auth_context_id": ver.AuthContextID})
 	if conv.Outcome != psOutcomeGranted || conv.SessionID == "" || conv.EntitlementID == "" {
-		t.Fatalf("the conversion did not grant a session: %+v", conv)
+		t.Fatalf("the rejoin did not give a session: %+v (the refused attempt must not spend the context)", conv)
 	}
 	if conv.SessionID == conv.EntitlementID {
 		t.Fatal("the session id is the entitlement id again; no session was opened")
 	}
+	if conv.EntitlementID != f.afterCheckoutEnt {
+		t.Fatalf("the device joined entitlement %s, want the stay's After Check-out entitlement %s", conv.EntitlementID, f.afterCheckoutEnt)
+	}
 
-	// The session is an enforced row on the new entitlement, for this device, labelled post-stay; the stay is POST_STAY_ACTIVE.
-	var state, method, sessEnt, pkg, entStatus, stayStatus string
+	// The session is an enforced row on THE entitlement, for this device, labelled post-stay; the stay stays CHECKED_OUT.
+	var state, method, sessEnt, entStatus, stayStatus string
 	if err := f.pool.QueryRow(context.Background(), `
-		SELECT s.state, COALESCE(s.credential_method,''), s.entitlement_id::text, e.package_revision_id::text,
-		       e.status, st.status
+		SELECT s.state, COALESCE(s.credential_method,''), s.entitlement_id::text, e.status, st.status
 		  FROM iam_v2.sessions s
 		  JOIN iam_v2.entitlements e ON e.id = s.entitlement_id
 		  JOIN iam_v2.stays st ON st.id = e.stay_id
-		 WHERE s.id = $1`, conv.SessionID).Scan(&state, &method, &sessEnt, &pkg, &entStatus, &stayStatus); err != nil {
+		 WHERE s.id = $1`, conv.SessionID).Scan(&state, &method, &sessEnt, &entStatus, &stayStatus); err != nil {
 		t.Fatalf("the returned session id names no session: %v", err)
 	}
 	if state != "active" || method != postStaySessionMethod || sessEnt != conv.EntitlementID ||
-		pkg != f.pkgB || entStatus != "ACTIVE" || stayStatus != "POST_STAY_ACTIVE" {
-		t.Fatalf("session state=%s method=%s ent=%s pkg=%s entStatus=%s stay=%s", state, method, sessEnt, pkg,
-			entStatus, stayStatus)
+		entStatus != "ACTIVE" || stayStatus != "CHECKED_OUT" {
+		t.Fatalf("session state=%s method=%s ent=%s entStatus=%s stay=%s", state, method, sessEnt, entStatus, stayStatus)
 	}
 
 	// A retry (lost reply) returns the same session rather than refusing.
-	again := psCall(t, f.ps.convertHandler, map[string]any{
-		"device": f.device(), "auth_context_id": ver.AuthContextID, "package_revision_id": f.pkgB})
+	again := psCall(t, f.ps.convertHandler, map[string]any{"device": f.device(), "auth_context_id": ver.AuthContextID})
 	if again.Outcome != psOutcomeGranted || again.SessionID != conv.SessionID {
-		t.Fatalf("a retried conversion did not return the session it opened: %+v", again)
+		t.Fatalf("a retried rejoin did not return the session it opened: %+v", again)
+	}
+	var n int
+	if err := f.pool.QueryRow(context.Background(), `SELECT count(*) FROM iam_v2.purchases WHERE stay_id=$1 AND trigger IN ('POST_STAY_CONVERSION')`, f.stay).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("%d post-stay purchases (%v), want none: the rejoin grants nothing", n, err)
 	}
 }
 
-// A conversion without a package_revision_id is refused and consumes nothing.
-func TestIntegration_PostStay_ConversionWithoutAPackageIsRefused(t *testing.T) {
+// A stay that holds no After Check-out entitlement (nothing eligible at checkout, the site grants none, or it ended) opens
+// nothing: the check does not even produce a context, whatever is typed.
+func TestIntegration_PostStay_NoAfterCheckoutEntitlementMeansNoContext(t *testing.T) {
 	f := newPostStayFixture(t)
-	f.signInByRoomThenCheckOut(t)
+	f.signInByRoomThenCheckOut(t) // checked out, no After Check-out entitlement granted
 	defer f.startEnforcementOwnerAtEpoch(t, 2)()
-
-	ver := psCall(t, f.ps.verifyHandler, f.answers())
-	if ver.Outcome != psOutcomeVerified {
-		t.Fatalf("verify: %+v", ver)
-	}
-	if out := psCall(t, f.ps.convertHandler, map[string]any{
-		"device": f.device(), "auth_context_id": ver.AuthContextID, "package_revision_id": ""}); out.Outcome != psOutcomeUnavailab {
-		t.Fatalf("a conversion without a package was answered %+v", out)
-	}
-	if out := psCall(t, f.ps.convertHandler, map[string]any{
-		"device": f.device(), "auth_context_id": ver.AuthContextID, "package_revision_id": f.paid}); out.Outcome != psOutcomeUnavailab {
-		t.Fatalf("a priced post-stay package was converted: %+v", out)
-	}
-	if out := psCall(t, f.ps.convertHandler, map[string]any{
-		"device": f.device(), "auth_context_id": ver.AuthContextID, "package_revision_id": f.pkgA}); out.Outcome != psOutcomeGranted {
-		t.Fatalf("the refused attempts spent the context: %+v", out)
-	}
-}
-
-// A site with no free post-stay package issues no context: the check passes but nothing could be granted.
-func TestIntegration_PostStay_NoGrantablePackageMeansNoContext(t *testing.T) {
-	f := newPostStayFixture(t)
-	f.signInByRoomThenCheckOut(t)
-	defer f.startEnforcementOwnerAtEpoch(t, 2)()
-	if _, err := f.pool.Exec(context.Background(), `UPDATE iam_v2.internet_packages SET active=false
-		WHERE tenant_id=$1 AND site_id=$2 AND code IN ('PS-A','PS-B')`, f.tenant, f.site); err != nil {
-		t.Fatal(err)
-	}
 	if ver := psCall(t, f.ps.verifyHandler, f.answers()); ver.Outcome != psOutcomeUnavailab || ver.AuthContextID != "" {
-		t.Fatalf("verify on a site with nothing to grant answered %+v", ver)
+		t.Fatalf("verify on a stay with no After Check-out access answered %+v", ver)
+	}
+}
+
+// A device that was not on the stay is refused with the CORRECT room and reservation (the surname is not a field any more).
+func TestIntegration_PostStay_ANewDeviceIsRefusedEvenWithTheRightCredentials(t *testing.T) {
+	f := newPostStayFixture(t)
+	device := f.signInByRoomThenCheckOut(t)
+	f.grantAfterCheckout(t, device)
+	defer f.startEnforcementOwnerAtEpoch(t, 2)()
+	other := f.answers()
+	other["device"] = map[string]string{"ip": f.net.guestIP, "mac": "02:00:00:aa:bb:cc"}
+	if out := psCall(t, f.ps.verifyHandler, other); out.Outcome != psOutcomeUnavailab {
+		t.Fatalf("a new device with the right room + reservation was answered %+v", out)
+	}
+	withName := f.answers()
+	withName["last_name"] = "Okonkwo"
+	if out := psCall(t, f.ps.verifyHandler, withName); out.Outcome != psOutcomeUnavailab {
+		t.Fatalf("a request carrying a surname was answered %+v: the surname is not part of the sign-in", out)
 	}
 }
 
@@ -227,15 +247,15 @@ func TestIntegration_PostStay_NoGrantablePackageMeansNoContext(t *testing.T) {
 // entitlement; it never gets a second one or a fresh allowance. A refused attempt leaves an audit row without guest data.
 func TestIntegration_PostStay_ReturningDeviceContinuesTheEntitlementAndRefusalsAreAudited(t *testing.T) {
 	f := newPostStayFixture(t)
-	f.signInByRoomThenCheckOut(t)
+	device := f.signInByRoomThenCheckOut(t)
+	f.grantAfterCheckout(t, device)
 	defer f.startEnforcementOwnerAtEpoch(t, 2)()
 	ctx := context.Background()
 
 	ver := psCall(t, f.ps.verifyHandler, f.answers())
-	conv := psCall(t, f.ps.convertHandler, map[string]any{
-		"device": f.device(), "auth_context_id": ver.AuthContextID, "package_revision_id": f.pkgB})
+	conv := psCall(t, f.ps.convertHandler, map[string]any{"device": f.device(), "auth_context_id": ver.AuthContextID})
 	if conv.Outcome != psOutcomeGranted {
-		t.Fatalf("first conversion: %+v", conv)
+		t.Fatalf("first rejoin: %+v", conv)
 	}
 
 	// Back again while the session is still live (a lost reply): the same entitlement and the same session.
@@ -243,8 +263,7 @@ func TestIntegration_PostStay_ReturningDeviceContinuesTheEntitlementAndRefusalsA
 	if ver2.Outcome != psOutcomeVerified {
 		t.Fatalf("returning device did not verify: %+v", ver2)
 	}
-	again := psCall(t, f.ps.convertHandler, map[string]any{
-		"device": f.device(), "auth_context_id": ver2.AuthContextID, "package_revision_id": f.pkgA})
+	again := psCall(t, f.ps.convertHandler, map[string]any{"device": f.device(), "auth_context_id": ver2.AuthContextID})
 	if again.Outcome != psOutcomeGranted || again.EntitlementID != conv.EntitlementID || again.SessionID != conv.SessionID {
 		t.Fatalf("returning device: %+v, want entitlement %s and session %s again", again, conv.EntitlementID, conv.SessionID)
 	}
@@ -254,8 +273,7 @@ func TestIntegration_PostStay_ReturningDeviceContinuesTheEntitlementAndRefusalsA
 		t.Fatal(err)
 	}
 	ver3 := psCall(t, f.ps.verifyHandler, f.answers())
-	third := psCall(t, f.ps.convertHandler, map[string]any{
-		"device": f.device(), "auth_context_id": ver3.AuthContextID, "package_revision_id": f.pkgB})
+	third := psCall(t, f.ps.convertHandler, map[string]any{"device": f.device(), "auth_context_id": ver3.AuthContextID})
 	// (This harness's enforcement stand-in re-registers the device's accounting origin only once per session minor, so the
 	// reply may stay UNAVAILABLE here; what matters is the database: a new session row on the same entitlement.)
 	_ = third
@@ -265,8 +283,8 @@ func TestIntegration_PostStay_ReturningDeviceContinuesTheEntitlementAndRefusalsA
 		conv.EntitlementID, conv.SessionID).Scan(&n); err != nil || n != 1 {
 		t.Fatalf("%d new live sessions on entitlement %s (%v), want exactly 1", n, conv.EntitlementID, err)
 	}
-	if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM iam_v2.purchases WHERE stay_id=$1 AND trigger='POST_STAY_CONVERSION'`, f.stay).Scan(&n); err != nil || n != 1 {
-		t.Fatalf("%d post-stay purchases (%v), want exactly 1", n, err)
+	if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM iam_v2.entitlements WHERE stay_id=$1 AND end_mode='GRACE_AFTER_CHECKOUT'`, f.stay).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("%d After Check-out entitlements (%v), want exactly 1", n, err)
 	}
 
 	// A wrong answer is refused the same way and is on record, without the answer or the guest.

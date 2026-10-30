@@ -32,9 +32,9 @@ var activitySources = map[string]string{
 	"VOUCHER_REDEMPTION":   "Voucher",
 	"ACCOUNT_AUTO_GRANT":   "Client account",
 	"OTP_SOCIAL_DEFAULT":   "Email, phone or social sign-in",
-	"CHECKOUT_GRACE":       "Grace Period",
-	"EMERGENCY_GRACE":      "Emergency grace",
-	"POST_STAY_CONVERSION": "After-stay access",
+	"CHECKOUT_GRACE":       "After check-out access",
+	"EMERGENCY_GRACE":      "After check-out access (built-in terms)",
+	"POST_STAY_CONVERSION": "After-stay access (earlier benefit, retired)",
 	"CROSS_PMS_TRANSFER":   "Moved between property systems",
 	"ADMIN_GRANT":          "Granted by staff",
 	"RENEWAL":              "Renewal",
@@ -403,9 +403,9 @@ func packageDisplayName(name, code string, system bool, trigger string) string {
 	if system {
 		switch trigger {
 		case "EMERGENCY_GRACE":
-			return "Emergency grace"
+			return "After check-out access (built-in terms)"
 		default:
-			return "Grace Period"
+			return "After check-out access"
 		}
 	}
 	return code

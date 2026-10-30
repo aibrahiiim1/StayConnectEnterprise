@@ -1,5 +1,13 @@
 # AD-36 closure: post-stay sign-in, continuity, audit, settings and abuse bounds
 
+> **Superseded in part, 2026-10-30 (Product Owner).** The unification of Checkout Grace and Post-Stay into **After Check-out
+> Access** ([`../architecture/ONEGATE_AFTER_CHECKOUT_ACCESS.md`](../architecture/ONEGATE_AFTER_CHECKOUT_ACCESS.md)) replaces section 1
+> (the "Post-Stay benefit" granted by a device's sign-in no longer exists: the single After Check-out entitlement is granted once at
+> the checkout and devices only rejoin it, and only devices authorised on the stay before check-out), the "new device + last name"
+> route, and the `post_stay_signin_days` setting. Sections 2-4 (refusal audit, throttle settings, rotation/enumeration bounds) stand.
+> The remaining Product-Owner decision recorded at the end ("stronger authority for a device never on the stay") is answered: such a
+> device is not eligible at all. This page is kept as the record of what was true when it was written.
+
 Closes the gaps recorded in [`AD36_NEW_DEVICE_IDENTITY_REVIEW.md`](AD36_NEW_DEVICE_IDENTITY_REVIEW.md) (master 4924d509).
 Mission authorised by the Product Owner. No PMS traffic, no shared host, no deployment; everything below ran in a throwaway
 full-schema PostgreSQL container. Classification: CONTROLLED (guest authentication and Entitlement core, one additive
