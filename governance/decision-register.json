@@ -1239,6 +1239,18 @@
       "title": "CLOSURE ROUND OF THE AUDIT-DECISION MISSION (2026-10-30): capacity and first-time offline activation acceptance in an isolated lab, review of the roll-up fix and of AD-36, and the defects they found. Simulated acceptance only; the sustained-churn target of 300 sign-ins a minute is recorded as NOT MET, not as passed.",
       "authorization_evidence": "The Product Owner's continuation of 2026-10-30 (GOAL: complete and close the existing AD-1 to AD-68 mission; Central 9613fb52, appliance at 2985a88e).",
       "does_not_authorize": "Go-Live, real PMS traffic, financial operations, Root CA changes, retired hosts, any schema change beyond migration 0180 (entitlement usage survives the raw purge)."
+    },
+    {
+      "id": "D84",
+      "decided_on": "2026-10-30",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-10-30",
+      "status": "ACTIVE",
+      "title": "SECOND CLOSURE ROUND (2026-10-30): sustained sign-in capacity (300 enforced a minute for an hour in the isolated 2 vCPU / 4 GB lab, met twice), shaping beyond 2,047 sessions per bridge (flower classifier), accounting integrity (migration 0181), AD-36 closure (migration 0190), acctd watchdog with the 90 s lease unchanged, capacity migrations 0191/0192. Simulated acceptance only; hardware and real-device acceptance remain outstanding.",
+      "authorization_evidence": "The Product Owner's continuation of 2026-10-30 (GOAL: resolve all remaining engineering defects and acceptance failures of the AD-1 to AD-68 mission from master 4924d509; deployment to the test appliance 172.21.96.97 authorized).",
+      "does_not_authorize": "Go-Live, real PMS traffic, financial operations, Root CA changes, retired hosts, deployment to the production Central (its code did not change), widening client networks beyond /20, any authentication or licensing semantics change."
     }
   ]
 }

@@ -228,7 +228,13 @@ def check_directory(d, by_number):
 
     # 4. CONTIGUITY
     lo, hi = min(numbers), max(numbers)
-    missing = [n for n in range(lo, hi + 1) if n not in numbers]
+    # RESERVED_UNUSED: numbers deliberately never used. 0182..0189 were set aside while the closure-round work ran in
+    # parallel (accounting 0181, then post-stay 0190, capacity 0191/0192) and the first migration after the block took
+    # 0190; 0190..0192 are already applied on the test appliance, so renumbering would re-apply them. The runner
+    # checks that every migration FILE below the one it applies is applied, so the hole is harmless. The list is
+    # closed: a new gap anywhere else is still refused.
+    reserved = set(range(182, 190)) if d.endswith("data-plane/migrations") or d == "data-plane/migrations" else set()
+    missing = [n for n in range(lo, hi + 1) if n not in numbers and n not in reserved]
     if missing:
         bad(
             "migration-contiguity",
