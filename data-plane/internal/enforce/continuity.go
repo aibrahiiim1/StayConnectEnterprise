@@ -108,7 +108,7 @@ func BuildContinuity(rows []ContinuityRow, window time.Duration, asOf time.Time)
 }
 
 // ContinuityRows reads the rows for the plan's entitled sessions. One query, indexed by session id.
-func (e *Enforcer) ContinuityRows(ctx context.Context, plan Plan) ([]ContinuityRow, error) {
+func (e *Enforcer) ContinuityRows(ctx context.Context, tenant, site string, plan Plan) ([]ContinuityRow, error) {
 	ids := make([]string, 0, len(plan.Shape))
 	rate := map[string][2]int{}
 	for _, s := range plan.Shape {
@@ -125,9 +125,9 @@ func (e *Enforcer) ContinuityRows(ctx context.Context, plan Plan) ([]ContinuityR
 			   OR (e.time_accounting_mode = 'VALIDITY_WINDOW' AND COALESCE(spr.time_quota_seconds,0) > 0)),
 			spr.time_quota_seconds, COALESCE(e.consumed_online_seconds,0)::bigint, e.window_ends_at
 		FROM iam_v2.sessions s
-		JOIN iam_v2.entitlements e ON e.id = s.entitlement_id
+		JOIN iam_v2.entitlements e ON e.id = s.entitlement_id AND e.tenant_id = s.tenant_id
 		LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id
-		WHERE s.id = ANY($1::uuid[])`, ids)
+		WHERE s.tenant_id = $2 AND s.site_id = $3 AND s.id = ANY($1::uuid[])`, ids, tenant, site)
 	if err != nil {
 		return nil, fmt.Errorf("continuity rows: %w", err)
 	}
@@ -148,12 +148,12 @@ func (e *Enforcer) ContinuityRows(ctx context.Context, plan Plan) ([]ContinuityR
 }
 
 // ContinuityFor reads and builds. AsOf is stamped BEFORE the read, so a change committed after it is newer than the block.
-func (e *Enforcer) ContinuityFor(ctx context.Context, plan Plan, window time.Duration) (*shapeplan.Continuity, error) {
+func (e *Enforcer) ContinuityFor(ctx context.Context, tenant, site string, plan Plan, window time.Duration) (*shapeplan.Continuity, error) {
 	if window <= 0 {
 		return nil, nil
 	}
 	asOf := time.Now()
-	rows, err := e.ContinuityRows(ctx, plan)
+	rows, err := e.ContinuityRows(ctx, tenant, site, plan)
 	if err != nil {
 		return nil, err
 	}

@@ -658,6 +658,10 @@ func (p *phase3Shaping) contTick(ctx context.Context, now time.Time) int {
 	if c.st == nil {
 		return 0
 	}
+	// A plan may have arrived while the database was being asked: the plan path is back in charge, and this tick must not overlay it.
+	if nb, berr := p.bootNow(); berr != nil || time.Duration(nb-c.st.LastPlanBoot)*time.Millisecond < contTakeoverAge {
+		return 0
+	}
 	c.probeOK = probeOK
 	if probe != nil && !probeOK {
 		c.probeFailures++

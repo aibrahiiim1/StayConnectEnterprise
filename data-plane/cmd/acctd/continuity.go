@@ -110,7 +110,7 @@ func (p *phase3) continuityFor(ctx context.Context, plan enforce.Plan, now time.
 	if blk != nil && now.Sub(at) < contRefresh && blk.WindowSeconds == int(secs) {
 		return blk
 	}
-	nb, err := p.enf.ContinuityFor(ctx, plan, time.Duration(secs)*time.Second)
+	nb, err := p.enf.ContinuityFor(ctx, p.tenant, p.site, plan, time.Duration(secs)*time.Second)
 	if err != nil {
 		slog.Warn("phase3: the continuity budgets could not be read; this plan carries none", "err", err)
 		return nil

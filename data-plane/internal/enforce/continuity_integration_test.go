@@ -116,7 +116,7 @@ func TestIntegration_Continuity_ProducerRowsAndBudget(t *testing.T) {
 		t.Fatalf("plan: %v %+v", err, plan)
 	}
 	asOf := time.Now()
-	blk, err := enf.ContinuityFor(ctx, plan, time.Hour)
+	blk, err := enf.ContinuityFor(ctx, f.tenant, f.site, plan, time.Hour)
 	if err != nil || blk == nil {
 		t.Fatalf("block: %v", err)
 	}
