@@ -1,0 +1,80 @@
+# netd / PostgreSQL / scd / whole-stack restarts with the 1,700 sessions live and 60 sign-ins a minute
+
+## netd
+1793347675.874636418 baseline authset=1757 active_sessions=1759 pg_pids(scd,netd,acctd)=554286 554178 882493
+1793347675.887753340 EVENT systemctl stop stayconnect-netd (held 20 s)
+1793347698.107315697 EVENT start netd
+1793347698.480475079 netd active
+1793347703.335865704 authset back to 1758
+1793347733.745160735 final authset=1757 active_sessions=1759 dup_live_devices=0
+active active active active active 
+
+## pg
+1793347836.617757499 baseline authset=1757 active_sessions=1760 pg_pids(scd,netd,acctd)=554286 933775 882493
+1793347836.645530900 EVENT docker restart stayconnect-pg
+1793347841.463678795 postgres accepts connections
+1793347841.585572422 SELECT 1 answered through the lab's published path
+1793347900.279202661 authset back to 1757
+1793347930.778891393 final authset=1757 active_sessions=1758 dup_live_devices=0
+active active active active active 
+
+## scd
+1793348033.668654791 baseline authset=1757 active_sessions=1758 pg_pids(scd,netd,acctd)=554286 933775 882493
+1793348033.678777688 EVENT stop+start scd
+1793348035.847088263 scd active
+1793348036.538605130 scd metrics endpoint answers
+1793348094.769471821 authset back to 1757
+1793348125.122670083 final authset=1757 active_sessions=1758 dup_live_devices=0
+active active active active active 
+
+## stack
+1793348227.937400563 baseline authset=1756 active_sessions=1757 pg_pids(scd,netd,acctd)=962514 933775 882493
+1793348227.946671291 EVENT stop every StayConnect service and the database container (services stopped together)
+1793348234.355621964 all stopped; holding 10 s
+1793348244.360071824 EVENT start: database, then services
+1793348245.716388933 postgres accepts connections
+1793348245.994193163 netd active
+1793348246.229145655 scd active
+1793348246.462873907 acctd active
+1793348246.484680537 edged active
+1793348246.499921542 portald active
+1793348306.069794560 authset back to 1756
+1793348336.401731526 final authset=1757 active_sessions=1758 dup_live_devices=0
+active active active active active 
+
+## lowest authorisation-set size in the 150 s after each event (the set holds the 1,700 long sessions plus about 57 churn sessions)
+netd  samples 131  authset min 1732 at +27s ; max 1758 ; first sample = 1755
+pg    samples 130  authset min 1748 at +9s ; max 1758 ; first sample = 1757
+scd   samples 131  authset min 1751 at +49s ; max 1758 ; first sample = 1757
+stack samples 132  authset min 1734 at +26s ; max 1758 ; first sample = 1756
+
+## sign-in attempts by window
+STOP acctd                         attempts   41  ok   20  not-ok   21  (window 30 s)
+kill -9 acctd                      attempts   19  ok   19  not-ok    0  (window 10 s)
+acctd stopped 240 s (+ refill)     attempts  264  ok   27  not-ok  237  (window 255 s)
+netd stopped 20 s                  attempts   47  ok   27  not-ok   20  (window 37 s)
+PostgreSQL restart                 attempts   39  ok   34  not-ok    5  (window 30 s)
+scd restart                        attempts   25  ok   22  not-ok    3  (window 15 s)
+whole stack                        attempts   57  ok   36  not-ok   21  (window 46 s)
+outside any event window           attempts 1908  ok 1908  not-ok    0
+failure kinds: {('STOP acctd', 'refused'): 21, ('acctd stopped 240 s (+ refill)', 'refused'): 237, ('netd stopped 20 s', 'refused'): 20, ('PostgreSQL restart', 'refused'): 5, ('scd restart', 'refused'): 3, ('whole stack', 'error'): 21}
+ok latency p50 2148 p95 3530 p99 4832 max 7892 ms; total ok 2093 of 2400
+
+## enforcement cross-check
+netd 'session enforcement confirmed' in the events window: 1855
+sessions created in window (clients 2000-2399 churn + 10 quota): 2385
+ended|ENFORCEMENT_TORN_DOWN|1413
+ended|ENTITLEMENT_ENDED|972
+dup live: 0
+journal ERROR-level lines since start: scd=3 netd=0 acctd=4 portald=3 edged=0 
+      3 guest method switch unreadable; refusing sign-in
+      1 phase3: plan session limits could not be enforced
+      1 phase3: expiry enforcement failed
+      1 phase3: could not load sessions for accounting
+      1 phase3: could not derive the shaping plan
+PENDING_ENFORCEMENT never activated that are still open: 0
+
+long sessions (started before the events run) that ended since: 
+ADMIN|1
+long sessions still live: 1699
+all-time: sessions of the 1700 ramp (24h vouchers) ended: 0

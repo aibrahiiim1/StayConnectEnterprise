@@ -1,0 +1,182 @@
+# Central disconnect (lab Central 172.30.10.10 dropped on 443 and 9443 in the appliance output hook, 22 minutes, 150 sign-ins a minute)
+
+## orchestration log (status every few minutes)
+appliance side started at 1793348957
+== baseline before the cut
+---- 08:29:18
+license={"state": "active", "valid_until": "2027-01-28T05:13:27Z", "grace_ends_at": "2027-02-04T05:13:27Z", "days_left": 90, "max_concurrent_online_guests": 2500, "current_online_guests": 1699} central={"state": "connected", "last_contact_at": "2026-10-30T08:28:57.115165821Z", "last_error": null}
+active|1699 
+authset=1699 dup_live=0 cut_drops= units=active,active,active,
+port 443: 307 0.697336s
+port 9443: 000 0.006968s
+cut on at 1793348961.002251431
+table inet lab_cut {
+	chain out {
+		type filter hook output priority -100; policy accept;
+		ip daddr 172.30.10.10 tcp dport { 443, 9443 } counter packets 0 bytes 0 drop
+	}
+}
+port 443: 000 5.004963s
+port 9443: 000 5.000889s
+churn disc started 22m rate 150
+== t=+60 s
+---- 08:30:23
+license={"state": "active", "valid_until": "2027-01-28T05:13:27Z", "grace_ends_at": "2027-02-04T05:13:27Z", "days_left": 90, "max_concurrent_online_guests": 2500, "current_online_guests": 1825} central={"state": "unreachable", "last_contact_at": "2026-10-30T08:28:57.115165821Z", "last_error": "OneGate Central did not answer in time."}
+PENDING_ENFORCEMENT|3 active|1825 
+authset=1825 dup_live=0 cut_drops=packets 52 units=active,active,active,
+{"time":"2026-10-30T08:29:57.094798946Z","level":"WARN","msg":"assignment: fetch failed","base":"https://central.oglab.test:9443","err":"Get \"https://central.oglab.test:9443/v1/appliance/assignment\": context deadline exceeded (Client.Timeout exceeded while a
+== t=+240 s
+---- 08:33:27
+license={"state": "active", "valid_until": "2027-01-28T05:13:27Z", "grace_ends_at": "2027-02-04T05:13:27Z", "days_left": 90, "max_concurrent_online_guests": 2500, "current_online_guests": 1847} central={"state": "unreachable", "last_contact_at": "2026-10-30T08:28:57.115165821Z", "last_error": "OneGate Central did not answer in time."}
+PENDING_ENFORCEMENT|6 active|1847 
+authset=1844 dup_live=0 cut_drops=packets 214 units=active,active,active,
+{"time":"2026-10-30T08:33:27.179199277Z","level":"WARN","msg":"assignment: fetch failed","base":"https://central.oglab.test:9443","err":"Get \"https://central.oglab.test:9443/v1/appliance/assignment\": context deadline exceeded (Client.Timeout exceeded while a
+== EVENT scd restart at +300
+1793349271.093815577 scd stop
+1793349274.267846619 scd active
+== t=+420 s
+---- 08:36:27
+license={"state": "active", "valid_until": "2027-01-28T05:13:27Z", "grace_ends_at": "2027-02-04T05:13:27Z", "days_left": 90, "max_concurrent_online_guests": 2500, "current_online_guests": 1848} central={"state": "unreachable", "last_contact_at": "2026-10-30T08:34:34.597359599Z", "last_error": "OneGate Central did not answer in time."}
+PENDING_ENFORCEMENT|7 active|1848 
+authset=1843 dup_live=0 cut_drops=packets 360 units=active,active,active,
+{"time":"2026-10-30T08:36:04.51363624Z","level":"WARN","msg":"assignment: fetch failed","base":"https://central.oglab.test:9443","err":"Get \"https://central.oglab.test:9443/v1/appliance/assignment\": context deadline exceeded (Client.Timeout exceeded while aw
+== EVENT acctd restart at +600
+1793349562.007198131 acctd stop
+1793349562.398078111 acctd active
+== t=+720 s
+---- 08:41:24
+license={"state": "active", "valid_until": "2027-01-28T05:13:27Z", "grace_ends_at": "2027-02-04T05:13:27Z", "days_left": 90, "max_concurrent_online_guests": 2500, "current_online_guests": 1851} central={"state": "unreachable", "last_contact_at": "2026-10-30T08:34:34.597359599Z", "last_error": "OneGate Central did not answer in time."}
+PENDING_ENFORCEMENT|5 active|1849 
+authset=1844 dup_live=0 cut_drops=packets 595 units=active,active,active,
+{"time":"2026-10-30T08:41:04.952570023Z","level":"WARN","msg":"assignment: fetch failed","base":"https://central.oglab.test:9443","err":"Get \"https://central.oglab.test:9443/v1/appliance/assignment\": context deadline exceeded (Client.Timeout exceeded while a
+== EVENT netd restart at +840
+1793349807.597485405 netd stop
+1793349809.569908010 netd active
+== t=+960 s
+---- 08:45:21
+license={"state": "active", "valid_until": "2027-01-28T05:13:27Z", "grace_ends_at": "2027-02-04T05:13:27Z", "days_left": 90, "max_concurrent_online_guests": 2500, "current_online_guests": 1847} central={"state": "unreachable", "last_contact_at": "2026-10-30T08:34:34.597359599Z", "last_error": "OneGate Central did not answer in time."}
+PENDING_ENFORCEMENT|4 active|1851 
+authset=1846 dup_live=0 cut_drops=packets 784 units=active,active,active,
+{"time":"2026-10-30T08:45:19.55763808Z","level":"WARN","msg":"appliancecert: reconcile failed","why":"periodic","err":"cert fetch: Get \"https://central.oglab.test/v1/appliance/certificate\": context deadline exceeded (Client.Timeout exceeded while awaiting he
+== t=+1200 s
+---- 08:49:27
+license={"state": "active", "valid_until": "2027-01-28T05:13:27Z", "grace_ends_at": "2027-02-04T05:13:27Z", "days_left": 90, "max_concurrent_online_guests": 2500, "current_online_guests": 1844} central={"state": "unreachable", "last_contact_at": "2026-10-30T08:34:34.597359599Z", "last_error": "OneGate Central did not answer in time."}
+PENDING_ENFORCEMENT|9 active|1844 
+authset=1839 dup_live=0 cut_drops=packets 968 units=active,active,active,
+{"time":"2026-10-30T08:49:05.160617814Z","level":"WARN","msg":"assignment: fetch failed","base":"https://central.oglab.test:9443","err":"Get \"https://central.oglab.test:9443/v1/appliance/assignment\": context deadline exceeded (Client.Timeout exceeded while a
+== t=+1320 s
+---- 08:51:31
+license={"state": "active", "valid_until": "2027-01-28T05:13:27Z", "grace_ends_at": "2027-02-04T05:13:27Z", "days_left": 90, "max_concurrent_online_guests": 2500, "current_online_guests": 1845} central={"state": "unreachable", "last_contact_at": "2026-10-30T08:34:34.597359599Z", "last_error": "OneGate Central did not answer in time."}
+PENDING_ENFORCEMENT|9 active|1845 
+authset=1843 dup_live=0 cut_drops=packets 1075 units=active,active,active,
+{"time":"2026-10-30T08:51:05.213998574Z","level":"WARN","msg":"assignment: fetch failed","base":"https://central.oglab.test:9443","err":"Get \"https://central.oglab.test:9443/v1/appliance/assignment\": context deadline exceeded (Client.Timeout exceeded while a
+== restore connectivity
+		ip daddr 172.30.10.10 tcp dport { 443, 9443 } counter packets 1075 bytes 72046 drop
+cut off at 1793350293.108379918
+port 443: 307 0.298308s
+port 9443: 000 0.035171s
+== restored +30 s
+---- 08:52:05
+license={"state": "active", "valid_until": "2027-01-28T05:13:27Z", "grace_ends_at": "2027-02-04T05:13:27Z", "days_left": 90, "max_concurrent_online_guests": 2500, "current_online_guests": 1772} central={"state": "connected", "last_contact_at": "2026-10-30T08:52:04.439883246Z", "last_error": null}
+active|1772 
+authset=1765 dup_live=0 cut_drops= units=active,active,active,
+{"time":"2026-10-30T08:51:35.228439138Z","level":"WARN","msg":"assignment: fetch failed","base":"https://central.oglab.test:9443","err":"Get \"https://central.oglab.test:9443/v1/appliance/assignment\": context deadline exceeded (Client.Timeout exceeded while a
+== restored +60 s
+---- 08:52:37
+license={"state": "active", "valid_until": "2027-01-28T05:13:27Z", "grace_ends_at": "2027-02-04T05:13:27Z", "days_left": 90, "max_concurrent_online_guests": 2500, "current_online_guests": 1699} central={"state": "connected", "last_contact_at": "2026-10-30T08:52:34.449577199Z", "last_error": null}
+active|1699 
+authset=1699 dup_live=0 cut_drops= units=active,active,active,
+== restored +120 s
+---- 08:53:39
+license={"state": "active", "valid_until": "2027-01-28T05:13:27Z", "grace_ends_at": "2027-02-04T05:13:27Z", "days_left": 90, "max_concurrent_online_guests": 2500, "current_online_guests": 1699} central={"state": "connected", "last_contact_at": "2026-10-30T08:53:34.430671308Z", "last_error": null}
+active|1699 
+authset=1699 dup_live=0 cut_drops= units=active,active,active,
+== restored +180 s
+---- 08:54:41
+license={"state": "active", "valid_until": "2027-01-28T05:13:27Z", "grace_ends_at": "2027-02-04T05:13:27Z", "days_left": 90, "max_concurrent_online_guests": 2500, "current_online_guests": 1699} central={"state": "connected", "last_contact_at": "2026-10-30T08:54:34.429451205Z", "last_error": null}
+active|1699 
+authset=1699 dup_live=0 cut_drops= units=active,active,active,
+== restored +300 s
+---- 08:56:34
+license={"state": "active", "valid_until": "2027-01-28T05:13:27Z", "grace_ends_at": "2027-02-04T05:13:27Z", "days_left": 90, "max_concurrent_online_guests": 2500, "current_online_guests": 1699} central={"state": "connected", "last_contact_at": "2026-10-30T08:56:34.424082068Z", "last_error": null}
+active|1699 
+authset=1699 dup_live=0 cut_drops= units=active,active,active,
+== restored +420 s
+---- 08:58:38
+license={"state": "active", "valid_until": "2027-01-28T05:13:27Z", "grace_ends_at": "2027-02-04T05:13:27Z", "days_left": 90, "max_concurrent_online_guests": 2500, "current_online_guests": 1699} central={"state": "connected", "last_contact_at": "2026-10-30T08:58:34.410841416Z", "last_error": null}
+active|1699 
+authset=1699 dup_live=0 cut_drops= units=active,active,active,
+== restored +600 s
+---- 09:01:42
+license={"state": "active", "valid_until": "2027-01-28T05:13:27Z", "grace_ends_at": "2027-02-04T05:13:27Z", "days_left": 90, "max_concurrent_online_guests": 2500, "current_online_guests": 1699} central={"state": "connected", "last_contact_at": "2026-10-30T09:01:34.426442417Z", "last_error": null}
+active|1699 
+authset=1699 dup_live=0 cut_drops= units=active,active,active,
+disconnect-all-done
+
+## sign-ins
+attempts 3300 ok 3291 (99.73%) p50 2676 p95 4252 p99 5105 max 6829 ms
+kinds {'refused:200': 9}
+first attempt at +13 s after the cut, last at +1336 s
+scd restart    attempts in -5..+40 s: 111, not ok 9; first ok sign-in finished 0.5 s after the stop command
+acctd restart  attempts in -5..+40 s: 113, not ok 0; first ok sign-in finished 0.6 s after the stop command
+netd restart   attempts in -5..+40 s: 109, not ok 0; first ok sign-in finished 1.3 s after the stop command
+per minute (attempts/ok) : [(5, 146, 137)]
+minutes 23 min attempts/min 34 max 156
+
+## evidence from the journals
+== licence on disk
+  
+1665 08:17 current.json
+1665 08:17 current.json.prev
+319 09:01 state.json
+319 09:01 state.json.prev
+== scd lines in the disconnect (licstate/central/hello), counted by message
+     43 WARN assignment: fetch failed
+      5 WARN hello: call failed
+      5 WARN appliancecert: reconcile failed
+      1 stayconnect-scd.service: Deactivated successfully.
+      1 stayconnect-scd.service: Consumed 16.087s CPU time.
+      1 phase6/phase5 guest dependency check: OK (/etc/stayconnect)
+      1 WARN licstate: cloud license fetch failed (offline-safe)
+      1 WARN erasure ledger: the secondary storage is not set up; erasure requests 
+      1 WARN appliancecert: mTLS hello failed
+      1 Stopping StayConnect Session Controller Daemon (scd)...
+      1 Stopped StayConnect Session Controller Daemon (scd).
+      1 Starting StayConnect Session Controller Daemon (scd)...
+      1 Started StayConnect Session Controller Daemon (scd).
+      1 INFO walled-garden: reconciled
+== after each restart: licence evaluated from disk
+2026-10-30T08:34:34.523536672Z state=Active valid_until=2027-01-28T05:13:27Z cloud_stale=false
+== licence refresh lines
+      1 2026-10-30T08:32:37.25863598Z hello: call failed
+      1 2026-10-30T08:34:44.549870484Z licstate: cloud license fetch failed (offline-safe)
+      1 2026-10-30T08:34:44.605493498Z hello: call failed
+      1 2026-10-30T08:34:49.597667991Z appliancecert: mTLS hello failed
+      1 2026-10-30T08:39:54.585536354Z hello: call failed
+      1 2026-10-30T08:44:54.565992722Z hello: call failed
+      1 2026-10-30T08:49:54.538494798Z hello: call failed
+== other services in the disconnect: ERROR lines
+scd=0 netd=1 acctd=2 portald=8 edged=0 
+== PG log errors/deadlocks in window
+3
+== duplicates / totals now
+active|1699
+0
+== cut counters
+		ip daddr 172.30.10.10 tcp dport { 443, 9443 } counter packets 1075 bytes 72046 drop
+cut off at 1793350293.108379918
+== netd
+{"time":"2026-10-30T08:43:27.629784845Z","level":"ERROR","msg":"netd: the live ruleset does not match the in-force configuration and could not be re-asserted","trigger":"periodic","err":"live nft state could not be read reliably: list tables: context canceled"
+== acctd
+2026-10-30T08:39:22 phase3: plan session limits could not be enforced | context canceled
+2026-10-30T08:39:22 phase3: could not derive the shaping plan | context canceled
+== portald
+2026-10-30T08:34:31 scd call | Post \
+2026-10-30T08:34:31 scd call | Post \
+2026-10-30T08:34:32 scd call | Post \
+2026-10-30T08:34:32 scd call | Post \
+2026-10-30T08:34:33 scd call | Post \
+== PG
+2026-10-30 08:34:34.092 UTC [5648] FATAL:  role "root" does not exist
+2026-10-30 08:39:22.327 UTC [7152] FATAL:  role "root" does not exist
+2026-10-30 08:43:29.456 UTC [8438] FATAL:  role "root" does not exist

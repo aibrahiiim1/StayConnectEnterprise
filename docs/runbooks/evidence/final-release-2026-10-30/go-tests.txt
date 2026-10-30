@@ -1,0 +1,46 @@
+# go test, Linux (golang:1.26.10), worktree at dbf86d28
+=== UNIT (linux, golang:1.26.10)
+ok  	github.com/stayconnect/enterprise/data-plane/cmd/netd	129.283s
+ok  	github.com/stayconnect/enterprise/data-plane/cmd/scd	4.413s
+ok  	github.com/stayconnect/enterprise/data-plane/cmd/acctd	1.617s
+ok  	github.com/stayconnect/enterprise/data-plane/cmd/edged	4.138s
+ok  	github.com/stayconnect/enterprise/data-plane/cmd/portald	19.981s
+ok  	github.com/stayconnect/enterprise/data-plane/internal/enforce	0.057s
+ok  	github.com/stayconnect/enterprise/data-plane/internal/shape	0.148s
+ok  	github.com/stayconnect/enterprise/data-plane/internal/nft	0.069s
+ok  	github.com/stayconnect/enterprise/data-plane/internal/poststay	0.075s
+ok  	github.com/stayconnect/enterprise/data-plane/internal/throttle	0.058s
+ok  	github.com/stayconnect/enterprise/data-plane/internal/signinattempt	0.058s
+ok  	github.com/stayconnect/enterprise/data-plane/internal/metrics	0.068s
+ok  	github.com/stayconnect/enterprise/data-plane/internal/sdwatchdog	0.245s
+ok  	github.com/stayconnect/enterprise/data-plane/internal/iamv2	2.556s
+ok  	github.com/stayconnect/enterprise/data-plane/internal/netcfg	0.090s
+?   	github.com/stayconnect/enterprise/data-plane/internal/writerguard	[no test files]
+ok  	github.com/stayconnect/enterprise/data-plane/internal/licstate	1.401s
+ok  	github.com/stayconnect/enterprise/data-plane/internal/grace	0.054s
+ok  	github.com/stayconnect/enterprise/data-plane/internal/sysnet	0.057s
+=== INTEGRATION (real PG16/Timescale 2.16.1, -p 1)
+ok  	github.com/stayconnect/enterprise/data-plane/internal/enforce	94.399s
+ok  	github.com/stayconnect/enterprise/data-plane/internal/writerguard	1.610s
+ok  	github.com/stayconnect/enterprise/data-plane/internal/poststay	0.020s
+--- FAIL: TestActivationRefusedWithoutARegisteredAccountingOrigin (1.29s)
+FAIL
+FAIL	github.com/stayconnect/enterprise/data-plane/cmd/scd	111.700s
+ok  	github.com/stayconnect/enterprise/data-plane/cmd/acctd	11.745s
+FAIL
+
+## real PostgreSQL 16 / TimescaleDB 2.16.1, full appliance schema, fresh database, -p 1 -count=1
+db build rc=0
+=== integration : ./cmd/scd
+ok  	github.com/stayconnect/enterprise/data-plane/cmd/scd	102.249s
+PASS=415 SKIP=18
+=== integration phase5 : ./internal/poststay ./cmd/scd
+ok  	github.com/stayconnect/enterprise/data-plane/internal/poststay	8.506s
+ok  	github.com/stayconnect/enterprise/data-plane/cmd/scd	73.366s
+PASS=393 SKIP=66
+=== integration : ./internal/enforce ./internal/writerguard ./cmd/acctd
+ok  	github.com/stayconnect/enterprise/data-plane/internal/enforce	81.410s
+ok  	github.com/stayconnect/enterprise/data-plane/internal/writerguard	1.517s
+ok  	github.com/stayconnect/enterprise/data-plane/cmd/acctd	11.308s
+PASS=163 SKIP=
+step7d done
