@@ -59,9 +59,11 @@ func setupRealKernel(t *testing.T) *realKernel {
 			t.Fatalf("setup %q: %v: %s", cmd, err, out)
 		}
 	}
-	for _, b := range scaleBridgeNames() {
+	for i, b := range scaleBridgeNames() {
 		sh("ip link del " + b + " 2>/dev/null; ip link del " + shape.IFBName(b) + " 2>/dev/null; true")
 		sh("ip link add " + b + " type bridge && ip link set " + b + " up")
+		// The guest network of the bridge is a /17 (as the gateway address would give it), so up to 32,766 sessions have their own class.
+		sh(fmt.Sprintf("ip addr add 10.%d.0.1/17 dev %s", 20+i, b))
 	}
 	sh("nft delete table inet stayconnect 2>/dev/null; true")
 	sh("nft add table inet stayconnect")
@@ -252,8 +254,8 @@ func newScaleEnv(t *testing.T, k kern) *scaleEnv {
 	return e
 }
 
-// scaleBridgeCount spreads the sessions over that many bridges (NETD_SCALE_BRIDGES). The kernel installs at most 2047 u32 filters per device parent (the
-// hash-table id space is 0x7ff), so one bridge cannot hold more than 2047 shaped sessions whatever netd does; a site with more uses several guest networks.
+// scaleBridgeCount spreads the sessions over that many bridges (NETD_SCALE_BRIDGES). One bridge now holds any number of sessions up to its subnet
+// (the harness gives each a /17); the former limit of 2,047 u32 filters per device parent no longer applies (docs/reviews/SHAPING_SCALE_BEYOND_2047.md).
 var scaleBridgeCount = 1
 
 func scaleBridgeName(b int) string {

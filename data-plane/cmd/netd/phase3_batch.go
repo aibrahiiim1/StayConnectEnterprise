@@ -433,7 +433,7 @@ func (p *phase3Shaping) abortBatch(ctx context.Context, bridge string, items []p
 	}
 	var minors []int
 	for _, i := range idx {
-		if m, ok := shape.MinorForIP(items[i].ip); ok {
+		if m, ok := shape.MinorFor(bridge, items[i].ip); ok {
 			minors = append(minors, m)
 		}
 	}
@@ -441,7 +441,7 @@ func (p *phase3Shaping) abortBatch(ctx context.Context, bridge string, items []p
 	down, e1 := p.shp.ReadClasses(ctx, bridge)
 	up, e2 := p.shp.ReadClasses(ctx, shape.IFBName(bridge))
 	for _, i := range idx {
-		m, ok := shape.MinorForIP(items[i].ip)
+		m, ok := shape.MinorFor(bridge, items[i].ip)
 		if !ok || derr != nil || e1 != nil || e2 != nil {
 			single(i)
 			continue
@@ -563,7 +563,7 @@ func (p *phase3Shaping) tearBatch(ctx context.Context, items []tearItem, stillTo
 		if errs[i] != nil {
 			continue
 		}
-		if m, ok := shape.MinorForIP(it.ip); ok {
+		if m, ok := shape.MinorFor(it.s.Bridge, it.ip); ok {
 			byBridge[it.s.Bridge] = append(byBridge[it.s.Bridge], m)
 		}
 	}
@@ -590,7 +590,7 @@ func (p *phase3Shaping) tearBatch(ctx context.Context, items []tearItem, stillTo
 		if p.queueEnd(ctx, classKey(s.Bridge, s.SessionID), s.SessionID, s.EndReason) {
 			stillTorn[classKey(s.Bridge, s.SessionID)] = true
 		}
-		if minor, ok := shape.MinorForIP(it.ip); ok {
+		if minor, ok := shape.MinorFor(s.Bridge, it.ip); ok {
 			delete(p.minorOwner, minorKey(s.Bridge, minor))
 		}
 		delete(p.classes, classKey(s.Bridge, s.SessionID))

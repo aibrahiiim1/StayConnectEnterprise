@@ -439,7 +439,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 			res.Problems = append(res.Problems, "shape: unusable plan entry for session "+s.SessionID)
 			continue
 		}
-		minor, ok := shape.MinorForIP(ip)
+		minor, ok := shape.MinorFor(s.Bridge, ip)
 		if !ok {
 			res.Failed++
 			res.Problems = append(res.Problems, "shape: unshapeable address for session "+s.SessionID)
@@ -476,7 +476,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 		}
 		// A handover is not a teardown: when the plan hands the address to a newer session, kernel teardown would take the new guest offline and reset its accounting series every pass.
 		// Only the durable half runs; the kernel half is left to the new owner.
-		if minor, ok := shape.MinorForIP(ip); ok {
+		if minor, ok := shape.MinorFor(s.Bridge, ip); ok {
 			if next, taken := desired[s.Bridge][minor]; taken && next.SessionID != s.SessionID {
 				ck := classKey(s.Bridge, s.SessionID)
 				// Handed over and already recorded as ended: the plan keeps listing it for a while, and recording it again every pass is a locking write per
@@ -521,7 +521,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 		if p.markEnded(ctx, s.SessionID, s.EndReason) {
 			stillTorn[classKey(s.Bridge, s.SessionID)] = true
 		}
-		if minor, ok := shape.MinorForIP(ip); ok {
+		if minor, ok := shape.MinorFor(s.Bridge, ip); ok {
 			delete(p.minorOwner, minorKey(s.Bridge, minor))
 		}
 		delete(p.classes, classKey(s.Bridge, s.SessionID))
@@ -557,7 +557,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 				if el.IP == nil {
 					continue
 				}
-				minor, ok := shape.MinorForIP(el.IP)
+				minor, ok := shape.MinorFor(el.Bridge, el.IP)
 				if !ok {
 					continue
 				}
@@ -604,7 +604,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 			// Batched pass: all stray classes of the bridge go in one tc batch and are proven gone with one read.
 			var strays []int
 			for _, minor := range sortedInts(installed) {
-				if minor < shape.GuestMinorBase || minor > shape.GuestMinorMax {
+				if !shape.IsGuestMinor(minor) {
 					continue
 				}
 				if _, want := desired[bridge][minor]; !want {
@@ -617,7 +617,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 			continue
 		}
 		for _, minor := range sortedInts(installed) {
-			if minor < shape.GuestMinorBase || minor > shape.GuestMinorMax {
+			if !shape.IsGuestMinor(minor) {
 				continue
 			}
 			if _, want := desired[bridge][minor]; want {

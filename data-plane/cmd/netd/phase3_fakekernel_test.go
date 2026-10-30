@@ -60,7 +60,9 @@ type kernelFake struct {
 	cnt  execCounts
 
 	// failTC / failNFT inject a failure for a command (single or one batch line / script op); nil = none.
-	failTC  func(args []string) error
+	// noFlower simulates a kernel without cls_flower.
+	noFlower bool
+	failTC   func(args []string) error
 	failNFT func(op string) error
 	// perExec is a simulated fork cost, applied to wall time only when set.
 	perExec time.Duration
@@ -295,32 +297,74 @@ func (k *kernelFake) tcOne(args []string) ([]byte, error) {
 			c.leaf = false
 		}
 	case "filter add":
-		pref, _ := strconv.Atoi(argAfter(args, "pref"))
 		d := k.dev(dev)
 		if argAfter(args, "parent") == "ffff:" { // ingress redirect
 			return nil, nil
 		}
-		if _, ok := d.filters[pref]; ok {
+		key, flow := fakeFilterKey(args)
+		if k.noFlower && flower(args) {
+			return []byte("Error: Specified filter kind not found.\nWe have an error talking to the kernel"), fmt.Errorf("exit status 2")
+		}
+		if _, ok := d.filters[key]; ok {
 			return []byte("RTNETLINK answers: File exists"), fmt.Errorf("exit status 2")
 		}
-		d.filters[pref] = argAfter(args, "flowid")
+		// the real kernel refuses the 2,048th u32 priority on a device; flower has no such limit
+		if !flower(args) {
+			n := 0
+			for kk := range d.filters {
+				if kk < flowerKeyBase {
+					n++
+				}
+			}
+			if n >= 2047 {
+				return []byte("Error: Filter already exists."), fmt.Errorf("exit status 2")
+			}
+		}
+		d.filters[key] = flow
 	case "filter del":
-		pref, _ := strconv.Atoi(argAfter(args, "pref"))
 		d := k.dev(dev)
-		if _, ok := d.filters[pref]; !ok {
+		key, _ := fakeFilterKey(args)
+		if _, ok := d.filters[key]; !ok {
 			return []byte("RTNETLINK answers: No such file or directory"), fmt.Errorf("exit status 2")
 		}
-		delete(d.filters, pref)
+		delete(d.filters, key)
 	case "filter show":
 		var b strings.Builder
-		for _, pref := range sortedPrefs(k.dev(dev).filters) {
-			fmt.Fprintf(&b, "filter protocol ip pref %d u32 chain 0 \nfilter protocol ip pref %d u32 chain 0 fh 800: ht divisor 1 \n", pref, pref)
+		for _, key := range sortedPrefs(k.dev(dev).filters) {
+			if key >= flowerKeyBase {
+				m := key - flowerKeyBase
+				fmt.Fprintf(&b, "filter protocol ip pref 1 flower chain 0 \nfilter protocol ip pref 1 flower chain 0 handle 0x%x classid 1:%x \n  eth_type ipv4\n", m, m)
+				continue
+			}
+			fmt.Fprintf(&b, "filter protocol ip pref %d u32 chain 0 \nfilter protocol ip pref %d u32 chain 0 fh 800: ht divisor 1 \n", key, key)
 		}
 		return []byte(b.String()), nil
 	default:
 		return nil, fmt.Errorf("fake tc: unsupported %v", args)
 	}
 	return nil, nil
+}
+
+// flowerKeyBase separates the fake's flower filters (keyed by handle) from its u32 filters (keyed by pref).
+const flowerKeyBase = 1 << 20
+
+func flower(args []string) bool {
+	for _, a := range args {
+		if a == "flower" {
+			return true
+		}
+	}
+	return false
+}
+
+// fakeFilterKey is the identity of a filter in the fake: the handle of a flower filter, the pref of a u32 one.
+func fakeFilterKey(args []string) (int, string) {
+	if flower(args) {
+		h, _ := strconv.ParseInt(strings.TrimPrefix(argAfter(args, "handle"), "0x"), 16, 32)
+		return flowerKeyBase + int(h), argAfter(args, "classid")
+	}
+	pref, _ := strconv.Atoi(argAfter(args, "pref"))
+	return pref, argAfter(args, "flowid")
 }
 
 func sortedPrefs(m map[int]string) []int {

@@ -122,7 +122,7 @@ func (p *phase3) accountingPass(ctx context.Context, rd counterReader, ep epochS
 			continue
 		}
 		bridge := s.Bridge
-		minor, ok := shape.MinorForIP(s.IP)
+		minor, ok := shape.MinorFor(bridge, s.IP)
 		if !ok {
 			degraded = reasonSourceIncoherent
 			continue
