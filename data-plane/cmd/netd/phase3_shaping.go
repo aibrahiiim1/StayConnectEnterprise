@@ -145,6 +145,11 @@ type phase3Shaping struct {
 }
 
 type passLeases struct {
+	// mu makes the lazily built index and the one-fetch-per-pass state safe for concurrent use. The same *passLeases is reachable from
+	// more than one goroutine: the continuity governor installs one on the shared address owner while a request handler (the ownership
+	// evidence probe) reads that owner without p.mu. Without this lock the first LeasesForIP could assign into a map another goroutine
+	// had just reset to nil, which panicked netd ("assignment to entry in nil map", seen at minute 43 of a 60 minute lab outage).
+	mu    sync.Mutex
 	src   leaseSource
 	done  bool
 	fetch time.Duration
@@ -174,6 +179,8 @@ func (l *passLeases) AbsenceTrusted(ip net.IP) (bool, string) {
 }
 
 func (l *passLeases) Leases() ([]KeaLease, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	if !l.done {
 		t0 := time.Now()
 		l.leases, l.err = l.src.Leases()
@@ -191,6 +198,8 @@ func (l *passLeases) Leases() ([]KeaLease, error) {
 // answering by reading the whole list made that question cost the size of the list: two thousand sessions against two thousand leases is four
 // million comparisons a pass, a tenth of netd's CPU at 300 sign-ins a minute (capacity acceptance, 2026-10-30).
 func (l *passLeases) LeasesForIP(ip string) ([]KeaLease, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	if !l.done || l.err != nil {
 		return nil, false
 	}
