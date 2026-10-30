@@ -1,0 +1,34 @@
+{
+  "transition_id": "T0275",
+  "seq": 275,
+  "timestamp": "2026-10-30T09:21:00Z",
+  "timestamp_derivation": "Computed from the session clock after the test appliance upgrade was read back (installed 09:19Z; the receipt is stamped after the read-back), before the commit that introduces this receipt.",
+  "record_type": "CLOSURE_ROUND_2_DEPLOYMENT",
+  "authorisation": "D84, the Product Owner's continuation of the mission of 2026-10-30 (deployment to the test appliance 172.21.96.97).",
+  "deployment": {
+    "central": "Not deployed: the round changed no Central code. Production Central stays onegate-central-5ac9cc5c9851.",
+    "test_appliance": "172.21.96.97: onegate-appliance-bcb5330cf914 by appliance-install.sh --upgrade (pre-change backups taken); migrations 0181, 0190, 0191, 0192 applied; units PASS; RELEASE.json source_commit bcb5330cf9141d413293b48555831fea5640d7d6; acctd unit WatchdogSec=30; DEPLOYED_BINARIES.sha256 lists the installed binaries.",
+    "lab": "The isolated container lab (new Central, new PKI; nothing registered on the production Central) ran the capacity, availability and Central-disconnect tests on the exact release candidate dbf86d28; see docs/runbooks/CAPACITY_AND_OFFLINE_ACCEPTANCE.md sections 6 and 7."
+  },
+  "verification": "Lab (simulated, 2 CPU / 4 GB): 17,998 of 18,000 sign-ins enforced over 60 minutes with 1,700 long sessions and 60 s churn, twice (2f687f24 and dbf86d28); data quota ended 20 of 20 sessions on DATA; purge fold did not regain quota; acctd hang restarted by the watchdog in 25 s with no guest losing access; 22-minute Central disconnect with 3,291 of 3,300 sign-ins enforced and the licence valid; real-kernel shaping test at 8,000 sessions per bridge. Not performed: physical devices at scale, reference hardware, real PMS post-stay traffic, a host reboot drill in the lab, flower filters on the test appliance under load.",
+  "not_touched": "Every retired host, the production Central, production users, live payment providers, PMS posting and configuration, the Root CA.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "bcb5330cf9141d413293b48555831fea5640d7d6",
+  "previous_delivery": "T0274",
+  "decision": "D84",
+  "go_live": "NOT authorised."
+}
