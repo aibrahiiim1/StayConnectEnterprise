@@ -10,14 +10,17 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/shapeplan"
 )
 
-const (
-	// phase3LeaseTTL equals the producer's plan validity (acctd's planValidity), so the kernel stops forwarding
-	// when netd starts reporting the plan ACTIVE_STALE. A session loses access within this bound unless renewed.
-	phase3LeaseTTL = 90 * time.Second
-
-	// phase3LeaseRenewBelow leaves about 60 ticks of margin so one missed pass is invisible, while a dead
-	// producer still expires inside the bound.
+// phase3LeaseTTL equals the producer's plan validity (acctd's planValidity), so the kernel stops forwarding
+// when netd starts reporting the plan ACTIVE_STALE. A session loses access within this bound unless renewed.
+// phase3LeaseRenewBelow leaves about 60 ticks of margin so one missed pass is invisible, while a dead
+// producer still expires inside the bound. Variables only so the real-kernel continuity test can run in seconds;
+// nothing else assigns them.
+var (
+	phase3LeaseTTL        = 90 * time.Second
 	phase3LeaseRenewBelow = 60 * time.Second
+)
+
+const (
 
 	// phase3ProvisionalLease is the short lease held while durable ACTIVE state is not yet proven, so an
 	// unconfirmed activation cannot become lasting access.

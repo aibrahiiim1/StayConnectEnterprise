@@ -221,6 +221,7 @@ func (a *acctd) runLoops(ctx context.Context, c cfg, clock *cutoffClock, netd pl
 		go listenPending(ctx, c.DBURL, sub.kick)
 	}
 	go clock.watch(ctx, a.db, cutoffRefreshEvery)
+	go p3.watchContinuity(ctx, a.db, contSettingRefresh)
 	go sub.loop(ctx, func() time.Duration { return submitPeriod(clock.period()) })
 
 	// Expiry: independent of how long accounting takes.

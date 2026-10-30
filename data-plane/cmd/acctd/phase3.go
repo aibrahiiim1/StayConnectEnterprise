@@ -58,6 +58,16 @@ type phase3 struct {
 	// lastIngested holds, per live session, the observation the database last accepted, so an unchanged counter is not sent again
 	// (accountingPass; touched only by the accounting ticker).
 	lastIngested map[string]ingestMark
+
+	// contWindow is the outage-continuity window in seconds (enforcement_policy.outage_continuity_minutes * 60). Zero is strict:
+	// no continuity block is sent and netd behaves as before. Held here by watchContinuity, so an unreadable setting keeps the
+	// value in force; before the first successful read it is zero.
+	contWindow atomic.Int64
+	// contKnown: the setting has been read at least once, so a window of 0 is the operator's word and not "not read yet".
+	contKnown atomic.Bool
+	// contBlock/contAt cache the last block for contRefresh, so the budget query runs twice a minute, not on every submission.
+	contBlock *shapeplan.Continuity
+	contAt    time.Time
 }
 
 // newPhase3 returns nil while the enforcement plane is off. It must not be gated on Checkout Grace: the shaping
@@ -268,6 +278,9 @@ func (p *phase3) reconcileShaping(ctx context.Context, netd planSubmitter, fallb
 		return
 	}
 	env, err := p.buildEnvelope(plan, p.managedBridges(ctx), fallbackBridge, time.Now())
+	if err == nil {
+		env.Continuity = p.continuityFor(ctx, plan, time.Now())
+	}
 	if err != nil {
 		// Audit P6 M2: never submit a generation that is not durably saved; report it on health instead.
 		p.setDegraded("shaping plan not submitted: " + err.Error())

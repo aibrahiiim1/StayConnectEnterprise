@@ -10,7 +10,7 @@ import { canWrite } from "@/lib/roles";
 import { formatDate } from "@/lib/utils";
 import {
   EnforcementChange, EnforcementDoc, EnforcementSetting, FIELD_LABEL, TURN_OFF_PHRASE,
-  allowListProblem, sameList, splitCidrs, valueWords,
+  allowListProblem, continuityProblem, continuityWords, sameList, splitCidrs, valueWords,
 } from "@/lib/enforcement-policy";
 import { REASON_HINT, REASON_MAX_CHARS, reasonOk } from "@/lib/reason";
 import { PageShell, PageHeader } from "@/components/ui/page";
@@ -55,13 +55,14 @@ function defaultWords(s: EnforcementSetting): string {
   return `${d}${s.unit ? ` ${s.unit}` : ""}`;
 }
 
-type Draft = { deny: boolean; upstream: boolean; mac: boolean; cutoff: string; cidrs: string };
+type Draft = { deny: boolean; upstream: boolean; mac: boolean; cutoff: string; cidrs: string; continuity: string };
 
 function draftOf(doc: EnforcementDoc): Draft {
   const p = doc.policy;
   return {
     deny: p.private_deny_enabled, upstream: p.allow_upstream_infrastructure, mac: p.mac_binding_enabled,
     cutoff: String(p.cutoff_seconds), cidrs: p.private_allow_cidrs.join("\n"),
+    continuity: p.outage_continuity_minutes === undefined ? "" : String(p.outage_continuity_minutes),
   };
 }
 
@@ -110,12 +111,18 @@ export default function EnforcementPolicyPage() {
       ? `Enter a whole number of seconds between ${lim.cutoff_min} and ${lim.cutoff_max}.`
       : null;
 
+  // Older appliances do not serve the continuity setting; the row is then not shown and nothing about it is sent.
+  const hasContinuity = cur.outage_continuity_minutes !== undefined;
+  const contN = Number(draft.continuity);
+  const contProblem = hasContinuity ? continuityProblem(draft.continuity, lim.continuity_min ?? 0, lim.continuity_max ?? 120) : null;
+  const contDirty = hasContinuity && contProblem === null && contN !== cur.outage_continuity_minutes;
+
   const dirty =
-    draft.deny !== cur.private_deny_enabled || draft.upstream !== cur.allow_upstream_infrastructure ||
+    contDirty || draft.deny !== cur.private_deny_enabled || draft.upstream !== cur.allow_upstream_infrastructure ||
     draft.mac !== cur.mac_binding_enabled || cutoffN !== cur.cutoff_seconds || !sameList(entries, cur.private_allow_cidrs);
   const turningDenialOff = cur.private_deny_enabled && !draft.deny;
   const reasonProblem = dirty && !reasonOk(reason) ? "A reason is required: " + REASON_HINT : null;
-  const blocked = !dirty || !!listProblem || !!cutoffProblem || !!reasonProblem || password === "" || saving;
+  const blocked = !dirty || !!listProblem || !!cutoffProblem || !!contProblem || !!reasonProblem || password === "" || saving;
 
   async function save() {
     if (!draft) return;
@@ -130,6 +137,7 @@ export default function EnforcementPolicyPage() {
       if (draft.mac !== cur.mac_binding_enabled) body.mac_binding_enabled = draft.mac;
       if (cutoffN !== cur.cutoff_seconds) body.cutoff_seconds = cutoffN;
       if (!sameList(entries, cur.private_allow_cidrs)) body.private_allow_cidrs = entries;
+      if (contDirty) body.outage_continuity_minutes = contN;
       const next = await api.patch<EnforcementDoc>("/network/enforcement-policy", body);
       setDoc(next);
       setDraft(draftOf(next));
@@ -236,6 +244,27 @@ export default function EnforcementPolicyPage() {
               </Field>
             </div>
           </div>
+
+          {hasContinuity && (
+            <div className={row}>
+              <div className="min-w-0 flex-1">
+                <label htmlFor="enf-continuity" className="text-label">{setting(doc, "outage_continuity_minutes").label}</label>
+                {desc("outage_continuity_minutes")}
+                <p className="mt-2 max-w-prose text-caption" data-testid="continuity-effect">
+                  {contProblem ? "" : continuityWords(contN)}
+                </p>
+              </div>
+              <div className="w-full sm:w-80">
+                <Field hint={`Allowed ${lim.continuity_min ?? 0} to ${lim.continuity_max ?? 120} minutes. 0 turns it off.`} error={writable ? contProblem : null}>
+                  <div className="flex items-center gap-2">
+                    <Input id="enf-continuity" inputMode="numeric" className="w-24" value={draft.continuity} readOnly={ro} disabled={ro}
+                      onChange={(ev) => setDraft({ ...draft, continuity: ev.target.value })} />
+                    <span className="text-sm text-muted-foreground">minutes</span>
+                  </div>
+                </Field>
+              </div>
+            </div>
+          )}
         </div>
 
         {writable && (
