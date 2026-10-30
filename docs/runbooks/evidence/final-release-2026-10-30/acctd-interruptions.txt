@@ -1,0 +1,86 @@
+# acctd interruptions with the 1,700 long sessions live (raw timings; epoch seconds, +N = seconds after the event)
+
+## stop
+1793346491.535484528 baseline authset=1756 acctd_pid=554408
+1793346491.543498423 EVENT kill -STOP 554408
+1793346516.950559543 RESTARTED new_pid=0 (old pid 554408 replaced)
+1793346519.950254681 authset back to 1758
+1793346550.130671449 final authset=1758 acctd=active
+1793346514.687344 appl systemd[1]: stayconnect-acctd.service: Watchdog timeout (limit 30s)!
+1793346514.687427 appl systemd[1]: stayconnect-acctd.service: Killing process 554408 (acctd) with signal SIGABRT.
+1793346514.708709 appl systemd[1]: stayconnect-acctd.service: Main process exited, code=exited, status=2/INVALIDARGUMENT
+1793346514.708831 appl systemd[1]: stayconnect-acctd.service: Failed with result 'watchdog'.
+1793346516.749640 appl systemd[1]: Stopped StayConnect Accounting Daemon (acctd).
+1793346516.944932 appl systemd[1]: Started StayConnect Accounting Daemon (acctd).
+
+## kill9
+1793346654.968298043 baseline authset=1758 acctd_pid=838405
+1793346654.974042869 EVENT kill -9 838405
+1793346657.444412772 RESTARTED new_pid=849933
+1793346657.540798372 authset back to 1758
+1793346687.625876409 final authset=1755 acctd=active
+1793346514.687344 appl systemd[1]: stayconnect-acctd.service: Watchdog timeout (limit 30s)!
+1793346514.687427 appl systemd[1]: stayconnect-acctd.service: Killing process 554408 (acctd) with signal SIGABRT.
+1793346514.708709 appl systemd[1]: stayconnect-acctd.service: Main process exited, code=exited, status=2/INVALIDARGUMENT
+1793346514.708831 appl systemd[1]: stayconnect-acctd.service: Failed with result 'watchdog'.
+1793346516.749640 appl systemd[1]: Stopped StayConnect Accounting Daemon (acctd).
+1793346516.944932 appl systemd[1]: Started StayConnect Accounting Daemon (acctd).
+
+## down
+1793346792.459555335 baseline authset=1758 acctd_pid=849933
+1793346792.467601157 EVENT systemctl stop stayconnect-acctd (held down 240 s)
+1793346792.522978390 stopped; waiting
+1793347032.525593892 EVENT systemctl start stayconnect-acctd
+1793347039.958505638 authset back to 1758
+1793347070.102335528 final authset=1758 acctd=active
+1793346792.489448 appl systemd[1]: Stopping StayConnect Accounting Daemon (acctd)...
+1793346792.508777 appl systemd[1]: Stopped StayConnect Accounting Daemon (acctd).
+1793347032.678454 appl systemd[1]: Started StayConnect Accounting Daemon (acctd).
+
+## authset trajectory (samples whose set size changed by more than 40, +s:size) and minimum after the event
+stop  :
+
+min after event 1731 at +27s
+kill9 :
+
+min after event 1755 at +4s
+down  :
++89s:842 +90s:0 +241s:768 +242s:1700
+min after event 0 at +90s
+
+## revocation evidence while acctd runs
+### admin disconnect
+1793347163.505155186 baseline authset=1758, session 4cc5a0a2-8b37-407c-8d40-5f7dec36da46 ip 10.60.0.108 in set: 1; acctd=active
+1793347163.519916322 EVENT admin disconnect
+disconnect -> 200
+1793347166.094160985 ip 10.60.0.108 left the set 0.1 s after t0 (quota: since monitoring began)
+1793347166.116531140 all gone; watching 100 s for renewal
+1793347266.661429795 final authset=1756 (baseline 1758); acctd=active; gone=1 of 1
+4cc5a0a2-8b37-407c-8d40-5f7dec36da46|ended|ADMIN|1793347164.273979
+504a2ee0-c061-4854-b03f-13b4a1653ada|ended|ADMIN|1793341088.239292
+### quota exhaustion
+1793347375.743861480 quota sessions live: 10; authset=1766; acctd=active
+1793347415.927855666 ip 10.61.5.136 left the set 40.2 s after t0 (quota: since monitoring began)
+1793347415.954915508 ip 10.61.5.134 left the set 40.2 s after t0 (quota: since monitoring began)
+1793347415.985862773 ip 10.61.5.137 left the set 40.2 s after t0 (quota: since monitoring began)
+1793347416.020871475 ip 10.61.5.133 left the set 40.3 s after t0 (quota: since monitoring began)
+1793347416.053115887 ip 10.61.5.139 left the set 40.3 s after t0 (quota: since monitoring began)
+1793347416.079814729 ip 10.61.5.135 left the set 40.3 s after t0 (quota: since monitoring began)
+1793347416.105347834 ip 10.61.5.138 left the set 40.4 s after t0 (quota: since monitoring began)
+1793347416.130897097 ip 10.61.5.130 left the set 40.4 s after t0 (quota: since monitoring began)
+1793347416.162336713 ip 10.61.5.131 left the set 40.4 s after t0 (quota: since monitoring began)
+1793347416.186481130 ip 10.61.5.132 left the set 40.4 s after t0 (quota: since monitoring began)
+1793347416.202791976 all gone; watching 100 s for renewal
+1793347517.010940245 final authset=1757 (baseline 1766); acctd=active; gone=10 of 10
+59f38780-01a1-4fe6-a37b-7ebb72b9164d|ended|ENTITLEMENT_ENDED|1793347407.038915
+c95087b6-688b-401c-8c53-7dc75302e1c6|ended|ENTITLEMENT_ENDED|1793347407.038915
+7e632206-7b65-42d8-b485-9a6513a5f93b|ended|ENTITLEMENT_ENDED|1793347407.038915
+e0876f78-f4c3-4382-897c-ec79a645dcba|ended|ENTITLEMENT_ENDED|1793347407.038915
+06639612-2a02-40ff-97aa-784d6d433ae7|ended|ENTITLEMENT_ENDED|1793347407.038915
+e98581cf-1ea4-4350-9248-a1d16167b00d|ended|ENTITLEMENT_ENDED|1793347407.038915
+075cc9c6-90a8-4895-83c3-07d857cda22a|ended|ENTITLEMENT_ENDED|1793347407.038915
+fc9e0c8c-d848-4edf-b627-4ea1eb4b3005|ended|ENTITLEMENT_ENDED|1793347407.038915
+98d9aecb-2087-4e74-96eb-0498d46b0b28|ended|ENTITLEMENT_ENDED|1793347407.038915
+cc5e346d-03dc-4d05-b568-fd7b5b5677e8|ended|ENTITLEMENT_ENDED|1793347407.038915
+8b0860c4-4f20-4c99-ba91-c411dd69551f|ended|ENTITLEMENT_ENDED|1793346322.283230
+4e77a401-2835-4c90-81db-a40a181dc82b|ended|ADMIN|1793346174.135755

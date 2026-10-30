@@ -1,0 +1,177 @@
+-- 0190 -- THE POST-STAY SIGN-IN THROTTLE IS SETTINGS, NOT CONSTANTS (AD-36 closure).
+--
+-- internal/poststay charged its brute-force limits from code constants (10 a minute per device, 20 per address, 5 wrong
+-- answers per stay and device, a 15-minute lockout, 200 a minute for the appliance). Operational values a hotel
+-- administrator may need to change are persisted, bounded, audited settings (docs/OPERATIONAL_SETTINGS_POLICY.md); this
+-- adds them to the site's sign-in limits next to post_stay_signin_days (0179), with the same read function, the same
+-- audited set function (append-only change log, mandatory reason, operator label) and the same grants.
+--
+--   post_stay_device_attempts_per_minute          10   3..60     attempts one device may make a minute (any answer)
+--   post_stay_ip_attempts_per_minute              20   5..200    attempts one network address may make a minute
+--   post_stay_wrong_answers_before_lockout         5   3..20     answers per stay and device (a device with no stay: per
+--                                                               device) a minute before that device is locked out
+--   post_stay_lockout_minutes                     15   1..240    how long a lockout lasts; never longer than four hours,
+--                                                               so no lockout is permanent and none needs an operator
+--   post_stay_new_device_room_attempts_per_minute 10   3..60     attempts from devices with no stay of their own that name
+--                                                               one room, and (separately) one reservation number, a
+--                                                               minute -- so rotating the device identity (MAC) does not
+--                                                               multiply the guesses; known devices are not counted
+--   post_stay_appliance_attempts_per_minute      200   20..5000  attempts the whole appliance accepts a minute (refused
+--                                                               clients do not use it up)
+--
+-- Additive and idempotent. The two functions change their column list, so they are dropped and created again; their owner
+-- and grants are restored below (and by the Gate-P reconcile, deploy/gatep/svc-signin-capacity-grants.sql). Touches
+-- iam_v2 only, so it is not a platform migration.
+
+BEGIN;
+
+ALTER TABLE iam_v2.site_signin_capacity_settings
+  ADD COLUMN IF NOT EXISTS post_stay_device_attempts_per_minute integer NOT NULL DEFAULT 10;
+ALTER TABLE iam_v2.site_signin_capacity_settings
+  ADD COLUMN IF NOT EXISTS post_stay_ip_attempts_per_minute integer NOT NULL DEFAULT 20;
+ALTER TABLE iam_v2.site_signin_capacity_settings
+  ADD COLUMN IF NOT EXISTS post_stay_wrong_answers_before_lockout integer NOT NULL DEFAULT 5;
+ALTER TABLE iam_v2.site_signin_capacity_settings
+  ADD COLUMN IF NOT EXISTS post_stay_lockout_minutes integer NOT NULL DEFAULT 15;
+ALTER TABLE iam_v2.site_signin_capacity_settings
+  ADD COLUMN IF NOT EXISTS post_stay_new_device_room_attempts_per_minute integer NOT NULL DEFAULT 10;
+ALTER TABLE iam_v2.site_signin_capacity_settings
+  ADD COLUMN IF NOT EXISTS post_stay_appliance_attempts_per_minute integer NOT NULL DEFAULT 200;
+DO $c$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ssc_ps_device_attempts_per_minute'
+                   AND conrelid = 'iam_v2.site_signin_capacity_settings'::regclass) THEN
+    ALTER TABLE iam_v2.site_signin_capacity_settings
+      ADD CONSTRAINT ssc_ps_device_attempts_per_minute CHECK (post_stay_device_attempts_per_minute BETWEEN 3 AND 60);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ssc_ps_ip_attempts_per_minute'
+                   AND conrelid = 'iam_v2.site_signin_capacity_settings'::regclass) THEN
+    ALTER TABLE iam_v2.site_signin_capacity_settings
+      ADD CONSTRAINT ssc_ps_ip_attempts_per_minute CHECK (post_stay_ip_attempts_per_minute BETWEEN 5 AND 200);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ssc_ps_wrong_answers_before_lockout'
+                   AND conrelid = 'iam_v2.site_signin_capacity_settings'::regclass) THEN
+    ALTER TABLE iam_v2.site_signin_capacity_settings
+      ADD CONSTRAINT ssc_ps_wrong_answers_before_lockout CHECK (post_stay_wrong_answers_before_lockout BETWEEN 3 AND 20);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ssc_ps_lockout_minutes'
+                   AND conrelid = 'iam_v2.site_signin_capacity_settings'::regclass) THEN
+    ALTER TABLE iam_v2.site_signin_capacity_settings
+      ADD CONSTRAINT ssc_ps_lockout_minutes CHECK (post_stay_lockout_minutes BETWEEN 1 AND 240);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ssc_ps_new_device_room_attempts_per_minute'
+                   AND conrelid = 'iam_v2.site_signin_capacity_settings'::regclass) THEN
+    ALTER TABLE iam_v2.site_signin_capacity_settings
+      ADD CONSTRAINT ssc_ps_new_device_room_attempts_per_minute CHECK (post_stay_new_device_room_attempts_per_minute BETWEEN 3 AND 60);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ssc_ps_appliance_attempts_per_minute'
+                   AND conrelid = 'iam_v2.site_signin_capacity_settings'::regclass) THEN
+    ALTER TABLE iam_v2.site_signin_capacity_settings
+      ADD CONSTRAINT ssc_ps_appliance_attempts_per_minute CHECK (post_stay_appliance_attempts_per_minute BETWEEN 20 AND 5000);
+  END IF;
+END $c$;
+
+DROP FUNCTION IF EXISTS iam_v2.signin_capacity_settings_set(uuid,uuid,jsonb,text,text);
+DROP FUNCTION IF EXISTS iam_v2.signin_capacity_settings_get(uuid,uuid);
+
+CREATE OR REPLACE FUNCTION iam_v2.signin_capacity_settings_get(p_tenant uuid, p_site uuid)
+  RETURNS TABLE (otp_code_lifetime_minutes integer, otp_max_attempts integer, otp_device_hourly_cap integer,
+                 otp_destination_hourly_cap integer, otp_source_hourly_cap integer,
+                 signin_ceiling_per_minute integer, network_pause_exempt_hours integer,
+                 device_retention_days integer, portal_image_max_edge_px integer, portal_image_quality integer,
+                 post_stay_signin_days integer,
+                 post_stay_device_attempts_per_minute integer, post_stay_ip_attempts_per_minute integer, post_stay_wrong_answers_before_lockout integer, post_stay_lockout_minutes integer, post_stay_new_device_room_attempts_per_minute integer, post_stay_appliance_attempts_per_minute integer,
+                 config_version bigint, updated_at timestamptz, updated_by text)
+  LANGUAGE sql STABLE SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
+  SELECT COALESCE(s.otp_code_lifetime_minutes, 10), COALESCE(s.otp_max_attempts, 5),
+         COALESCE(s.otp_device_hourly_cap, 5), COALESCE(s.otp_destination_hourly_cap, 15),
+         COALESCE(s.otp_source_hourly_cap, 20), s.signin_ceiling_per_minute,
+         COALESCE(s.network_pause_exempt_hours, 24), COALESCE(s.device_retention_days, 90),
+         COALESCE(s.portal_image_max_edge_px, 2560), COALESCE(s.portal_image_quality, 82), COALESCE(s.post_stay_signin_days, 7),
+         COALESCE(s.post_stay_device_attempts_per_minute, 10), COALESCE(s.post_stay_ip_attempts_per_minute, 20), COALESCE(s.post_stay_wrong_answers_before_lockout, 5), COALESCE(s.post_stay_lockout_minutes, 15), COALESCE(s.post_stay_new_device_room_attempts_per_minute, 10), COALESCE(s.post_stay_appliance_attempts_per_minute, 200),
+         COALESCE(s.config_version, 0), s.updated_at, s.updated_by
+    FROM (SELECT 1) one
+    LEFT JOIN iam_v2.site_signin_capacity_settings s ON s.tenant_id = p_tenant AND s.site_id = p_site;
+$fn$;
+REVOKE EXECUTE ON FUNCTION iam_v2.signin_capacity_settings_get(uuid,uuid) FROM PUBLIC;
+
+CREATE OR REPLACE FUNCTION iam_v2.signin_capacity_settings_set(
+    p_tenant uuid, p_site uuid, p_values jsonb, p_operator text, p_reason text)
+  RETURNS bigint
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
+DECLARE v_version bigint; v_old jsonb; v_new jsonb; k text;
+BEGIN
+  IF p_operator IS NULL OR btrim(p_operator) = '' THEN
+    RAISE EXCEPTION 'an operator label is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_reason IS NULL OR length(btrim(p_reason)) < 4 OR length(btrim(p_reason)) > 500 THEN
+    RAISE EXCEPTION 'a reason of 4-500 characters is required to change the sign-in limits'
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_values IS NULL OR jsonb_typeof(p_values) <> 'object' OR p_values = '{}'::jsonb THEN
+    RAISE EXCEPTION 'no setting named' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  FOR k IN SELECT jsonb_object_keys(p_values) LOOP
+    IF k NOT IN ('otp_code_lifetime_minutes','otp_max_attempts','otp_device_hourly_cap','otp_destination_hourly_cap',
+                 'otp_source_hourly_cap','signin_ceiling_per_minute','network_pause_exempt_hours',
+                 'device_retention_days','portal_image_max_edge_px','portal_image_quality','post_stay_signin_days',
+                 'post_stay_device_attempts_per_minute','post_stay_ip_attempts_per_minute','post_stay_wrong_answers_before_lockout','post_stay_lockout_minutes','post_stay_new_device_room_attempts_per_minute','post_stay_appliance_attempts_per_minute') THEN
+      RAISE EXCEPTION 'unknown setting %', k USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+  END LOOP;
+  PERFORM pg_advisory_xact_lock(hashtext('signin_capacity_settings'), hashtext(p_site::text));
+  INSERT INTO iam_v2.site_signin_capacity_settings (tenant_id, site_id, updated_by, config_version)
+  VALUES (p_tenant, p_site, btrim(p_operator), 0) ON CONFLICT (tenant_id, site_id) DO NOTHING;
+  SELECT to_jsonb(g) - 'config_version' - 'updated_at' - 'updated_by' INTO v_old
+    FROM iam_v2.signin_capacity_settings_get(p_tenant, p_site) g;
+  UPDATE iam_v2.site_signin_capacity_settings s SET
+      otp_code_lifetime_minutes  = COALESCE((p_values->>'otp_code_lifetime_minutes')::int, s.otp_code_lifetime_minutes),
+      otp_max_attempts           = COALESCE((p_values->>'otp_max_attempts')::int, s.otp_max_attempts),
+      otp_device_hourly_cap      = COALESCE((p_values->>'otp_device_hourly_cap')::int, s.otp_device_hourly_cap),
+      otp_destination_hourly_cap = COALESCE((p_values->>'otp_destination_hourly_cap')::int, s.otp_destination_hourly_cap),
+      otp_source_hourly_cap      = COALESCE((p_values->>'otp_source_hourly_cap')::int, s.otp_source_hourly_cap),
+      signin_ceiling_per_minute  = CASE WHEN p_values ? 'signin_ceiling_per_minute'
+                                        THEN (p_values->>'signin_ceiling_per_minute')::int
+                                        ELSE s.signin_ceiling_per_minute END,
+      network_pause_exempt_hours = COALESCE((p_values->>'network_pause_exempt_hours')::int, s.network_pause_exempt_hours),
+      device_retention_days      = COALESCE((p_values->>'device_retention_days')::int, s.device_retention_days),
+      portal_image_max_edge_px   = COALESCE((p_values->>'portal_image_max_edge_px')::int, s.portal_image_max_edge_px),
+      portal_image_quality       = COALESCE((p_values->>'portal_image_quality')::int, s.portal_image_quality),
+      post_stay_signin_days      = COALESCE((p_values->>'post_stay_signin_days')::int, s.post_stay_signin_days),
+      post_stay_device_attempts_per_minute = COALESCE((p_values->>'post_stay_device_attempts_per_minute')::int, s.post_stay_device_attempts_per_minute),
+      post_stay_ip_attempts_per_minute = COALESCE((p_values->>'post_stay_ip_attempts_per_minute')::int, s.post_stay_ip_attempts_per_minute),
+      post_stay_wrong_answers_before_lockout = COALESCE((p_values->>'post_stay_wrong_answers_before_lockout')::int, s.post_stay_wrong_answers_before_lockout),
+      post_stay_lockout_minutes = COALESCE((p_values->>'post_stay_lockout_minutes')::int, s.post_stay_lockout_minutes),
+      post_stay_new_device_room_attempts_per_minute = COALESCE((p_values->>'post_stay_new_device_room_attempts_per_minute')::int, s.post_stay_new_device_room_attempts_per_minute),
+      post_stay_appliance_attempts_per_minute = COALESCE((p_values->>'post_stay_appliance_attempts_per_minute')::int, s.post_stay_appliance_attempts_per_minute),
+      updated_by = btrim(p_operator), updated_at = now(), config_version = s.config_version + 1
+    WHERE s.tenant_id = p_tenant AND s.site_id = p_site
+    RETURNING s.config_version INTO v_version;
+  SELECT to_jsonb(g) - 'config_version' - 'updated_at' - 'updated_by' INTO v_new
+    FROM iam_v2.signin_capacity_settings_get(p_tenant, p_site) g;
+  INSERT INTO iam_v2.signin_capacity_settings_changes
+    (tenant_id, site_id, changed_by, change_reason, old_values, new_values, new_config_version)
+  VALUES (p_tenant, p_site, btrim(p_operator), btrim(p_reason), v_old, v_new, v_version);
+  RETURN v_version;
+END $fn$;
+REVOKE EXECUTE ON FUNCTION iam_v2.signin_capacity_settings_set(uuid,uuid,jsonb,text,text) FROM PUBLIC;
+
+DO $own$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'iam_v2_owner') THEN
+    EXECUTE 'ALTER FUNCTION iam_v2.signin_capacity_settings_get(uuid,uuid) OWNER TO iam_v2_owner';
+    EXECUTE 'ALTER FUNCTION iam_v2.signin_capacity_settings_set(uuid,uuid,jsonb,text,text) OWNER TO iam_v2_owner';
+  END IF;
+END $own$;
+
+DO $g$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_scd') THEN
+    GRANT EXECUTE ON FUNCTION iam_v2.signin_capacity_settings_get(uuid,uuid) TO svc_scd;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_edged') THEN
+    GRANT EXECUTE ON FUNCTION iam_v2.signin_capacity_settings_get(uuid,uuid) TO svc_edged;
+    GRANT EXECUTE ON FUNCTION iam_v2.signin_capacity_settings_set(uuid,uuid,jsonb,text,text) TO svc_edged;
+  END IF;
+END $g$;
+
+COMMIT;

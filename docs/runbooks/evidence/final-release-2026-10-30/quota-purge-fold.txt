@@ -1,0 +1,67 @@
+# Raw-retention purge fold on a live quota entitlement (lab)
+
+## 1. before
+session 8b0860c4-4f20-4c99-ba91-c411dd69551f entitlement 6a9153ab-57c8-484e-b90d-deb364902102 at 07:44:54
+consumed_data_bytes | 3310050
+p3_entitlement_data_usage | 3310050
+session bytes | 3310050
+raw rows | 4
+raw bytes | 3310050
+accumulator bytes (folded) | 0
+minute tier bytes | 3310050
+hour tier bytes | 3310050
+entitlement_usage_bytes(now)|{"bytes_up":18236,"bytes_down":3291814,"records":4,"latest_sampled_at":"2026-10-30T07:43:12.920242+00:00"}
+oldest raw sample|2026-10-30 07:42:57.41309+00
+data_crossing_progress|{"binding_id":"110a2049-91ef-4a74-aa90-331a35a5363a","tenant_id":"772ee4e9-0f3e-4b7d-a87d-df338b0f0fd7","site_id":"5774e032-22df-4415-bcd9-87aea0c5c8d5","entitlement_id":"6a9153ab-57c8-484e-b90d-deb364902102
+
+## 2. backdate by 3 days + purge (iam_v2.purge_accounting_detail)
+session 8b0860c4-4f20-4c99-ba91-c411dd69551f entitlement 6a9153ab-57c8-484e-b90d-deb364902102 at 07:44:55
+-- backdating this one session's samples and tier rows by 3 days (lab data, to make them older than the 2-day raw retention); then roll-up + purge
+UPDATE 1
+ALTER TABLE
+UPDATE 2
+UPDATE 1
+COMMIT
+-- purge (iam_v2.purge_accounting_detail), repeated until nothing more goes
+purge round 1 -> 4
+purge round 2 -> 0
+consumed_data_bytes | 3310050
+p3_entitlement_data_usage | 3310050
+session bytes | 3310050
+raw rows | 0
+raw bytes | 0
+accumulator bytes (folded) | 3310050
+minute tier bytes | 3310050
+hour tier bytes | 3310050
+entitlement_usage_bytes(now)|{"bytes_up":18236,"bytes_down":3291814,"records":4,"latest_sampled_at":"2026-10-27T07:43:12.920242+00:00"}
+oldest raw sample|none
+data_crossing_progress|{"binding_id":"110a2049-91ef-4a74-aa90-331a35a5363a","tenant_id":"772ee4e9-0f3e-4b7d-a87d-df338b0f0fd7","site_id":"5774e032-22df-4415-bcd9-87aea0c5c8d5","entitlement_id":"6a9153ab-57c8-484e-b90d-deb364902102
+
+## 3. session driven on to the quota
+07:42:56 | TERMINATED | DATA | 9927364 | 1538756 | ended | ENTITLEMENT_ENDED | 9927364 | t | 146
+07:40:31 | ACTIVE |  | 3310116 | -5078492 | ended | ADMIN | 3310116 | t | 
+
+## 4. integrity summary and final state
+== accounting_integrity_summary(tenant, site)
+ kind | events | entitlements | bytes | last_at 
+------+--------+--------------+-------+---------
+(0 rows)
+
+== events by kind
+ kind | count | sum 
+------+-------+-----
+(0 rows)
+
+== inexact accumulator rows
+0
+== final entitlement state of the fold session
+   status   | terminal_reason | consumed_data_bytes | session_bytes |    end_reason     | folded_bytes 
+------------+-----------------+---------------------+---------------+-------------------+--------------
+ TERMINATED | DATA            |             9927364 |       9927364 | ENTITLEMENT_ENDED |      3310050
+(1 row)
+
+== reconcile (the backdated session is in all tiers consistently)
+  raw_bytes   | minute_bytes |  hour_bytes  | session_bytes | entitlement_bytes | raw_rows | minute_samples | hour_samples 
+--------------+--------------+--------------+---------------+-------------------+----------+----------------+--------------
+ 112404589887 | 112404592739 | 112404592739 |  112411210053 |      112411210053 |  1046080 |        1046083 |      1046083
+(1 row)

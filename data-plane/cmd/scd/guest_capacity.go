@@ -1,10 +1,31 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 )
+
+// slotKey carries the request's capacity slot, so a handler that is only WAITING (for enforcement to be confirmed) can hand it back.
+type slotKey struct{}
+
+type guestSlot struct {
+	once    sync.Once
+	release func()
+}
+
+func (g *guestSlot) free() { g.once.Do(g.release) }
+
+// releaseGuestSlot gives the in-flight slot of the request in ctx back before a long wait that holds no database connection and does no
+// work. The sign-in waits up to eight seconds for the kernel to confirm the guest; counted against the 64 slots that wait starved every other
+// guest request at 5 sign-ins a second (capacity acceptance, 2026-10-30). A no-op outside a guest request or when already released.
+func releaseGuestSlot(ctx context.Context) {
+	if g, ok := ctx.Value(slotKey{}).(*guestSlot); ok && g != nil {
+		g.free()
+	}
+}
 
 // maxGuestInFlight bounds guest requests scd works on at once. scd has a small database pool and two CPUs; beyond this,
 // requests would only queue inside scd until the 10 s handler timeout. A protective internal limit, not a hotel setting.
@@ -46,8 +67,9 @@ func guestCapacity(limit int) func(http.Handler) http.Handler {
 					return
 				}
 			}
-			defer func() { <-slots }()
-			next.ServeHTTP(w, r)
+			g := &guestSlot{release: func() { <-slots }}
+			defer g.free()
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), slotKey{}, g)))
 		})
 	}
 }

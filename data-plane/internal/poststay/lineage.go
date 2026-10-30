@@ -12,7 +12,6 @@ import (
 	"errors"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/namenorm"
 	"github.com/stayconnect/enterprise/data-plane/internal/throttle"
@@ -34,6 +33,8 @@ type VerifyRequest struct {
 	// WindowDays is how long after check-out a stay can still be signed in to (the site's post_stay_signin_days setting,
 	// migration 0179). Zero or less means DefaultWindowDays: an unset window never means "for ever".
 	WindowDays int
+	// Limits are the site's brute-force settings (migration 0190); the zero value means the defaults.
+	Limits Limits
 }
 
 type candidate struct {
@@ -89,51 +90,113 @@ func sameText(stored, typed string) bool {
 // learns nothing and a refusal costs the same as a wrong answer. An unreachable store denies the attempt. The identity
 // rule is keyed by the stay identity (episode) AND the device; with no candidate it is keyed by the device alone, so a
 // device with no stay is limited as tightly as one with several.
-func (s *Store) chargeThrottle(ctx context.Context, req VerifyRequest, cands []candidate) error {
+//
+// A device identity (the MAC the kernel reports) costs nothing to change, so the limits keyed by it only bound an honest
+// guest's mistakes. What bounds a guesser who rotates it is what they must guess: devices with no stay of their own are
+// also charged against the room and against the reservation number they typed, shared by every identity. Devices that
+// have a stay are not charged there -- they are compared with their own stays only and cannot enumerate anything -- so
+// someone hammering a room number cannot lock out the guests who already have a device on that stay. The most a
+// flood can do is hold NEW devices of that room out for the lockout (at most four hours, a setting), and only while it
+// keeps sending; nothing is permanent and nothing needs an operator.
+//
+// The appliance-wide rule is Global: it is charged only for attempts every other rule allowed, so a client that is
+// already refused cannot exhaust it for everybody.
+func (s *Store) chargeThrottle(ctx context.Context, req VerifyRequest, cands []candidate, room, reservation string) (throttle.Decision, error) {
+	lim := req.Limits.Bounded()
+	block := lim.lockout()
 	rules := []throttle.Rule{
-		{Kind: throttle.ScopeDevice, Value: req.Device, Method: ThrottleMethod, Limit: 10, Block: 15 * time.Minute},
-		{Kind: throttle.ScopeEndpoint, Value: "post-stay-pin", Method: ThrottleMethod, Limit: 200},
+		{Kind: throttle.ScopeDevice, Value: req.Device, Method: ThrottleMethod, Limit: lim.DeviceAttemptsPerMinute, Block: block},
+		{Kind: throttle.ScopeEndpoint, Value: "post-stay-pin", Method: ThrottleMethod, Limit: lim.ApplianceAttemptsPerMinute, Global: true},
 	}
 	if strings.TrimSpace(req.IP) != "" {
-		rules = append(rules, throttle.Rule{Kind: throttle.ScopeIP, Value: req.IP, Method: ThrottleMethod, Limit: 20, Block: 15 * time.Minute})
+		rules = append(rules, throttle.Rule{Kind: throttle.ScopeIP, Value: req.IP, Method: ThrottleMethod, Limit: lim.IPAttemptsPerMinute, Block: block})
 	}
 	if len(cands) == 0 {
 		rules = append(rules, throttle.Rule{Kind: throttle.ScopeIdentity, Value: "new-device|" + req.Device,
-			Method: ThrottleMethod, Limit: 5, Block: 15 * time.Minute})
+			Method: ThrottleMethod, Limit: lim.WrongAnswersBeforeLockout, Block: block})
+		// An empty value is skipped by the store; an oversized one is refused as malformed below and is bounded by the
+		// rules above.
+		if room != "" && len(room) <= maxTypedLen {
+			rules = append(rules, throttle.Rule{Kind: throttle.ScopeIdentity, Value: "new-device-room|" + req.Tenant + "|" + req.Site + "|" + room,
+				Method: ThrottleMethod, Limit: lim.NewDeviceRoomAttemptsPerMinute, Block: block})
+		}
+		if reservation != "" && len(reservation) <= maxTypedLen {
+			rules = append(rules, throttle.Rule{Kind: throttle.ScopeIdentity, Value: "new-device-reservation|" + req.Tenant + "|" + req.Site + "|" + reservation,
+				Method: ThrottleMethod, Limit: lim.NewDeviceRoomAttemptsPerMinute, Block: block})
+		}
 	}
 	for _, c := range cands {
 		rules = append(rules, throttle.Rule{Kind: throttle.ScopeIdentity,
 			Value:  "stay:" + c.stay + ":" + strconv.Itoa(c.version) + "|device:" + req.Device,
-			Method: ThrottleMethod, Limit: 5, Block: 15 * time.Minute})
+			Method: ThrottleMethod, Limit: lim.WrongAnswersBeforeLockout, Block: block})
 	}
 	d, err := s.thr.Allow(ctx, rules...)
-	if err != nil || !d.Allowed {
-		return ErrThrottled
+	if err != nil {
+		return throttle.Decision{Reason: throttle.ScopeEndpoint}, ErrThrottled
 	}
-	return nil
+	if !d.Allowed {
+		return d, ErrThrottled
+	}
+	return d, nil
 }
+
+// Refusal is the error Verify returns for a refused attempt. It IS ErrNotAuthenticable or ErrThrottled to errors.Is and to
+// Error() -- a caller that distinguishes more than that has built an oracle -- and carries only the facts the audit row
+// records.
+type Refusal struct {
+	Err        error
+	Route      string
+	Candidates int
+	Scope      string
+}
+
+func (r *Refusal) Error() string { return r.Err.Error() }
+func (r *Refusal) Unwrap() error { return r.Err }
 
 // Verify checks the room and reservation (and, from a new device, the last name) against the original stay and returns
 // the profile id of that stay's episode. Every failure is ErrNotAuthenticable (or ErrThrottled) and the work done is the
 // same on every path: the candidates are always read, every candidate is always compared, and the new-device lookup runs
-// whenever there is no candidate.
+// whenever there is no candidate. Every refusal is also written to the audit log (audit.go).
 func (s *Store) Verify(ctx context.Context, req VerifyRequest) (string, error) {
+	profile, rf, err := s.verify(ctx, req)
+	if err != nil {
+		return "", err
+	}
+	if rf != nil {
+		code := RefusalNotAuthenticable
+		if errors.Is(rf.Err, ErrThrottled) {
+			code = RefusalThrottled
+		}
+		s.AuditRefusal(ctx, RefusalEvent{Tenant: req.Tenant, Code: code, Route: rf.Route, Candidates: rf.Candidates,
+			ThrottleScope: rf.Scope, Device: req.Device, IP: req.IP,
+			Room: namenorm.Room(req.Room), Reservation: namenorm.Reservation(req.Reservation)})
+		return "", rf
+	}
+	return profile, nil
+}
+
+// verify returns a profile, or a Refusal, or (for a fault of the appliance rather than an answer) an error.
+func (s *Store) verify(ctx context.Context, req VerifyRequest) (string, *Refusal, error) {
 	windowDays := req.WindowDays
 	if windowDays <= 0 {
 		windowDays = DefaultWindowDays
 	}
 	cands, err := s.candidateStays(ctx, req.Tenant, req.Site, req.Device, windowDays)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	if s.thr != nil {
-		if err := s.chargeThrottle(ctx, req, cands); err != nil {
-			return "", err
-		}
+	route := RouteKnownDevice
+	if len(cands) == 0 {
+		route = RouteNewDevice
 	}
 	room, reservation, last := namenorm.Room(req.Room), namenorm.Reservation(req.Reservation), namenorm.Name(req.LastName)
+	if s.thr != nil {
+		if d, err := s.chargeThrottle(ctx, req, cands, room, reservation); err != nil {
+			return "", &Refusal{Err: ErrThrottled, Route: route, Candidates: len(cands), Scope: string(d.Reason)}, nil
+		}
+	}
 	if len(room) > maxTypedLen || len(reservation) > maxTypedLen || len(last) > maxTypedLen {
-		return "", ErrNotAuthenticable
+		return "", &Refusal{Err: ErrNotAuthenticable, Route: route, Candidates: len(cands)}, nil
 	}
 
 	matchedStay := ""
@@ -160,19 +223,19 @@ func (s *Store) Verify(ctx context.Context, req VerifyRequest) (string, error) {
 				                  AND g.last_name_norm=$5)
 				 LIMIT 2`, req.Tenant, req.Site, room, reservation, last, windowDays)
 			if err != nil {
-				return "", err
+				return "", nil, err
 			}
 			for rows.Next() {
 				var id string
 				if err := rows.Scan(&id); err != nil {
 					rows.Close()
-					return "", err
+					return "", nil, err
 				}
 				ids = append(ids, id)
 			}
 			rows.Close()
 			if err := rows.Err(); err != nil {
-				return "", err
+				return "", nil, err
 			}
 		} else {
 			// The same query's cost, with a value that matches nothing.
@@ -187,7 +250,14 @@ func (s *Store) Verify(ctx context.Context, req VerifyRequest) (string, error) {
 		}
 	}
 	if matchedStay == "" {
-		return "", ErrNotAuthenticable
+		return "", &Refusal{Err: ErrNotAuthenticable, Route: route, Candidates: len(cands)}, nil
 	}
-	return s.ensureProfile(ctx, req.Tenant, req.Site, matchedStay, windowDays)
+	profile, err := s.ensureProfile(ctx, req.Tenant, req.Site, matchedStay, windowDays)
+	if err != nil {
+		if errors.Is(err, ErrNotAuthenticable) {
+			return "", &Refusal{Err: ErrNotAuthenticable, Route: route, Candidates: len(cands)}, nil
+		}
+		return "", nil, err
+	}
+	return profile, nil, nil
 }

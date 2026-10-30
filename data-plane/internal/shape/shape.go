@@ -2,8 +2,14 @@
 // Download is an HTB class + u32 dst-filter on B's egress root; upload is redirected from B's ingress to a
 // per-bridge IFB device (the WAN only sees the SNAT'd appliance IP) with a src-filter there.
 //
-// classid minor = 0x1000 + (((ip[2]&0x0f)<<8) | ip[3]) is unique within a guest subnet up to /20, and each
-// bridge/ifb serves one guest network, so (device, minor) is globally unique for acctd's attribution.
+// classid minor is derived from the address alone (minor.go): 0x1000 + the host index for the first 4096 hosts of a
+// subnet, 0x3000 + (index - 4096) beyond that, so it is unique within a guest subnet up to /17, and each bridge/ifb serves
+// one guest network, so (device, minor) is globally unique for acctd's attribution.
+//
+// Classification is ONE flower filter per direction per session, all at the same priority (FlowerPref) with the class
+// minor as the filter handle: the kernel hashes the (identical) match mask once, so a packet costs one hash lookup however
+// many sessions are shaped, and there is no per-filter table id to run out of (the 2,047 limit of one u32 filter per pref).
+// A kernel without cls_flower falls back to the original one-u32-filter-per-pref scheme (see classifier.go).
 package shape
 
 import (
@@ -18,6 +24,11 @@ import (
 	"strings"
 	"sync"
 )
+
+// LeafFlows is the flow-hash size of each session's fq_codel leaf. The kernel default (1024) costs about 71 KB of memory per
+// class and device, which is 1.1 GB for 8,000 sessions on a bridge and its IFB; 128 costs about 9 KB and still separates a
+// guest's concurrent flows.
+const LeafFlows = 128
 
 const (
 	RootMajor      = "1"
@@ -41,6 +52,7 @@ type Client struct {
 	mu         sync.Mutex
 	infraReady map[string]bool // bridge -> ingress/IFB redirect established this process
 	bridgeMu   map[string]*sync.Mutex
+	cls        classifierState
 }
 
 func realExec(ctx context.Context, name string, args ...string) ([]byte, error) {
@@ -187,7 +199,7 @@ func (c *Client) EnsureBridgeInfra(ctx context.Context, bridge string) error {
 
 // AddSession installs classes and filters in one call; downKbps/upKbps <= 0 mean "no cap".
 func (c *Client) AddSession(ctx context.Context, bridge string, ip net.IP, downKbps, upKbps int) error {
-	cid := ClassidForIP(ip)
+	cid := ClassidFor(bridge, ip)
 	if cid == "" {
 		return fmt.Errorf("ipv4 required, got %s", ip)
 	}
@@ -211,7 +223,7 @@ func (c *Client) AddSession(ctx context.Context, bridge string, ip net.IP, downK
 		return fmt.Errorf("download add on %s: %w", bridge, err)
 	}
 	if err := c.addClassAndFilter(ctx, ifb, cid, upRate, "src", ip); err != nil {
-		_ = c.removeClassAndFilter(ctx, bridge, cid, ip)
+		_ = c.removeClassAndFilter(ctx, bridge, cid, minorOfCid(cid))
 		return fmt.Errorf("upload add on %s: %w", ifb, err)
 	}
 	return nil
@@ -230,7 +242,7 @@ func (c *Client) PrepareSession(ctx context.Context, bridge string, ip net.IP, d
 // PrepareSessionIn: empty groupCid is PER_DEVICE (class off the root); non-empty is SHARED, where the
 // caller must have created the group and the session becomes a child with a small floor and the group's ceiling.
 func (c *Client) PrepareSessionIn(ctx context.Context, bridge string, ip net.IP, downKbps, upKbps int, groupCid string) error {
-	cid := ClassidForIP(ip)
+	cid := ClassidFor(bridge, ip)
 	if cid == "" {
 		return fmt.Errorf("ipv4 required, got %s", ip)
 	}
@@ -259,7 +271,7 @@ func (c *Client) PrepareSessionIn(ctx context.Context, bridge string, ip net.IP,
 	}
 	if err := c.addClassUnder(ctx, ifb, parent, cid, upFloor, upRate); err != nil {
 		// Roll back the download class so a failed prepare leaves no half-class.
-		c.removeClassByPref(ctx, bridge, cid, filterPrefFor(ip))
+		c.removeClassByPref(ctx, bridge, cid, minorOfCid(cid))
 		return fmt.Errorf("prepare upload class on %s: %w", ifb, err)
 	}
 	return nil
@@ -268,7 +280,7 @@ func (c *Client) PrepareSessionIn(ctx context.Context, bridge string, ip net.IP,
 // ActivateSession installs both forwarding filters; if the second fails the first is removed, so a session
 // never forwards in one direction only.
 func (c *Client) ActivateSession(ctx context.Context, bridge string, ip net.IP) error {
-	cid := ClassidForIP(ip)
+	cid := ClassidFor(bridge, ip)
 	if cid == "" {
 		return fmt.Errorf("ipv4 required, got %s", ip)
 	}
@@ -277,7 +289,7 @@ func (c *Client) ActivateSession(ctx context.Context, bridge string, ip net.IP) 
 		return fmt.Errorf("activate download filter on %s: %w", bridge, err)
 	}
 	if err := c.addFilter(ctx, ifb, cid, "src", ip); err != nil {
-		_ = c.removeFilter(ctx, bridge, ip)
+		_ = c.removeFilter(ctx, bridge, minorOfCid(cid))
 		return fmt.Errorf("activate upload filter on %s: %w", ifb, err)
 	}
 	return nil
@@ -287,14 +299,15 @@ func (c *Client) ActivateSession(ctx context.Context, bridge string, ip net.IP) 
 // removal is unproven and the caller should escalate to RemoveClassification.
 func (c *Client) AbortSession(ctx context.Context, bridge string, ip net.IP) error {
 	// Filters first, so forwarding stops even if a class delete later fails.
-	_ = c.removeFilter(ctx, bridge, ip)
-	_ = c.removeFilter(ctx, IFBName(bridge), ip)
-	_ = c.removeClassAndFilter(ctx, bridge, ClassidForIP(ip), ip)
-	_ = c.removeClassAndFilter(ctx, IFBName(bridge), ClassidForIP(ip), ip)
-	minor, ok := MinorForIP(ip)
+	minor, ok := MinorFor(bridge, ip)
 	if !ok {
 		return nil
 	}
+	cid := classidOf(minor)
+	_ = c.removeFilter(ctx, bridge, minor)
+	_ = c.removeFilter(ctx, IFBName(bridge), minor)
+	_ = c.removeClassAndFilter(ctx, bridge, cid, minor)
+	_ = c.removeClassAndFilter(ctx, IFBName(bridge), cid, minor)
 	for _, dev := range []string{bridge, IFBName(bridge)} {
 		classes, err := c.ReadClasses(ctx, dev)
 		if err != nil {
@@ -311,8 +324,12 @@ func (c *Client) AbortSession(ctx context.Context, bridge string, ip net.IP) err
 // nothing. It does NOT deny internet access: the guest keeps forwarding, unshaped and uncounted, through the
 // default class; only the nft authorization gate denies access. Call it only after packet authorization is removed.
 func (c *Client) RemoveClassification(ctx context.Context, bridge string, ip net.IP) error {
-	e1 := c.removeFilter(ctx, bridge, ip)
-	e2 := c.removeFilter(ctx, IFBName(bridge), ip)
+	minor, ok := MinorFor(bridge, ip)
+	if !ok {
+		return nil
+	}
+	e1 := c.removeFilter(ctx, bridge, minor)
+	e2 := c.removeFilter(ctx, IFBName(bridge), minor)
 	if e1 != nil {
 		return e1
 	}
@@ -332,7 +349,7 @@ func (c *Client) ReRateSession(ctx context.Context, bridge string, ip net.IP, do
 // every device the full allowance, since an HTB class within its own rate never borrows from its parent
 // (audit Phase 8 M4 / Phase 6 M4).
 func (c *Client) ReRateSessionIn(ctx context.Context, bridge string, ip net.IP, downKbps, upKbps int, groupCid string) error {
-	cid := ClassidForIP(ip)
+	cid := ClassidFor(bridge, ip)
 	if cid == "" {
 		return fmt.Errorf("ipv4 required, got %s", ip)
 	}
@@ -360,45 +377,33 @@ func (c *Client) ReRateSessionIn(ctx context.Context, bridge string, ip net.IP, 
 
 // SessionForwarding reports whether the forwarding filter is installed in both directions (post-activation check).
 func (c *Client) SessionForwarding(ctx context.Context, bridge string, ip net.IP) (bool, error) {
-	down, err := c.filterPresent(ctx, bridge, ip)
-	if err != nil {
-		return false, err
-	}
-	up, err := c.filterPresent(ctx, IFBName(bridge), ip)
-	if err != nil {
-		return false, err
-	}
-	return down && up, nil
-}
-
-func (c *Client) filterPresent(ctx context.Context, dev string, ip net.IP) (bool, error) {
-	out, err := c.exec(ctx, c.TCPath, "filter", "show", "dev", dev, "parent", RootParent)
-	if err != nil {
-		// A missing device has no filters: definitely not forwarding.
+	minor, ok := MinorFor(bridge, ip)
+	if !ok {
 		return false, nil
 	}
-	want := fmt.Sprintf("pref %d ", filterPrefFor(ip))
-	return bytes.Contains(out, []byte(want)), nil
+	down, up := c.minorsWithFilter(ctx, bridge), c.minorsWithFilter(ctx, IFBName(bridge))
+	return down[minor] && up[minor], nil
 }
 
 func (c *Client) DeleteSession(ctx context.Context, bridge string, ip net.IP) error {
-	cid := ClassidForIP(ip)
-	if cid == "" {
+	minor, ok := MinorFor(bridge, ip)
+	if !ok {
 		return nil
 	}
-	_ = c.removeClassAndFilter(ctx, bridge, cid, ip)
-	_ = c.removeClassAndFilter(ctx, IFBName(bridge), cid, ip)
+	cid := classidOf(minor)
+	_ = c.removeClassAndFilter(ctx, bridge, cid, minor)
+	_ = c.removeClassAndFilter(ctx, IFBName(bridge), cid, minor)
 	return nil
 }
 
 // DeleteSessionClass removes a managed class by minor, for reconciling classes whose session (and IP) is
 // no longer known.
 func (c *Client) DeleteSessionClass(ctx context.Context, bridge string, minor int) error {
-	if minor < GuestMinorBase || minor > GuestMinorMax {
+	if !IsGuestMinor(minor) {
 		// The root and default classes are infrastructure; removing them would take the bridge down.
 		return fmt.Errorf("minor %d is outside the managed guest class range", minor)
 	}
-	cid := fmt.Sprintf("%s:%x", RootMajor, minor)
+	cid := classidOf(minor)
 	unlock := c.lockBridge(bridge)
 	defer unlock()
 	c.removeClassByPref(ctx, bridge, cid, minor)
@@ -406,20 +411,10 @@ func (c *Client) DeleteSessionClass(ctx context.Context, bridge string, minor in
 	return nil
 }
 
-func (c *Client) removeClassByPref(ctx context.Context, ifc, cid string, pref int) {
-	_ = c.run(ctx, "filter", "del", "dev", ifc, "parent", RootParent,
-		"pref", strconv.Itoa(pref), "protocol", "ip", "u32")
+func (c *Client) removeClassByPref(ctx context.Context, ifc, cid string, minor int) {
+	_ = c.removeFilter(ctx, ifc, minor)
 	_ = c.run(ctx, "qdisc", "del", "dev", ifc, "parent", cid)
 	_ = c.run(ctx, "class", "del", "dev", ifc, "classid", cid)
-}
-
-// filterPrefFor is unique within a device because each device serves one subnet.
-func filterPrefFor(ip net.IP) int {
-	minor, ok := MinorForIP(ip)
-	if !ok {
-		return 0
-	}
-	return minor
 }
 
 func (c *Client) addClassAndFilter(ctx context.Context, ifc, cid string, kbps int, matchField string, ip net.IP) error {
@@ -446,7 +441,7 @@ func (c *Client) addClassUnder(ctx context.Context, ifc, parent, cid string, rat
 	}
 	minor := strings.SplitN(cid, ":", 2)[1]
 	if err := c.run(ctx, "qdisc", "add", "dev", ifc, "parent", cid,
-		"handle", minor+":", "fq_codel"); err != nil {
+		"handle", minor+":", "fq_codel", "flows", strconv.Itoa(LeafFlows)); err != nil {
 		return err
 	}
 	return nil
@@ -486,24 +481,29 @@ func (c *Client) changeClassUnder(ctx context.Context, ifc, parent, cid string, 
 
 // addFilter installs the filter that makes a prepared class start carrying the guest's packets.
 func (c *Client) addFilter(ctx context.Context, ifc, cid, matchField string, ip net.IP) error {
-	pref := fmt.Sprintf("%d", filterPrefFor(ip))
-	return c.run(ctx, "filter", "add", "dev", ifc, "protocol", "ip",
-		"parent", RootParent, "pref", pref, "u32",
-		"match", "ip", matchField, ip.String()+"/32", "flowid", cid)
+	return c.run(ctx, c.filterAddArgs(ctx, ifc, cid, matchField, ip)...)
 }
 
-// removeFilter deletes only the filter, stopping forwarding into the class while keeping its counters.
-func (c *Client) removeFilter(ctx context.Context, ifc string, ip net.IP) error {
-	pref := fmt.Sprintf("%d", filterPrefFor(ip))
-	return c.run(ctx, "filter", "del", "dev", ifc, "parent", RootParent,
-		"pref", pref, "protocol", "ip", "u32")
+// removeFilter deletes only the filter(s) of a class, stopping forwarding into it while keeping its counters. It tries
+// the current (flower) form first and then the pre-upgrade u32 form, so a session classified by an older netd is
+// released too.
+func (c *Client) removeFilter(ctx context.Context, ifc string, minor int) error {
+	var first error
+	for _, args := range c.filterDelArgs(ctx, ifc, minor) {
+		err := c.run(ctx, args...)
+		if err == nil {
+			return nil
+		}
+		if first == nil {
+			first = err
+		}
+	}
+	return first
 }
 
-func (c *Client) removeClassAndFilter(ctx context.Context, ifc, cid string, ip net.IP) error {
+func (c *Client) removeClassAndFilter(ctx context.Context, ifc, cid string, minor int) error {
 	// Filter first, otherwise the class delete is EBUSY.
-	pref := fmt.Sprintf("%d", filterPrefFor(ip))
-	_ = c.run(ctx, "filter", "del", "dev", ifc, "parent", RootParent,
-		"pref", pref, "protocol", "ip", "u32")
+	_ = c.removeFilter(ctx, ifc, minor)
 	_ = c.run(ctx, "qdisc", "del", "dev", ifc, "parent", cid)
 	_ = c.run(ctx, "class", "del", "dev", ifc, "classid", cid)
 	return nil
@@ -579,7 +579,7 @@ func (c *Client) ReadClasses(ctx context.Context, device string) (map[int]ClassB
 				continue
 			}
 			minor := int(minor64)
-			if minor < GuestMinorBase || minor > GuestMinorMax {
+			if !IsGuestMinor(minor) {
 				continue
 			}
 			curMinor = minor

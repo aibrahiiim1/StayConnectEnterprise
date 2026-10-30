@@ -106,6 +106,16 @@ func (s *Store) scopeKey(kind ScopeKind, value string) string {
 	return hex.EncodeToString(m.Sum(nil))
 }
 
+// Fingerprint is a short keyed pseudonym of a value, for audit rows that must let an operator see "the same device /
+// address / answer again" without holding the value: the first 16 hex characters of the same HMAC the buckets use. It
+// cannot be reversed or recomputed without this appliance's key.
+func (s *Store) Fingerprint(kind ScopeKind, value string) string {
+	if strings.TrimSpace(value) == "" {
+		return ""
+	}
+	return s.scopeKey(kind, value)[:16]
+}
+
 func (s *Store) windowStart(now time.Time) time.Time { return now.Truncate(s.window).UTC() }
 
 type chargeable struct {

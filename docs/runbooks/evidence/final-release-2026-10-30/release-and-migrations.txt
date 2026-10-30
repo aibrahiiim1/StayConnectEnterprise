@@ -1,0 +1,132 @@
+# Release and migrations, read back from the lab appliance (2026-10-30)
+# before: appliance as left by the previous round (release 2f687f24); after: after appliance-install.sh --upgrade of release dbf86d288f65
+
+## BEFORE
+== release
+"source_commit": "2f687f2406dee6763986b3f5b59c5470d7444501"
+scd go version -m:   / strings: vcs.revision=2f687f2406dee6763986b3f5b59c5470d7444501
+netd go version -m:   / strings: vcs.revision=2f687f2406dee6763986b3f5b59c5470d7444501
+acctd go version -m:   / strings: vcs.revision=2f687f2406dee6763986b3f5b59c5470d7444501
+edged go version -m:   / strings: vcs.revision=2f687f2406dee6763986b3f5b59c5470d7444501
+portald go version -m:   / strings: vcs.revision=2f687f2406dee6763986b3f5b59c5470d7444501
+pmsd go version -m:   / strings: vcs.revision=2f687f2406dee6763986b3f5b59c5470d7444501
+== running binaries match installed
+scd pid=500569 exe=/opt/stayconnect/bin/scd sha=4bb0fdff66c6a29c file=4bb0fdff66c6a29c
+netd pid=350920 exe=/opt/stayconnect/bin/netd sha=a720c96b4362f352 file=a720c96b4362f352
+acctd pid=351153 exe=/opt/stayconnect/bin/acctd sha=51767e9f938fa48e file=51767e9f938fa48e
+== migrations
+0191_accounting_checkpoints_class_generation_indexes
+0192_the_controlled_operation_janitor_does_not_block_the_writers
+0191_accounting_checkpoints_class_generation_indexes.down.sql 0191_accounting_checkpoints_class_generation_indexes.up.sql 0192_the_controlled_operation_janitor_does_not_block_the_writers.down.sql 0192_the_controlled_oper
+== acctd unit
+Type=simple Restart=always NotifyAccess=none RestartUSec=2s WatchdogUSec=0 ActiveState=active 
+RestartSec=2
+== sysctl neighbour file
+-rw-r--r-- 1 root root 1528 Oct 30 04:03 99-stayconnect.conf
+net.ipv4.neigh.default.gc_thresh1 = 4096 net.ipv4.neigh.default.gc_thresh2 = 8192 net.ipv4.neigh.default.gc_thresh3 = 16384 net.ipv6.neigh.default.gc_thresh1 = 1024 net.ipv6.neigh.default.gc_thresh2 = 4096 net.ipv6.neigh
+ipv4 gc_thresh1=cat: /proc/sys/net/ipv4/neigh/default/gc_thresh1: No such file or directory ipv4 gc_thresh2=cat: /proc/sys/net/ipv4/neigh/default/gc_thresh2: No such file or directory ipv4 gc_thresh3=cat: /proc/sys/net/i
+== kernel flower
+6.6.87.2-microsoft-standard-WSL2
+cls_flower             53248  0 cls_u32                20480  3402 sch_htb                28672  4 
+== classifier in use: tc filters per bridge
+br-g-1e89de3f: flower_lines=0 u32_lines=3000 htb_classes=1000
+br-g102: flower_lines=0 u32_lines=2100 htb_classes=700
+ifb-g-1e89de3f: flower_lines=0 u32_lines=3000
+ifb-g102: flower_lines=0 u32_lines=2100
+== services
+active active active active active 
+active|1700
+authset: 1700
+
+## AFTER (migrations 0181/0190/0191/0192 applied by the installer's own runner)
+== release
+"source_commit": "dbf86d288f65b093211232569cb102e203f2cf79"
+scd go version -m:   / strings: vcs.revision=dbf86d288f65b093211232569cb102e203f2cf79
+netd go version -m:   / strings: vcs.revision=dbf86d288f65b093211232569cb102e203f2cf79
+acctd go version -m:   / strings: vcs.revision=dbf86d288f65b093211232569cb102e203f2cf79
+edged go version -m:   / strings: vcs.revision=dbf86d288f65b093211232569cb102e203f2cf79
+portald go version -m:   / strings: vcs.revision=dbf86d288f65b093211232569cb102e203f2cf79
+pmsd go version -m:   / strings: vcs.revision=dbf86d288f65b093211232569cb102e203f2cf79
+== running binaries match installed
+scd pid=554286 exe=/opt/stayconnect/bin/scd sha=a872d26692dd1cc9 file=a872d26692dd1cc9
+netd pid=554178 exe=/opt/stayconnect/bin/netd sha=ab83603b29531fa9 file=ab83603b29531fa9
+acctd pid=554408 exe=/opt/stayconnect/bin/acctd sha=4590bb9ffbca25aa file=4590bb9ffbca25aa
+== migrations
+0181_accounting_integrity_closure
+0190_post_stay_sign_in_throttle_is_settings
+0191_accounting_checkpoints_class_generation_indexes
+0192_the_controlled_operation_janitor_does_not_block_the_writers
+0181_accounting_integrity_closure.down.sql 0181_accounting_integrity_closure.up.sql 0190_post_stay_sign_in_throttle_is_settings.down.sql 0190_post_stay_sign_in_throttle_is_settings.up.sql 0191_accounting_checkpoints_clas
+== acctd unit
+Type=simple Restart=always NotifyAccess=main RestartUSec=2s WatchdogUSec=30s ActiveState=active 
+RestartSec=2
+# is turning (sdwatchdog), so a stall is restarted within WatchdogSec instead of lasting until guests lose access.
+# Type=simple + NotifyAccess=main: no start-up handshake is added.
+WatchdogSec=30
+NotifyAccess=main
+== sysctl neighbour file
+-rw-r--r-- 1 root root 1528 Oct 30 06:15 99-stayconnect.conf
+net.ipv4.neigh.default.gc_thresh1 = 4096 net.ipv4.neigh.default.gc_thresh2 = 8192 net.ipv4.neigh.default.gc_thresh3 = 16384 net.ipv6.neigh.default.gc_thresh1 = 1024 net.ipv6.neigh.default.gc_thresh2 = 4096 net.ipv6.neigh
+ipv4 gc_thresh1=cat: /proc/sys/net/ipv4/neigh/default/gc_thresh1: No such file or directory ipv4 gc_thresh2=cat: /proc/sys/net/ipv4/neigh/default/gc_thresh2: No such file or directory ipv4 gc_thresh3=cat: /proc/sys/net/i
+== kernel flower
+6.6.87.2-microsoft-standard-WSL2
+cls_flower             53248  0 cls_u32                20480  3402 sch_htb                28672  4 
+== classifier in use: tc filters per bridge
+br-g-1e89de3f: flower_lines=0 u32_lines=3000 htb_classes=1000
+br-g102: flower_lines=0 u32_lines=2100 htb_classes=700
+ifb-g-1e89de3f: flower_lines=0 u32_lines=3000
+ifb-g102: flower_lines=0 u32_lines=2100
+== services
+active active active active active 
+active|1700
+authset: 1700
+
+## AFTER the 1,700 long sessions were signed in again on this release: classifier
+== classifier in use: tc filters per bridge
+br-g-1e89de3f: flower_lines=1001 u32_lines=0 htb_classes=1000
+br-g102: flower_lines=701 u32_lines=0 htb_classes=700
+ifb-g-1e89de3f: flower_lines=1001 u32_lines=0
+ifb-g102: flower_lines=701 u32_lines=0
+== services
+active active active active active 
+active|1700
+authset: 1700
+
+## release build provenance (appliance-build.sh)
+== embedded provenance, read back from what was just written ==
+  scd      revision=dbf86d288f65 modified=false tags=stayconnect_production  -> ok
+  edged    revision=dbf86d288f65 modified=false tags=stayconnect_production  -> ok
+  netd     revision=dbf86d288f65 modified=false tags=stayconnect_production  -> ok
+  portald  revision=dbf86d288f65 modified=false tags=stayconnect_production  -> ok
+  acctd    revision=dbf86d288f65 modified=false tags=stayconnect_production  -> ok
+  pmsd     revision=dbf86d288f65 modified=false tags=stayconnect_production  -> ok
+  keybootstrap revision=dbf86d288f65 modified=false tags=stayconnect_production  -> ok
+  svc-run  revision=dbf86d288f65 modified=false tags=stayconnect_production  -> ok
+
+APPLIANCE_BUILD = PASS (every binary names dbf86d288f65b093211232569cb102e203f2cf79, clean, with tags=stayconnect_production)
+>> the contract requires no build flags: navigation is decided at runtime from edged's mounted surfaces
+>> npm ci
+
+## installer migration step (extract)
+[appliance-install] ==== 4. database migrations (each behind a verified pre-change backup) + Gate-P
+[migrate] database is at 0180 (from /etc/stayconnect/schema-baseline (factory-clean baseline, empty ledger)); this release ships up to 0192; pending: 4
+[migrate]   0181_accounting_integrity_closure
+[migrate]   0190_post_stay_sign_in_throttle_is_settings
+[migrate]   0191_accounting_checkpoints_class_generation_indexes
+[migrate]   0192_the_controlled_operation_janitor_does_not_block_the_writers
+[migrate] applying 0181_accounting_integrity_closure
+== a live site is about to change (applying migration 0181_accounting_integrity_closure): taking the mandatory pre-change backup first ==
+EDGE_MIGRATE_OK applied=1 skipped=0
+[migrate] applying 0190_post_stay_sign_in_throttle_is_settings
+== a live site is about to change (applying migration 0190_post_stay_sign_in_throttle_is_settings): taking the mandatory pre-change backup first ==
+  no gap below 0190_post_stay_sign_in_throttle_is_settings: every lower numbered migration is applied (1 checked)
+EDGE_MIGRATE_OK applied=1 skipped=0
+[migrate] applying 0191_accounting_checkpoints_class_generation_indexes
+== a live site is about to change (applying migration 0191_accounting_checkpoints_class_generation_indexes): taking the mandatory pre-change backup first ==
+  no gap below 0191_accounting_checkpoints_class_generation_indexes: every lower numbered migration is applied (2 checked)
+EDGE_MIGRATE_OK applied=1 skipped=0
+[migrate] applying 0192_the_controlled_operation_janitor_does_not_block_the_writers
+== a live site is about to change (applying migration 0192_the_controlled_operation_janitor_does_not_block_the_writers): taking the mandatory pre-change backup first ==
+  no gap below 0192_the_controlled_operation_janitor_does_not_block_the_writers: every lower numbered migration is applied (3 checked)
+EDGE_MIGRATE_OK applied=1 skipped=0
+[migrate] done

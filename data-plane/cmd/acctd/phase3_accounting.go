@@ -11,6 +11,8 @@ import (
 	"net"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/stayconnect/enterprise/data-plane/internal/shape"
 )
 
@@ -113,6 +115,21 @@ func (p *phase3) accountingPass(ctx context.Context, rd counterReader, ep epochS
 	}
 
 	accepted, degraded := 0, ""
+	var items []ingestItem
+	// Marks carried to the next pass: only sessions still live are kept, and a refused or unanswered observation is dropped so it is asked again.
+	next := make(map[string]ingestMark, len(sessions))
+	for id, m := range p.lastIngested {
+		next[id] = m
+	}
+	live := make(map[string]struct{}, len(sessions))
+	for _, s := range sessions {
+		live[s.ID] = struct{}{}
+	}
+	for id := range next {
+		if _, ok := live[id]; !ok {
+			delete(next, id)
+		}
+	}
 	for _, s := range sessions {
 		if s.Bridge == "" {
 			// Substituting a default would let the daemon decide where counters came from; the controlled
@@ -122,7 +139,7 @@ func (p *phase3) accountingPass(ctx context.Context, rd counterReader, ep epochS
 			continue
 		}
 		bridge := s.Bridge
-		minor, ok := shape.MinorForIP(s.IP)
+		minor, ok := shape.MinorFor(bridge, s.IP)
 		if !ok {
 			degraded = reasonSourceIncoherent
 			continue
@@ -146,19 +163,29 @@ func (p *phase3) accountingPass(ctx context.Context, rd counterReader, ep epochS
 			slog.Warn("phase3: session's class is absent from the counters; not accounted", "session", s.ID)
 			continue
 		}
-		class, err := p.ingestAbsolute(ctx, s, bridge, minor, epoch,
-			int64(upBytes.Bytes), int64(downBytes.Bytes), now)
-		if err != nil {
-			degraded = reasonObservationRefused
-			slog.Warn("phase3: absolute counter observation refused", "session", s.ID, "err", err)
+		it := ingestItem{s: s, bridge: bridge, minor: minor, epoch: epoch, up: int64(upBytes.Bytes), down: int64(downBytes.Bytes)}
+		// The database answers an observation whose counters have not moved since the last accepted one with a replay and stores nothing
+		// (iam_v2.ingest_absolute_counters), but it takes the checkpoint's row lock to find that out, which is a write and a commit.
+		// Asking again is therefore pure cost: at 1,700 live sessions of which a tenth move, nine in ten commits per tick were for nothing.
+		if prev, ok := p.lastIngested[s.ID]; ok && prev == (ingestMark{epoch: epoch, up: it.up, down: it.down}) {
 			continue
 		}
-		switch class {
+		items = append(items, it)
+	}
+	for i, r := range p.ingestBatch(ctx, items, now) {
+		if r.err != nil {
+			degraded = reasonObservationRefused
+			slog.Warn("phase3: absolute counter observation refused", "session", items[i].s.ID, "err", r.err)
+			continue
+		}
+		next[items[i].s.ID] = ingestMark{epoch: items[i].epoch, up: items[i].up, down: items[i].down}
+		switch r.class {
 		case "ACCEPTED", "DELAYED":
 			// A REPLAY:* classification stored nothing further; counting it would make retries look like traffic.
 			accepted++
 		}
 	}
+	p.lastIngested = next
 	p.acctDegraded = degraded
 	if degraded == "" {
 		p.lastPassOK = now
@@ -207,4 +234,105 @@ func (p *phase3) accountingHealth(now time.Time) map[string]any {
 		out["reason"] = reason
 	}
 	return out
+}
+
+// ingestMark is the last observation the database accepted for a session; an identical one is a replay and is not sent again.
+type ingestMark struct{ epoch, up, down int64 }
+
+type ingestItem struct {
+	s               phase3Session
+	bridge          string
+	minor           int
+	epoch, up, down int64
+}
+
+type ingestResult struct {
+	class string
+	err   error
+}
+
+// ingestChunk bounds one transaction: a refusal anywhere in it sends the whole chunk through the one-by-one path.
+const ingestChunk = 100
+
+// ingestBatch submits the observations, a chunk to a transaction, so a tick that has many sessions to report commits a few times, not once
+// per session. The meaning of every observation is unchanged: each is the same call, with the same arguments, to the same controlled operation,
+// and a replay (a retry after an uncertain commit) is still recognised by it. If any call in a chunk is refused, or the chunk cannot be
+// committed, the transaction is rolled back and the chunk's observations are sent one by one exactly as before, so a single refusal (a session that
+// ended a moment ago, say) is reported against that session alone and never costs its neighbours.
+func (p *phase3) ingestBatch(ctx context.Context, items []ingestItem, at time.Time) []ingestResult {
+	out := make([]ingestResult, len(items))
+	p.ingestRange(ctx, items, at, out)
+	return out
+}
+
+func (p *phase3) ingestOne(ctx context.Context, it ingestItem, at time.Time) ingestResult {
+	c, err := p.ingestAbsolute(ctx, it.s, it.bridge, it.minor, it.epoch, it.up, it.down, at)
+	return ingestResult{class: c, err: err}
+}
+
+// ingestRange sends items in chunks. A refusal at position k of a chunk rolls that transaction back; the k observations before it (which the database had
+// accepted in the aborted transaction) are sent again as a chunk of their own, the refused one alone, and the rest continue as the next chunk, so one session
+// that ended a moment ago costs one extra statement and one extra round trip, not a second pass over its neighbours.
+func (p *phase3) ingestRange(ctx context.Context, items []ingestItem, at time.Time, out []ingestResult) {
+	for pos := 0; pos < len(items); {
+		hi := pos + ingestChunk
+		if hi > len(items) {
+			hi = len(items)
+		}
+		failAt, ok := p.ingestChunkTx(ctx, items[pos:hi], at, out[pos:hi])
+		switch {
+		case ok:
+			pos = hi
+		case failAt > 0:
+			p.ingestRange(ctx, items[pos:pos+failAt], at, out[pos:pos+failAt])
+			out[pos+failAt] = p.ingestOne(ctx, items[pos+failAt], at)
+			pos += failAt + 1
+		case failAt == 0:
+			out[pos] = p.ingestOne(ctx, items[pos], at)
+			pos++
+		default: // the transaction itself could not be run (begin, send or commit): the chunk goes one by one
+			for i := pos; i < hi; i++ {
+				out[i] = p.ingestOne(ctx, items[i], at)
+			}
+			pos = hi
+		}
+	}
+}
+
+// ingestChunkTx sends one chunk in one transaction. ok is true when every observation was answered and the transaction committed. Otherwise failAt is the
+// position of the first refused observation (the transaction is rolled back), or -1 when the transaction could not be run at all.
+func (p *phase3) ingestChunkTx(ctx context.Context, items []ingestItem, at time.Time, out []ingestResult) (failAt int, ok bool) {
+	if len(items) < 2 {
+		return 0, false
+	}
+	tx, err := p.enf.Pool().Begin(ctx)
+	if err != nil {
+		return -1, false
+	}
+	b := &pgx.Batch{}
+	for _, it := range items {
+		b.Queue(`SELECT iam_v2.ingest_absolute_counters($1,$2,$3::uuid,$4::uuid,$5,$6,$7,$8,$9,$10)`,
+			p.tenant, p.site, it.s.ID, it.s.DeviceID, it.bridge, it.minor, it.epoch, it.up, it.down, at)
+	}
+	br := tx.SendBatch(ctx, b)
+	classes := make([]string, len(items))
+	failAt = -1
+	for i := range items {
+		if err := br.QueryRow().Scan(&classes[i]); err != nil {
+			failAt = i
+			break
+		}
+	}
+	_ = br.Close()
+	if failAt >= 0 {
+		_ = tx.Rollback(ctx)
+		return failAt, false
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return -1, false
+	}
+	for i := range items {
+		out[i] = ingestResult{class: classes[i]}
+	}
+	return 0, true
 }

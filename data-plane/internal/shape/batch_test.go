@@ -86,7 +86,7 @@ func TestActivateBatchInstallsBothFiltersPerSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := r.scripts[0]
-	if strings.Count(s, "filter add") != 4 || !strings.Contains(s, "match ip dst 10.20.0.10/32 flowid 1:100a") || !strings.Contains(s, "dev ifb-g301 protocol ip parent 1: pref 4106 u32 match ip src 10.20.0.10/32") {
+	if strings.Count(s, "filter add") != 4 || !strings.Contains(s, "dev br-g301 protocol ip parent 1: pref 1 handle 0x100a flower dst_ip 10.20.0.10/32 classid 1:100a") || !strings.Contains(s, "dev ifb-g301 protocol ip parent 1: pref 1 handle 0x100a flower src_ip 10.20.0.10/32 classid 1:100a") {
 		t.Fatalf("script:\n%s", s)
 	}
 }

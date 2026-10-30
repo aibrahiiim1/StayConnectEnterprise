@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0180, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0192, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -236,6 +236,34 @@ END $$;
 --
 
 COMMENT ON FUNCTION iam_v2.account_password_settings_set(p_tenant uuid, p_site uuid, p_style text, p_length integer, p_operator text, p_reason text) IS 'Stores a validated generated-password format and returns its new config_version. Takes effect on the NEXT generated password; no existing credential changes.';
+
+
+--
+-- Name: accounting_integrity_summary(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.accounting_integrity_summary(p_tenant uuid, p_site uuid) RETURNS TABLE(kind text, events bigint, entitlements bigint, bytes bigint, last_at timestamp with time zone)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT e.kind, count(*)::bigint, count(DISTINCT e.entitlement_id)::bigint, COALESCE(sum(e.bytes), 0)::bigint, max(e.recorded_at)
+    FROM iam_v2.accounting_integrity_events e
+   WHERE e.tenant_id = p_tenant AND e.site_id = p_site
+   GROUP BY e.kind
+  UNION ALL
+  SELECT 'FOLDED_BUCKET_INEXACT'::text, count(*)::bigint, count(DISTINCT a.entitlement_id)::bigint,
+         COALESCE(sum(a.bytes_up + a.bytes_down), 0)::bigint, max(a.latest_sampled_at)
+    FROM iam_v2.accounting_usage_entitlement a
+   WHERE a.tenant_id = p_tenant AND a.site_id = p_site AND NOT a.exact
+  HAVING count(*) > 0;
+$$;
+
+
+--
+-- Name: FUNCTION accounting_integrity_summary(p_tenant uuid, p_site uuid); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.accounting_integrity_summary(p_tenant uuid, p_site uuid) IS 'Per kind: how many times the accounting chose the conservative direction instead of an exact figure at this site, for how many entitlements and bytes, and when last (0181). Empty = every figure is sample-exact.';
 
 
 --
@@ -2001,8 +2029,15 @@ BEGIN
   END IF;
   -- Bounded janitor. A transaction that rolled back or a backend that died leaves its row behind; nothing
   -- reads a stale row (the txid will not recur inside the retention window) but the table should not grow
-  -- without limit on an appliance that runs for years.
-  DELETE FROM iam_v2.controlled_operation_scope WHERE opened_at < now() - interval '1 hour';
+  -- without limit on an appliance that runs for years. A small batch of the oldest expired rows, taken only if no
+  -- other transaction holds them: this call never waits for, and can never deadlock with, another caller's cleanup.
+  DELETE FROM iam_v2.controlled_operation_scope
+   WHERE ctid = ANY (ARRAY(
+           SELECT s.ctid FROM iam_v2.controlled_operation_scope s
+            WHERE s.opened_at < now() - interval '1 hour'
+            ORDER BY s.opened_at
+            LIMIT 100
+              FOR UPDATE SKIP LOCKED));
   v_token := gen_random_uuid();
   INSERT INTO iam_v2.controlled_operation_scope (txid, family, token)
   VALUES (txid_current(), p_family, v_token)
@@ -2862,7 +2897,7 @@ CREATE FUNCTION iam_v2.entitlement_usage_bytes(p_ent uuid, p_at timestamp with t
     SELECT sum(a.bytes_up) AS up, sum(a.bytes_down) AS down, sum(a.records) AS n, max(a.latest_sampled_at) AS latest
       FROM iam_v2.accounting_usage_entitlement a
      WHERE a.entitlement_id = p_ent AND a.arm IN (0, 2)
-       AND (a.bucket + interval '1 hour' <= p_at OR a.latest_sampled_at <= p_at)),
+       AND a.bucket <= p_at),
   live AS (
     SELECT sum(r.bytes_up) AS up, sum(r.bytes_down) AS down, count(*) AS n, max(r.sampled_at) AS latest
       FROM (
@@ -2882,7 +2917,7 @@ CREATE FUNCTION iam_v2.entitlement_usage_bytes(p_ent uuid, p_at timestamp with t
   SELECT (COALESCE(f.up, 0) + COALESCE(l.up, 0))::bigint,
          (COALESCE(f.down, 0) + COALESCE(l.down, 0))::bigint,
          (COALESCE(f.n, 0) + COALESCE(l.n, 0))::bigint,
-         greatest(f.latest, l.latest)
+         CASE WHEN greatest(f.latest, l.latest) IS NULL THEN NULL ELSE least(greatest(f.latest, l.latest), p_at) END
     FROM folded f, live l;
 $$;
 
@@ -2891,7 +2926,30 @@ $$;
 -- Name: FUNCTION entitlement_usage_bytes(p_ent uuid, p_at timestamp with time zone); Type: COMMENT; Schema: iam_v2; Owner: -
 --
 
-COMMENT ON FUNCTION iam_v2.entitlement_usage_bytes(p_ent uuid, p_at timestamp with time zone) IS 'Bytes attributed to ONE Entitlement up to ONE instant, by binding interval, with the no-binding fallback for sessions that predate the binding table. SECURITY DEFINER so a caller can obtain the aggregate without holding SELECT on iam_v2.accounting_records -- svc_pmsd needs the number at a checkout boundary and Gate-P forbids it the table. Since 0180 it adds the samples the purge has already folded into iam_v2.accounting_usage_entitlement to the raw samples still present, so the answer does not shrink when raw is purged. It returns four aggregate numbers about an entitlement the caller must already be able to name; it exposes no guest, Stay, reservation, folio, payment or PMS data, and it writes nothing.';
+COMMENT ON FUNCTION iam_v2.entitlement_usage_bytes(p_ent uuid, p_at timestamp with time zone) IS 'Bytes attributed to ONE Entitlement up to ONE instant, by binding interval, with the no-binding fallback for sessions that predate the binding table. SECURITY DEFINER so a caller can obtain the aggregate without holding SELECT on iam_v2.accounting_records -- svc_pmsd needs the number at a checkout boundary and Gate-P forbids it the table. Adds the samples the purge has folded into iam_v2.accounting_usage_entitlement (0180). Since 0181 a folded hour that straddles p_at is COUNTED whole: the answer is exact, or an UPPER bound over by at most that hour (never a lower bound; see entitlement_usage_uncertainty). It returns four aggregate numbers about an entitlement the caller must already be able to name; it exposes no guest, Stay, reservation, folio, payment or PMS data, and it writes nothing.';
+
+
+--
+-- Name: entitlement_usage_uncertainty(uuid, timestamp with time zone); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.entitlement_usage_uncertainty(p_ent uuid, p_at timestamp with time zone) RETURNS TABLE(straddling_bytes bigint, inexact_bytes bigint)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT COALESCE(sum(a.bytes_up + a.bytes_down) FILTER (WHERE a.arm IN (0, 2) AND a.bucket <= p_at
+                                                          AND a.bucket + interval '1 hour' > p_at AND a.latest_sampled_at > p_at), 0)::bigint,
+         COALESCE(sum(a.bytes_up + a.bytes_down) FILTER (WHERE a.arm IN (0, 2) AND a.bucket <= p_at AND NOT a.exact), 0)::bigint
+    FROM iam_v2.accounting_usage_entitlement a
+   WHERE a.entitlement_id = p_ent;
+$$;
+
+
+--
+-- Name: FUNCTION entitlement_usage_uncertainty(p_ent uuid, p_at timestamp with time zone); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.entitlement_usage_uncertainty(p_ent uuid, p_at timestamp with time zone) IS 'How much of entitlement_usage_bytes(p_ent, p_at) is not a sample-exact figure (0181): straddling_bytes = the folded hour that holds samples after p_at and was counted whole (the result may exceed the truth by at most this); inexact_bytes = folded rows whose attribution was estimated (0180 backfill, 0181 retroactive-binding charge). Both zero = the figure is exact.';
 
 
 --
@@ -4597,7 +4655,12 @@ BEGIN
   END IF;
 
   -- the per-session record sequence is allocated under the checkpoint lock, so it cannot collide
-  SELECT COALESCE(max(sample_seq),0)+1 INTO v_seq FROM iam_v2.accounting_records WHERE session_id = p_session;
+  -- 0181: monotonic for the life of the session, NOT max(raw)+1. The raw purge deletes samples, and a session whose samples
+  -- were all purged (idle past raw_retention_days) restarted at 1, below the crossing checkpoint's examined_seq, so
+  -- p6_advance_data_crossing / p6_data_crossing never read the new samples and the data quota could be passed.
+  SELECT greatest(COALESCE((SELECT max(r0.sample_seq) FROM iam_v2.accounting_records r0 WHERE r0.session_id = p_session), 0),
+                  COALESCE((SELECT max(c2.last_sample_seq) FROM iam_v2.accounting_checkpoints c2 WHERE c2.session_id = p_session), 0)) + 1
+    INTO v_seq;
   INSERT INTO iam_v2.accounting_records
     (tenant_id, site_id, session_id, sample_seq, bytes_up, bytes_down, sampled_at, ingested_at)
     VALUES (p_tenant, p_site, p_session, v_seq, v_up, v_down, p_sampled_at, now())
@@ -4641,7 +4704,7 @@ BEGIN
 
   UPDATE iam_v2.accounting_checkpoints
      SET prev_bytes_up = p_abs_up, prev_bytes_down = p_abs_down, prev_sampled_at = p_sampled_at,
-         last_record_id = v_rec, last_classification = v_class, updated_at = now()
+         last_record_id = v_rec, last_classification = v_class, last_sample_seq = v_seq, updated_at = now()
    WHERE id = cp.id;
   RETURN v_class;
 END $$;
@@ -9934,6 +9997,12 @@ BEGIN
                updated_at = now()
          WHERE pr.entitlement_id = e.id;
       END IF;
+      IF v_exact IS NOT NULL AND COALESCE((SELECT sum(a.bytes_up + a.bytes_down) FROM iam_v2.accounting_usage_entitlement a
+                                            WHERE a.entitlement_id = e.id AND a.arm = 0), 0) >= e.quota THEN
+        -- the quota was reached inside the folded part: the instant is the latest sample time of the crossing hour (0181 event)
+        INSERT INTO iam_v2.accounting_integrity_events (tenant_id, site_id, entitlement_id, kind, bytes, detail)
+        VALUES (p_tenant, p_site, e.id, 'CROSSING_INSTANT_APPROXIMATE', e.quota, jsonb_build_object('crossed_at', v_exact));
+      END IF;
       INSERT INTO iam_v2.data_crossing_state AS s (entitlement_id, tenant_id, site_id, quota_bytes, crossed_at)
       VALUES (e.id, p_tenant, p_site, e.quota, v_exact)
       ON CONFLICT (entitlement_id) DO UPDATE
@@ -10543,6 +10612,55 @@ $$;
 --
 
 COMMENT ON FUNCTION iam_v2.p6_over_budget_now(p_entitlement uuid) IS 'Whether an AGGREGATE_ONLINE_TIME entitlement has spent its budget as of NOW, from current authoritative state. It says nothing about WHEN that happened, which is a separate and much harder question.';
+
+
+--
+-- Name: p6_reconcile_crossing_checkpoint(uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p6_reconcile_crossing_checkpoint(p_entitlement uuid) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_t uuid; v_s uuid; v_folded bigint; v_raw bigint; v_counted bigint; v_def bigint; v_first uuid; v_sess uuid;
+BEGIN
+  SELECT tenant_id, site_id INTO v_t, v_s FROM iam_v2.entitlements WHERE id = p_entitlement;
+  IF NOT FOUND THEN RETURN 0; END IF;
+  SELECT COALESCE(sum(a.bytes_up + a.bytes_down), 0) INTO v_folded
+    FROM iam_v2.accounting_usage_entitlement a WHERE a.entitlement_id = p_entitlement AND a.arm = 0;
+  -- the raw samples a checkpoint must already include: those at or before the binding's examined_seq
+  SELECT COALESCE(sum(ar.bytes_up + ar.bytes_down), 0) INTO v_raw
+    FROM iam_v2.session_entitlement_bindings sb
+    JOIN iam_v2.data_crossing_progress pr ON pr.binding_id = sb.id
+    JOIN iam_v2.accounting_records ar ON ar.session_id = sb.session_id AND ar.sample_seq <= pr.examined_seq
+     AND sb.bound_from <= ar.sampled_at AND (sb.bound_until IS NULL OR sb.bound_until > ar.sampled_at)
+   WHERE sb.entitlement_id = p_entitlement;
+  SELECT COALESCE(sum(pr.counted_bytes), 0) INTO v_counted FROM iam_v2.data_crossing_progress pr WHERE pr.entitlement_id = p_entitlement;
+  v_def := v_folded + v_raw - v_counted;
+  IF v_def <= 0 THEN RETURN 0; END IF;
+  SELECT pr.binding_id INTO v_first FROM iam_v2.data_crossing_progress pr
+   WHERE pr.entitlement_id = p_entitlement ORDER BY pr.binding_id LIMIT 1;
+  IF v_first IS NULL THEN
+    SELECT sb.id INTO v_first FROM iam_v2.session_entitlement_bindings sb
+     WHERE sb.entitlement_id = p_entitlement ORDER BY sb.bound_from, sb.id LIMIT 1;
+    IF v_first IS NULL THEN RETURN 0; END IF;
+  END IF;
+  SELECT sb.session_id INTO v_sess FROM iam_v2.session_entitlement_bindings sb WHERE sb.id = v_first;
+  INSERT INTO iam_v2.data_crossing_progress AS pr (binding_id, tenant_id, site_id, entitlement_id, session_id, examined_seq, counted_bytes, final)
+  VALUES (v_first, v_t, v_s, p_entitlement, v_sess, 0, v_def, false)
+  ON CONFLICT (binding_id) DO UPDATE SET counted_bytes = pr.counted_bytes + EXCLUDED.counted_bytes, updated_at = now();
+  INSERT INTO iam_v2.accounting_integrity_events (tenant_id, site_id, entitlement_id, session_id, kind, bytes, detail)
+  VALUES (v_t, v_s, p_entitlement, v_sess, 'CHECKPOINT_BELOW_EXACT', v_def,
+          jsonb_build_object('folded', v_folded, 'raw_examined', v_raw, 'checkpoint_before', v_counted));
+  RETURN v_def;
+END $$;
+
+
+--
+-- Name: FUNCTION p6_reconcile_crossing_checkpoint(p_entitlement uuid); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.p6_reconcile_crossing_checkpoint(p_entitlement uuid) IS 'Lifts an entitlement''s data-crossing checkpoint to folded accumulator + the raw samples already examined when it is lower (0181); never lowers it, never terminates anything. Returns the bytes added and records an integrity event.';
 
 
 --
@@ -13005,6 +13123,7 @@ CREATE FUNCTION iam_v2.rebind_session_entitlement(p_session uuid, p_ent uuid, p_
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
 DECLARE v_t uuid; v_s uuid; v_open uuid; v_from timestamptz; v_cur uuid; v_seq bigint; v_id uuid;
+        v_days integer; v_cut timestamptz; v_wm timestamptz; v_hb bigint; v_hn bigint; v_rb bigint; v_rn bigint; v_gap bigint;
 BEGIN
   -- This operation writes a capability-scoped family, so it declares its own scope. Doing it here
   -- rather than relying on ownership is what lets Gate-P give every function its own owner without
@@ -13024,6 +13143,42 @@ BEGIN
   INSERT INTO iam_v2.session_entitlement_bindings(tenant_id,site_id,session_id,entitlement_id,seq,bound_from)
     VALUES (v_t,v_s,p_session,p_ent,v_seq,p_at) RETURNING id INTO v_id;
   UPDATE iam_v2.sessions SET entitlement_id = p_ent WHERE id = p_session;
+
+  -- 0181. A binding for an instant older than the raw retention may take over samples the purge has ALREADY folded into the
+  -- previous entitlement's accumulator; that fold cannot be redone (the samples are gone). Missing history is never invented:
+  -- the new entitlement is charged the session's folded hour-tier bytes from the hour of p_at onwards (an upper bound -- it
+  -- includes the part of the first hour before p_at and anything the previous binding legitimately kept), marked exact = false,
+  -- the previous entitlement keeps what it was charged, and the event says so. An event is written whenever p_at is older than
+  -- the retention, even if nothing is found folded yet (a purge may be running).
+  IF p_at < now() - interval '1 day' THEN
+    SELECT g.raw_retention_days INTO v_days FROM iam_v2.usage_rollup_settings_get(v_t, v_s) g;
+    v_cut := now() - make_interval(days => COALESCE(v_days, 2));
+    IF p_at < v_cut THEN
+      SELECT watermark INTO v_wm FROM iam_v2.site_usage_rollup_state WHERE tenant_id = v_t AND site_id = v_s;
+      SELECT COALESCE(sum(h.bytes_up + h.bytes_down), 0), COALESCE(sum(h.samples), 0) INTO v_hb, v_hn
+        FROM iam_v2.accounting_usage_hour h WHERE h.session_id = p_session AND h.bucket >= date_trunc('hour', p_at);
+      SELECT COALESCE(sum(ar.bytes_up + ar.bytes_down), 0), count(*) INTO v_rb, v_rn
+        FROM iam_v2.accounting_records ar
+       WHERE ar.session_id = p_session AND ar.sampled_at >= date_trunc('hour', p_at)
+         AND v_wm IS NOT NULL AND ar.ingested_at < v_wm;
+      v_gap := greatest(v_hb - v_rb, 0);
+      IF v_gap > 0 THEN
+        INSERT INTO iam_v2.accounting_usage_entitlement AS t
+               (tenant_id, site_id, entitlement_id, arm, bucket, bytes_up, bytes_down, records, latest_sampled_at, exact)
+        VALUES (v_t, v_s, p_ent, 0, date_trunc('hour', p_at), 0, v_gap, greatest(v_hn - v_rn, 0), p_at, false)
+        ON CONFLICT (entitlement_id, bucket, arm) DO UPDATE
+           SET bytes_down = t.bytes_down + EXCLUDED.bytes_down, records = t.records + EXCLUDED.records,
+               latest_sampled_at = greatest(t.latest_sampled_at, EXCLUDED.latest_sampled_at), exact = false;
+      END IF;
+      INSERT INTO iam_v2.accounting_integrity_events (tenant_id, site_id, entitlement_id, session_id, kind, bytes, detail)
+      VALUES (v_t, v_s, p_ent, p_session, 'RETROACTIVE_BINDING_PAST_RAW_RETENTION', v_gap,
+              jsonb_build_object('bound_from', p_at, 'raw_retention_days', COALESCE(v_days, 2), 'bucket', date_trunc('hour', p_at),
+                                 'charged_bytes_down', v_gap, 'charged_records', greatest(v_hn - v_rn, 0)));
+      IF v_gap > 0 THEN
+        PERFORM iam_v2.p6_reconcile_crossing_checkpoint(p_ent);
+      END IF;
+    END IF;
+  END IF;
   RETURN v_id;
 END $$;
 
@@ -14434,7 +14589,7 @@ END $$;
 -- Name: signin_capacity_settings_get(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
-CREATE FUNCTION iam_v2.signin_capacity_settings_get(p_tenant uuid, p_site uuid) RETURNS TABLE(otp_code_lifetime_minutes integer, otp_max_attempts integer, otp_device_hourly_cap integer, otp_destination_hourly_cap integer, otp_source_hourly_cap integer, signin_ceiling_per_minute integer, network_pause_exempt_hours integer, device_retention_days integer, portal_image_max_edge_px integer, portal_image_quality integer, post_stay_signin_days integer, config_version bigint, updated_at timestamp with time zone, updated_by text)
+CREATE FUNCTION iam_v2.signin_capacity_settings_get(p_tenant uuid, p_site uuid) RETURNS TABLE(otp_code_lifetime_minutes integer, otp_max_attempts integer, otp_device_hourly_cap integer, otp_destination_hourly_cap integer, otp_source_hourly_cap integer, signin_ceiling_per_minute integer, network_pause_exempt_hours integer, device_retention_days integer, portal_image_max_edge_px integer, portal_image_quality integer, post_stay_signin_days integer, post_stay_device_attempts_per_minute integer, post_stay_ip_attempts_per_minute integer, post_stay_wrong_answers_before_lockout integer, post_stay_lockout_minutes integer, post_stay_new_device_room_attempts_per_minute integer, post_stay_appliance_attempts_per_minute integer, config_version bigint, updated_at timestamp with time zone, updated_by text)
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
@@ -14443,6 +14598,7 @@ CREATE FUNCTION iam_v2.signin_capacity_settings_get(p_tenant uuid, p_site uuid) 
          COALESCE(s.otp_source_hourly_cap, 20), s.signin_ceiling_per_minute,
          COALESCE(s.network_pause_exempt_hours, 24), COALESCE(s.device_retention_days, 90),
          COALESCE(s.portal_image_max_edge_px, 2560), COALESCE(s.portal_image_quality, 82), COALESCE(s.post_stay_signin_days, 7),
+         COALESCE(s.post_stay_device_attempts_per_minute, 10), COALESCE(s.post_stay_ip_attempts_per_minute, 20), COALESCE(s.post_stay_wrong_answers_before_lockout, 5), COALESCE(s.post_stay_lockout_minutes, 15), COALESCE(s.post_stay_new_device_room_attempts_per_minute, 10), COALESCE(s.post_stay_appliance_attempts_per_minute, 200),
          COALESCE(s.config_version, 0), s.updated_at, s.updated_by
     FROM (SELECT 1) one
     LEFT JOIN iam_v2.site_signin_capacity_settings s ON s.tenant_id = p_tenant AND s.site_id = p_site;
@@ -14472,7 +14628,8 @@ BEGIN
   FOR k IN SELECT jsonb_object_keys(p_values) LOOP
     IF k NOT IN ('otp_code_lifetime_minutes','otp_max_attempts','otp_device_hourly_cap','otp_destination_hourly_cap',
                  'otp_source_hourly_cap','signin_ceiling_per_minute','network_pause_exempt_hours',
-                 'device_retention_days','portal_image_max_edge_px','portal_image_quality','post_stay_signin_days') THEN
+                 'device_retention_days','portal_image_max_edge_px','portal_image_quality','post_stay_signin_days',
+                 'post_stay_device_attempts_per_minute','post_stay_ip_attempts_per_minute','post_stay_wrong_answers_before_lockout','post_stay_lockout_minutes','post_stay_new_device_room_attempts_per_minute','post_stay_appliance_attempts_per_minute') THEN
       RAISE EXCEPTION 'unknown setting %', k USING ERRCODE = 'invalid_parameter_value';
     END IF;
   END LOOP;
@@ -14495,6 +14652,12 @@ BEGIN
       portal_image_max_edge_px   = COALESCE((p_values->>'portal_image_max_edge_px')::int, s.portal_image_max_edge_px),
       portal_image_quality       = COALESCE((p_values->>'portal_image_quality')::int, s.portal_image_quality),
       post_stay_signin_days      = COALESCE((p_values->>'post_stay_signin_days')::int, s.post_stay_signin_days),
+      post_stay_device_attempts_per_minute = COALESCE((p_values->>'post_stay_device_attempts_per_minute')::int, s.post_stay_device_attempts_per_minute),
+      post_stay_ip_attempts_per_minute = COALESCE((p_values->>'post_stay_ip_attempts_per_minute')::int, s.post_stay_ip_attempts_per_minute),
+      post_stay_wrong_answers_before_lockout = COALESCE((p_values->>'post_stay_wrong_answers_before_lockout')::int, s.post_stay_wrong_answers_before_lockout),
+      post_stay_lockout_minutes = COALESCE((p_values->>'post_stay_lockout_minutes')::int, s.post_stay_lockout_minutes),
+      post_stay_new_device_room_attempts_per_minute = COALESCE((p_values->>'post_stay_new_device_room_attempts_per_minute')::int, s.post_stay_new_device_room_attempts_per_minute),
+      post_stay_appliance_attempts_per_minute = COALESCE((p_values->>'post_stay_appliance_attempts_per_minute')::int, s.post_stay_appliance_attempts_per_minute),
       updated_by = btrim(p_operator), updated_at = now(), config_version = s.config_version + 1
     WHERE s.tenant_id = p_tenant AND s.site_id = p_site
     RETURNING s.config_version INTO v_version;
@@ -17494,10 +17657,44 @@ CREATE TABLE iam_v2.accounting_checkpoints (
     last_record_id uuid,
     last_classification text NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_sample_seq bigint DEFAULT 0 NOT NULL,
     CONSTRAINT accounting_checkpoints_last_classification_check CHECK ((last_classification = ANY (ARRAY['BASELINED'::text, 'ACCEPTED'::text, 'DELAYED'::text, 'DUPLICATE'::text, 'RESET_BASELINED'::text]))),
     CONSTRAINT accounting_checkpoints_prev_bytes_down_check CHECK ((prev_bytes_down >= 0)),
     CONSTRAINT accounting_checkpoints_prev_bytes_up_check CHECK ((prev_bytes_up >= 0))
 );
+
+
+--
+-- Name: COLUMN accounting_checkpoints.last_sample_seq; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.accounting_checkpoints.last_sample_seq IS 'The highest accounting_records.sample_seq ever allocated for the session through this checkpoint (0181). Survives the raw purge, so the per-session sequence never restarts below the crossing checkpoint.';
+
+
+--
+-- Name: accounting_integrity_events; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.accounting_integrity_events (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    entitlement_id uuid,
+    session_id uuid,
+    kind text NOT NULL,
+    bytes bigint,
+    detail jsonb DEFAULT '{}'::jsonb NOT NULL,
+    recorded_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT aie_bytes CHECK (((bytes IS NULL) OR (bytes >= 0))),
+    CONSTRAINT aie_kind CHECK ((kind = ANY (ARRAY['CHECKPOINT_BELOW_EXACT'::text, 'RETROACTIVE_BINDING_PAST_RAW_RETENTION'::text, 'CROSSING_INSTANT_APPROXIMATE'::text, 'BACKFILL_INEXACT_ATTRIBUTION'::text])))
+);
+
+
+--
+-- Name: TABLE accounting_integrity_events; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.accounting_integrity_events IS 'Every place the accounting could not be exact and chose the conservative (never lower) quota direction instead (0181): a checkpoint lifted to the exact figure, a binding written into history the raw purge had already folded, a crossing instant that is only known to the hour, an inexact backfilled attribution. No guest data: ids, byte counts and instants only. Read through iam_v2.accounting_integrity_summary().';
 
 
 --
@@ -22057,6 +22254,12 @@ CREATE TABLE iam_v2.site_signin_capacity_settings (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_by text,
     post_stay_signin_days integer DEFAULT 7 NOT NULL,
+    post_stay_device_attempts_per_minute integer DEFAULT 10 NOT NULL,
+    post_stay_ip_attempts_per_minute integer DEFAULT 20 NOT NULL,
+    post_stay_wrong_answers_before_lockout integer DEFAULT 5 NOT NULL,
+    post_stay_lockout_minutes integer DEFAULT 15 NOT NULL,
+    post_stay_new_device_room_attempts_per_minute integer DEFAULT 10 NOT NULL,
+    post_stay_appliance_attempts_per_minute integer DEFAULT 200 NOT NULL,
     CONSTRAINT ssc_ceiling CHECK (((signin_ceiling_per_minute IS NULL) OR ((signin_ceiling_per_minute >= 600) AND (signin_ceiling_per_minute <= 100000)))),
     CONSTRAINT ssc_destination_over_device CHECK ((otp_destination_hourly_cap >= otp_device_hourly_cap)),
     CONSTRAINT ssc_device_retention CHECK (((device_retention_days >= 7) AND (device_retention_days <= 3650))),
@@ -22069,6 +22272,12 @@ CREATE TABLE iam_v2.site_signin_capacity_settings (
     CONSTRAINT ssc_otp_source_cap CHECK (((otp_source_hourly_cap >= 5) AND (otp_source_hourly_cap <= 500))),
     CONSTRAINT ssc_pause_exempt CHECK (((network_pause_exempt_hours >= 0) AND (network_pause_exempt_hours <= 168))),
     CONSTRAINT ssc_post_stay_days CHECK (((post_stay_signin_days >= 1) AND (post_stay_signin_days <= 30))),
+    CONSTRAINT ssc_ps_appliance_attempts_per_minute CHECK (((post_stay_appliance_attempts_per_minute >= 20) AND (post_stay_appliance_attempts_per_minute <= 5000))),
+    CONSTRAINT ssc_ps_device_attempts_per_minute CHECK (((post_stay_device_attempts_per_minute >= 3) AND (post_stay_device_attempts_per_minute <= 60))),
+    CONSTRAINT ssc_ps_ip_attempts_per_minute CHECK (((post_stay_ip_attempts_per_minute >= 5) AND (post_stay_ip_attempts_per_minute <= 200))),
+    CONSTRAINT ssc_ps_lockout_minutes CHECK (((post_stay_lockout_minutes >= 1) AND (post_stay_lockout_minutes <= 240))),
+    CONSTRAINT ssc_ps_new_device_room_attempts_per_minute CHECK (((post_stay_new_device_room_attempts_per_minute >= 3) AND (post_stay_new_device_room_attempts_per_minute <= 60))),
+    CONSTRAINT ssc_ps_wrong_answers_before_lockout CHECK (((post_stay_wrong_answers_before_lockout >= 3) AND (post_stay_wrong_answers_before_lockout <= 20))),
     CONSTRAINT ssc_version CHECK ((config_version >= 0))
 );
 
@@ -23956,6 +24165,14 @@ ALTER TABLE ONLY iam_v2.accounting_checkpoints
 
 ALTER TABLE ONLY iam_v2.accounting_checkpoints
     ADD CONSTRAINT accounting_checkpoints_session_id_source_device_id_bridge_c_key UNIQUE (session_id, source_device_id, bridge, class_minor);
+
+
+--
+-- Name: accounting_integrity_events accounting_integrity_events_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.accounting_integrity_events
+    ADD CONSTRAINT accounting_integrity_events_pkey PRIMARY KEY (id);
 
 
 --
@@ -26701,6 +26918,20 @@ CREATE INDEX account_password_settings_changes_lookup ON iam_v2.account_password
 
 
 --
+-- Name: accounting_checkpoints_class_idx; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX accounting_checkpoints_class_idx ON iam_v2.accounting_checkpoints USING btree (tenant_id, site_id, bridge, class_minor, source_epoch);
+
+
+--
+-- Name: accounting_checkpoints_site_epoch_idx; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX accounting_checkpoints_site_epoch_idx ON iam_v2.accounting_checkpoints USING btree (tenant_id, site_id, source_epoch DESC);
+
+
+--
 -- Name: accounting_records_site_ingested_idx; Type: INDEX; Schema: iam_v2; Owner: -
 --
 
@@ -26740,6 +26971,13 @@ CREATE INDEX agr_site ON iam_v2.assisted_guest_requests USING btree (tenant_id, 
 --
 
 CREATE INDEX agre_request ON iam_v2.assisted_guest_request_events USING btree (request_id, at);
+
+
+--
+-- Name: aie_site_kind; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX aie_site_kind ON iam_v2.accounting_integrity_events USING btree (tenant_id, site_id, kind, recorded_at DESC);
 
 
 --
@@ -26831,6 +27069,13 @@ CREATE UNIQUE INDEX client_groups_name_per_site ON iam_v2.client_groups USING bt
 --
 
 CREATE INDEX controlled_operation_scope_opened_at ON iam_v2.controlled_operation_scope USING btree (opened_at);
+
+
+--
+-- Name: controlled_operation_scope_opened_idx; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX controlled_operation_scope_opened_idx ON iam_v2.controlled_operation_scope USING btree (opened_at);
 
 
 --
@@ -31121,6 +31366,14 @@ GRANT ALL ON FUNCTION iam_v2.account_password_settings_set(p_tenant uuid, p_site
 
 
 --
+-- Name: FUNCTION accounting_integrity_summary(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.accounting_integrity_summary(p_tenant uuid, p_site uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.accounting_integrity_summary(p_tenant uuid, p_site uuid) TO svc_edged;
+
+
+--
 -- Name: FUNCTION accounting_retention_get(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -31576,6 +31829,14 @@ GRANT ALL ON FUNCTION iam_v2.end_session_enforcement(p_tenant uuid, p_site uuid,
 
 REVOKE ALL ON FUNCTION iam_v2.entitlement_usage_bytes(p_ent uuid, p_at timestamp with time zone) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.entitlement_usage_bytes(p_ent uuid, p_at timestamp with time zone) TO svc_pmsd;
+
+
+--
+-- Name: FUNCTION entitlement_usage_uncertainty(p_ent uuid, p_at timestamp with time zone); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.entitlement_usage_uncertainty(p_ent uuid, p_at timestamp with time zone) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.entitlement_usage_uncertainty(p_ent uuid, p_at timestamp with time zone) TO svc_pmsd;
 
 
 --
@@ -32905,6 +33166,13 @@ REVOKE ALL ON FUNCTION iam_v2.p6_online_watermark_monotonic() FROM PUBLIC;
 --
 
 REVOKE ALL ON FUNCTION iam_v2.p6_over_budget_now(p_entitlement uuid) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION p6_reconcile_crossing_checkpoint(p_entitlement uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p6_reconcile_crossing_checkpoint(p_entitlement uuid) FROM PUBLIC;
 
 
 --

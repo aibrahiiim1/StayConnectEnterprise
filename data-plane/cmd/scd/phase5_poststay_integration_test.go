@@ -222,3 +222,66 @@ func TestIntegration_PostStay_NoGrantablePackageMeansNoContext(t *testing.T) {
 		t.Fatalf("verify on a site with nothing to grant answered %+v", ver)
 	}
 }
+
+// AD-36 closure: a device that comes back (its session ended, or the first answer was lost) continues the SAME
+// entitlement; it never gets a second one or a fresh allowance. A refused attempt leaves an audit row without guest data.
+func TestIntegration_PostStay_ReturningDeviceContinuesTheEntitlementAndRefusalsAreAudited(t *testing.T) {
+	f := newPostStayFixture(t)
+	f.signInByRoomThenCheckOut(t)
+	defer f.startEnforcementOwnerAtEpoch(t, 2)()
+	ctx := context.Background()
+
+	ver := psCall(t, f.ps.verifyHandler, f.answers())
+	conv := psCall(t, f.ps.convertHandler, map[string]any{
+		"device": f.device(), "auth_context_id": ver.AuthContextID, "package_revision_id": f.pkgB})
+	if conv.Outcome != psOutcomeGranted {
+		t.Fatalf("first conversion: %+v", conv)
+	}
+
+	// Back again while the session is still live (a lost reply): the same entitlement and the same session.
+	ver2 := psCall(t, f.ps.verifyHandler, f.answers())
+	if ver2.Outcome != psOutcomeVerified {
+		t.Fatalf("returning device did not verify: %+v", ver2)
+	}
+	again := psCall(t, f.ps.convertHandler, map[string]any{
+		"device": f.device(), "auth_context_id": ver2.AuthContextID, "package_revision_id": f.pkgA})
+	if again.Outcome != psOutcomeGranted || again.EntitlementID != conv.EntitlementID || again.SessionID != conv.SessionID {
+		t.Fatalf("returning device: %+v, want entitlement %s and session %s again", again, conv.EntitlementID, conv.SessionID)
+	}
+
+	// Back after the session ended: a new session on the SAME entitlement.
+	if _, err := f.pool.Exec(ctx, `UPDATE iam_v2.sessions SET state='ended', ended=now(), end_reason='TEST' WHERE id=$1`, conv.SessionID); err != nil {
+		t.Fatal(err)
+	}
+	ver3 := psCall(t, f.ps.verifyHandler, f.answers())
+	third := psCall(t, f.ps.convertHandler, map[string]any{
+		"device": f.device(), "auth_context_id": ver3.AuthContextID, "package_revision_id": f.pkgB})
+	// (This harness's enforcement stand-in re-registers the device's accounting origin only once per session minor, so the
+	// reply may stay UNAVAILABLE here; what matters is the database: a new session row on the same entitlement.)
+	_ = third
+	var n int
+	if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM iam_v2.sessions
+		WHERE entitlement_id=$1 AND id<>$2 AND ended IS NULL AND state IN ('active','PENDING_ENFORCEMENT')`,
+		conv.EntitlementID, conv.SessionID).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("%d new live sessions on entitlement %s (%v), want exactly 1", n, conv.EntitlementID, err)
+	}
+	if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM iam_v2.purchases WHERE stay_id=$1 AND trigger='POST_STAY_CONVERSION'`, f.stay).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("%d post-stay purchases (%v), want exactly 1", n, err)
+	}
+
+	// A wrong answer is refused the same way and is on record, without the answer or the guest.
+	bad := f.answers()
+	bad["reservation"] = "WRONG-RES-ZQ9"
+	if out := psCall(t, f.ps.verifyHandler, bad); out.Outcome != psOutcomeUnavailab {
+		t.Fatalf("wrong reservation: %+v", out)
+	}
+	var rows int
+	var leaked bool
+	if err := f.pool.QueryRow(ctx, `SELECT count(*), COALESCE(bool_or(payload::text ~* '(WRONG-RES-ZQ9|RES-4001|Okonkwo)'), false)
+		FROM public.audit_log WHERE tenant_id=$1 AND action='post_stay.signin_refused'`, f.tenant).Scan(&rows, &leaked); err != nil {
+		t.Fatal(err)
+	}
+	if rows == 0 || leaked {
+		t.Fatalf("refusal audit rows=%d leaked guest data=%v", rows, leaked)
+	}
+}

@@ -14,6 +14,13 @@
 //     lock out another device's attempts for the same stay, and a guesser's device is locked out on its own.
 //   - The profile is per stay EPISODE (UNIQUE(origin_stay_id, origin_lifecycle_version)), never per room, so it cannot
 //     be inherited by the next occupant: a reinstatement orphans it in the database.
+//   - A device never gets an Entitlement of its own and never resets what the stay spent. The stay has ONE live
+//     Entitlement: a returning device or a further device JOINS it (the plan's device limit decides), and only when the
+//     stay has none (it ended at check-out) is the Post-Stay BENEFIT granted -- once per stay, a new Entitlement from
+//     the zero-price POST_STAY package, by the package's design and not by the device (see convert.go).
+//   - Brute-force limits are the site's settings (limits.go, migration 0190); a client that rotates its device
+//     identity is bounded by the room and reservation it must guess, not by the identity it can change for free.
+//   - Every refusal, grant and join is a row in the audit log without guest data (audit.go).
 //   - v1 grants zero-price packages only. No PIN exists any more: the pin_* columns of older profiles are historical
 //     evidence of how those profiles were issued and are never read for a decision.
 package poststay
@@ -25,6 +32,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/throttle"
@@ -53,17 +61,23 @@ var (
 	// ErrSettlementRequired: v1 refuses priced packages rather than silently granting them free.
 	ErrSettlementRequired  = errors.New("poststay: post-stay v1 grants zero-price packages only")
 	ErrPackageNotGrantable = errors.New("poststay: package revision is not a grantable post-stay package")
-	ErrAlreadyConverted    = errors.New("poststay: this episode has already converted to post-stay")
+	ErrAlreadyConverted    = errors.New("poststay: the once-per-stay post-stay benefit was already granted and is no longer available")
+	// ErrEntitlementNotJoinable: the stay has a live Entitlement that a device cannot join now (not active, or its window has
+	// ended). Granting a second one would break one-live-Entitlement-per-Stay and reset what it spent, so nothing is granted.
+	ErrEntitlementNotJoinable = errors.New("poststay: the stay's entitlement cannot be joined now")
+	// ErrDeviceLimit: the entitlement's plan allows no more devices; a device cannot add itself past it.
+	ErrDeviceLimit = errors.New("poststay: the entitlement already has its maximum number of devices")
 )
 
 type Store struct {
 	pool *pgxpool.Pool
 	thr  *throttle.Store
 	now  func() time.Time
+	aud  *auditor
 }
 
 func New(pool *pgxpool.Pool, thr *throttle.Store) *Store {
-	return &Store{pool: pool, thr: thr, now: time.Now}
+	return &Store{pool: pool, thr: thr, now: time.Now, aud: newAuditor()}
 }
 
 // SetClock is for tests only.
@@ -107,6 +121,54 @@ func (s *Store) Revoke(ctx context.Context, req RevokeRequest) error {
 // out): that is the same refusal as a wrong answer. The insert runs in the controlled-writer scope the table requires,
 // and a concurrent creator is absorbed by the episode's uniqueness.
 func (s *Store) ensureProfile(ctx context.Context, tenant, site, stay string, windowDays int) (string, error) {
+	// The common case after the first device: the episode already has its profile (the first device's conversion may even
+	// have moved the stay on to POST_STAY_ACTIVE, which the insert below cannot accept). Read before writing.
+	if profile, err := s.currentProfile(ctx, tenant, site, stay); err != nil {
+		return "", err
+	} else if profile != "" {
+		return s.authenticable(ctx, tenant, site, profile)
+	}
+	profile, err := s.insertProfile(ctx, tenant, site, stay, windowDays)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "P0001" {
+			// Two devices of one stay racing: the other one created the profile and converted (the stay left CHECKED_OUT)
+			// between our read and our insert, and the profile guard refused ours. Take the one that exists.
+			if cur, rerr := s.currentProfile(ctx, tenant, site, stay); rerr == nil && cur != "" {
+				return s.authenticable(ctx, tenant, site, cur)
+			}
+			return "", ErrNotAuthenticable
+		}
+		return "", err
+	}
+	return s.authenticable(ctx, tenant, site, profile)
+}
+
+// currentProfile is the profile of the stay's CURRENT episode, or "".
+func (s *Store) currentProfile(ctx context.Context, tenant, site, stay string) (string, error) {
+	var profile string
+	err := s.pool.QueryRow(ctx, `SELECT p.id::text FROM iam_v2.post_stay_profiles p
+		JOIN iam_v2.stays st ON st.tenant_id=p.tenant_id AND st.site_id=p.site_id AND st.id=p.origin_stay_id
+		                    AND st.lifecycle_version=p.origin_lifecycle_version
+		 WHERE p.tenant_id=$1 AND p.site_id=$2 AND p.origin_stay_id=$3`, tenant, site, stay).Scan(&profile)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return profile, err
+}
+
+func (s *Store) authenticable(ctx context.Context, tenant, site, profile string) (string, error) {
+	var ok bool
+	if err := s.pool.QueryRow(ctx, `SELECT iam_v2.p5_post_stay_authenticable($1,$2,$3)`, tenant, site, profile).Scan(&ok); err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", ErrNotAuthenticable
+	}
+	return profile, nil
+}
+
+func (s *Store) insertProfile(ctx context.Context, tenant, site, stay string, windowDays int) (string, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return "", err
@@ -139,13 +201,6 @@ func (s *Store) ensureProfile(ctx context.Context, tenant, site, stay string, wi
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return "", err
-	}
-	var ok bool
-	if err := s.pool.QueryRow(ctx, `SELECT iam_v2.p5_post_stay_authenticable($1,$2,$3)`, tenant, site, profile).Scan(&ok); err != nil {
-		return "", err
-	}
-	if !ok {
-		return "", ErrNotAuthenticable
 	}
 	return profile, nil
 }

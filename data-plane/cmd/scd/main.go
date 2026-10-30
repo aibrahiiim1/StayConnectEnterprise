@@ -608,6 +608,14 @@ func main() {
 		}),
 	}
 	s.nft.SetMetrics(s.met)
+	if pool != nil {
+		s.met.WatchPool("scd", func() metrics.PoolStats {
+			st := pool.Stat()
+			return metrics.PoolStats{Acquired: st.AcquiredConns(), Idle: st.IdleConns(), Max: st.MaxConns(),
+				Acquires: st.AcquireCount(), EmptyAcquires: st.EmptyAcquireCount(), CanceledAcquires: st.CanceledAcquireCount(),
+				AcquireWait: st.AcquireDuration()}
+		}, prometheus.Labels{"tenant_id": c.TenantID, "site_id": c.SiteID, "appliance_id": c.ApplianceID})
+	}
 	// The portal's HTTPS state for social sign-in: the HTTP fallback until the portal certificate agent starts below.
 	s.socialPortal = noPortalHTTPS{}
 

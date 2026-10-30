@@ -150,6 +150,8 @@ type passLeases struct {
 	onFetch func(time.Duration, int)
 	leases  []KeaLease
 	err     error
+	// byIP indexes leases by address, built on first use (LeasesForIP).
+	byIP map[string][]KeaLease
 }
 
 // KeaEpoch forwards to the real source.
@@ -175,11 +177,28 @@ func (l *passLeases) Leases() ([]KeaLease, error) {
 		l.leases, l.err = l.src.Leases()
 		l.done = true
 		l.fetch = time.Since(t0)
+		l.byIP = nil
 		if l.onFetch != nil {
 			l.onFetch(l.fetch, len(l.leases))
 		}
 	}
 	return l.leases, l.err
+}
+
+// LeasesForIP returns the rows of the pass's lease list that name ip, in their original order. Every session asks "whose address is this", and
+// answering by reading the whole list made that question cost the size of the list: two thousand sessions against two thousand leases is four
+// million comparisons a pass, a tenth of netd's CPU at 300 sign-ins a minute (capacity acceptance, 2026-10-30).
+func (l *passLeases) LeasesForIP(ip string) ([]KeaLease, bool) {
+	if !l.done || l.err != nil {
+		return nil, false
+	}
+	if l.byIP == nil {
+		l.byIP = make(map[string][]KeaLease, len(l.leases))
+		for _, x := range l.leases {
+			l.byIP[x.IPAddress] = append(l.byIP[x.IPAddress], x)
+		}
+	}
+	return l.byIP[ip], true
 }
 
 // Any other mode value, including the empty string from older revisions, is PER_DEVICE.
@@ -439,7 +458,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 			res.Problems = append(res.Problems, "shape: unusable plan entry for session "+s.SessionID)
 			continue
 		}
-		minor, ok := shape.MinorForIP(ip)
+		minor, ok := shape.MinorFor(s.Bridge, ip)
 		if !ok {
 			res.Failed++
 			res.Problems = append(res.Problems, "shape: unshapeable address for session "+s.SessionID)
@@ -476,7 +495,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 		}
 		// A handover is not a teardown: when the plan hands the address to a newer session, kernel teardown would take the new guest offline and reset its accounting series every pass.
 		// Only the durable half runs; the kernel half is left to the new owner.
-		if minor, ok := shape.MinorForIP(ip); ok {
+		if minor, ok := shape.MinorFor(s.Bridge, ip); ok {
 			if next, taken := desired[s.Bridge][minor]; taken && next.SessionID != s.SessionID {
 				ck := classKey(s.Bridge, s.SessionID)
 				// Handed over and already recorded as ended: the plan keeps listing it for a while, and recording it again every pass is a locking write per
@@ -521,7 +540,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 		if p.markEnded(ctx, s.SessionID, s.EndReason) {
 			stillTorn[classKey(s.Bridge, s.SessionID)] = true
 		}
-		if minor, ok := shape.MinorForIP(ip); ok {
+		if minor, ok := shape.MinorFor(s.Bridge, ip); ok {
 			delete(p.minorOwner, minorKey(s.Bridge, minor))
 		}
 		delete(p.classes, classKey(s.Bridge, s.SessionID))
@@ -557,7 +576,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 				if el.IP == nil {
 					continue
 				}
-				minor, ok := shape.MinorForIP(el.IP)
+				minor, ok := shape.MinorFor(el.Bridge, el.IP)
 				if !ok {
 					continue
 				}
@@ -604,7 +623,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 			// Batched pass: all stray classes of the bridge go in one tc batch and are proven gone with one read.
 			var strays []int
 			for _, minor := range sortedInts(installed) {
-				if minor < shape.GuestMinorBase || minor > shape.GuestMinorMax {
+				if !shape.IsGuestMinor(minor) {
 					continue
 				}
 				if _, want := desired[bridge][minor]; !want {
@@ -617,7 +636,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 			continue
 		}
 		for _, minor := range sortedInts(installed) {
-			if minor < shape.GuestMinorBase || minor > shape.GuestMinorMax {
+			if !shape.IsGuestMinor(minor) {
 				continue
 			}
 			if _, want := desired[bridge][minor]; want {

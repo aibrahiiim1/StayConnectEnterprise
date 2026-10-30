@@ -8,6 +8,7 @@ package poststay
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -231,7 +232,14 @@ func newDevice(t *testing.T, p *pgxpool.Pool, f fx, mac string) string {
 }
 
 func req(f fx, device, room, res, last string) VerifyRequest {
-	return VerifyRequest{Tenant: f.tenant, Site: f.site, Device: device, IP: "10.99.0.5", Room: room, Reservation: res, LastName: last}
+	// The source address is derived from the device: the per-address bucket (20 a minute, then a 15-minute block) is real
+	// state in the database, so tests sharing one address blocked each other across runs.
+	h := 0
+	for _, c := range device {
+		h = (h*31 + int(c)) & 0xffffff
+	}
+	ip := fmt.Sprintf("10.%d.%d.%d", 100+(h>>16)%100, (h>>8)&0xff, h&0xff)
+	return VerifyRequest{Tenant: f.tenant, Site: f.site, Device: device, IP: ip, Room: room, Reservation: res, LastName: last}
 }
 
 // The device that was on the stay signs in with the room and the reservation; a profile is made once, with no PIN.

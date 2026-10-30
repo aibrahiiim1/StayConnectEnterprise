@@ -40,3 +40,28 @@ the production Central's name is blackholed in the appliances' `/etc/hosts`; not
 `ogload setup / signin / traffic` through `scenario.sh`, with `monitor.sh` on the appliance -> `analyze.py monitor.csv scenario.log`.
 Offline activation: `off_flow.py` on Central (import request, mint package) and `apply_pkg.py` on the appliance (uploads the package exactly as the Admin Console does,
 with tampering options for the refusal tests).
+
+## Sign-in capacity round (2026-10-30): what changed in the lab, and the measuring tools
+
+The lab was rebuilt for the sign-in capacity closure ([`docs/reviews/SIGNIN_CAPACITY_CLOSURE.md`](../../docs/reviews/SIGNIN_CAPACITY_CLOSURE.md)).
+Differences from the first lab, each a property of the lab host that decided what the earlier numbers meant:
+
+* **The host kernel's neighbour (ARP) table.** Docker Desktop's VM keeps one table for every container; its hard limit (`gc_thresh3`, 1,024) is below the
+  2,000+ simulated clients plus the appliance's own entries, and the kernel logged `neighbour: arp_cache: neighbor table overflow!`. That, not the generator's
+  dialling pattern, is what dropped SYNs in the earlier runs ("traffic success 7 percent"). Raise it from the VM:
+  `wsl -d docker-desktop -e sh -c "sysctl -w net.ipv4.neigh.default.gc_thresh1=8192 net.ipv4.neigh.default.gc_thresh2=32768 net.ipv4.neigh.default.gc_thresh3=65536"`
+  (it does not survive a Docker Desktop restart). The product carries the same setting for the appliance itself (`deploy/sysctl/99-stayconnect.conf`).
+* **Database memory.** The TimescaleDB image tunes itself from the host's memory (15 GB here: `shared_buffers` 3,958 MB); the lab sets what it would pick on the
+  4 GB VM (`pgtune.sh`: 1 GB, 3 GB effective cache, 5 MB work_mem) and adds `pg_stat_statements`, `track_io_timing`, `track_wal_io_timing`, `log_lock_waits`.
+  Postgres is restarted by recreating its container through the product's compose file
+  (`docker compose -f /opt/stayconnect/deploy/compose/infra.yml up -d --force-recreate postgres`), never by restarting the nested Docker daemon.
+* **Churn clients.** A client that signs in exactly when its 60-second session ends is a hand-over (the new session takes the old class's address and goes down
+  netd's slow per-session path, 0.5 to 1 s each). The churn therefore cycles 400 clients (indices 2000 to 2399) at 300 sign-ins a minute, so each is idle for
+  about 20 s between the end of one session and its next sign-in.
+* **Measuring.** `sampler.sh` (every 5 s: cgroup CPU and memory, PostgreSQL connections, locks and waits, authorisation-set size, duplicate live sessions per
+  device, licence count), `gen-churn.sh` (300 a minute plus 10 percent of the long sessions moving), `ogload signin -log` (one line per attempt),
+  `attempts.py`, `csvsum.py`, `cpu.py` (analysis), `pgsample.sh` + `pgagg.py` (who waits for whom), `pgstat.sh` (pg_stat_statements), `passes.py`/`passfull.py`
+  (netd pass lines), `routes.py` (scd route latencies), `poolshow.py` (scd pool metrics), `collect.sh`, `cpuproc.sh` (CPU per service), `prof.sh` (pprof),
+  `probe.sh` (commit latency), `lab_quota.py` (data-quota vouchers). The scripts assume the lab's layout (`/rel` is the shared directory, `/root` the working directory).
+  Diagnostic binaries: `build-lab-binaries.sh stayconnect_production,oglabdiag <svc>` serves pprof on loopback (scd 6061, netd 6062, acctd 6063); a release is
+  never built with that tag.

@@ -82,10 +82,10 @@ func TestActivateAddsForwardingFilters(t *testing.T) {
 		t.Fatal(err)
 	}
 	cid := ClassidForIP(testIP)
-	if !rr.has("filter add dev br-guest protocol ip parent 1: pref") || !rr.has("match ip dst "+testIP.String()+"/32 flowid "+cid) {
+	if !rr.has("filter add dev br-guest protocol ip parent 1: pref 1 handle 0x1005 flower dst_ip "+testIP.String()+"/32 classid "+cid) {
 		t.Fatal("the download forwarding filter was not installed on activation")
 	}
-	if !rr.has("match ip src " + testIP.String() + "/32 flowid " + cid) {
+	if !rr.has("filter add dev ifb-guest protocol ip parent 1: pref 1 handle 0x1005 flower src_ip " + testIP.String() + "/32 classid " + cid) {
 		t.Fatal("the upload forwarding filter was not installed on activation")
 	}
 }
@@ -165,7 +165,7 @@ func TestRemoveClassificationStripsFilters(t *testing.T) {
 func TestSessionForwardingReadsBothDirections(t *testing.T) {
 	c, rr := newTestClient()
 	minor, _ := MinorForIP(testIP)
-	rr.filterShow = "filter parent 1: protocol ip pref " + itoa(minor) + " u32 ..."
+	rr.filterShow = "filter protocol ip pref 1 flower chain 0 handle 0x" + itoahex(minor) + " classid 1:" + itoahex(minor) + "\n"
 	on, err := c.SessionForwarding(context.Background(), "br-guest", testIP)
 	if err != nil {
 		t.Fatal(err)

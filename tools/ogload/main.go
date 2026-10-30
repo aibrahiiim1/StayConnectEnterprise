@@ -355,7 +355,27 @@ func cmdSignin() {
 	to := flag.Int("to", 1<<30, "client index to stop before")
 	loopFor := flag.Duration("loop-for", 0, "keep cycling over the selected clients (re-signing them in) for this long")
 	voucherOffset := flag.Int("voucher-offset", 0, "skip this many voucher codes first")
+	logPath := flag.String("log", "", "write one line per attempt (unix_ms,client,result,latency_ms) to this file")
 	flag.Parse()
+	var lmu sync.Mutex
+	var lw *bufio.Writer
+	if *logPath != "" {
+		lf, err := os.Create(*logPath)
+		if err != nil {
+			fatal("log: %v", err)
+		}
+		defer lf.Close()
+		lw = bufio.NewWriterSize(lf, 1<<16)
+		defer lw.Flush()
+	}
+	attemptLog := func(idx int, result string, d time.Duration) {
+		if lw == nil {
+			return
+		}
+		lmu.Lock()
+		fmt.Fprintf(lw, "%d,%d,%s,%d\n", time.Now().UnixMilli(), idx, strings.ReplaceAll(result, ",", ";"), d.Milliseconds())
+		lmu.Unlock()
+	}
 	cs := load()
 	var sel []*Client
 	for _, c := range cs {
@@ -424,22 +444,27 @@ func cmdSignin() {
 				if err != nil {
 					atomic.AddInt64(&errN, 1)
 					st.add("error:"+short(err), d, 0)
+					attemptLog(c.Idx, "error", d)
 					return
 				}
 				io.Copy(io.Discard, resp.Body)
 				resp.Body.Close()
 				loc := resp.Header.Get("Location")
 				switch {
-				case strings.Contains(loc, "/success"):
+				// A sign-in counts only as the portal's own success answer: 303 See Other to /success.
+				case resp.StatusCode == http.StatusSeeOther && strings.Contains(loc, "/success"):
 					c.SignedIn, c.Voucher = true, code
 					atomic.AddInt64(&okN, 1)
 					st.add("ok", d, 0)
+					attemptLog(c.Idx, "ok", d)
 				case strings.Contains(loc, "/packages"):
 					atomic.AddInt64(&errN, 1)
 					st.add("needs_package_choice", d, 0)
+					attemptLog(c.Idx, "needs_package_choice", d)
 				default:
 					atomic.AddInt64(&errN, 1)
 					st.add(fmt.Sprintf("refused:%d", resp.StatusCode), d, 0)
+					attemptLog(c.Idx, fmt.Sprintf("refused:%d", resp.StatusCode), d)
 				}
 			}(c, codes[i])
 		}

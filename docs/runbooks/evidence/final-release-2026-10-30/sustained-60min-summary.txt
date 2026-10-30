@@ -1,0 +1,103 @@
+# 60-minute sustained run, release dbf86d288f65, 2026-10-30 06:36:33 - 07:36:36 UTC (lab)
+
+## sign-ins (generator log: one line per attempt)
+attempts 18000 ok 17998 (99.99%)  p50 3404 p95 5080 p99 5769 max 9914 ms
+failures by kind {'refused:200': 2}
+minutes with failures (minute, failures): [(52, 2)]
+ok within 8 s: 17985 of 17998
+minutes with a full offer (>=295 attempts): 50 of 61
+enforced sign-ins per minute: min 295, median 301, max 313; minutes below 298: [(12, 296), (17, 295), (20, 297), (47, 296), (56, 297), (57, 296), (59, 296)]
+per-minute median latency: lowest 2979, highest 3905 ms; per-minute p99: lowest 5124, highest 8051 ms
+minutes  0- 9:  2987 attempts,  2987 enforced (100.00%), p50 2994 p95 4805 p99 5636 ms
+minutes 10-19:  3002 attempts,  3002 enforced (100.00%), p50 3387 p95 5006 p99 5632 ms
+minutes 20-29:  2995 attempts,  2995 enforced (100.00%), p50 3443 p95 4972 p99 5515 ms
+minutes 30-39:  2997 attempts,  2997 enforced (100.00%), p50 3543 p95 5232 p99 5979 ms
+minutes 40-49:  3006 attempts,  3006 enforced (100.00%), p50 3487 p95 5149 p99 5939 ms
+minutes 50-59:  2993 attempts,  2991 enforced (99.93%), p50 3556 p95 5210 p99 6035 ms
+minutes 60-60:    20 attempts,    20 enforced (100.00%), p50 3838 p95 4762 p99 4762 ms
+
+## generator summary lines
+{"attempts":17700,"elapsed_s":3540.000507544,"errors":2,"ok":17682,"progress":"signin"}
+{"attempts":17850,"elapsed_s":3570.000600826,"errors":2,"ok":17826,"progress":"signin"}
+{"attempts":18000,"bytes":0,"from":2000,"max_ms":9914,"n":18000,"ok":17998,"p50_ms":3404,"p95_ms":5080,"p99_ms":5770,"phase":"signin","results":{"ok":17998,"refused:200":2},"seconds":3603.449802513,"target_rate_per_min":300,"to":2400}
+{"bytes":32086425600,"bytes_per_mover":262144,"live_clients":1700,"max_ms":138,"n":122400,"p50_ms":108,"p95_ms":108,"p99_ms":109,"pct":10,"phase":"traffic","results":{"ok":122400},"rounds":720,"seconds":3600.430853194}
+
+## appliance samples every 5 s (sampler.sh, sampler2.sh)
+samples 628
+authset min 1720 max 2002  (samples below 1700: 0)
+active sessions min 1714 max 2021
+pending max 33  dup_live_dev max 0  online_count max 2036
+pg_total max 32, scd max 16, acctd max 5, netd max 7; idle_in_tx max 2, waiting_lock max 6, notgranted max 6
+cgroup CPU % of 2 vCPU: mean 82.5 p50 81.6 p95 97.4 max 109.2
+load1 max 6.56 mean 4.72
+rss_scd MB min 31 max 36
+rss_netd MB min 33 max 94
+rss_acctd MB min 18 max 43
+rss_portald MB min 26 max 39
+rss_edged MB min 27 max 28
+mem_cur MB max 4096 (cgroup incl. page cache)
+scd pool: acquires 45512 -> 497217, waited 7 -> 22, wait s 0.26 -> 2.27; canceled max 0; deadlocks max 0
+sampler2 authset min 1714 samples 659
+
+## after the run: journals, PostgreSQL, pool, WAL, memory, reconcile
+== netd: sessions confirmed enforced (ACTIVATED) during the run
+18021
+== journal ERROR-level lines per service
+scd: 0
+netd: 0
+acctd: 0
+portald: 0
+edged: 0
+== distinct ERROR messages
+== PostgreSQL log
+deadlocks: 0  lock timeouts: 0  FATAL: 0  ERROR: 20
+      2 ERROR:  ACCT_SESSION_OUT_OF_SCOPE: session fd79b4cc-49e3-4514-8198-5e36476839d6 ended at 2026-10-30 06:49:30.112731+00
+      2 ERROR:  ACCT_SESSION_OUT_OF_SCOPE: session c55eacbb-00c2-4957-af9a-3e500e7c02fd ended at 2026-10-30 06:49:30.112731+00
+      2 ERROR:  ACCT_SESSION_OUT_OF_SCOPE: session ba59a2b3-1a5f-4bda-816d-a1f58b6fd47f ended at 2026-10-30 06:49:30.112731+00
+      2 ERROR:  ACCT_SESSION_OUT_OF_SCOPE: session a9c5d9fe-51ce-4ed6-8c64-446abea536bb ended at 2026-10-30 06:49:30.112731+00
+      2 ERROR:  ACCT_SESSION_OUT_OF_SCOPE: session a83db99a-13e7-48d5-b861-63c0490f79d4 ended at 2026-10-30 06:49:30.112731+00
+== scd pool
+scd_db_pool_acquire_wait_seconds_total 2.269572828
+scd_db_pool_acquired_connections 0
+scd_db_pool_acquires_canceled_total 0
+scd_db_pool_acquires_total 497302
+scd_db_pool_acquires_waited_total 22
+scd_db_pool_idle_connections 15
+scd_db_pool_max_connections 16
+== wal
+ wal_records | wal_mb | wal_write | wal_sync | write_ms | sync_ms | ms_per_sync | secs 
+-------------+--------+-----------+----------+----------+---------+-------------+------
+     9009027 |   3059 |    166971 |   165776 |    10271 |  532399 |        3.21 | 3737
+(1 row)
+
+ xact_commit | xact_rollback | blks_read | blks_hit  | temp_files | deadlocks 
+-------------+---------------+-----------+-----------+------------+-----------
+      675006 |           270 |         0 | 305028652 |          0 |         0
+== memory
+low 0 high 0 max 21601 oom 0 oom_kill 0 oom_group_kill 0 
+anon 562872320 file 3468251136 kernel 235761664 shmem 1103810560 slab 168908952 
+peak 4295077888 max 4294967296
+== dmesg neighbour overflow lines: 5452
+== kernel set / tc
+auth set: 1700
+== accounting reconcile
+  raw_bytes   | minute_bytes |  hour_bytes  | session_bytes | entitlement_bytes | raw_rows | minute_samples | hour_samples 
+--------------+--------------+--------------+---------------+-------------------+----------+----------------+--------------
+ 112397972573 | 112397972573 | 112397972573 |  112397972573 |      112397972573 |  1046075 |        1046075 |      1046075
+(1 row)
+
+ state  | count | with_another_live 
+--------+-------+-------------------
+ active |  1700 |                 0
+(1 row)
+
+ sessions_started_in_window | still_live 
+----------------------------+------------
+                      18266 |        246
+(1 row)
+
+== integrity summary
+                tenant                |                 site                 
+--------------------------------------+--------------------------------------
+ 772ee4e9-0f3e-4b7d-a87d-df338b0f0fd7 | 5774e032-22df-4415-bcd9-87aea0c5c8d5
+(1 row)

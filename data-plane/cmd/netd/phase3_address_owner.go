@@ -36,6 +36,12 @@ type leaseStability interface {
 	AbsenceTrusted(ip net.IP) (trusted bool, why string)
 }
 
+// leaseIndex is implemented by a source that already holds the lease list in memory and can name the rows of one address without a scan; ok is false when
+// it cannot (the caller then reads the whole list, which is always correct).
+type leaseIndex interface {
+	LeasesForIP(ip string) (rows []KeaLease, ok bool)
+}
+
 // leaseEpoch is implemented by a source that can say when the Kea instance it reads started; a different start time means Kea restarted.
 type leaseEpoch interface {
 	KeaEpoch() (started time.Time, ok bool)
@@ -100,7 +106,13 @@ func (a addressOwner) Evidence(ctx context.Context, ip net.IP, mac string) owner
 		epoch, _ = ep.KeaEpoch()
 	}
 	want, at := ip.String(), a.clock()
-	for _, l := range leases {
+	rows := leases
+	if ix, ok := a.src.(leaseIndex); ok {
+		if r, ok := ix.LeasesForIP(want); ok {
+			rows = r
+		}
+	}
+	for _, l := range rows {
 		if l.IPAddress != want || !a.current(l, at) {
 			continue
 		}

@@ -207,7 +207,7 @@ func kernelInventory(ctx context.Context, shp shaper, bridges []string) (map[str
 		}
 		m := map[int]bool{}
 		for minor := range classes {
-			if minor >= shape.GuestMinorBase && minor <= shape.GuestMinorMax {
+			if shape.IsGuestMinor(minor) {
 				m[minor] = true
 			}
 		}
