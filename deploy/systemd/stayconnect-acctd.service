@@ -17,6 +17,11 @@ ExecStartPre=/opt/stayconnect/bin/wait-for-site-db.sh
 ExecStart=/opt/stayconnect/bin/acctd
 Restart=always
 RestartSec=2
+# A stuck (not crashed) acctd stops renewing the 90 s authorization plan. The daemon pings only while its plan submitter
+# is turning (sdwatchdog), so a stall is restarted within WatchdogSec instead of lasting until guests lose access.
+# Type=simple + NotifyAccess=main: no start-up handshake is added.
+WatchdogSec=30
+NotifyAccess=main
 User=root
 Group=root
 ProtectSystem=full

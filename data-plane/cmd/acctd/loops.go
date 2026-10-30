@@ -28,6 +28,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/livez"
+	"github.com/stayconnect/enterprise/data-plane/internal/sdwatchdog"
 )
 
 const (
@@ -35,6 +36,11 @@ const (
 	maxCutoffSeconds = 60
 	// cutoffRefreshEvery is how often the setting is re-read.
 	cutoffRefreshEvery = 30 * time.Second
+	// submissionDeadline bounds one plan derivation and delivery (the netd client itself times out at 10 s).
+	submissionDeadline = 15 * time.Second
+	// watchdogLiveness is how stale the submitter loop may be before the watchdog ping is withheld. It exceeds one full
+	// submission deadline plus the longest idle period; the unit WatchdogSec (30 s) restarts acctd shortly after.
+	watchdogLiveness = 25 * time.Second
 )
 
 // clampCutoff keeps a stored value inside the range the database also enforces.
@@ -143,9 +149,21 @@ type submitter struct {
 	// minGap, when set, is the shortest time between the start of one submission and a submission started by a kick (not by the period).
 	minGap time.Duration
 	last   time.Time
+	// beat is the last time the loop was seen turning (unix nanoseconds): the systemd watchdog pings only while it is recent.
+	beat atomic.Int64
 }
 
-func newSubmitter(run func()) *submitter { return &submitter{kickCh: make(chan struct{}, 1), run: run} }
+func newSubmitter(run func()) *submitter {
+	s := &submitter{kickCh: make(chan struct{}, 1), run: run}
+	s.beat.Store(time.Now().UnixNano())
+	return s
+}
+
+// alive reports whether the loop has turned within d. A submission that never returns (a database call without an
+// answer) stops the beat, which lets the watchdog restart acctd instead of leaving every guest to lose access at the lease.
+func (s *submitter) alive(d time.Duration) bool {
+	return time.Since(time.Unix(0, s.beat.Load())) < d
+}
 
 func (s *submitter) kick() {
 	select {
@@ -156,6 +174,7 @@ func (s *submitter) kick() {
 
 func (s *submitter) loop(ctx context.Context, period func() time.Duration) {
 	for {
+		s.beat.Store(time.Now().UnixNano())
 		t := time.NewTimer(period())
 		select {
 		case <-ctx.Done():
@@ -187,7 +206,15 @@ func (s *submitter) loop(ctx context.Context, period func() time.Duration) {
 // runLoops starts the three tickers and blocks until ctx ends.
 func (a *acctd) runLoops(ctx context.Context, c cfg, clock *cutoffClock, netd planSubmitter, counters counterReader, epochs epochSource, aggOwner interface{ sweep(context.Context) }) {
 	p3 := a.p3
-	sub := newSubmitter(func() { p3.reconcileShaping(ctx, netd, c.LegacyBridge) })
+	sub := newSubmitter(func() {
+		// A submission has a deadline: derived from durable state and handed to netd in a few seconds when healthy, and never
+		// allowed to hold the plan renewals hostage when the database or netd stops answering.
+		sctx, cancel := context.WithTimeout(ctx, submissionDeadline)
+		defer cancel()
+		p3.reconcileShaping(sctx, netd, c.LegacyBridge)
+	})
+	// A stuck acctd is restarted by systemd (WatchdogSec) rather than left until the lease lapses; the restart takes seconds.
+	go sdwatchdog.Run(ctx, func() bool { return sub.alive(watchdogLiveness) })
 
 	sub.minGap = pendingMinGap
 	if c.DBURL != "" {
