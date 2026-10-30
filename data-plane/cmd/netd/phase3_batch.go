@@ -629,21 +629,26 @@ const (
 )
 
 func (p *phase3Shaping) classifySession(ctx context.Context, bridge string, minor int, s shapeplan.Session) workKind {
+	// The reason a session takes the per-session path is counted in the pass line (ind_*), so a pass that spends its time there says why.
 	if s.SpeedAllocation == speedAllocationShared {
+		p.count("ind_shared", 1)
 		return workIndividual
 	}
 	key := classKey(bridge, s.SessionID)
 	if p.quarantined[key] != nil {
+		p.count("ind_quarantined", 1)
 		return workIndividual
 	}
 	_, active := p.epochs[key]
 	_, held := p.classes[key]
 	down, err := p.readClassesForPass(ctx, bridge)
 	if err != nil {
+		p.count("ind_unreadable", 1)
 		return workIndividual
 	}
 	up, err := p.readClassesForPass(ctx, shape.IFBName(bridge))
 	if err != nil {
+		p.count("ind_unreadable", 1)
 		return workIndividual
 	}
 	_, d := down[minor]
@@ -653,10 +658,14 @@ func (p *phase3Shaping) classifySession(ctx context.Context, bridge string, mino
 		if d && u && p.installedMatchesPlan(ctx, bridge, minor, s, "") {
 			return workSteady
 		}
+		p.count("ind_held_changed", 1)
 	case !active && !held:
 		if !d && !u {
 			return workAdmit
 		}
+		p.count("ind_new_slot_in_use", 1)
+	default:
+		p.count("ind_half_known", 1)
 	}
 	return workIndividual
 }
