@@ -157,13 +157,27 @@ NAME_RE='^[0-9]{4}_[a-z0-9_]+$'
 # tools/validate-migration-location.py enforces in CI). A file in a reserved range is never applied; a migration the
 # release pins must be byte-identical to its pin; and a ledger row for the same NUMBER under a different NAME means the
 # release renamed something this database already ran. All three are refused BEFORE the database is touched.
-[ -f "$HERE/deploy/scripts/lib-baseline.sh" ] || { echo "REFUSED: $HERE/deploy/scripts/lib-baseline.sh is missing; cannot read the reserved-number declaration" >&2; exit 2; }
-# shellcheck source=../deploy/scripts/lib-baseline.sh
-. "$HERE/deploy/scripts/lib-baseline.sh"
+# Self-contained on purpose (the same parsing as deploy/scripts/lib-baseline.sh reserved_number_list): this script is copied on its own into
+# test trees and must not depend on the deploy tree being beside it.
+reserved_range_of(){ # $1 = dir, $2 = NNNN ; prints the matching RESERVED_NUMBERS line; rc 0 reserved, 1 not, 2 declaration unreadable
+  local f="$1/RESERVED_NUMBERS" line range a b n
+  [ -f "$f" ] || return 1
+  n=$((10#$2))
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%%#*}"
+    range="$(printf '%s' "$line" | awk '{print $1}')"
+    [ -n "$range" ] || continue
+    if ! [[ "$range" =~ ^([0-9]{4})-([0-9]{4})$ ]]; then echo "RESERVED_NUMBERS: malformed line: $line" >&2; return 2; fi
+    a=$((10#${BASH_REMATCH[1]})); b=$((10#${BASH_REMATCH[2]}))
+    [ "$a" -le "$b" ] || { echo "RESERVED_NUMBERS: range runs backwards: $line" >&2; return 2; }
+    if [ "$n" -ge "$a" ] && [ "$n" -le "$b" ]; then printf '%s\n' "$range"; return 0; fi
+  done < "$f"
+  return 1
+}
 verify_release_identity(){ # $1 = version (NNNN_name) being applied, $2 = the directory its file came from
   local ver="$1" dir="$2" num rc other pin got
   num="${ver:0:4}"
-  is_reserved_number "$dir" "$num"; rc=$?
+  reserved_range_of "$dir" "$num" >/dev/null; rc=$?
   if [ "$rc" = 0 ]; then
     echo "REFUSED: $ver uses number $num, which $dir/RESERVED_NUMBERS holds out of the sequence on purpose." >&2
     echo "         Take the next free number instead." >&2

@@ -15,7 +15,7 @@ end state of `0001..NNNN`; a freshly provisioned appliance starts from it with a
 ### Reserved numbers
 
 * A file named `NNNN_*.up.sql` or `.down.sql` with a reserved number is **refused**: by CI before merge, and at apply time by
-  `edge-migrate.sh` and `apply-pending-migrations.sh` (the second reads the same `RESERVED_NUMBERS` before it plans anything, so a
+  `edge-migrate.sh` (self-contained, so it also works copied on its own) and `apply-pending-migrations.sh` (the second reads the same `RESERVED_NUMBERS` before it plans anything, so a
   release built from a branch that skipped CI still cannot apply one). The Central tree (`control-plane/migrations`) has the same file and
   `deploy/scripts/central-migrate.sh` the same refusal.
 * A reserved number is **not a gap**: the contiguity check skips it, and the runner's own "no lower migration unapplied" check walks
