@@ -329,6 +329,22 @@ func (s *server) updateGuestNetwork(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A changed subnet is held to the same rules as a new one, and a switched-on network is not widened in place (widenRefusal). An
+	// unchanged echo of the stored subnet is accepted as it always was.
+	var curSubnet string
+	var curEnabled bool
+	if err := tx.QueryRow(ctx, `SELECT text(subnet_cidr), enabled FROM guest_networks WHERE id=$1`, id).Scan(&curSubnet, &curEnabled); err == nil &&
+		strings.TrimSpace(in.SubnetCIDR) != "" && strings.TrimSpace(in.SubnetCIDR) != curSubnet {
+		if bad := s.clientSubnetRefusal(ctx, in.SubnetCIDR); bad != nil {
+			jsonErr(w, http.StatusBadRequest, bad.code, bad.msg)
+			return
+		}
+		if why := widenRefusal(curSubnet, curEnabled, in.SubnetCIDR); why != "" {
+			jsonErr(w, http.StatusConflict, "subnet_widen_refused", why)
+			return
+		}
+	}
+
 	portalURL := netcfg.PortalURLFor(in.GatewayIP, 8380)
 	// dns_servers: nil (not supplied) must stay SQL NULL so COALESCE keeps the stored value; a nil slice marshals to
 	// JSON null, which COALESCE does not fall through and would overwrite the column. An empty array clears it.

@@ -46,7 +46,7 @@ Stateless as before (netd, acctd and a restarted process derive the same id from
 
 The host index needs the bridge's subnet. It is read from the **bridge's own IPv4 addresses** (`net.InterfaceByName`, cached 5 s, the narrowest configured subnet containing the address wins), so no plan, contract or database field is added and netd and acctd agree without talking. A bridge with no address, an address outside /17../19, or a session outside every configured subnet falls back to the previous rule. `MinorFor(bridge, ip)` replaces `MinorForIP(ip)` at the ten production call sites in `cmd/netd` and `cmd/acctd`; `IsGuestMinor` replaces the `GuestMinorBase..GuestMinorMax` range checks (stray sweeps, class-state restore, `ReadClasses`, delete refusal), so strays in the extension band are found and removed like any other.
 
-`internal/netcfg` `MinSubnetPrefix` is deliberately NOT raised: it stays /20 (4,094 clients per client network), which the shaper already serves past 2,047 sessions. Allowing /19 (8,190 clients, shaper support goes to /17) is a broadcast-domain product limit and is left as an open Product Owner decision (the separate commit 5c1f999c on branch shaping/scale-beyond-2047 would do it).
+`internal/netcfg` `MinSubnetPrefix` was NOT raised by this work (it stayed /20 pending a Product Owner decision). **Update 2026-10-30: the Product Owner approved /19** (8,190 usable addresses, an address-capacity limit and not a concurrency claim); it is implemented in the /19 closure work, see [`../CLIENT_NETWORKING.md`](../CLIENT_NETWORKING.md) section 1a.
 
 ### 3.3 What did not change
 
@@ -135,7 +135,7 @@ The real `reconcileLocked`/`provisionSession`, real `shape` and `nft` clients, a
 
 ## 8. Decision required
 
-`MinSubnetPrefix` /20 to /19 (commit "netcfg: allow client networks up to /19"). Without it nothing above 4,094 clients per network can be configured, so the 8,000-session case is reachable only in the lab. The shaper work does not depend on it and works without it for 2,048-4,094 sessions per network. It is a product limit on broadcast-domain size (ARP/broadcast load of an 8,190-host segment), so it is the Product Owner's call; revert that one commit to keep /20.
+`MinSubnetPrefix` /20 to /19 (commit "netcfg: allow client networks up to /19"). Without it nothing above 4,094 clients per network can be configured, so the 8,000-session case is reachable only in the lab. The shaper work does not depend on it and works without it for 2,048-4,094 sessions per network. It is a product limit on broadcast-domain size (ARP/broadcast load of an 8,190-host segment), so it was the Product Owner's call. **Decided 2026-10-30: /19 approved.**
 
 ## 9. Files
 

@@ -444,6 +444,15 @@ func (a *applier) validateWithPortal(ctx context.Context, intent []netcfg.GuestN
 	topo := a.renderTopo()
 	topo.PortalVIP = vip
 	res := netcfg.ValidateSet(intent, topo, avail, known)
+	// A client network may not overlap the WAN/management subnet this appliance carries (the same NIC on a two-port appliance). Checked
+	// against the live address list. An unreadable list cannot show an overlap, so it does not block (the portal check below is the one
+	// that fails closed, and only when a portal address is set).
+	if host, herr := a.hostAddrs(ctx); herr == nil {
+		if oi := netcfg.ValidateHostOverlap(intent, topo, host); len(oi) > 0 {
+			res.OK = false
+			res.Issues = append(res.Issues, oi...)
+		}
+	}
 	issues, err := a.validatePortal(ctx, vip, intent)
 	if err != nil {
 		return res, vip, err

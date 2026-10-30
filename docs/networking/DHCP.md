@@ -111,6 +111,8 @@ issues. Pool/reservation checks run only for `dhcp_mode = local`. Every code:
 | `protected_interface` | parent is the management/WAN interface | choose a client-network interface |
 | `bad_network_type` | `network_type` not `untagged`/`vlan` | fix the type |
 | `vlan_out_of_range` | VLAN id not in 1–4094 | use a valid 802.1Q id |
+| `subnet_too_large` | subnet wider than `/19` (8,190 usable addresses) | use `/19` or narrower, or split the site into several client networks |
+| `subnet_overlaps_host` | the subnet overlaps the appliance's own WAN/management network | choose a range outside the WAN/management subnet |
 | `vlan_on_untagged` | untagged network set a VLAN id | clear `vlan_id` |
 | `bad_gateway` | `gateway_ip` not valid IPv4 | correct the address |
 | `bad_subnet` | `subnet_cidr` not valid IPv4 CIDR | correct the CIDR |

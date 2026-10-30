@@ -24,6 +24,7 @@ import { errMsg } from "@/lib/utils";
 import { HelpList, HelpSection } from "@/components/help";
 import { HealthCheckList, SwitchRow, ValidationIssueList, useNetworkAccess } from "@/components/network/shared";
 import { isReauth, useNetworkChangeStepUp } from "@/components/network/change-step-up";
+import { SUBNET_SIZE_HINT, subnetSizeProblem } from "@/lib/network-subnet";
 import {
   VlanAddressingTable, VlanIdList, newVlanRow, vlanPlanProblems, withSuggestedAddressing, type VlanRow,
 } from "@/components/network/vlan-plan";
@@ -144,6 +145,7 @@ export default function NewGuestNetworkPage() {
           return null;
         }
         if (!subnetCidr.trim()) return "Subnet CIDR is required (e.g. 10.20.0.0/22).";
+        if (subnetSizeProblem(subnetCidr)) return subnetSizeProblem(subnetCidr);
         if (!gatewayIp.trim()) return "Gateway IP is required.";
         if (usedSubnets.has(subnetCidr.trim())) return "That subnet is already used by another client network.";
         return null;
@@ -503,7 +505,7 @@ export default function NewGuestNetworkPage() {
                 </div>
               ) : (
                 <>
-                  <Field label="Subnet (CIDR)" required hint="The whole address range of this network, e.g. 10.20.0.0/22.">
+                  <Field label="Subnet (CIDR)" required hint={`The whole address range of this network, e.g. 10.20.0.0/22. ${SUBNET_SIZE_HINT}`}>
                     <Input value={subnetCidr} onChange={(e) => setSubnetCidr(e.target.value)} placeholder="10.20.0.0/22" className="font-mono" />
                   </Field>
                   <Field

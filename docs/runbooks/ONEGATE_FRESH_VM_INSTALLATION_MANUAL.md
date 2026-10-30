@@ -363,6 +363,7 @@ Open *Network → Client networks* (`/network`). A fresh appliance offers one **
 | DHCP pool | `10.20.0.10` – `10.20.15.254`, lease 3600 s (renew 900, rebind 7200) |
 | Domain | `guest.local` |
 | Captive portal, Internet, NAT, isolation | on |
+| Size limit | A client network may be anything from `/30` up to **`/19`** (8,190 usable addresses). `/19` is the largest: it is the address capacity of one network, not the number of devices served at once. A wider subnet is refused with the message *subnet is larger than /19*; split the site into several client networks. The prepared `/20` is not changed by this, and a client network that is switched on is never widened in place (create a new network instead). |
 
 **Option 1 — activate the prepared network (untagged):** map your AP/SSID to the VLAN that reaches NIC 2 untagged; *Activate* (a staged ENABLE) → **Apply** (password) → verify → **Confirm within 120 s**.
 

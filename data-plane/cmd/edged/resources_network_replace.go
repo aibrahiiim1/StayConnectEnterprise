@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"net"
 	"net/http"
 	"strings"
 
@@ -28,6 +29,58 @@ type errSubnetConflict struct{ subnet, other string }
 
 func (e errSubnetConflict) Error() string {
 	return fmt.Sprintf("subnet %s overlaps client network %q; every client network needs its own, non-overlapping subnet", e.subnet, e.other)
+}
+
+// errSubnetInvalid is a subnet the appliance will not run a client network on (wider than /19, narrower than /30, not an IPv4 CIDR, or
+// inside the WAN/management network), caught when it is entered instead of when the configuration is applied.
+type errSubnetInvalid struct{ code, msg string }
+
+func (e errSubnetInvalid) Error() string { return e.msg }
+
+// clientSubnetRefusal is the width rule shared with netd's apply-time validator (netcfg.CheckClientSubnet) plus, when the appliance
+// can say what its WAN/management network is, the overlap with it. "" means acceptable. A WAN that cannot be read does not block:
+// netd's apply refuses the overlap from the live address list.
+func (s *server) clientSubnetRefusal(ctx context.Context, subnet string) *errSubnetInvalid {
+	subnet = strings.TrimSpace(subnet)
+	if subnet == "" {
+		return nil
+	}
+	if iss := netcfg.CheckClientSubnet(subnet); len(iss) > 0 {
+		return &errSubnetInvalid{code: iss[0].Code, msg: iss[0].Message}
+	}
+	if s.netd != nil {
+		if facts, err := s.systemFacts(ctx); err == nil {
+			if wan := facts.wanCIDR(); wan != "" && cidrsOverlap(subnet, wan) {
+				return &errSubnetInvalid{code: "subnet_overlaps_host", msg: fmt.Sprintf(
+					"subnet %s overlaps %s, the WAN/management network of this appliance; a client network must not share addresses with it", subnet, wan)}
+			}
+		}
+	}
+	return nil
+}
+
+// widenRefusal states why an ENABLED client network's subnet cannot be made wider in place ("" = allowed). Widening a live network changes
+// the address range its clients, their DHCP leases, per-client speed classes and the gateway's own bridge address are bound to, so the
+// supported route is a new client network with the wider subnet (create or Replace, staged and confirmed with rollback), then retire the
+// old one. A disabled network is not live, so it may be edited freely; narrowing and unchanged subnets keep the previous behaviour.
+func widenRefusal(curCIDR string, enabled bool, newCIDR string) string {
+	newCIDR = strings.TrimSpace(newCIDR)
+	if !enabled || newCIDR == "" || newCIDR == curCIDR {
+		return ""
+	}
+	_, cur, e1 := net.ParseCIDR(curCIDR)
+	_, nw, e2 := net.ParseCIDR(newCIDR)
+	if e1 != nil || e2 != nil || cur.IP.To4() == nil || nw.IP.To4() == nil {
+		return ""
+	}
+	co, _ := cur.Mask.Size()
+	no, _ := nw.Mask.Size()
+	if no >= co {
+		return ""
+	}
+	return fmt.Sprintf("the subnet of a client network that is switched on cannot be made wider in place (%s to %s): its clients, DHCP leases and "+
+		"per-client speed classes belong to the current range. Create a new client network with the wider subnet, move clients over, then "+
+		"switch the old one off", curCIDR, newCIDR)
 }
 
 // Two enabled client networks may not share a name; a disabled network keeps its name without blocking a new one.
@@ -97,6 +150,11 @@ func writeNetworkInsertErr(w http.ResponseWriter, err error) {
 		jsonErr(w, http.StatusConflict, "subnet_overlap", sc.Error())
 		return
 	}
+	var si errSubnetInvalid
+	if errors.As(err, &si) {
+		jsonErr(w, http.StatusBadRequest, si.code, si.msg)
+		return
+	}
 	var nc errNameConflict
 	if errors.As(err, &nc) {
 		jsonErr(w, http.StatusConflict, "duplicate_name", nc.Error())
@@ -150,6 +208,9 @@ func (s *server) insertGuestNetwork(ctx context.Context, tx pgx.Tx, in guestNetw
 		vlan = *in.VLANID
 	}
 	newID := newUUID()
+	if bad := s.clientSubnetRefusal(ctx, in.SubnetCIDR); bad != nil {
+		return createdNetwork{}, *bad
+	}
 	if boolOr(in.Enabled, true) && in.SubnetCIDR != "" {
 		other, err := s.subnetOverlap(ctx, tx, in.SubnetCIDR, exclude)
 		if err != nil {
@@ -262,6 +323,11 @@ func (s *server) createGuestNetworkBatch(w http.ResponseWriter, r *http.Request)
 			var sc errSubnetConflict
 			if errors.As(err, &sc) {
 				jsonErr(w, http.StatusConflict, "subnet_overlap", fmt.Sprintf("network %d (%s): %s", i+1, in.Name, sc.Error()))
+				return
+			}
+			var si errSubnetInvalid
+			if errors.As(err, &si) {
+				jsonErr(w, http.StatusBadRequest, si.code, fmt.Sprintf("network %d (%s): %s", i+1, in.Name, si.msg))
 				return
 			}
 			jsonErr(w, http.StatusBadRequest, "bad_request", fmt.Sprintf("network %d (%s): %s", i+1, in.Name, pgErr(err)))
