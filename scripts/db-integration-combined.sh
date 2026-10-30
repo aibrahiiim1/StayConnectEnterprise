@@ -36,9 +36,11 @@ echo "== building the full appliance schema ($FULLSCHEMA_IMAGE) =="
 fullschema_build "$C" "$PORT" "$TEMPLATE"; rc=$?
 [ "$rc" = 0 ] || { echo "DB_INTEGRATION_COMBINED = cannot build the schema (rc=$rc)"; exit 2; }
 copied=0
+# TimescaleDB's background workers keep reconnecting to the template, and CREATE DATABASE ... TEMPLATE needs it unused: refuse new
+# connections to it for the copy, then end the ones that are there.
+docker exec "$C" psql -X -q -U postgres -d postgres -c "ALTER DATABASE $TEMPLATE WITH ALLOW_CONNECTIONS false" </dev/null >/dev/null 2>&1
 for _ in $(seq 1 30); do
-  docker exec "$C" psql -X -q -U postgres -d postgres -tAc \
-    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$TEMPLATE' AND pid <> pg_backend_pid()" </dev/null >/dev/null 2>&1
+  docker exec "$C" psql -X -q -U postgres -d postgres -tAc     "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$TEMPLATE' AND pid <> pg_backend_pid()" </dev/null >/dev/null 2>&1
   if docker exec "$C" psql -X -q -U postgres -d postgres -c "CREATE DATABASE $DB TEMPLATE $TEMPLATE" </dev/null >/dev/null 2>&1; then copied=1; break; fi
   sleep 1
 done

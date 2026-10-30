@@ -78,7 +78,8 @@ func observe(t *testing.T, p *pgxpool.Pool, f fixture, dest, sourceEnt string) r
 		 (SELECT count(*) FROM iam_v2.entitlement_transfers WHERE from_stay_id=$1),
 		 (SELECT COALESCE(terminal_reason,'') FROM iam_v2.entitlements WHERE id=$3),
 		 (SELECT count(*) FROM iam_v2.purchases WHERE stay_id=$1 AND trigger IN ('CHECKOUT_GRACE','EMERGENCY_GRACE')),
-		 (SELECT COALESCE(
+		 -- NULL when the source stay no longer has a live entitlement (the transfer won the race): that is zero attachments, not an error.
+		 COALESCE((SELECT COALESCE(
 		     (SELECT count(*) FROM iam_v2.entitlement_devices ed
 		       WHERE ed.entitlement_id=e.id AND ed.status='AUTHORIZED'), 0)
 		   + COALESCE(
@@ -89,7 +90,7 @@ func observe(t *testing.T, p *pgxpool.Pool, f fixture, dest, sourceEnt string) r
 		       WHERE se.entitlement_id=e.id AND se.state='active'), 0)
 		    FROM iam_v2.entitlements e
 		   WHERE e.stay_id=$1 AND e.status IN ('PENDING','ACTIVE','SUSPENDED')
-		   LIMIT 1)`,
+		   LIMIT 1), 0)`,
 		f.stay, dest, sourceEnt).
 		Scan(&s.staySrcStatus, &s.liveOnSource, &s.liveOnDest, &s.sessionsDangling, &s.devicesDangling,
 			&s.transfers, &s.srcTerminalRsn, &s.graceCreated, &s.srcLiveAttachments); err != nil {

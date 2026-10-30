@@ -5,6 +5,11 @@ Closure round of the AD-1..AD-68 audit remediation mission. Tools: [`tools/oglab
 [`reviews/PR272_ROLLUP_REVIEW.md`](../reviews/PR272_ROLLUP_REVIEW.md), [`reviews/USAGE_AFTER_RAW_PURGE_FIX.md`](../reviews/USAGE_AFTER_RAW_PURGE_FIX.md),
 [`reviews/OFFLINE_ACTIVATION_REGISTRY_FIX.md`](../reviews/OFFLINE_ACTIVATION_REGISTRY_FIX.md), [`reviews/AD36_NEW_DEVICE_IDENTITY_REVIEW.md`](../reviews/AD36_NEW_DEVICE_IDENTITY_REVIEW.md).
 
+> **How to read this document.** It records three rounds. **Sections 2 to 5 are the FIRST round (2026-10-29) and are kept as history**: their
+> "NOT MET", "not run" and "not changed" statements were true of that round and have been answered since. **Sections 6 and 7 are
+> current** (the second closure round and the final release acceptance, 2026-10-30), and the status of every item raised in section 5 is
+> in the table at the end of section 5. Where a first-round statement is superseded the text says so in place.
+
 ## 1. What this is, and what it is not
 
 **Simulated acceptance in an isolated lab, not field acceptance.** The lab is a set of privileged systemd containers on one Docker Desktop
@@ -16,7 +21,7 @@ and the production name is blackholed. A container shares the host kernel and CP
 **Not performed (needs equipment or authority this mission does not have):** 2,000 physical devices and a real Wi-Fi/switch fabric; the approved
 hardware or a VM at 2 vCPU / 4 GB; real PMS traffic (post-stay, FIAS, posting); payment providers.
 
-## 2. Capacity results
+## 2. Capacity results, first round (2026-10-29; the churn result is superseded by sections 6 and 7)
 
 Release under test: `f20faa171ea7` (appliance), 1,700 long sessions plus up to 300 cycling clients on two client networks (one untagged, one VLAN),
 Kea leases for 2,000 clients, accounting, shaping and the kernel authorization set all live.
@@ -29,37 +34,37 @@ Kea leases for 2,000 clients, accounting, shaping and the kernel authorization s
 | Memory | cgroup peak 3,039 MB of 4,096 MB; resident: scd 37-108 MB, acctd 29-136 MB, netd 36-42 MB, edged up to 153 MB, portald up to 142 MB; all PostgreSQL processes together 2.7-4.8 GB resident (shared buffers counted per process) |
 | CPU | 10-48% average of 2 CPUs by phase, 77% max |
 | Database | 33-34 connections max (scd 20, the per-role limit); accounting rows grew +8,377 (10 min steady) and +1,343 (5 min stress) |
-| **300 successful sign-ins/minute sustained with 60-second sessions (steady phase)** | **NOT MET**: 19 of 3,000 attempts succeeded; p50 8.3 s, p95 16.8 s; the refusals are "could not bring your device online" (enforcement not confirmed in time). |
+| **300 successful sign-ins/minute sustained with 60-second sessions (steady phase)** | **NOT MET in the first round (met in sections 6 and 7)**: 19 of 3,000 attempts succeeded; p50 8.3 s, p95 16.8 s; the refusals are "could not bring your device online" (enforcement not confirmed in time). |
 | Traffic phase success | not a valid forwarding measure at this concurrency (see 2.2) |
 
-### 2.1 Why the churn target is not met (measured, not guessed)
+### 2.1 Why the churn target was not met in the first round (measured, not guessed)
 
 * The first netd defect (a pass that grew with the square of the sessions) was fixed earlier; the ramp then reached 98%.
 * Under sustained churn the netd pass budget was consumed by queueing, lease renewal waited behind other work, ended sessions were re-recorded every pass and the plan
   listed them for an hour. Fixed and measured (`NETD_ENFORCEMENT_SCALING.md` section 10): in the simulator 268 of 300 long sessions lost authorization before and 0 after, longest pass 127.8 s to 4.3 s, database calls 40,209 to 3,114.
-* **What remains:** new sign-ins queue on the appliance-wide licence-slot advisory lock and a saturated `svc_scd` connection limit, and every admission waits for a netd pass whose database calls
+* **What remained at the end of the first round:** new sign-ins queue on the appliance-wide licence-slot advisory lock and a saturated `svc_scd` connection limit, and every admission waits for a netd pass whose database calls
   (`activate_session_enforcement` hit its 3 s bound repeatedly under churn) are slowed by the same load. In this run the lock is now taken only for the count and the insert
   (`iamv2_session_activate.go`), which is correct but did not change the outcome: p50 sign-in latency under churn is 8 s with most attempts finishing after the 10 s target.
-  Closing the gap needs further change in scd (connection limit, admission path), acctd (per-session commits, long expiry transaction) and possibly a schema or role decision, which is a controlled change and is **not** made here.
+  Closing the gap needs further change in scd (connection limit, admission path), acctd (per-session commits, long expiry transaction) and possibly a schema or role decision, which is a controlled change and was **not** made in the first round. (It was made in the second: 0191 and 0192, section 6.)
 * An earlier voucher-exhaustion artefact (spent 60-second voucher codes) was found and removed from the measurement by issuing fresh codes; the numbers above are with fresh codes.
 
-### 2.2 Honest limits of the traffic numbers
+### 2.2 Honest limits of the traffic numbers (first round; corrected in section 6)
 
 `ogload traffic` success was 914 of 6,972 (steady) and 9,953 of 33,320 (stress): the failed connections never reached the bridge (a burst of 850 clients fetching from the appliance's own portal failed 43% while 100 clients at once
-succeeded 100%), so these figures describe the generator and the container network, not forwarding health. They are reported, not claimed as a pass.
+succeeded 100%), so these figures describe the generator and the container network, not forwarding health. They are reported, not claimed as a pass. (Section 6 found the cause: the lab VM's neighbour table.)
 
-### 2.3 Failure behaviour (single clean run, 1,700 sessions live)
+### 2.3 Failure behaviour, first round (single clean run, 1,700 sessions live)
 
 | Test | Result |
 |---|---|
 | netd stop/start | authorization set refilled within 5 s; 1,700 sessions still active |
 | PostgreSQL restart | listening again in 2 s; authorization set never emptied; 1,700 sessions active. (An earlier attempt left the lab's published database port unprogrammed after a Docker daemon restart in the container; recreating the container through the product's compose file restored it. Lab plumbing, not a product change.) |
-| acctd stopped for 4 minutes | the authorization set emptied (a lease lives only as long as the plan that renews it, 90 s), so guests go offline after about 90 s without a plan; sessions stayed active in the database; the set refilled within 6 s of acctd starting. **Whether that bound should be longer is a product decision.** |
+| acctd stopped for 4 minutes | the authorization set emptied (a lease lives only as long as the plan that renews it, 90 s), so guests go offline after about 90 s without a plan; sessions stayed active in the database; the set refilled within 6 s of acctd starting. **Whether that bound should be longer is a product decision** (answered afterwards: unchanged at 90 s, section 7.4 and [`reviews/AVAILABILITY_DURING_ACCTD_INTERRUPTION.md`](../reviews/AVAILABILITY_DURING_ACCTD_INTERRUPTION.md)). |
 | roll-up catch-up after the outage | raw, minute and hour byte totals equal (7,161,476,120) after catch-up: nothing lost, nothing counted twice |
-| Central disconnect | **not run in this lab.** By construction no Central call is on the sign-in path (licence from disk), but this was not exercised here. |
+| Central disconnect | **not run in the first round** (run in the second: section 7.5). By construction no Central call is on the sign-in path (licence from disk). |
 | Retention (migration 0180) | proven with a real PostgreSQL in `usage_after_raw_purge_integration_test.go` (usage unchanged after the raw purge); not repeated at lab scale |
 
-## 3. First-time offline activation acceptance
+## 3. First-time offline activation acceptance (first round; still current)
 
 Fresh factory-clean appliance container installed with `--offline-activation-only` and only the lab Central's public trust files; the lab Central is isolated.
 
@@ -74,7 +79,7 @@ Fresh factory-clean appliance container installed with `--offline-activation-onl
 
 Reviewed in [`PR272_ROLLUP_REVIEW.md`](../reviews/PR272_ROLLUP_REVIEW.md): a poisoned two-hour window stalled catch-up forever; fixed with an adaptive window. Usage that depended on raw rows before the purge lost data; fixed by migration 0180 (`accounting_usage_entitlement`). Late-commit loss analysed, not reachable at current settings, documented.
 
-## 5. Decisions and limits left to the Product Owner
+## 5. Decisions and limits left to the Product Owner (as raised in the first round; status table below)
 
 1. The churn target (300 sign-ins/min sustained) is not met on this lab; the fix needs scd/acctd/database work as in 2.1.
 2. Lease/plan bound: 90 s without a plan takes every guest offline (fail-closed). Longer?
@@ -82,7 +87,15 @@ Reviewed in [`PR272_ROLLUP_REVIEW.md`](../reviews/PR272_ROLLUP_REVIEW.md): a poi
 4. AD-36: the entitlement continuity PO clarification is not met by the new conversion (a new Entitlement is created); refusals after check-out are logged but not audited. See the AD-36 review. Not changed.
 5. Field acceptance still required: physical devices at scale, reference hardware, real PMS post-stay traffic.
 
-(Item 1, the unmet churn target, is answered by section 6 below; sections 2 to 5 stand as the history of the first round. Raw evidence of the new run: [`evidence/signin-capacity-2026-10-30/`](evidence/signin-capacity-2026-10-30/).)
+**Status of those five items today** (raw evidence of the second round: [`evidence/signin-capacity-2026-10-30/`](evidence/signin-capacity-2026-10-30/)):
+
+| # | Item as raised in the first round | Status now |
+|---|---|---|
+| 1 | The churn target (300 sign-ins/min sustained) is not met | **Closed in the lab**: met on `2f687f24` (section 6) and on the final candidate `dbf86d28` (section 7). Hardware acceptance is still outstanding (item 5). |
+| 2 | Lease/plan bound: 90 s without a plan takes every guest offline | **Unchanged at 90 s (fail closed)**, by decision recorded in [`reviews/AVAILABILITY_DURING_ACCTD_INTERRUPTION.md`](../reviews/AVAILABILITY_DURING_ACCTD_INTERRUPTION.md); recovery was shortened instead (15 s plan deadline, `WatchdogSec=30`; section 7.4). A longer bound remains the Product Owner's call. |
+| 3 | At most 2,047 shaped sessions per bridge or IFB | **Fixed for the classifier** (one `flower` filter per session direction, class ids for subnets up to /17; [`reviews/SHAPING_SCALE_BEYOND_2047.md`](../reviews/SHAPING_SCALE_BEYOND_2047.md)). The client-network size limit is a separate topic; see that review and the current network documentation. |
+| 4 | AD-36: a new Entitlement is created by the conversion, refusals are not audited | **Closed** by [`reviews/AD36_POST_STAY_CLOSURE.md`](../reviews/AD36_POST_STAY_CLOSURE.md) (one Entitlement per stay, audited refusals, throttle settings); the one decision that remains is stated there. |
+| 5 | Field acceptance: physical devices at scale, reference hardware, real PMS post-stay traffic | **Still open.** Nothing in this document is field acceptance. |
 
 ## 6. Sign-in capacity closure round (2026-10-30): 300 enforced sign-ins a minute for one hour, met in the lab
 
@@ -200,7 +213,7 @@ The appliance's output hook dropped 172.30.10.10 on 443 and 9443 (its own nft ta
 | Logs | `assignment: fetch failed` (43), `hello: call failed` (5, one every 5 minutes), `appliancecert: reconcile failed` (5), `licstate: cloud license fetch failed (offline-safe)` (1); no sign-in path error. The hello failures are timeouts, never a definitive "unknown appliance" reply, so the orphan self-reset does not trigger (`cmd/scd/main.go`: only an HTTP 401 saying "not enrolled", "unknown appliance" or "not found" counts) |
 | Restarts during the cut | scd at +300 s (active in 3.2 s), acctd at +600 s (0.4 s), netd at +840 s (2.0 s). Each started and kept admitting guests from the licence on disk (`licstate: license evaluated state=Active ... cloud_stale=false` right after the scd start). Sign-ins in the 40 s around each: 9 of 111 refused in the scd window, 0 of 113 for acctd, 0 of 109 for netd |
 | Restore (08:51:33) | `/central/status` read **connected** within 31 s (the 60 s hello cadence), last contact then moving every minute; the same 1,699 sessions, 0 duplicates, no lost session |
-| Observation | right after the scd restart `last_contact_at` moved to the restart instant (08:34:34) although the network was cut: `assignment: waiting for the mTLS client certificate` is recorded as a successful conversation (`ErrCertPending`, `cmd/scd/assignment.go`). The link state read `unreachable` again once a later call failed, so the display was wrong for seconds. Not changed (a status-semantics decision) |
+| Observation, and its correction | right after the scd restart `last_contact_at` moved to the restart instant (08:34:34) although the network was cut. **Root cause (found afterwards, not the one first written here):** after a restart the certificate agent loads the client certificate from disk, and that load was reported to the contact record as a successful attempt (`internal/appliancecert` `EnsureUntilInstalled` called the observer with a nil error although Central had not been asked). **Corrected in the final engineering round:** the observer now hears only attempts that consulted Central; the mTLS hello after the load is the first real exchange; `last_contact_at` means "the last successful exchange with Central since scd started" and is null until one happens; a new link state `identity_not_loaded` means "no identity or certificate loaded and nothing exchanged yet" (Hotel Admin: "Not contacted yet"). Licence semantics are unchanged: Central silence alone never changes the licence state before its grace. Not re-measured in the lab (code and unit tests only). |
 
 **Licence grace boundary: code-proven, not lab-proven** (no licence expiry was touched and 30 days were not waited). `license.Evaluate` (`license/verify.go`): Active until `valid_until`, GracePeriod until `valid_until + grace_period_days` (7 days on the lab licence), Restricted or Expired after.
 `AllowsNewSessions()` is true in Active, GracePeriod and Restricted and false in Expired, Suspended, Revoked and Unlicensed (`license/doc.go`). **Central silence alone never changes the state**: `cloud_stale` (more than `offline_grace_days` without a cloud validation) is a warning flag that "does not interrupt a valid license". The lab proves 22 minutes of silence with the licence on disk; the boundary behaviour is proven by the code above and `license/*_test.go`.
@@ -209,8 +222,25 @@ The appliance's output hook dropped 172.30.10.10 on 443 and 9443 (its own nft ta
 
 * Unit and service packages `cmd/netd cmd/scd cmd/acctd cmd/edged cmd/portald internal/{enforce,shape,nft,poststay,throttle,signinattempt,metrics,sdwatchdog,iamv2,netcfg,writerguard,licstate,grace,sysnet}`: **all pass** (`writerguard` has no non-integration tests).
 * Real PostgreSQL 16 / TimescaleDB 2.16.1 with the full appliance schema, fresh database, `-tags integration -p 1 -count=1`: `cmd/scd` 415 pass / 18 skip; `internal/poststay` and `cmd/scd` with `-tags "integration phase5"` (AD-36 closure, migration 0190 limits) 393 pass / 66 skip; `internal/enforce` (accounting integrity 0181, usage after raw purge), `internal/writerguard` (janitor 0192) and `cmd/acctd`: all pass (163 passed in that run).
-* **One failure, reported:** in the first combined integration run (`enforce`, `writerguard`, `poststay`, `scd`, `acctd` in sequence on one database) `cmd/scd` `TestActivationRefusedWithoutARegisteredAccountingOrigin` failed (`no pending session to activate`). It passes alone and passes in the whole `cmd/scd` package on a fresh database, and a later run on the same polluted database logged `no free 10.77.x fixture subnet remains in this database`: the packages share a database and leave state behind. I read this as test isolation, not a product defect, and did not investigate further.
-* The skips are tests that need an external fixture (`LEDGER_DRILL_DSN`, a second database) that was not provided.
+* **One failure, reported (the first combined run), and its resolution in the final engineering round.** In the first combined integration run
+  (`enforce`, `writerguard`, `poststay`, `scd`, `acctd` in sequence on one database) `cmd/scd` `TestActivationRefusedWithoutARegisteredAccountingOrigin` failed
+  (`no pending session to activate`), and a later run on the same polluted database logged `no free 10.77.x fixture subnet remains in this database`. It was first
+  read as test isolation and not investigated. **Root cause, measured:** scd's fixtures took client subnets (`10.77.N.0/24`) from a process-wide counter over 200
+  values and never released one, so (a) once a database held more than the pool a fixture reused a subnet still enabled in another tenant, and the portal resolved the
+  sign-in into that tenant, and (b) once the pool was spent the fixture called `t.Skip`: **a fourth run of the scd package on the same database skipped 119 of its tests
+  and reported `ok` in 36 s instead of 110 s** (the third took 39 s, the second 74 s). A green result that tested nothing. A second defect of the same class turned up on the
+  second run: the event-table trim test inserted a fixed primary key (`duplicate key value`), so it passed once per database. Three stale catalogs that fail on a clean master were
+  also corrected (a personal-column candidate for `post_stay_new_device_room_attempts_per_minute`, the tenant-keyed table list, and the `stay_event_payload_reductions` exemption).
+  **Fix:** a fixture claims a `/24` out of 8,192 (`10.192.0.0/11`) under a session-level advisory lock held on its own connection for the life of the test (so concurrent processes
+  cannot take the same one and a crashed process releases its claim), treats any enabled network on the subnet as taken, and on cleanup disables its networks and releases the
+  lock, so the pool recycles. **Proof:** `cmd/scd` four times in a row on one database after the change: 18 skips each time (the tests that need an external fixture, below), 0
+  exhaustion, 107 to 126 s each. And `scripts/db-integration-combined.sh` (every package with integration tests, `-tags integration -p 1`, against one full-schema TimescaleDB
+  2.16.1 / PostgreSQL 16 database, run twice in a row on that same database): **74 packages ok in each of the two runs, no failure, no fixture-exhaustion skip.** The phase-tagged suites were run twice in a row on a shared database as well (`-tags "integration phase4 phase5 phase6"`): the phase-5 suites of `cmd/edged`,
+  `internal/authctx`, `internal/poststay` and `internal/transfer` pass both times; `internal/checkout` passed the second time and failed two race tests the first time
+  because the observer scanned a NULL when the transfer won the race (a flaky test, fixed to read zero and then passed twice in a row). **Not isolation problems, and not run green here:**
+  the phase-6 suites of `cmd/scd`, `internal/enforce` and `internal/deviceselfservice` fail the same way on both runs because they are written for the `iam_v2_scratch` fixture schema
+  (`operators.name`, an unguarded `accounting_records`, a legacy appliance row) and not for the full appliance schema; they belong to the scratch-database harness and were left as they are. Not run: the `prodprivilege` suite (it needs the Gate-P database of `scripts/prod-privilege-integration.sh`).
+* The skips are tests that need an external fixture that was not provided: in the combined run 159 per run, by reason `ROOMCHARGE_TEST_DSN` 23, `PHASE4_RUNTIME_DSN` 30, `LEDGER_DRILL_DSN` 16, `THROTTLE_TEST_DSN` 14, `IAMV2_TEST_DSN` 12, `OTP_TEST_DSN` 9, `OTPBOOT_TEST_DSN` 6, `EDGED_ROLE_TEST_DSN` 4, `MIGRATION_TEST_DSN` 2, and five environment guards (kernel, network namespace, a screenshot directory, an empty `tenants` table). Several have their own harness (`scripts/db-integration-tests.sh`, `scripts/phase4-pg-integration.sh`, `scripts/prod-privilege-integration.sh`); none was weakened or filtered here.
 
 ### 7.7 Simulated versus not
 
