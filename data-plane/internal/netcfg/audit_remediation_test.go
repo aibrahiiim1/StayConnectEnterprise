@@ -20,15 +20,17 @@ func issueCodes(iss []Issue) map[string]bool {
 	return out
 }
 
-// Wider than /20 is refused (the shaper's class minor has 12 host bits).
-func TestSubnetWiderThan20IsRefused(t *testing.T) {
-	n := goodNet("a", "A", "br-g20", "10.20.0.0/19", "10.20.0.1", 20)
+// Wider than /19 is refused (the shaper names a class per host, up to /17; the product stops at /19).
+func TestSubnetWiderThan19IsRefused(t *testing.T) {
+	n := goodNet("a", "A", "br-g20", "10.20.0.0/18", "10.20.0.1", 20)
 	if !issueCodes(ValidateOne(n, DefaultTopology(), nil, nil, ""))["subnet_too_large"] {
-		t.Fatal("a /19 was accepted")
+		t.Fatal("a /18 was accepted")
 	}
-	n.SubnetCIDR = "10.20.0.0/20"
-	if issueCodes(ValidateOne(n, DefaultTopology(), nil, nil, ""))["subnet_too_large"] {
-		t.Fatal("a /20 was refused")
+	for _, cidr := range []string{"10.20.0.0/19", "10.20.0.0/20"} {
+		n.SubnetCIDR = cidr
+		if issueCodes(ValidateOne(n, DefaultTopology(), nil, nil, ""))["subnet_too_large"] {
+			t.Fatalf("a %s was refused", cidr)
+		}
 	}
 }
 

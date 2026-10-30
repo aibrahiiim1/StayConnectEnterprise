@@ -7,8 +7,9 @@ import (
 )
 
 const (
-	// MinSubnetPrefix is the widest client subnet: /20 (see the subnet_too_large rule).
-	MinSubnetPrefix = 20
+	// MinSubnetPrefix is the widest client subnet: /19, 8190 clients (see the subnet_too_large rule). The shaper names a class
+	// per host of the subnet and supports up to /17 (internal/shape minor.go); /19 is the product limit on top of that.
+	MinSubnetPrefix = 19
 	// MinLeaseSeconds / MaxLeaseSeconds bound every DHCP lease timer that is set.
 	MinLeaseSeconds = 60
 	MaxLeaseSeconds = 7 * 24 * 3600
@@ -129,11 +130,11 @@ func ValidateOne(n GuestNetwork, topo Topology, availIfaces, knownIfaces map[str
 			r.add(f("subnet_cidr"), "subnet_too_small",
 				"subnet is too small to host a gateway and a DHCP pool (use /30 or larger)")
 		}
-		// The widest subnet the shaper can tell apart: a client's tc class comes from the low 12 host bits of its address
-		// (internal/shape MinorForIP), so in anything wider than a /20 two clients share one class.
+		// The widest subnet the shaper can tell apart: a client's tc class is named by its host index in the subnet
+		// (internal/shape MinorFor); the extension band reaches /17 and this rule holds the product at MinSubnetPrefix.
 		if bits == 32 && ones < MinSubnetPrefix {
 			r.add(f("subnet_cidr"), "subnet_too_large",
-				fmt.Sprintf("subnet is larger than /%d (4094 clients); per-client speed limits and usage cannot tell "+
+				fmt.Sprintf("subnet is larger than /%d (8190 clients); per-client speed limits and usage cannot tell "+
 					"clients apart in a wider subnet. Split it into several client networks.", MinSubnetPrefix))
 		}
 	}
