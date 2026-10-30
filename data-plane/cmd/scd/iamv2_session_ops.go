@@ -142,6 +142,30 @@ func liveSessionCount(ctx context.Context, tx pgx.Tx, applianceID string) (int64
 	return online, err
 }
 
+// admitLicensed runs one admission transaction. work does everything the admission needs and calls reserve at the point where the licence slot must be
+// taken (as late as possible: the lock is held to the commit). The first attempt reserves on the shared path; if the appliance is within maxInFlight
+// of its limit the transaction is rolled back whole and run again on the exclusive, exact path, so work must be safe to run twice (it is rolled back,
+// and must not keep results of the first attempt).
+func admitLicensed(ctx context.Context, db interface {
+	Begin(ctx context.Context) (pgx.Tx, error)
+}, applianceID string, limit int64, maxInFlight int, work func(tx pgx.Tx, reserve func() error) error) error {
+	attempt := func(exclusive bool) error {
+		return pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
+			return work(tx, func() error {
+				if exclusive {
+					return reserveLicensedSlot(ctx, tx, applianceID, limit)
+				}
+				return reserveLicensedSlotShared(ctx, tx, applianceID, limit, maxInFlight)
+			})
+		})
+	}
+	err := attempt(false)
+	if errors.Is(err, errLicenceNearLimit) {
+		err = attempt(true)
+	}
+	return err
+}
+
 // admissionConcurrency is the most transactions scd can have open at once: each holds a pool connection. It is the margin of the shared
 // admission path (reserveLicensedSlotShared). A pool that cannot be asked yields a margin no licence passes, so the exact path is used.
 func (s *server) admissionConcurrency() int {

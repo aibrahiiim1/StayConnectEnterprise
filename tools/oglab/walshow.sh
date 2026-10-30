@@ -1,0 +1,4 @@
+#!/bin/bash
+docker exec stayconnect-pg psql -X -U stayconnect -d stayconnect_site -c "select wal_records, (wal_bytes/1048576)::int wal_mb, wal_write, wal_sync, wal_write_time::int write_ms, wal_sync_time::int sync_ms, (wal_sync_time/nullif(wal_sync,0))::numeric(8,2) ms_per_sync, extract(epoch from now()-stats_reset)::int secs from pg_stat_wal"
+docker exec stayconnect-pg psql -X -U stayconnect -d stayconnect_site -c "select xact_commit, xact_rollback, blks_read, blks_hit, temp_files, deadlocks from pg_stat_database where datname='stayconnect_site'"
+docker exec stayconnect-pg psql -X -U stayconnect -d stayconnect_site -c "select checkpoints_timed, checkpoints_req, (checkpoint_write_time)::int cw_ms, (checkpoint_sync_time)::int cs_ms, buffers_checkpoint, buffers_clean, buffers_backend, buffers_backend_fsync from pg_stat_bgwriter"

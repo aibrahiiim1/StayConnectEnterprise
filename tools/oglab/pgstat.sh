@@ -1,0 +1,3 @@
+#!/bin/bash
+# top statements by total time since the last reset
+docker exec stayconnect-pg psql -X -U stayconnect -d stayconnect_site -c "select r.rolname, calls, round(total_exec_time::numeric) as total_ms, round(mean_exec_time::numeric,2) as mean_ms, round(max_exec_time::numeric) as max_ms, rows, round((shared_blks_hit*100.0/nullif(shared_blks_hit+shared_blks_read,0))::numeric,1) as hit, wal_records, round(coalesce(blk_write_time,0)::numeric) wr_ms, left(regexp_replace(query,'\s+',' ','g'),90) q from pg_stat_statements s join pg_roles r on r.oid=s.userid where dbid=(select oid from pg_database where datname='stayconnect_site') order by total_exec_time desc limit ${1:-25}"

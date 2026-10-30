@@ -62,9 +62,8 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 	var sessionID string
 	var reused bool
 	// The licence slot is taken on the shared admission path first (no serialisation while the appliance is far from its limit) and, if the
-	// appliance is within one pool of connections of the limit, again on the exclusive, exact path (reserveLicensedSlotShared).
-	exclusive := false
-	admit := func(tx pgx.Tx) error {
+	// appliance is within one pool of connections of the limit, again on the exclusive, exact path (admitLicensed).
+	admit := func(tx pgx.Tx, reserve func() error) error {
 		sessionID, reused = "", false
 		// The entitlement must be ours, live and in its window, checked inside the transaction so a racing revocation cannot slip a session in.
 		// maxDevices NULL = no device limit; devicePolicy DISCONNECT_OLDEST admits over the limit by disconnecting the oldest device.
@@ -238,11 +237,7 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 		}
 		// The appliance-wide admission lock is taken as late as possible and held only for the count and the insert: every sign-in on the
 		// appliance queues behind it, so the statements above must not run while it is held (capacity acceptance, 2026-10-30).
-		if exclusive {
-			if err := reserveLicensedSlot(ctx, tx, s.applID, s.lic.MaxConcurrentOnlineGuests()); err != nil {
-				return err
-			}
-		} else if err := reserveLicensedSlotShared(ctx, tx, s.applID, s.lic.MaxConcurrentOnlineGuests(), s.admissionConcurrency()); err != nil {
+		if err := reserve(); err != nil {
 			return err
 		}
 
@@ -261,11 +256,7 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 		_, err = tx.Exec(ctx, `SELECT pg_notify('onegate_session_pending', $1)`, sessionID)
 		return err
 	}
-	err = pgx.BeginFunc(ctx, s.db, admit)
-	if errors.Is(err, errLicenceNearLimit) {
-		exclusive = true
-		err = pgx.BeginFunc(ctx, s.db, admit)
-	}
+	err = admitLicensed(ctx, s.db, s.applID, s.lic.MaxConcurrentOnlineGuests(), s.admissionConcurrency(), admit)
 	if err != nil {
 		var cap *licenseCapacityError
 		if errors.As(err, &cap) {

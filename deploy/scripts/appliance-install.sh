@@ -338,6 +338,10 @@ else
   changed="$(install_binaries)"
   step "6. units and the product profile"
   bash "$SC/deploy/scripts/install-service-units.sh" "$SC/deploy"
+  # Kernel settings the release carries (deploy/sysctl): a fresh install applies them in provisioning, so an upgrade must too, or an appliance installed
+  # before a setting existed (the neighbour table size for the licensed guest count) never gets it.
+  cp "$SC/deploy/sysctl"/*.conf /etc/sysctl.d/ 2>/dev/null || true
+  sysctl --system >/dev/null 2>&1 || true
   # A missing *_DB_URL is added from this appliance's own credentials; a present one is never changed (audit X3).
   bash "$SC/deploy/scripts/backfill-db-urls.sh" "$ETC" \
     || die "could not check the services' database URLs (above); the new binaries are installed but the services were not restarted"

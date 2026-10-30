@@ -150,6 +150,8 @@ type passLeases struct {
 	onFetch func(time.Duration, int)
 	leases  []KeaLease
 	err     error
+	// byIP indexes leases by address, built on first use (LeasesForIP).
+	byIP map[string][]KeaLease
 }
 
 // KeaEpoch forwards to the real source.
@@ -175,11 +177,28 @@ func (l *passLeases) Leases() ([]KeaLease, error) {
 		l.leases, l.err = l.src.Leases()
 		l.done = true
 		l.fetch = time.Since(t0)
+		l.byIP = nil
 		if l.onFetch != nil {
 			l.onFetch(l.fetch, len(l.leases))
 		}
 	}
 	return l.leases, l.err
+}
+
+// LeasesForIP returns the rows of the pass's lease list that name ip, in their original order. Every session asks "whose address is this", and
+// answering by reading the whole list made that question cost the size of the list: two thousand sessions against two thousand leases is four
+// million comparisons a pass, a tenth of netd's CPU at 300 sign-ins a minute (capacity acceptance, 2026-10-30).
+func (l *passLeases) LeasesForIP(ip string) ([]KeaLease, bool) {
+	if !l.done || l.err != nil {
+		return nil, false
+	}
+	if l.byIP == nil {
+		l.byIP = make(map[string][]KeaLease, len(l.leases))
+		for _, x := range l.leases {
+			l.byIP[x.IPAddress] = append(l.byIP[x.IPAddress], x)
+		}
+	}
+	return l.byIP[ip], true
 }
 
 // Any other mode value, including the empty string from older revisions, is PER_DEVICE.

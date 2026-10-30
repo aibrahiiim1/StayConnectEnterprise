@@ -171,6 +171,11 @@ func (s *submitter) loop(ctx context.Context, period func() time.Duration) {
 					return
 				case <-g.C:
 				}
+				// Wake-ups that arrived while this one was held back belong to the same submission: it is derived now, from everything they announced.
+				select {
+				case <-s.kickCh:
+				default:
+				}
 			}
 		case <-t.C:
 		}

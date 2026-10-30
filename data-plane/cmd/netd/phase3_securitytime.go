@@ -13,6 +13,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
 
 type securityClock interface {
@@ -29,7 +31,22 @@ type securityClock interface {
 type procSecurityClock struct {
 	uptimePath string
 	bootIDPath string
+
+	// A pass asks for the time and the boot identity once per session (about two thousand times a pass): each ask was an open, read and close,
+	// and together they were a quarter of netd's CPU at 300 sign-ins a minute (capacity acceptance, 2026-10-30). The identity of a boot cannot change
+	// within it, so it is read again at most once a second; the uptime is read again at most every 250 ms and carried forward in between by the
+	// monotonic clock, which advances at the same rate, so a reading is never more than a few milliseconds from a fresh one.
+	mu       sync.Mutex
+	upBase   int64
+	upAt     time.Time
+	bootID   string
+	bootIDAt time.Time
 }
+
+const (
+	securityUptimeRefresh = 250 * time.Millisecond
+	securityBootIDRefresh = time.Second
+)
 
 func newSecurityClock() *procSecurityClock {
 	return &procSecurityClock{
@@ -39,6 +56,23 @@ func newSecurityClock() *procSecurityClock {
 }
 
 func (c *procSecurityClock) BootMillis() (int64, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.upAt.IsZero() {
+		if age := time.Since(c.upAt); age >= 0 && age < securityUptimeRefresh {
+			return c.upBase + age.Milliseconds(), nil
+		}
+	}
+	ms, err := c.readUptime()
+	if err != nil {
+		c.upAt = time.Time{}
+		return 0, err
+	}
+	c.upBase, c.upAt = ms, time.Now()
+	return ms, nil
+}
+
+func (c *procSecurityClock) readUptime() (int64, error) {
 	raw, err := os.ReadFile(c.uptimePath)
 	if err != nil {
 		return 0, fmt.Errorf("security clock unreadable: %w", err)
@@ -59,17 +93,26 @@ func (c *procSecurityClock) BootMillis() (int64, error) {
 }
 
 func (c *procSecurityClock) BootID() (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.bootID != "" && time.Since(c.bootIDAt) < securityBootIDRefresh && time.Since(c.bootIDAt) >= 0 {
+		return c.bootID, nil
+	}
 	raw, err := os.ReadFile(c.bootIDPath)
 	if err != nil {
+		c.bootID = ""
 		return "", fmt.Errorf("boot identity unreadable: %w", err)
 	}
 	id := strings.TrimSpace(string(raw))
 	if id == "" {
+		c.bootID = ""
 		return "", fmt.Errorf("boot identity is empty")
 	}
 	if !plausibleBootID(id) {
+		c.bootID = ""
 		return "", fmt.Errorf("boot identity is malformed: %q", trimForLog(id))
 	}
+	c.bootID, c.bootIDAt = id, time.Now()
 	return id, nil
 }
 
