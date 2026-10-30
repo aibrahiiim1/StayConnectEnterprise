@@ -191,6 +191,14 @@ describe("Central connection", () => {
     serve(status({ central: { state: "not_configured", last_contact_at: null } }));
     await renderPage();
     expect(region("OneGate Central").getByText("Not configured", { selector: "span" })).toBeTruthy();
+    cleanup(); vi.resetModules();
+
+    // After a restart nothing has been exchanged yet: neither "Connected" nor "unreachable", and no contact time is invented.
+    serve(status({ central: { state: "identity_not_loaded", last_contact_at: null, last_error: null } }));
+    await renderPage();
+    expect(region("OneGate Central").getByText("Not contacted yet", { selector: "span" })).toBeTruthy();
+    expect(region("OneGate Central").getByText(/not loaded yet/)).toBeTruthy();
+    expect(region("OneGate Central").queryByText("Connected", { selector: "span" })).toBeNull();
   });
 
   it("Check now posts to /central/refresh and shows what it found", async () => {

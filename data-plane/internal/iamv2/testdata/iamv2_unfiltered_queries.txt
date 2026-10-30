@@ -148,5 +148,4 @@ internal/staygrant/staygrant.go	7576a8bc1902	SELECT COALESCE(time_accounting_mod
 internal/staygrant/staygrant.go	803833fe1bf9	SELECT count(*) FROM iam_v2.entitlements WHERE stay_id=$1 AND status IN ('PENDING','ACTIVE
 internal/transfer/transfer.go	2eb72ed2d27b	WITH closed AS ( UPDATE iam_v2.entitlement_device_authorizations a SET deauthorized_at = G
 internal/transfer/transfer.go	aaed691c38f3	SELECT (SELECT count(*) FROM iam_v2.entitlement_devices ed JOIN iam_v2.entitlements e ON e
-internal/transfer/transfer.go	e8b9421437c6	UPDATE iam_v2.sessions SET entitlement_id=$1 WHERE entitlement_id=$2 AND state='active'
 internal/transfer/transfer.go	eaf70d00e430	SELECT count(*) FROM iam_v2.entitlement_transfers WHERE from_entitlement_id=$1

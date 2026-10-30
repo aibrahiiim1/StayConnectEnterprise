@@ -30,8 +30,7 @@ func newProdAuthFixture(t *testing.T) *authFixture {
 	}
 	t.Cleanup(p.Close)
 
-	claimFreeFixtureOctet(t, p)
-	f := &authFixture{pool: p, net: nextFixtureNet()}
+	f := &authFixture{pool: p, net: claimFixtureNet(t, p)}
 	// The per-fixture subnet seeds the unique names; dots and slashes are invalid in an interface name.
 	uniq := strings.NewReplacer("/", "-", ".", "-").Replace(f.net.subnet)
 

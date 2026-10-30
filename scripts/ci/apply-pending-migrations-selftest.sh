@@ -75,6 +75,26 @@ echo "== again"
 rc="$(EDGE_PRECHANGE_BACKUP=true run)"
 if [ "$rc" = 0 ] && grep -q 'pending: 0' "$W/out"; then ok "a second run finds nothing pending"; else bad "again rc=$rc"; tail -10 "$W/out"; fi
 
+echo "== reserved numbers and pinned identities"
+M="$T/data-plane/migrations"
+before="$(q "select count(*) from public.schema_migrations")"
+printf 'BEGIN;\nSELECT 1;\nCOMMIT;\n' > "$M/0185_selftest_reserved.up.sql"; printf 'BEGIN;\nSELECT 1;\nCOMMIT;\n' > "$M/0185_selftest_reserved.down.sql"
+rc="$(EDGE_PRECHANGE_BACKUP=true run)"
+if [ "$rc" = 1 ] && grep -q 'held out of the sequence' "$W/out" && [ "$(q "select count(*) from public.schema_migrations")" = "$before" ]; then ok "a file named in a reserved range (0185) is refused and nothing is applied"
+else bad "reserved rc=$rc"; tail -10 "$W/out"; fi
+rm -f "$M/0185_selftest_reserved.up.sql" "$M/0185_selftest_reserved.down.sql"
+LAST="$(ls "$M" | grep -E '^[0-9]{4}_.*\.up\.sql$' | sort | sed -n '/^0192_/p' | head -1)"
+cp "$M/$LAST" "$W/last.keep"; printf -- '-- edited after it shipped\n' >> "$M/$LAST"
+rc="$(EDGE_PRECHANGE_BACKUP=true run)"
+if [ "$rc" = 1 ] && grep -q 'differs from the pinned' "$W/out"; then ok "a release whose file differs from its pinned identity is refused"
+else bad "edited-identity rc=$rc"; tail -10 "$W/out"; fi
+cp "$W/last.keep" "$M/$LAST"
+mv "$M/$NEXT.up.sql" "$M/${NEXT%_selftest_next_migration}_selftest_renamed.up.sql"
+rc="$(EDGE_PRECHANGE_BACKUP=true run)"
+if [ "$rc" = 1 ] && grep -q 'has no file of that name' "$W/out"; then ok "a release that renames a migration the ledger holds is refused"
+else bad "renamed rc=$rc"; tail -10 "$W/out"; fi
+mv "$M/${NEXT%_selftest_next_migration}_selftest_renamed.up.sql" "$M/$NEXT.up.sql"
+
 echo "== platform marker needs the release record"
 NEXT2="$(printf '%04d' $((10#$THROUGH + 2)))_selftest_platform_migration"
 printf -- '-- 0000 selftest platform migration\n-- edge-migrate: platform\nBEGIN;\nCREATE TABLE public.selftest_platform_migration (id integer PRIMARY KEY);\nCOMMIT;\n' > "$T/data-plane/migrations/$NEXT2.up.sql"

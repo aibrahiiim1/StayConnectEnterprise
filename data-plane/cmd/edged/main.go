@@ -393,6 +393,11 @@ func main() {
 				r.Use(s.resourcePermission("backups"))
 				r.Mount("/", s.accountingRetentionRoutes())
 			})
+			// Read-only: where the accounting counted an upper bound instead of an exact figure (0181). Counts and bytes only.
+			r.Route("/accounting-integrity", func(r chi.Router) {
+				r.Use(s.resourcePermission("reports"))
+				r.Mount("/", s.accountingIntegrityRoutes())
+			})
 			// Shortening a period anonymises history on the next run, hence the same "backups" key.
 			r.Route("/data-retention", func(r chi.Router) {
 				r.Use(s.resourcePermission("backups"))

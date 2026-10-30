@@ -150,6 +150,13 @@ export function centralWords(c: CentralStatus["central"]): { title: string; tone
       };
     case "not_configured":
       return { title: "Not configured", tone: "default", line: "No OneGate Central address is set on this appliance." };
+    case "identity_not_loaded":
+      // Nothing has been exchanged with Central since this appliance started, so neither "connected" nor "unreachable" is known.
+      return {
+        title: "Not contacted yet",
+        tone: "default",
+        line: "This appliance's identity or certificate is not loaded yet, so it has not spoken to OneGate Central since it started. Clients are not affected.",
+      };
     default:
       return { title: String(c.state), tone: "default", line: "" };
   }

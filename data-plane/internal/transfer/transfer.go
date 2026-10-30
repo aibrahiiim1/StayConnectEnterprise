@@ -310,10 +310,35 @@ func (s *Store) Execute(ctx context.Context, req Request) (Result, error) {
 		fromEnt, movedAt); err != nil {
 		return Result{}, err
 	}
-	sessions, err := tx.Exec(ctx, `UPDATE iam_v2.sessions
-		SET entitlement_id=$1 WHERE entitlement_id=$2 AND state='active'`, toEnt, fromEnt)
+	// Live sessions move through the binding writer, never by rewriting sessions.entitlement_id: accounting attributes every
+	// sample to the Entitlement the session was BOUND to at the sample's instant (session_entitlement_bindings), so a bare
+	// re-point left the open binding on the terminated source and the destination never accrued the usage its own data limit
+	// is measured against. rebind_session_entitlement closes the source's interval and opens the destination's at the same
+	// instant the devices moved, and also re-points the row. A session still PENDING_ENFORCEMENT moves too: its device
+	// authorisation moved, and left behind it would become active on a terminated entitlement.
+	rows, err := tx.Query(ctx, `SELECT id::text FROM iam_v2.sessions
+		WHERE tenant_id=$2 AND site_id=$3 AND entitlement_id=$1 AND ended IS NULL
+		  AND state IN ('active','PENDING_ENFORCEMENT') ORDER BY id`, fromEnt, req.Tenant, req.Site)
 	if err != nil {
 		return Result{}, err
+	}
+	var liveSessions []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return Result{}, err
+		}
+		liveSessions = append(liveSessions, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return Result{}, err
+	}
+	for _, sid := range liveSessions {
+		if _, err := tx.Exec(ctx, `SELECT iam_v2.rebind_session_entitlement($1,$2,$3)`, sid, toEnt, movedAt); err != nil {
+			return Result{}, err
+		}
 	}
 
 	// The database refuses both lineage rows unless everything above holds.
@@ -340,7 +365,7 @@ func (s *Store) Execute(ctx context.Context, req Request) (Result, error) {
 	}
 	return Result{
 		TransferID: transferID, FromEntitlement: fromEnt, ToEntitlement: toEnt, ToPackage: pkgRev,
-		DevicesRebound: int(devices.RowsAffected()), SessionsRebound: int(sessions.RowsAffected()),
+		DevicesRebound: int(devices.RowsAffected()), SessionsRebound: len(liveSessions),
 		WindowEnds: windowEnds,
 	}, nil
 }

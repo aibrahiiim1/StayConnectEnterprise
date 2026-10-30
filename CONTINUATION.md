@@ -11,20 +11,25 @@
 > `current_state_facts.master_head_at_delivery_base` and live master. It names no master head; read
 > `latest_transition_id` and `current_delivery` in the register.
 
-## Where the work is (2026-10-29)
+## Where the work is (2026-10-30)
 
 Merged: #256–#264 (installer, enrollment, modules, cleanups, the first audit remediation; T0259–T0266). Then, by the
 Product Owner's decisions of 2026-10-29 (D81): **PR #265** (audit decisions AD-1 to AD-68, T0267) and **PR #266**
-(the upgrade-path fix found by deploying it, T0268). The disposition of every decision — implemented, accepted risk,
-documentation only, or waiting for evidence — is in [`docs/AUDIT_DECISION_DISPOSITIONS.md`](docs/AUDIT_DECISION_DISPOSITIONS.md).
-Both environments run the release (installation manual A3.10).
+(the upgrade-path fix found by deploying it, T0268); the closure rounds that followed are #267–#271 (D82), the roll-up window
+and capacity acceptance #272–#274 (D83) and the second closure round #275–#276 (D84, T0275: accounting integrity 0181, the AD-36
+closure, the flower shaping classifier, sign-in capacity 0191/0192 and the acctd watchdog). The disposition of every decision —
+implemented, accepted risk, documentation only, or waiting for evidence — is in
+[`docs/AUDIT_DECISION_DISPOSITIONS.md`](docs/AUDIT_DECISION_DISPOSITIONS.md); the measured acceptance is
+[`docs/runbooks/CAPACITY_AND_OFFLINE_ACCEPTANCE.md`](docs/runbooks/CAPACITY_AND_OFFLINE_ACCEPTANCE.md) (sections 6 and 7 are current;
+2 to 5 are the first round, kept as history). The release each environment runs is in the table below and in
+`governance/project-state.json` (`current_delivery`), which wins.
 
 ## Environments (Product-Owner record, 2026-10-28)
 
 | Role | Host | State |
 |---|---|---|
-| **Production Central** | `central.onegate.getsemantics.com`, public `41.128.240.133`, private `172.21.96.96` | release `onegate-central-9613fb52679d` (2026-10-29, the closure round: ctrlapi runs as the least-privilege role `ctrlapi_rt`, migrations through 0063; the earlier audit-decision release `ee2faf881d89` had Central code equals master `1cd37145`); its own trust universe. Never a default for tests or drills |
-| **Test appliance** | `172.21.96.97` | release `onegate-appliance-9613fb52679d` (2026-10-29, the closure round, migrations through 0179, appliance Root CA pinned against its fingerprint; the earlier audit-decision release was `1cd37145c468`); activated on the production Central; standing deployment authorization for routine software (D79); Go-Live not authorised |
+| **Production Central** | `central.onegate.getsemantics.com`, public `41.128.240.133`, private `172.21.96.96` | Central code of release `5ac9cc5c9851` (unchanged by the second closure round; ctrlapi runs as the least-privilege role `ctrlapi_rt`, migrations through 0063; first installed as `onegate-central-9613fb52679d` on 2026-10-29); its own trust universe. Never a default for tests or drills |
+| **Test appliance** | `172.21.96.97` | the second closure round `bcb5330cf914` (2026-10-30, migrations through 0192, appliance Root CA pinned against its fingerprint; the 2026-10-29 closure round was `9613fb52679d`); activated on the production Central; standing deployment authorization for routine software (D79); Go-Live not authorised |
 
 Every other host is retired and never contacted (`current_state_facts.retired_hosts`, enforced by
 `tools/validate-standing-records.py`). The cloud delivery environment cannot reach either current host (its egress

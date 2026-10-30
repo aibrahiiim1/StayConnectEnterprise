@@ -689,6 +689,11 @@ and never migrated since, `/etc/stayconnect/schema-baseline`; each pending migra
 (`gatep-reconcile.sh --expect-commit <release commit>`, hash-guarded against the installed release's `RELEASE.json` + `SHA256SUMS`, one
 transaction) → install the binaries with `install(1)`, keeping each old one as `<bin>.bak-<stamp>` → install units → restart in dependency order
 (`netd`, `scd`, `acctd`, `portald`, `edged`, and `pmsd` if enabled) → install the Admin Console → record the release → `check-appliance-units.sh`.
+
+**Migration numbers are checked before anything is planned** (`data-plane/migrations/README.md`). `apply-pending-migrations.sh` refuses, applying nothing and exiting 1, a release that
+(a) holds a migration file whose number is in `data-plane/migrations/RESERVED_NUMBERS` (today `0182-0189`, held out on purpose; the hole is harmless to the runner, whose gap check walks files, not numbers),
+(b) holds a migration whose sha256 differs from its pin in `data-plane/migrations/IDENTITIES`, or
+(c) lacks, or names differently, a migration the database ledger already holds (a downgrade or a renamed history). `edge-migrate.sh` repeats (a), (b) and the name check for the one migration it applies, and `central-migrate.sh` refuses (a), a changed applied migration (its ledger keeps a checksum) and a different name for an applied number. Proven by `scripts/ci/apply-pending-migrations-selftest.sh` and `deploy/scripts/central-migrate-selftest.sh` (a file in the reserved range and a renamed applied migration are each refused) and, without a database, by `tools/validate-migration-location-selftest.py`.
 **If a migration or the reconcile fails, the binaries are not replaced.** Before step 8 it prints the exact binary-rollback command — copy it into your log.
 
 Measured: an upgrade with no pending migration took ~25 s; a signed-in Client stayed online across it; identity, certificate and `.dsn` were

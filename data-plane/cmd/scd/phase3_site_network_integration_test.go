@@ -29,44 +29,16 @@ type clientNetwork struct {
 	ip, mac         string
 }
 
-// freeSiteNetworkOctet picks an unused third octet in 10.78.0.0/16. It must be a query, not a counter:
-// resolveNetwork picks the enabled subnet containing the address, so shared subnets resolve arbitrarily.
-// 10.78 avoids collisions with claimFreeFixtureOctet's 10.77.
-func (f *authFixture) freeSiteNetworkOctet(t *testing.T) int {
-	t.Helper()
-	rows, err := f.pool.Query(context.Background(),
-		`SELECT DISTINCT split_part(host(network(subnet_cidr)), '.', 3)::int
-		   FROM public.guest_networks WHERE subnet_cidr <<= '10.78.0.0/16'`)
-	if err != nil {
-		t.Fatalf("read the used 10.78 subnets: %v", err)
-	}
-	defer rows.Close()
-	used := map[int]bool{}
-	for rows.Next() {
-		var n int
-		if err := rows.Scan(&n); err == nil {
-			used[n] = true
-		}
-	}
-	for n := 1; n < 250; n++ {
-		if !used[n] {
-			return n
-		}
-	}
-	t.Skip("no free 10.78.x subnet remains in this database")
-	return 0
-}
-
 // addClientNetwork seeds one client network with its own subnet. `enabled` is false for the retired side of
 // a replacement (applied replacements disable the original row); a disabled network resolves no devices.
 func (f *authFixture) addClientNetwork(t *testing.T, label string, enabled bool) clientNetwork {
 	t.Helper()
-	octet := f.freeSiteNetworkOctet(t)
+	n := claimFixtureNet(t, f.pool)
 	cn := clientNetwork{
-		subnet:  fmt.Sprintf("10.78.%d.0/24", octet),
-		gateway: fmt.Sprintf("10.78.%d.1", octet),
-		ip:      fmt.Sprintf("10.78.%d.40", octet),
-		mac:     fmt.Sprintf("02:00:00:dd:00:%02x", octet),
+		subnet:  n.subnet,
+		gateway: n.gateway,
+		ip:      n.host(40),
+		mac:     fmt.Sprintf("02:00:00:dd:%02x:%02x", (n.index>>8)&0xff, n.index&0xff),
 	}
 	// bridge_name and parent_interface must be unique, so derive both from a fresh uuid.
 	if err := f.pool.QueryRow(context.Background(), `
