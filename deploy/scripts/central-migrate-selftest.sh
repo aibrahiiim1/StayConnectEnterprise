@@ -171,4 +171,20 @@ run adopt "$M" up > "$T/up2.log" 2>&1 \
   && [ "$(Q adopt "SELECT count(*) FROM schema_migrations WHERE checksum <> ''")" = 5 ] \
   && ok "up backfills the pre-ledger checksum and applies the rest" || { bad "backfill"; tail -5 "$T/up2.log"; }
 
+# ---- 7. reserved numbers and a renamed applied migration
+R="$T/reserved"; mkdir -p "$R"; cp "$M"/*.sql "$R/"
+printf '0007-0008   held out on purpose\n' > "$R/RESERVED_NUMBERS"
+cp "$M/0001_first.up.sql" "$R/0007_squatter.up.sql"; cp "$M/0001_first.down.sql" "$R/0007_squatter.down.sql" 2>/dev/null || true
+newdb reserved
+out="$(run reserved "$R" up 2>&1)" && bad "a file in a reserved range was applied"
+printf '%s' "$out" | grep -q 'holds out of the sequence' && [ "$(Q reserved "SELECT to_regclass('public.first_t') IS NULL")" = t ] \
+  && ok "a file in a reserved range is refused before anything is applied" || bad "reserved: $out"
+rm -f "$R/0007_squatter".*sql
+newdb renamed
+run renamed "$M" up > "$T/ren1.log" 2>&1 || { bad "renamed: first up failed"; tail -3 "$T/ren1.log"; }
+RN="$T/renamed"; mkdir -p "$RN"; cp "$M"/*.sql "$RN/"
+mv "$RN/0004_slow_4.up.sql" "$RN/0004_other_name.up.sql" 2>/dev/null; mv "$RN/0004_slow_4.down.sql" "$RN/0004_other_name.down.sql" 2>/dev/null
+out="$(run renamed "$RN" up 2>&1)"
+printf '%s' "$out" | grep -q 'already ran number 0004' && ok "a release offering a different name for an applied number is refused" || bad "renamed: $out"
+
 exit "$fail"

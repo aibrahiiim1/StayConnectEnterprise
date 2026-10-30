@@ -1,0 +1,3 @@
+# RESERVED MIGRATION NUMBERS for the Central control-plane database. Same format and same meaning as
+# data-plane/migrations/RESERVED_NUMBERS:   FIRST-LAST   reason   (one range per line, a hash starts a comment).
+# None are reserved: the Central sequence 0001..NNNN is contiguous. Add one line here to hold a range out.

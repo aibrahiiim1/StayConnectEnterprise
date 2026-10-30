@@ -153,6 +153,42 @@ fi
 q(){ $EDGE_PSQL -tAqc "${ROLE_PREFIX}$1" </dev/null; }
 NAME_RE='^[0-9]{4}_[a-z0-9_]+$'
 
+# RESERVED NUMBERS AND PINNED IDENTITIES (data-plane/migrations/RESERVED_NUMBERS, IDENTITIES -- the same files
+# tools/validate-migration-location.py enforces in CI). A file in a reserved range is never applied; a migration the
+# release pins must be byte-identical to its pin; and a ledger row for the same NUMBER under a different NAME means the
+# release renamed something this database already ran. All three are refused BEFORE the database is touched.
+[ -f "$HERE/deploy/scripts/lib-baseline.sh" ] || { echo "REFUSED: $HERE/deploy/scripts/lib-baseline.sh is missing; cannot read the reserved-number declaration" >&2; exit 2; }
+# shellcheck source=../deploy/scripts/lib-baseline.sh
+. "$HERE/deploy/scripts/lib-baseline.sh"
+verify_release_identity(){ # $1 = version (NNNN_name) being applied, $2 = the directory its file came from
+  local ver="$1" dir="$2" num rc other pin got
+  num="${ver:0:4}"
+  is_reserved_number "$dir" "$num"; rc=$?
+  if [ "$rc" = 0 ]; then
+    echo "REFUSED: $ver uses number $num, which $dir/RESERVED_NUMBERS holds out of the sequence on purpose." >&2
+    echo "         Take the next free number instead." >&2
+    exit 3
+  elif [ "$rc" = 2 ]; then
+    echo "REFUSED: $dir/RESERVED_NUMBERS is unreadable, so reserved numbers cannot be excluded" >&2; exit 3
+  fi
+  pin="$(awk -v v="$ver" '$1==v {print $2}' "$dir/IDENTITIES" 2>/dev/null | head -1)"
+  if [ -n "$pin" ]; then
+    got="$(sha256sum "$dir/$ver.up.sql" | awk '{print $1}')"
+    if [ "$got" != "$pin" ]; then
+      echo "REFUSED: $ver differs from the identity this release pins for it (IDENTITIES)." >&2
+      echo "         pinned: $pin" >&2; echo "         file:   $got" >&2
+      echo "         A shipped migration is never edited; add a new migration instead." >&2
+      exit 3
+    fi
+  fi
+  other="$(q "SELECT string_agg(version, ',') FROM public.schema_migrations WHERE substring(version from 1 for 4)='$num' AND version<>'$ver'")"
+  if [ -n "$other" ]; then
+    echo "REFUSED: this database already ran number $num as $other, but the release offers $ver." >&2
+    echo "         A release may not rename or replace a migration the ledger holds." >&2
+    exit 3
+  fi
+}
+
 ack_for_kind(){ case "$1" in disposable) echo "I_UNDERSTAND_DISPOSABLE_DATABASE";; live-site) echo "I_UNDERSTAND_LIVE_DARK_SITE_MIGRATION";; *) echo "";; esac; }
 # A SEPARATE VOCABULARY FOR REMOVING SCHEMA. Deliberately not derived from the apply acknowledgement, so
 # muscle memory for one cannot satisfy the other.
@@ -649,6 +685,7 @@ apply_one(){ # $1=file  atomic lock-then-ledger
   elif [ "$ALL" -ne 1 ]; then
     echo "REFUSED: --expect-sha256 is mandatory for a single-migration apply" >&2; exit 3
   fi
+  verify_release_identity "$ver" "$(dirname "$f")"
   verify_baseline_for "$ver"
   # Only for a single named apply: --all is ordered by construction.
   [ "$ALL" -eq 1 ] || verify_in_order "$ver"

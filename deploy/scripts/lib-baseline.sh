@@ -47,3 +47,46 @@ baseline_is_current() {
   fi
   return 0
 }
+
+# ---------------------------------------------------------------------------------------------------------------------
+# RESERVED NUMBERS AND PINNED IDENTITIES (data-plane/migrations/RESERVED_NUMBERS and IDENTITIES).
+#
+# The SAME two files tools/validate-migration-location.py reads in CI are read here at apply time, so a file the
+# validator would refuse cannot be applied on an appliance either (a release built from a branch that skipped CI, or a
+# tree edited after installation).
+#
+#   reserved_number_list <dir>        every reserved four-digit number, one per line; return 2 on a malformed line
+#   is_reserved_number <dir> <NNNN>   0 reserved · 1 not reserved · 2 the declaration is unreadable (callers fail closed)
+#   release_identity_problems <dir>   prints one line per pinned migration whose file is missing or whose sha256 differs
+# ---------------------------------------------------------------------------------------------------------------------
+reserved_number_list() {
+  local f="$1/RESERVED_NUMBERS" line range a b n
+  [ -f "$f" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%%#*}"
+    range="$(printf '%s' "$line" | awk '{print $1}')"
+    [ -n "$range" ] || continue
+    if ! [[ "$range" =~ ^([0-9]{4})-([0-9]{4})$ ]]; then echo "RESERVED_NUMBERS: malformed line: $line" >&2; return 2; fi
+    a=$((10#${BASH_REMATCH[1]})); b=$((10#${BASH_REMATCH[2]}))
+    [ "$a" -le "$b" ] || { echo "RESERVED_NUMBERS: range runs backwards: $line" >&2; return 2; }
+    for ((n=a; n<=b; n++)); do printf '%04d\n' "$n"; done
+  done < "$f"
+}
+
+is_reserved_number() {
+  local list
+  list="$(reserved_number_list "$1")" || return 2
+  printf '%s\n' "$list" | grep -qx "$2"
+}
+
+release_identity_problems() {
+  local dir="$1" f stem want got
+  [ -f "$dir/IDENTITIES" ] || return 0
+  while read -r stem want; do
+    case "$stem" in ''|'#'*) continue;; esac
+    f="$dir/$stem.up.sql"
+    if [ ! -f "$f" ]; then echo "$stem: pinned in IDENTITIES but the release has no such file"; continue; fi
+    got="$(sha256sum "$f" | cut -d' ' -f1)"
+    [ "$got" = "$want" ] || echo "$stem: sha256 $got differs from the pinned $want"
+  done < "$dir/IDENTITIES"
+}
