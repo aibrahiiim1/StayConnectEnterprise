@@ -325,6 +325,8 @@ type gateView struct {
 	// skip due renewals.
 	ok    bool
 	byKey map[string]gateElem
+	// aged is how long ago the snapshot was taken: the lease an element had left then is that much shorter now.
+	aged time.Duration
 }
 
 func gateKey(bridge string, ip net.IP) string {
@@ -358,6 +360,11 @@ func (v gateView) lookup(bridge string, ip net.IP) (gateElem, bool, bool) {
 		return gateElem{}, false, false
 	}
 	e, ok := v.byKey[gateKey(bridge, ip)]
+	if ok && e.Expires > 0 && v.aged > 0 {
+		if e.Expires -= v.aged; e.Expires <= 0 {
+			e.Expires = 1 // lapsed since the snapshot (or about to): due for renewal, never "no expiry reported"
+		}
+	}
 	return e, ok, true
 }
 

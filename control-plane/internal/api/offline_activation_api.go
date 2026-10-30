@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/stayconnect/enterprise/control-plane/internal/activation"
 	"github.com/stayconnect/enterprise/control-plane/internal/assignment"
@@ -260,25 +261,41 @@ func (b *OfflineBase) activationPackage(w http.ResponseWriter, r *http.Request) 
 	if raw, err := base64.RawStdEncoding.DecodeString(pubKey); err == nil && len(raw) == ed25519.PublicKeySize {
 		idFpr = activation.KeyID(ed25519.PublicKey(raw))
 	}
+	// The CURRENT signed registry, as served to online appliances: a never-online appliance can verify its assignment only if it arrives here.
+	// No registry signed yet (registry signing disabled) leaves the field out; any other failure refuses rather than issue a package the
+	// appliance may be unable to verify.
+	var regDoc json.RawMessage
+	switch env, err := currentRegistryEnvelope(ctx, b.DB); {
+	case errors.Is(err, pgx.ErrNoRows):
+	case err != nil:
+		Fail(w, r, http.StatusServiceUnavailable, "registry_unavailable", "Central could not read the assignment trust registry. Try again later.")
+		return
+	default:
+		if regDoc, err = registryForPackage(env); err != nil {
+			Fail(w, r, http.StatusServiceUnavailable, "registry_unavailable", "Central's assignment trust registry is unreadable. Try again later.")
+			return
+		}
+	}
 	now := time.Now()
 	pkg := &activation.Package{
-		SchemaVersion:   activation.SchemaVersion,
-		PackageID:       newUUIDv4(),
-		RequestID:       reqID,
-		RequestNonce:    reqNonce,
-		ApplianceID:     appID,
-		Serial:          serial,
-		IdentityKeyFpr:  idFpr,
-		TenantID:        asg.TenantID,
-		SiteID:          asg.SiteID,
-		Assignment:      asgRaw,
-		LicenseEnvelope: json.RawMessage(licEnv),
-		Entitlements:    json.RawMessage(`{}`),
-		CABundlePEM:     b.caPEM,
-		CentralBase:     b.centralBase,
-		IssuedAt:        now.Unix(),
-		ExpiresAt:       now.Add(time.Duration(validHours(body.ValidHours)) * time.Hour).Unix(),
-		Nonce:           offlineNonce(),
+		SchemaVersion:      activation.SchemaVersion,
+		PackageID:          newUUIDv4(),
+		RequestID:          reqID,
+		RequestNonce:       reqNonce,
+		ApplianceID:        appID,
+		Serial:             serial,
+		IdentityKeyFpr:     idFpr,
+		TenantID:           asg.TenantID,
+		SiteID:             asg.SiteID,
+		Assignment:         asgRaw,
+		LicenseEnvelope:    json.RawMessage(licEnv),
+		Entitlements:       json.RawMessage(`{}`),
+		CABundlePEM:        b.caPEM,
+		CentralBase:        b.centralBase,
+		AssignmentRegistry: regDoc,
+		IssuedAt:           now.Unix(),
+		ExpiresAt:          now.Add(time.Duration(validHours(body.ValidHours)) * time.Hour).Unix(),
+		Nonce:              offlineNonce(),
 	}
 	activation.SignPackage(b.priv, pkg)
 
@@ -316,6 +333,19 @@ func (b *OfflineBase) activationPackage(w http.ResponseWriter, r *http.Request) 
 	audit.Op(r.Context(), b.DB, r, "offline_activation.package_generated", "appliance", appID, map[string]any{
 		"_tenant_id": pkg.TenantID, "package_id": pkg.PackageID, "request_id": reqID, "expires_at": pkg.ExpiresAt})
 	writeFile(w, "activation-package-"+serial+".json", map[string]any{"package_id": pkg.PackageID, "package": pkg})
+}
+
+// registryForPackage turns the stored registry envelope into the document a package carries: parsed into the signed struct and re-marshalled, so the
+// bytes are the stable form of exactly the fields the root signature covers (the stored jsonb reorders keys). It is not re-signed or altered.
+func registryForPackage(env []byte) (json.RawMessage, error) {
+	var sr assignment.SignedRegistry
+	if err := json.Unmarshal(env, &sr); err != nil {
+		return nil, err
+	}
+	if sr.RegistryVersion <= 0 || sr.Signature == "" {
+		return nil, errors.New("not a signed registry")
+	}
+	return json.Marshal(&sr)
 }
 
 // offlineLicense signs a licence file for an activated appliance: its own current licence.

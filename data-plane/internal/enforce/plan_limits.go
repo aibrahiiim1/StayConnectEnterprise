@@ -5,7 +5,11 @@ package enforce
 
 import (
 	"context"
+	"errors"
+	"sync"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type SessionEnd struct {
@@ -69,9 +73,74 @@ func (e *Enforcer) PurgeAccountingDetail(ctx context.Context, tenant, site strin
 	return n, err
 }
 
+// The roll-up reads one TIME window of raw samples per call, and the number of rows in a window is whatever the site
+// produced in it. acctd's role cancels a statement after 30 s; a window that cannot be read in that time rolls back
+// whole (the watermark moves in the same transaction), so the SAME window would be retried, and cancelled, forever
+// and nothing behind it would ever be rolled up or purged. The window therefore adapts: it starts at two hours, is
+// cut to a quarter after a cancelled statement (never below the function's one-minute minimum) and doubles back
+// after a call that was quick.
+const (
+	rollupWindowMax = 2 * time.Hour
+	rollupWindowMin = time.Minute
+)
+
+// rollupQuick: a window read faster than this is far from the 30 s cancellation (twice as wide takes under 10 s) and may
+// be widened. A variable only so a test can scale it with a scaled-down statement_timeout.
+var rollupQuick = 5 * time.Second
+
+// nextRollupWindow decides the window for the call after one that took `took` and ended in `err`.
+func nextRollupWindow(cur, took time.Duration, err error) time.Duration {
+	switch {
+	case err != nil && isStatementTimeout(err):
+		cur /= 4
+	case err == nil && took < rollupQuick:
+		cur *= 2
+	}
+	if cur < rollupWindowMin {
+		cur = rollupWindowMin
+	}
+	if cur > rollupWindowMax {
+		cur = rollupWindowMax
+	}
+	return cur
+}
+
+// isStatementTimeout reports a statement cancelled by statement_timeout (SQLSTATE 57014, query_canceled).
+func isStatementTimeout(err error) bool {
+	var pg *pgconn.PgError
+	return errors.As(err, &pg) && pg.Code == "57014"
+}
+
+type rollupWindows struct {
+	mu sync.Mutex
+	by map[string]time.Duration
+}
+
+func (w *rollupWindows) get(site string) time.Duration {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if d, ok := w.by[site]; ok {
+		return d
+	}
+	return rollupWindowMax
+}
+
+func (w *rollupWindows) set(site string, d time.Duration) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.by == nil {
+		w.by = map[string]time.Duration{}
+	}
+	w.by[site] = d
+}
+
 // RollupAccountingUsage adds the next window of raw accounting samples to the per-minute and per-hour usage tables
 // (migration 0175, AD-48) and returns the samples read. A no-op on a database without the migration. The purge never
 // removes a raw sample the rollup has not read, so this must keep running for detail to be reclaimed.
+//
+// The window is at most two hours and shrinks after a cancelled statement (see nextRollupWindow), so a busy site's
+// window that cannot be read inside the role's statement_timeout is retried smaller instead of failing forever. The
+// function is atomic, so a cancelled call leaves the watermark and the usage tables as they were.
 func (e *Enforcer) RollupAccountingUsage(ctx context.Context, tenant, site string) (int64, error) {
 	present, err := e.procPresent(ctx, "iam_v2.rollup_accounting_usage(uuid,uuid,interval)")
 	if err != nil {
@@ -80,11 +149,12 @@ func (e *Enforcer) RollupAccountingUsage(ctx context.Context, tenant, site strin
 	if !present {
 		return 0, nil
 	}
+	window := e.rollupWin.get(site)
 	var n int64
-	// A window, not the function's one-day default: acctd's role cancels a statement after 30 s, and a day of samples at
-	// the design load (2,000 devices) is several million rows. Measured on a 1 vCPU appliance: about 85,000 rows a second,
-	// so two hours (about 480,000 rows) take some six seconds; the caller repeats until a window is empty.
-	err = e.pool.QueryRow(ctx, `SELECT iam_v2.rollup_accounting_usage($1,$2,interval '2 hours')`, tenant, site).Scan(&n)
+	t0 := time.Now()
+	err = e.pool.QueryRow(ctx, `SELECT iam_v2.rollup_accounting_usage($1,$2,make_interval(secs => $3::double precision))`,
+		tenant, site, window.Seconds()).Scan(&n)
+	e.rollupWin.set(site, nextRollupWindow(window, time.Since(t0), err))
 	return n, err
 }
 

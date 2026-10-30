@@ -35,6 +35,8 @@ type Client struct {
 
 	// exec is a field so tests can assert the tc commands without a kernel.
 	exec func(ctx context.Context, name string, args ...string) ([]byte, error)
+	// execIn runs one invocation with a script on stdin (`tc -batch -`); see batch.go.
+	execIn func(ctx context.Context, stdin []byte, name string, args ...string) ([]byte, error)
 
 	mu         sync.Mutex
 	infraReady map[string]bool // bridge -> ingress/IFB redirect established this process
@@ -50,9 +52,25 @@ func New() *Client {
 		TCPath:     "/usr/sbin/tc",
 		IPPath:     "/usr/sbin/ip",
 		exec:       realExec,
+		execIn:     realExecStdin,
 		infraReady: map[string]bool{},
 		bridgeMu:   map[string]*sync.Mutex{},
 	}
+}
+
+// NewWithExec builds a client over caller-supplied executors, so a test or a harness can count or simulate every tc/ip invocation.
+func NewWithExec(e func(ctx context.Context, name string, args ...string) ([]byte, error),
+	in func(ctx context.Context, stdin []byte, name string, args ...string) ([]byte, error)) *Client {
+	return &Client{
+		TCPath: "/usr/sbin/tc", IPPath: "/usr/sbin/ip", exec: e, execIn: in,
+		infraReady: map[string]bool{}, bridgeMu: map[string]*sync.Mutex{},
+	}
+}
+
+func realExecStdin(ctx context.Context, stdin []byte, name string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Stdin = bytes.NewReader(stdin)
+	return cmd.CombinedOutput()
 }
 
 func MinorForIP(ip net.IP) (int, bool) {
@@ -494,10 +512,46 @@ func (c *Client) removeClassAndFilter(ctx context.Context, ifc, cid string, ip n
 type ClassBytes struct {
 	Bytes   uint64
 	Packets uint64
+	// Params is true when the class header was parsed completely: Parent, RateKbit and CeilKbit are then what is installed. A caller that
+	// finds it false must not conclude anything from the other three.
+	Params bool
+	// Parent is "1:" for a class directly under the root qdisc (PER_DEVICE) or the group classid of a SHARED session.
+	Parent   string
+	RateKbit int
+	CeilKbit int
 }
 
 // classHeaderRe matches e.g. "class htb 1:10cd parent 1: ...".
 var classHeaderRe = regexp.MustCompile(`^class htb (\w+):([0-9a-f]+)\b`)
+
+// classRatesRe takes the parent and the two rates off a class header: "class htb 1:10cd root leaf 10cd: prio 0 rate 5Mbit ceil 5Mbit burst ...".
+var classRatesRe = regexp.MustCompile(`^class htb \w+:[0-9a-f]+ (?:(root)|parent (\S+)) .*?\brate (\S+) ceil (\S+)`)
+
+// parseTCRate converts tc's rate text (5Mbit, 1500Kbit, 800bit) to kbit; false when it is not a whole number of kbit.
+func parseTCRate(s string) (int, bool) {
+	mult := 1.0
+	switch {
+	case strings.HasSuffix(s, "Gbit"):
+		mult, s = 1e6, strings.TrimSuffix(s, "Gbit")
+	case strings.HasSuffix(s, "Mbit"):
+		mult, s = 1e3, strings.TrimSuffix(s, "Mbit")
+	case strings.HasSuffix(s, "Kbit"):
+		mult, s = 1, strings.TrimSuffix(s, "Kbit")
+	case strings.HasSuffix(s, "bit"):
+		mult, s = 1e-3, strings.TrimSuffix(s, "bit")
+	default:
+		return 0, false
+	}
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0, false
+	}
+	k := v * mult
+	if k != float64(int(k+0.5)) {
+		return 0, false
+	}
+	return int(k + 0.5), true
+}
 
 var sentRe = regexp.MustCompile(`^\s*Sent\s+(\d+)\s+bytes\s+(\d+)\s+pkt\b`)
 
@@ -529,7 +583,19 @@ func (c *Client) ReadClasses(ctx context.Context, device string) (map[int]ClassB
 				continue
 			}
 			curMinor = minor
-			res[curMinor] = ClassBytes{}
+			cb := ClassBytes{}
+			if rm := classRatesRe.FindStringSubmatch(line); rm != nil {
+				rate, ok1 := parseTCRate(rm[3])
+				ceil, ok2 := parseTCRate(rm[4])
+				if ok1 && ok2 {
+					cb.Params, cb.RateKbit, cb.CeilKbit = true, rate, ceil
+					cb.Parent = RootParent
+					if rm[1] == "" {
+						cb.Parent = rm[2]
+					}
+				}
+			}
+			res[curMinor] = cb
 			continue
 		}
 		if curMinor < 0 {

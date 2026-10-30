@@ -25,8 +25,28 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/shapeplan"
 )
 
+// provCtx is what the checks that precede any kernel work established about one session.
+type provCtx struct {
+	ip      net.IP
+	key     string
+	lease   time.Duration
+	ev      ownershipEvidence
+	nowBoot int64
+}
+
 // Caller holds p.mu.
 func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, minor int, s shapeplan.Session, view gateView, now time.Time, res *shapingPlanResponse) {
+	pc, ok := p.provisionPrecheck(ctx, bridge, minor, s, view, now, res)
+	if !ok {
+		return
+	}
+	p.provisionTail(ctx, bridge, minor, s, view, now, res, pc)
+}
+
+// provisionPrecheck is everything that decides, from memory and the DHCP evidence alone, whether a session may be provisioned or renewed at all: the
+// access boundary, address ownership, the monotonic clock and the quarantine. It installs nothing; the fail-closed outcomes it reaches deny access.
+// ok is false when the session has been dealt with (failed closed, held, or left unrenewed).
+func (p *phase3Shaping) provisionPrecheck(ctx context.Context, bridge string, minor int, s shapeplan.Session, view gateView, now time.Time, res *shapingPlanResponse) (provCtx, bool) {
 	ip := net.ParseIP(s.IP)
 	key := classKey(bridge, s.SessionID)
 	if p.epochs == nil {
@@ -39,8 +59,9 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 	// The plan may still list a session past its deadline; that is not authority to forward it.
 	lease, leasable, why := leaseFor(s, now)
 	if !leasable {
-		p.failClosed(ctx, bridge, ip, res, "shape "+s.SessionID+": "+why+"; not authorized")
-		return
+		// The plan still lists a session whose window has run out (or has under a second left): the ordinary end of access, which the next plan lists as ended.
+		p.endClosed(ctx, bridge, ip, res, "shape "+s.SessionID+": "+why+"; not authorized")
+		return provCtx{}, false
 	}
 
 	// Before anything is installed or renewed, DHCP is asked whose address this is. A reassigned or released
@@ -68,7 +89,7 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 			"shape "+s.SessionID+": "+s.IP+" is no longer leased to this session's device; authorization withdrawn")
 		p.markEnded(ctx, s.SessionID, endReasonAddressNotOwned)
 		p.endSeries(bridge, s.SessionID)
-		return
+		return provCtx{}, false
 	case addressUnknown:
 		// Missing evidence is not permission to continue: durable state alone must never renew an address
 		// (that is how a reassigned address stayed authorized). Withhold the renewal and let the bounded
@@ -79,7 +100,7 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 					"the authorization is NOT renewed and will expire with its current lease unless ownership "+
 					"is confirmed first")
 			p.noteUnverified(bridge, s.SessionID)
-			return
+			return provCtx{}, false
 		}
 	}
 
@@ -96,7 +117,7 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 		p.failClosed(ctx, bridge, ip, res,
 			"shape "+s.SessionID+": the monotonic security clock is unreadable ("+clockErr.Error()+
 				"); the activation bound cannot be measured, so no provisional access is granted")
-		return
+		return provCtx{}, false
 	}
 	// An untrustworthy boot identity is not failed closed here: that would disconnect sessions already proven
 	// active. It is carried as "", which every consumer treats as untrusted (beginAttempt refuses,
@@ -126,15 +147,12 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 				}
 			}
 			if !resolved {
-				if derr := p.denyAccess(ctx, bridge, ip); derr != nil {
-					res.Problems = append(res.Problems,
-						"cross-boot hold "+s.SessionID+": PACKET AUTHORIZATION NOT PROVEN REMOVED: "+derr.Error())
-				}
+				p.holdDeny(ctx, bridge, ip, res, "cross-boot hold "+s.SessionID)
 				res.Failed++
 				res.Problems = append(res.Problems, "shape "+s.SessionID+
 					": an unproven activation survived a reboot; its monotonic bound cannot be carried across "+
 					"boots and durable ACTIVE is not proven, so the session stays denied")
-				return
+				return provCtx{}, false
 			}
 		}
 	}
@@ -152,17 +170,35 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 		}
 		if hold {
 			// denyAccess still runs: the quarantine may have begun while an element was installed.
-			if derr := p.denyAccess(ctx, bridge, ip); derr != nil {
-				res.Problems = append(res.Problems,
-					"quarantine "+s.SessionID+": PACKET AUTHORIZATION NOT PROVEN REMOVED: "+derr.Error())
-			}
+			p.holdDeny(ctx, bridge, ip, res, "quarantine "+s.SessionID)
 			res.Failed++
 			res.Problems = append(res.Problems, "shape "+s.SessionID+
 				": quarantined after "+itoa(q.Strikes)+" unproven activation(s); not re-admitting for another "+
 				itoa(int((q.BackoffUntilBootMs-nowBoot)/1000))+"s")
-			return
+			return provCtx{}, false
 		}
 		q.freshAttempt = true // the backoff has elapsed and durable state is readable: one fresh attempt
+	}
+	return provCtx{ip: ip, key: key, lease: lease, ev: ev, nowBoot: nowBoot}, true
+}
+
+// provisionTail is the kernel half: re-rate or renew an active class, or admit a new one through the staged sequence described at the top of this file.
+func (p *phase3Shaping) provisionTail(ctx context.Context, bridge string, minor int, s shapeplan.Session, view gateView, now time.Time, res *shapingPlanResponse, pc provCtx) {
+	ip, key, lease, ev, nowBoot := pc.ip, pc.key, pc.lease, pc.ev, pc.nowBoot
+	if p.epochs == nil {
+		p.epochs = map[string]int64{}
+	}
+	if p.pending == nil {
+		p.pending = map[string]int64{}
+	}
+	if p.pb != nil {
+		// The checks above ran earlier in the pass for this session; the clock the bound is measured on is read again.
+		var cerr error
+		if nowBoot, cerr = p.bootNow(); cerr != nil {
+			p.failClosed(ctx, bridge, ip, res, "shape "+s.SessionID+": the monotonic security clock is unreadable ("+cerr.Error()+
+				"); the activation bound cannot be measured, so no provisional access is granted")
+			return
+		}
 	}
 
 	// Re-rate of an already-active class: a `tc class change` in place (no new generation, no new origin,
@@ -178,11 +214,15 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 					res.Problems = append(res.Problems, "re-rate "+s.SessionID+": "+gproblem)
 					return
 				}
-				if rerr := p.shp.ReRateSessionIn(ctx, bridge, ip, s.DownKbps, s.UpKbps, groupCid); rerr != nil {
-					// A failed re-rate leaves the last authorised rate in force.
-					res.Failed++
-					res.Problems = append(res.Problems, "re-rate "+s.SessionID+": "+rerr.Error())
-					return
+				// An unchanged class is not rewritten: `tc class change` to the values already installed changes nothing, but it is one forked process
+				// per device per session per pass. Only a class whose installed parent, rate and ceiling are read and equal the plan's is skipped.
+				if !(p.pb != nil && p.installedMatchesPlan(ctx, bridge, minor, s, groupCid)) {
+					if rerr := p.shp.ReRateSessionIn(ctx, bridge, ip, s.DownKbps, s.UpKbps, groupCid); rerr != nil {
+						// A failed re-rate leaves the last authorised rate in force.
+						res.Failed++
+						res.Problems = append(res.Problems, "re-rate "+s.SessionID+": "+rerr.Error())
+						return
+					}
 				}
 				p.minorOwner[minorKey(bridge, minor)] = s.SessionID
 				// Finishes a promotion whose acknowledgement was lost; idempotent for an active session.
@@ -190,6 +230,11 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 				if problem != "" {
 					res.Failed++
 					res.Problems = append(res.Problems, problem)
+				}
+				if outcome == activationEnded {
+					p.endClosed(ctx, bridge, ip, res, "session "+s.SessionID+": durable state has ended it; access withdrawn")
+					p.endSeries(bridge, s.SessionID)
+					return
 				}
 				if outcome == activationFailed {
 					// proveActive already recorded the strike and backoff; endSeries leaves that record alone.
@@ -263,7 +308,11 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 
 	// The origin is recorded before any forwarding filter exists so the first packet counts from a real
 	// baseline; activate_session_enforcement verifies this checkpoint before promoting the Session.
-	if problem := p.registerOrigin(ctx, s, minor, epoch); problem != "" {
+	if problem, ended := p.registerOrigin(ctx, s, minor, epoch); ended {
+		p.endClosed(ctx, bridge, ip, res, "session "+s.SessionID+": durable state has ended it; access withdrawn")
+		p.dropEnded(bridge, s.SessionID)
+		return
+	} else if problem != "" {
 		p.failClosed(ctx, bridge, ip, res, problem)
 		return
 	}
@@ -300,6 +349,16 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 		}
 	}
 
+	p.completeAdmission(ctx, bridge, minor, s, view, now, res, pc, epoch)
+}
+
+// completeAdmission records the class as managed once it is in force in the kernel (both tc halves and the provisional authorization), then proves the
+// Session durably active and gives it its full lease. Shared by the per-session path and the batched admission.
+func (p *phase3Shaping) completeAdmission(ctx context.Context, bridge string, minor int, s shapeplan.Session, view gateView, now time.Time, res *shapingPlanResponse, pc provCtx, epoch int64) {
+	ip, key, lease, ev, nowBoot := pc.ip, pc.key, pc.lease, pc.ev, pc.nowBoot
+	if p.epochs == nil {
+		p.epochs = map[string]int64{}
+	}
 	p.minorOwner[minorKey(bridge, minor)] = s.SessionID
 	p.epochs[key] = epoch
 	if p.classes == nil {
@@ -325,6 +384,9 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 		p.noteRenewable(key, bridge, ip, s, ev.Until, now)
 	case activationUnproven:
 		// Keeps the provisional lease; the next pass retries the promotion.
+	case activationEnded:
+		p.endClosed(ctx, bridge, ip, res, "session "+s.SessionID+": durable state has ended it; access withdrawn")
+		p.endSeries(bridge, s.SessionID)
 	default:
 		p.failClosed(ctx, bridge, ip, res, "session "+s.SessionID+": activation never proven")
 		p.endSeries(bridge, s.SessionID)
@@ -373,6 +435,14 @@ func (p *phase3Shaping) assertLease(ctx context.Context, bridge string, ip net.I
 		return true
 	}
 	el, present, known := view.lookup(bridge, ip)
+	if p.pb != nil {
+		// Batched pass: leases that need writing are collected and written in one transaction (flushRenewals); a lease with time left is untouched.
+		if known && present && !needsRenewal(el.Expires, want) {
+			return true
+		}
+		p.pb.renew[gateKey(bridge, ip)] = pendingRenew{bridge: bridge, ip: ip, want: want, sessionID: sessionID, known: known}
+		return true
+	}
 	if !known {
 		// Unreadable set: refresh unconditionally, or a whole property would expire together.
 		if err := p.gate.Authorize(ctx, bridge, ip, want); err != nil {
@@ -403,6 +473,12 @@ func (p *phase3Shaping) assertLease(ctx context.Context, bridge string, ip net.I
 // the nft element is gone the guest is online whatever tc says), then abort tc, stripping classification
 // filters if the classes cannot be proven removed. It keeps the pending generation for the retry.
 func (p *phase3Shaping) failClosed(ctx context.Context, bridge string, ip net.IP, res *shapingPlanResponse, problem string) {
+	if p.pb != nil {
+		// Batched pass: the denial is proven for every session that failed in one transaction at the next flush point (phase3_batch.go), and the
+		// tc teardown follows it there, in the same order.
+		p.pb.denies = append(p.pb.denies, pendingDeny{bridge: bridge, ip: ip, problem: problem, abort: true})
+		return
+	}
 	if err := p.denyAccess(ctx, bridge, ip); err != nil {
 		// The guest may still be authorized: the most serious outcome, reported as such.
 		problem += " (PACKET AUTHORIZATION NOT PROVEN REMOVED: " + err.Error() + ")"
@@ -416,6 +492,17 @@ func (p *phase3Shaping) failClosed(ctx context.Context, bridge string, ip net.IP
 	}
 	res.Failed++
 	res.Problems = append(res.Problems, problem)
+}
+
+// endClosed withdraws the access of a session whose access has simply ended (its window ran out, or durable state says it ended while the plan that
+// listed it was in flight). It is failClosed's withdrawal, in the same order, but a withdrawal that is proven is an event, not a failure. In a batched
+// pass it is counted (EndedMidPass); the per-session pass reports it as it always did.
+func (p *phase3Shaping) endClosed(ctx context.Context, bridge string, ip net.IP, res *shapingPlanResponse, problem string) {
+	if p.pb == nil {
+		p.failClosed(ctx, bridge, ip, res, problem)
+		return
+	}
+	p.pb.denies = append(p.pb.denies, pendingDeny{bridge: bridge, ip: ip, problem: problem, abort: true, quiet: true})
 }
 
 // classPresent requires the class on both the bridge (download) and its ifb (upload).

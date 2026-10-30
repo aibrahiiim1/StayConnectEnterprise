@@ -126,6 +126,30 @@ func (s *RegistryStore) CurrentVersion() int64 {
 // rejected (rollback defence); an EQUAL version is accepted only if byte-identical; the outgoing registry is kept as previous and the write is atomic.
 // Returns empty on adoption or benign no-op, else a rejection reason; a rejection NEVER replaces the current registry.
 func (s *RegistryStore) Adopt(sr *SignedRegistry, now time.Time) (adopted bool, reason string) {
+	noop, reason := s.Check(sr, now)
+	if reason != "" || noop {
+		return false, reason
+	}
+	cur := s.Load()
+	rec := &registryRecord{Current: sr, AdoptedAt: now.UTC().Format(time.RFC3339)}
+	if cur != nil {
+		rec.Previous = cur.Current
+	}
+	if err := s.save(rec); err != nil {
+		return false, "persist failed: " + err.Error()
+	}
+	if !s.EverAdopted() {
+		if err := writeDurable(s.adoptedMarkerPath(), []byte(rec.AdoptedAt+"\n"), 0o644); err != nil {
+			return false, "persist failed: " + err.Error()
+		}
+	}
+	return true, ""
+}
+
+// Check applies every rule Adopt applies, without writing: the signature must verify against the baked-in root within its validity window, a LOWER
+// version than the held one is rejected, an EQUAL version only if byte-identical (noop=true: nothing to write). reason is empty when the registry
+// may be adopted or is already held. Shared by Adopt and by callers that must vet a registry before a multi-step apply (offline first activation).
+func (s *RegistryStore) Check(sr *SignedRegistry, now time.Time) (noop bool, reason string) {
 	if reason := VerifyRegistry(s.RootPub, sr, now); reason != "" {
 		return false, reason
 	}
@@ -140,22 +164,10 @@ func (s *RegistryStore) Adopt(sr *SignedRegistry, now time.Time) (adopted bool, 
 			if string(a) != string(b) {
 				return false, "registry version reuse with different content rejected"
 			}
-			return false, ""
+			return true, ""
 		}
 	}
-	rec := &registryRecord{Current: sr, AdoptedAt: now.UTC().Format(time.RFC3339)}
-	if cur != nil {
-		rec.Previous = cur.Current
-	}
-	if err := s.save(rec); err != nil {
-		return false, "persist failed: " + err.Error()
-	}
-	if !s.EverAdopted() {
-		if err := writeDurable(s.adoptedMarkerPath(), []byte(rec.AdoptedAt+"\n"), 0o644); err != nil {
-			return false, "persist failed: " + err.Error()
-		}
-	}
-	return true, ""
+	return false, ""
 }
 
 func (s *RegistryStore) save(rec *registryRecord) error {

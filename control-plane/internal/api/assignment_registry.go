@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/stayconnect/enterprise/control-plane/internal/assignment"
 	"github.com/stayconnect/enterprise/control-plane/internal/audit"
 	"github.com/stayconnect/enterprise/control-plane/internal/auth"
@@ -89,6 +91,16 @@ func (b *RegistryBase) Rebuild(ctx context.Context, reason string) (*assignment.
 	return sr, nil
 }
 
+// currentRegistryEnvelope is the signed registry document Central serves to appliances (GET /v1/appliance/assignment-registry) and also embeds in an
+// offline activation package: one query, so the two can never disagree. pgx.ErrNoRows when no registry has been signed.
+func currentRegistryEnvelope(ctx context.Context, db *pgxpool.Pool) ([]byte, error) {
+	var env []byte
+	if err := db.QueryRow(ctx, `SELECT signed_envelope FROM assignment_registry WHERE is_current`).Scan(&env); err != nil {
+		return nil, err
+	}
+	return env, nil
+}
+
 func (b *RegistryBase) Serve(w http.ResponseWriter, r *http.Request) {
 	if ident := auth.ApplianceFromContext(r.Context()); ident == nil {
 		Fail(w, r, http.StatusUnauthorized, CodeUnauthenticated, "appliance identity required")
@@ -96,8 +108,8 @@ func (b *RegistryBase) Serve(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := DBCtx(r)
 	defer cancel()
-	var env []byte
-	if err := b.DB.QueryRow(ctx, `SELECT signed_envelope FROM assignment_registry WHERE is_current`).Scan(&env); err != nil {
+	env, err := currentRegistryEnvelope(ctx, b.DB)
+	if err != nil {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
