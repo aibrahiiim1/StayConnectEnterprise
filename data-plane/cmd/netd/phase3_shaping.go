@@ -137,6 +137,8 @@ type phase3Shaping struct {
 	softEnd     time.Time
 	passStart   time.Time
 	indivCursor map[string]int
+	// cont is the outage-continuity governor (phase3_continuity.go); nil or without a state path means strict (the 90 s lease only).
+	cont *continuity
 	// arrivedGen is the newest plan generation that has reached the handler, whether or not it has the lock yet; supersededN counts the plans it overtook.
 	arrivedGen  atomic.Int64
 	supersededN atomic.Int64
@@ -299,6 +301,9 @@ func (p *phase3Shaping) submit(ctx context.Context, env shapeplan.Envelope, now 
 		p.noteRejection(reason)
 		return shapingPlanResponse{Accepted: false, Reason: reason}, errPlanRefused{reason}
 	}
+
+	// The continuity block is judged after the pass, when the walk's proof of each session is in p.memo.
+	defer p.contNotePlan(env, now)
 
 	accepted := shapeplan.Accepted{
 		Generation: env.PlanGeneration, Hash: env.DesiredStateHash,

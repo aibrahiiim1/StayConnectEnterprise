@@ -44,7 +44,7 @@ func (f *fakeEnforcementStore) apply(_ context.Context, ch []enforcementFieldCha
 
 func shippedPolicy() enforcementPolicy {
 	return enforcementPolicy{PrivateDenyEnabled: true, PrivateAllowCIDRs: []string{}, AllowUpstreamInfrastructure: true,
-		CutoffSeconds: 5, ConfigVersion: 1}
+		CutoffSeconds: 5, OutageContinuityMinutes: 60, ConfigVersion: 1}
 }
 
 func enforcementRouter(s *server) http.Handler {
@@ -96,7 +96,7 @@ func TestEnforcementPolicy_GetReturnsValuesBoundsDefaultsAndHistory(t *testing.T
 	if !out.Policy.PrivateDenyEnabled || out.Policy.MACBindingEnabled || out.Policy.CutoffSeconds != 5 {
 		t.Errorf("the shipped defaults are not reported: %+v", out.Policy)
 	}
-	if len(out.Settings) != 5 || out.Limits["max_cidrs"] != 64 || out.Limits["cutoff_max"] != 60 || len(out.History) != 1 {
+	if len(out.Settings) != 6 || out.Limits["max_cidrs"] != 64 || out.Limits["cutoff_max"] != 60 || len(out.History) != 1 {
 		t.Errorf("settings/limits/history missing: %d settings, %v, %d history", len(out.Settings), out.Limits, len(out.History))
 	}
 	for _, d := range out.Settings {
@@ -140,6 +140,8 @@ func TestEnforcementPolicy_PatchRefusesBadInputWith400AndNeverWrites(t *testing.
 		{"blank reason", `{"mac_binding_enabled":true,"reason":"   ","password":"right-password"}`, "reason is required"},
 		{"cutoff low", `{"cutoff_seconds":0,"reason":"because","password":"right-password"}`, "between 1 and 60"},
 		{"cutoff high", `{"cutoff_seconds":61,"reason":"because","password":"right-password"}`, "between 1 and 60"},
+		{"continuity high", `{"outage_continuity_minutes":121,"reason":"because","password":"right-password"}`, "between 0 and 120"},
+		{"continuity low", `{"outage_continuity_minutes":-1,"reason":"because","password":"right-password"}`, "between 0 and 120"},
 		{"too wide", `{"private_allow_cidrs":["10.0.0.0/7"],"reason":"because","password":"right-password"}`, "between /8 and /32"},
 		{"ipv6", `{"private_allow_cidrs":["fd00::/8"],"reason":"because","password":"right-password"}`, "IPv4"},
 		{"junk", `{"private_allow_cidrs":["nonsense"],"reason":"because","password":"right-password"}`, "IPv4"},

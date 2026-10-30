@@ -238,6 +238,17 @@ func main() {
 	}.loop(rootCtx, 30*time.Second)
 	// Lease renewal between full walks (AD-53); a no-op while the fast path is off or not in force.
 	go p3shaping.renewLoop(rootCtx, phase3RenewEvery)
+	// Outage continuity: restore what a restart may keep (same boot, same scope, journal intact), then govern. With no
+	// continuity block in the plans (setting 0) the governor holds nothing and the 90 s lease is the whole story.
+	p3shaping.cont = &continuity{
+		statePath:   envOr("NETD_PHASE3_CONTINUITY_STATE", "/var/lib/stayconnect/netd-phase3-continuity.json"),
+		journalPath: envOr("NETD_PHASE3_CONTINUITY_JOURNAL", "/var/lib/stayconnect/netd-phase3-continuity-revocations.json"),
+		probe:       &pgEntitlementProbe{pool: pool, tenant: p3mode.TenantID, site: p3mode.SiteID},
+	}
+	if why := p3shaping.contRestore(); why != "" {
+		slog.Warn("netd: outage-continuity record not restored; strict behaviour until the next plan carries a block", "why", why)
+	}
+	go p3shaping.continuityLoop(rootCtx, phase3RenewEvery)
 	slog.Info("netd phase3 shaping writer", "active", p3mode.Active, "producer_authenticated", p3authz.configured)
 
 	// Watchdog: rolls back pending revisions past their deadline; also runs at boot to recover from a crash.
@@ -317,6 +328,9 @@ func (s *server) routes() http.Handler {
 	// Per-class generations: the only trustworthy answer to "did this counter series restart?"
 	r.Get("/v1/phase3/shaping/epochs", s.phase3EpochsHandler)
 	r.Post("/v1/flows/end", s.callers.gate(classFlows, s.flowsEnd))
+	// Outage continuity (phase3_continuity.go): a durable revocation that does not need acctd or the database, and the governor's state.
+	r.Post("/v1/phase3/continuity/revoke", s.callers.gate(classFlows, s.continuityRevoke))
+	r.Get("/v1/phase3/continuity", admin(s.continuityStatus))
 
 	r.Get("/v1/system-network", admin(s.sysnetGet))
 	r.Post("/v1/system-network/validate", admin(s.sysnetValidate))

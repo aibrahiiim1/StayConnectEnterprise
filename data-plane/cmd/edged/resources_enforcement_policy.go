@@ -29,6 +29,10 @@ const (
 	enforcementMaxPrefix = 32
 	enforcementCutoffMin = 1
 	enforcementCutoffMax = 60
+	// Outage continuity (migration 0198): minutes the guests the last plan covered stay online if OneGate's own plan delivery stops.
+	enforcementContinuityMin     = 0
+	enforcementContinuityMax     = 120
+	enforcementContinuityDefault = 60
 	enforcementHistory   = 50
 )
 
@@ -38,6 +42,7 @@ type enforcementPolicy struct {
 	AllowUpstreamInfrastructure bool      `json:"allow_upstream_infrastructure"`
 	MACBindingEnabled           bool      `json:"mac_binding_enabled"`
 	CutoffSeconds               int       `json:"cutoff_seconds"`
+	OutageContinuityMinutes     int       `json:"outage_continuity_minutes"`
 	ConfigVersion               int64     `json:"config_version"`
 	UpdatedAt                   time.Time `json:"updated_at"`
 	UpdatedBy                   string    `json:"updated_by,omitempty"`
@@ -71,9 +76,9 @@ func (p pgEnforcementStore) read(ctx context.Context) (enforcementPolicy, error)
 	var by *string
 	err := p.s.db.QueryRow(ctx, `
 		SELECT private_deny_enabled, private_allow_cidrs, allow_upstream_infrastructure, mac_binding_enabled,
-		       cutoff_seconds, config_version, updated_at, updated_by
+		       cutoff_seconds, outage_continuity_minutes, config_version, updated_at, updated_by
 		  FROM public.enforcement_policy`).Scan(&o.PrivateDenyEnabled, &o.PrivateAllowCIDRs,
-		&o.AllowUpstreamInfrastructure, &o.MACBindingEnabled, &o.CutoffSeconds, &o.ConfigVersion, &o.UpdatedAt, &by)
+		&o.AllowUpstreamInfrastructure, &o.MACBindingEnabled, &o.CutoffSeconds, &o.OutageContinuityMinutes, &o.ConfigVersion, &o.UpdatedAt, &by)
 	if err != nil {
 		return o, err
 	}
@@ -139,6 +144,7 @@ type enforcementSettingOut struct {
 
 func enforcementSettings() []enforcementSettingOut {
 	lo, hi := enforcementCutoffMin, enforcementCutoffMax
+	clo, chi := enforcementContinuityMin, enforcementContinuityMax
 	zero, maxc := 0, enforcementMaxCIDRs
 	return []enforcementSettingOut{
 		{Field: "private_deny_enabled", Label: "Deny guests the hotel's private networks", Default: true,
@@ -151,6 +157,13 @@ func enforcementSettings() []enforcementSettingOut {
 			Explanation: "The AD-23 control: access is keyed to the bridge, IP address and the MAC address from the DHCP lease, so another device taking over an address does not inherit the access. Off keeps the earlier IP-only key. Ships off until the bound ruleset is proven on the test appliance."},
 		{Field: "cutoff_seconds", Label: "Cut-off delay when an allowance is used up", Default: 5, Unit: "seconds",
 			Explanation: "How soon a guest whose allowance ran out is cut off: the period of the accounting enforcement pass. Shorter is stricter and costs a little more work.", Min: &lo, Max: &hi},
+		{Field: "outage_continuity_minutes", Label: "Keep guests online when OneGate itself fails", Default: enforcementContinuityDefault, Unit: "minutes",
+			Explanation: "If OneGate's accounting service stops, hangs or loses its database, guests who were online stay online for at most this long, " +
+				"and only while their own limits hold: a session is cut off at once when an administrator disconnects it, when it is ended or revoked in the " +
+				"database, when its time window or maximum session length ends, or when the data it is allowed is used up (counted by the network service meanwhile). " +
+				"Nobody new can sign in during the failure. If the appliance restarts, guests reconnect only once the services are back. " +
+				"0 turns this off: guests then lose access about 90 seconds after the accounting service stops, as before. Up to 120.",
+			Min: &clo, Max: &chi},
 	}
 }
 
@@ -174,6 +187,7 @@ func (s *server) getEnforcementPolicy(w http.ResponseWriter, r *http.Request) {
 		"limits": map[string]any{
 			"max_cidrs": enforcementMaxCIDRs, "min_prefix": enforcementMinPrefix, "max_prefix": enforcementMaxPrefix,
 			"cutoff_min": enforcementCutoffMin, "cutoff_max": enforcementCutoffMax,
+			"continuity_min": enforcementContinuityMin, "continuity_max": enforcementContinuityMax,
 		},
 		"history": hist,
 	})
@@ -218,6 +232,7 @@ type enforcementPatch struct {
 	AllowUpstreamInfrastructure *bool     `json:"allow_upstream_infrastructure"`
 	MACBindingEnabled           *bool     `json:"mac_binding_enabled"`
 	CutoffSeconds               *int      `json:"cutoff_seconds"`
+	OutageContinuityMinutes     *int      `json:"outage_continuity_minutes"`
 	Reason                      string    `json:"reason"`
 	// Password is the operator's own, asked again: this policy decides what every client may reach.
 	Password string `json:"password"`
@@ -242,6 +257,14 @@ func diffEnforcementPatch(cur enforcementPolicy, in enforcementPatch) ([]enforce
 		}
 		if *in.CutoffSeconds != cur.CutoffSeconds {
 			ch = append(ch, enforcementFieldChange{"cutoff_seconds", strconv.Itoa(*in.CutoffSeconds)})
+		}
+	}
+	if in.OutageContinuityMinutes != nil {
+		if *in.OutageContinuityMinutes < enforcementContinuityMin || *in.OutageContinuityMinutes > enforcementContinuityMax {
+			return nil, fmt.Errorf("outage continuity must be between %d and %d minutes", enforcementContinuityMin, enforcementContinuityMax)
+		}
+		if *in.OutageContinuityMinutes != cur.OutageContinuityMinutes {
+			ch = append(ch, enforcementFieldChange{"outage_continuity_minutes", strconv.Itoa(*in.OutageContinuityMinutes)})
 		}
 	}
 	if in.PrivateAllowCIDRs != nil {

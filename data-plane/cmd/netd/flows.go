@@ -62,6 +62,11 @@ func (s *server) endFlows(ctx context.Context, ip net.IP, bridge string, flows c
 		func() {
 			p.mu.Lock()
 			defer p.mu.Unlock()
+			// Journal first: a disconnect must survive a netd restart even while acctd and the database are away
+			// (outage continuity must never bring this address back).
+			if jerr := p.contRevoke(ctx, contRevocation{IP: ip.String(), Bridge: bridge, Reason: "STAFF_DISCONNECT"}); jerr != nil {
+				problems = append(problems, fmt.Errorf("revocation journal not written: %w", jerr))
+			}
 			els, err := p.gate.List(ctx)
 			if err != nil {
 				problems = append(problems, fmt.Errorf("phase-3 authorization set unreadable: %w", err))
