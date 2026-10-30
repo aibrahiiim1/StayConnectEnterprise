@@ -1,5 +1,4 @@
 -- 0199 -- NETD CAN ASK WHICH SESSIONS ARE NO LONGER ENTITLED (outage continuity, revocation channel B).
--- edge-migrate: platform
 --
 -- While acctd is away, netd's continuity governor keeps the authorization of sessions the last plan covered
 -- (docs/architecture/ONEGATE_OUTAGE_CONTINUITY.md). A revocation made through the database by anything other than a staff

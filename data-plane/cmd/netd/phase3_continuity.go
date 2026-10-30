@@ -35,10 +35,11 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/shapeplan"
 )
 
+// contTakeoverAge: plans have been silent this long (monotonic), so the governor renews. Below the 90 s lease with margin: the
+// element renewed last by the plan path still has more than this left to run. A variable only so the real-kernel test can run in seconds.
+var contTakeoverAge = 60 * time.Second
+
 const (
-	// contTakeoverAge: plans have been silent this long (monotonic), so the governor renews. Below the 90 s lease with margin: the
-	// element renewed last by the plan path still has more than this left to run.
-	contTakeoverAge = 60 * time.Second
 	// contSampleEvery is the spacing of the counter samples a budget baseline is taken from (the producer's margin assumes this).
 	contSampleEvery = 30 * time.Second
 	contSampleKeep  = 12
