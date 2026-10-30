@@ -261,29 +261,53 @@ const ingestChunk = 100
 // ended a moment ago, say) is reported against that session alone and never costs its neighbours.
 func (p *phase3) ingestBatch(ctx context.Context, items []ingestItem, at time.Time) []ingestResult {
 	out := make([]ingestResult, len(items))
-	for lo := 0; lo < len(items); lo += ingestChunk {
-		hi := lo + ingestChunk
-		if hi > len(items) {
-			hi = len(items)
-		}
-		if !p.ingestChunkTx(ctx, items[lo:hi], at, out[lo:hi]) {
-			for i := lo; i < hi; i++ {
-				it := items[i]
-				c, err := p.ingestAbsolute(ctx, it.s, it.bridge, it.minor, it.epoch, it.up, it.down, at)
-				out[i] = ingestResult{class: c, err: err}
-			}
-		}
-	}
+	p.ingestRange(ctx, items, at, out)
 	return out
 }
 
-func (p *phase3) ingestChunkTx(ctx context.Context, items []ingestItem, at time.Time, out []ingestResult) bool {
+func (p *phase3) ingestOne(ctx context.Context, it ingestItem, at time.Time) ingestResult {
+	c, err := p.ingestAbsolute(ctx, it.s, it.bridge, it.minor, it.epoch, it.up, it.down, at)
+	return ingestResult{class: c, err: err}
+}
+
+// ingestRange sends items in chunks. A refusal at position k of a chunk rolls that transaction back; the k observations before it (which the database had
+// accepted in the aborted transaction) are sent again as a chunk of their own, the refused one alone, and the rest continue as the next chunk, so one session
+// that ended a moment ago costs one extra statement and one extra round trip, not a second pass over its neighbours.
+func (p *phase3) ingestRange(ctx context.Context, items []ingestItem, at time.Time, out []ingestResult) {
+	for pos := 0; pos < len(items); {
+		hi := pos + ingestChunk
+		if hi > len(items) {
+			hi = len(items)
+		}
+		failAt, ok := p.ingestChunkTx(ctx, items[pos:hi], at, out[pos:hi])
+		switch {
+		case ok:
+			pos = hi
+		case failAt > 0:
+			p.ingestRange(ctx, items[pos:pos+failAt], at, out[pos:pos+failAt])
+			out[pos+failAt] = p.ingestOne(ctx, items[pos+failAt], at)
+			pos += failAt + 1
+		case failAt == 0:
+			out[pos] = p.ingestOne(ctx, items[pos], at)
+			pos++
+		default: // the transaction itself could not be run (begin, send or commit): the chunk goes one by one
+			for i := pos; i < hi; i++ {
+				out[i] = p.ingestOne(ctx, items[i], at)
+			}
+			pos = hi
+		}
+	}
+}
+
+// ingestChunkTx sends one chunk in one transaction. ok is true when every observation was answered and the transaction committed. Otherwise failAt is the
+// position of the first refused observation (the transaction is rolled back), or -1 when the transaction could not be run at all.
+func (p *phase3) ingestChunkTx(ctx context.Context, items []ingestItem, at time.Time, out []ingestResult) (failAt int, ok bool) {
 	if len(items) < 2 {
-		return false
+		return 0, false
 	}
 	tx, err := p.enf.Pool().Begin(ctx)
 	if err != nil {
-		return false
+		return -1, false
 	}
 	b := &pgx.Batch{}
 	for _, it := range items {
@@ -292,25 +316,23 @@ func (p *phase3) ingestChunkTx(ctx context.Context, items []ingestItem, at time.
 	}
 	br := tx.SendBatch(ctx, b)
 	classes := make([]string, len(items))
-	ok := true
+	failAt = -1
 	for i := range items {
 		if err := br.QueryRow().Scan(&classes[i]); err != nil {
-			ok = false
+			failAt = i
 			break
 		}
 	}
-	if err := br.Close(); err != nil {
-		ok = false
-	}
-	if !ok {
+	_ = br.Close()
+	if failAt >= 0 {
 		_ = tx.Rollback(ctx)
-		return false
+		return failAt, false
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return false
+		return -1, false
 	}
 	for i := range items {
 		out[i] = ingestResult{class: classes[i]}
 	}
-	return true
+	return 0, true
 }

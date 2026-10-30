@@ -28,13 +28,34 @@ type batchSess struct {
 	ent, sess, ip string
 }
 
+// newStay adds a Stay: the fixture allows one live entitlement per Stay, and a batch needs several sessions with their own entitlements.
+func (f *ingestFixture) newStay(t *testing.T, n int) string {
+	t.Helper()
+	ctx := context.Background()
+	tx := opTx(t, f.pool, "stay")
+	defer func() { _ = tx.Rollback(ctx) }()
+	var id string
+	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status,lifecycle_version,last_applied_event_version)
+	   VALUES (gen_random_uuid(), $1,$2,$3,'RB'||($4::int)::text||'-'||substr(gen_random_uuid()::text,1,6),'SB'||($4::int)::text||'-'||substr(gen_random_uuid()::text,1,6),'IN_HOUSE',1,0) RETURNING id::text`,
+		f.tenant, f.site, f.iface, n).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
 func (f *ingestFixture) liveMany(t *testing.T, n int, bridge string, ep *fakeEpochs) []batchSess {
 	t.Helper()
 	out := make([]batchSess, 0, n)
 	for i := 0; i < n; i++ {
 		ip := fmt.Sprintf("10.9.%d.%d", 1+i/200, 1+i%200)
 		started := time.Now().Add(-3 * time.Hour)
+		saved := f.stay
+		f.stay = f.newStay(t, i)
 		ent := f.grantEntitlement(t, started, nil)
+		f.stay = saved
 		sess := f.openSessionOn(t, ent, f.device, started, ip, bridge)
 		ep.set(bridge, sess, 1)
 		out = append(out, batchSess{ent: ent, sess: sess, ip: ip})
@@ -91,7 +112,8 @@ func TestIntegration_Acct_AnEndedSessionInAChunkCostsItsNeighboursNothing(t *tes
 	f := newIngest(t, 0)
 	ctx := context.Background()
 	ep := newEpochs()
-	ss := f.liveMany(t, 5, "br-guest", ep)
+	ss := f.liveMany(t, 7, "br-guest", ep)
+	ended := map[int]bool{0: true, 3: true, 6: true} // first, middle and last position of the chunk
 	c := newFakeCounters()
 	for _, s := range ss {
 		c.absolutes(t, "br-guest", s.ip, 1000, 1000)
@@ -100,9 +122,11 @@ func TestIntegration_Acct_AnEndedSessionInAChunkCostsItsNeighboursNothing(t *tes
 	for _, s := range ss {
 		c.absolutes(t, "br-guest", s.ip, 1300, 1700)
 	}
-	// The third session ends after the pass listed it live and before the observation is sent: the controlled operation refuses it.
-	if _, err := f.pool.Exec(ctx, `UPDATE iam_v2.sessions SET state='ended', ended=now(), end_reason='TEST' WHERE id=$1`, ss[2].sess); err != nil {
-		t.Fatalf("end the session: %v", err)
+	// These sessions end after the pass listed them live and before the observation is sent: the controlled operation refuses them.
+	for i := range ended {
+		if _, err := f.pool.Exec(ctx, `UPDATE iam_v2.sessions SET state='ended', ended=now(), end_reason='TEST' WHERE id=$1`, ss[i].sess); err != nil {
+			t.Fatalf("end the session: %v", err)
+		}
 	}
 	// Force it into the chunk anyway: a pass built from the inventory taken before the end.
 	items := make([]ingestItem, 0, len(ss))
@@ -111,9 +135,9 @@ func TestIntegration_Acct_AnEndedSessionInAChunkCostsItsNeighboursNothing(t *tes
 	}
 	res := f.p3.ingestBatch(ctx, items, time.Now())
 	for i, r := range res {
-		if i == 2 {
+		if ended[i] {
 			if r.err == nil {
-				t.Fatal("the ended session's observation was accepted")
+				t.Fatalf("the ended session %d's observation was accepted", i)
 			}
 			continue
 		}
@@ -123,7 +147,7 @@ func TestIntegration_Acct_AnEndedSessionInAChunkCostsItsNeighboursNothing(t *tes
 	}
 	for i, s := range ss {
 		u, d := f.usage(t, s.ent)
-		if i == 2 {
+		if ended[i] {
 			if u != 0 || d != 0 {
 				t.Fatalf("the refused session was billed %d/%d", u, d)
 			}
@@ -136,12 +160,12 @@ func TestIntegration_Acct_AnEndedSessionInAChunkCostsItsNeighboursNothing(t *tes
 	// Replaying the same batch bills nothing more (the replay classification), including for the neighbours.
 	res = f.p3.ingestBatch(ctx, items, time.Now())
 	for i, r := range res {
-		if i != 2 && (r.err != nil || (r.class != "REPLAY:ACCEPTED" && r.class != "DUPLICATE")) {
+		if !ended[i] && (r.err != nil || (r.class != "REPLAY:ACCEPTED" && r.class != "DUPLICATE")) {
 			t.Fatalf("replay %d: %q %v", i, r.class, r.err)
 		}
 	}
 	for i, s := range ss {
-		if i == 2 {
+		if ended[i] {
 			continue
 		}
 		if u, d := f.usage(t, s.ent); u != 300 || d != 700 {

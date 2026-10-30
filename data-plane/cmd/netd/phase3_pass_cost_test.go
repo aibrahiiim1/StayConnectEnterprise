@@ -96,7 +96,7 @@ func TestTheIndexedLeaseAnswerEqualsTheFullScan(t *testing.T) {
 	}
 	rows := []KeaLease{
 		cur("10.0.0.2", "aa:aa:aa:aa:aa:01", 0),
-		old("10.0.0.3", "aa:aa:aa:aa:aa:02"), // a lapsed row first,
+		old("10.0.0.3", "aa:aa:aa:aa:aa:02"),    // a lapsed row first,
 		cur("10.0.0.3", "aa:aa:aa:aa:aa:03", 0), // then the live one
 		cur("10.0.0.4", "aa:aa:aa:aa:aa:04", 2), // released: history, not ownership
 		cur("10.0.0.5", "aa:aa:aa:aa:aa:05", 0),
