@@ -214,7 +214,7 @@ func (p *phase5PostStay) convertHandler(w http.ResponseWriter, r *http.Request) 
 	// session back, not a second one.
 	sessionID := ""
 	if out.Joined {
-		sessionID = p.liveSessionTx(ctx, tx, out.Entitlement, dev.DeviceID)
+		sessionID = p.liveSessionTx(ctx, tx, dev.Tenant, dev.Site, out.Entitlement, dev.DeviceID)
 	}
 	if sessionID == "" {
 		if err := reserveLicensedSlot(ctx, tx, p.srv.applID, p.srv.lic.MaxConcurrentOnlineGuests()); err != nil {
@@ -263,12 +263,13 @@ func convertRefusalCode(err error) string {
 }
 
 // liveSessionTx returns this device's live session on the entitlement, or "".
-func (p *phase5PostStay) liveSessionTx(ctx context.Context, tx pgx.Tx, entitlement, device string) string {
+func (p *phase5PostStay) liveSessionTx(ctx context.Context, tx pgx.Tx, tenant, site, entitlement, device string) string {
 	var sid string
 	if err := tx.QueryRow(ctx, `SELECT id::text FROM iam_v2.sessions
-		 WHERE entitlement_id = $1::uuid AND device_id = $2::uuid AND ended IS NULL
+		 WHERE tenant_id = $1::uuid AND site_id = $2::uuid
+		   AND entitlement_id = $3::uuid AND device_id = $4::uuid AND ended IS NULL
 		   AND state IN ('active','PENDING_ENFORCEMENT')
-		 ORDER BY started DESC LIMIT 1`, entitlement, device).Scan(&sid); err != nil {
+		 ORDER BY started DESC LIMIT 1`, tenant, site, entitlement, device).Scan(&sid); err != nil {
 		return ""
 	}
 	return sid
