@@ -16,3 +16,17 @@ BEGIN
   GRANT SELECT ON iam_v2.accounting_usage_minute, iam_v2.accounting_usage_hour TO svc_edged;
   GRANT SELECT ON iam_v2.site_usage_rollup_changes TO svc_edged;
 END $g$;
+
+-- Accounting integrity closure (migration 0181). Same guard: skipped where the migration is not applied.
+--   svc_edged  reads the integrity summary (every place the accounting chose the conservative quota direction)
+--   svc_pmsd   reads how much of a usage-at-instant figure is uncertain (the same caller as entitlement_usage_bytes)
+-- The reconcile function and the events table have no runtime grantee: only definer functions touch them.
+DO $g$
+BEGIN
+  IF to_regprocedure('iam_v2.accounting_integrity_summary(uuid,uuid)') IS NULL THEN
+    RAISE NOTICE 'migration 0181 is not applied; accounting-integrity grants skipped';
+    RETURN;
+  END IF;
+  GRANT EXECUTE ON FUNCTION iam_v2.accounting_integrity_summary(uuid,uuid) TO svc_edged;
+  GRANT EXECUTE ON FUNCTION iam_v2.entitlement_usage_uncertainty(uuid,timestamptz) TO svc_pmsd;
+END $g$;

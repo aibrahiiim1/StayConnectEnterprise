@@ -533,8 +533,9 @@ func TestIntegration_UsageAfterRawPurge_PurgeChangesNoTotal(t *testing.T) {
 	}
 }
 
-// A usage-at-instant read that lands inside a purged hour is a lower bound (documented), never an overcount.
-func TestIntegration_UsageAfterRawPurge_AnInstantInsideAPurgedHourIsALowerBound(t *testing.T) {
+// A usage-at-instant read that lands inside a purged hour is an UPPER bound since 0181 (the straddling hour is counted whole), never
+// a lower bound: the post-stay quota test must not read less than the guest used. entitlement_usage_uncertainty says by how much.
+func TestIntegration_UsageAfterRawPurge_AnInstantInsideAPurgedHourIsAnUpperBound(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
 	uaInstallOld(t, p)
@@ -556,21 +557,35 @@ func TestIntegration_UsageAfterRawPurge_AnInstantInsideAPurgedHourIsALowerBound(
 		}
 	}
 	uaRollAndPurge(t, p, sc.f, 700)
+	over := 0
 	for key, w := range was {
 		got := uaUsageAt(t, p, "iam_v2.entitlement_usage_bytes", key.ent, key.at)
-		if got.up > w.up || got.down > w.down || got.n > w.n {
-			t.Fatalf("an instant in a purged hour OVERCOUNTS: got %v, truth %v", got, w)
+		if got.up < w.up || got.down < w.down || got.n < w.n {
+			t.Fatalf("an instant in a purged hour UNDERCOUNTS (grants quota): got %v, truth %v", got, w)
 		}
-		// short by at most the one hour holding the instant
-		var hourMax int64
-		if err := p.QueryRow(context.Background(), `SELECT COALESCE(max(a.bytes_up+a.bytes_down),0) FROM iam_v2.accounting_usage_entitlement a
-			WHERE a.entitlement_id=$1 AND a.bucket <= $2 AND a.bucket + interval '1 hour' > $2`, key.ent, key.at).Scan(&hourMax); err != nil {
+		if got.latest != nil && got.latest.After(key.at) {
+			t.Fatalf("latest_sampled_at %v is after the asked instant %v", got.latest, key.at)
+		}
+		var strad, inexact int64
+		if err := p.QueryRow(context.Background(), `SELECT straddling_bytes, inexact_bytes FROM iam_v2.entitlement_usage_uncertainty($1,$2)`,
+			key.ent, key.at).Scan(&strad, &inexact); err != nil {
 			t.Fatal(err)
 		}
-		if (w.up+w.down)-(got.up+got.down) > hourMax {
-			t.Fatalf("short by more than the instant's hour: truth %v got %v hour %d", w, got, hourMax)
+		excess := (got.up + got.down) - (w.up + w.down)
+		if excess > strad {
+			t.Fatalf("over by %d but the uncertainty function only admits %d", excess, strad)
+		}
+		if excess == 0 && strad == 0 {
+			continue
+		}
+		if excess > 0 {
+			over++
+		}
+		if inexact != 0 {
+			t.Fatalf("a live purge must fold exactly: %d inexact bytes", inexact)
 		}
 	}
+	t.Logf("%d of %d probes inside a purged hour were counted conservatively", over, len(was))
 }
 
 // ----------------------------------------------------------------------------------------------------------
