@@ -19,6 +19,7 @@ func TestIntegration_Continuity_SettingDefaultBoundsAndAudit(t *testing.T) {
 	if got := scalar[int](t, p, `SELECT outage_continuity_minutes FROM public.enforcement_policy`); got != 60 {
 		t.Fatalf("default = %d, want 60", got)
 	}
+	before := scalar[int](t, p, `SELECT count(*)::int FROM public.enforcement_policy_changes WHERE field='outage_continuity_minutes' AND changed_by='test-operator'`)
 	for _, v := range []string{"0", "120", "45"} {
 		if _, err := p.Exec(ctx, `SELECT public.enforcement_policy_set('outage_continuity_minutes',$1,'test-operator','integration test of the bounds')`, v); err != nil {
 			t.Fatalf("value %s refused: %v", v, err)
@@ -34,9 +35,9 @@ func TestIntegration_Continuity_SettingDefaultBoundsAndAudit(t *testing.T) {
 		t.Fatal("the table constraint must refuse 121 even for a direct write")
 	}
 	// Every accepted change is in the append-only history.
-	n := scalar[int](t, p, `SELECT count(*)::int FROM public.enforcement_policy_changes WHERE field='outage_continuity_minutes' AND changed_by='test-operator'`)
+	n := scalar[int](t, p, `SELECT count(*)::int FROM public.enforcement_policy_changes WHERE field='outage_continuity_minutes' AND changed_by='test-operator'`) - before
 	if n != 3 {
-		t.Fatalf("audit rows = %d, want 3", n)
+		t.Fatalf("audit rows added = %d, want 3", n)
 	}
 	if _, err := p.Exec(ctx, `SELECT public.enforcement_policy_set('outage_continuity_minutes','60','test-operator','restore the default')`); err != nil {
 		t.Fatal(err)
