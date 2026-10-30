@@ -46,7 +46,7 @@ Stateless as before (netd, acctd and a restarted process derive the same id from
 
 The host index needs the bridge's subnet. It is read from the **bridge's own IPv4 addresses** (`net.InterfaceByName`, cached 5 s, the narrowest configured subnet containing the address wins), so no plan, contract or database field is added and netd and acctd agree without talking. A bridge with no address, an address outside /17../19, or a session outside every configured subnet falls back to the previous rule. `MinorFor(bridge, ip)` replaces `MinorForIP(ip)` at the ten production call sites in `cmd/netd` and `cmd/acctd`; `IsGuestMinor` replaces the `GuestMinorBase..GuestMinorMax` range checks (stray sweeps, class-state restore, `ReadClasses`, delete refusal), so strays in the extension band are found and removed like any other.
 
-`internal/netcfg` `MinSubnetPrefix` is raised from /20 to **/19** (8,190 clients) in a separate commit. The shaper supports /17; /19 is the product limit and **needs the Product Owner's confirmation before deployment** (section 8).
+`internal/netcfg` `MinSubnetPrefix` is deliberately NOT raised: it stays /20 (4,094 clients per client network), which the shaper already serves past 2,047 sessions. Allowing /19 (8,190 clients, shaper support goes to /17) is a broadcast-domain product limit and is left as an open Product Owner decision (the separate commit 5c1f999c on branch shaping/scale-beyond-2047 would do it).
 
 ### 3.3 What did not change
 
