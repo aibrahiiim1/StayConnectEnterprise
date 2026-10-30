@@ -249,6 +249,10 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 				r.Use(s.resourcePermission("backups"))
 				r.Mount("/", s.accountingRetentionRoutes())
 			})
+			r.Route("/accounting-integrity", func(r chi.Router) {
+				r.Use(s.resourcePermission("reports"))
+				r.Mount("/", s.accountingIntegrityRoutes())
+			})
 			r.Route("/data-retention", func(r chi.Router) {
 				r.Use(s.resourcePermission("backups"))
 				r.Mount("/", s.dataRetentionRoutes())
