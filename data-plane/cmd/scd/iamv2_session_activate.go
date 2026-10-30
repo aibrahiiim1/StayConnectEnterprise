@@ -61,7 +61,11 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 
 	var sessionID string
 	var reused bool
-	err = pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
+	// The licence slot is taken on the shared admission path first (no serialisation while the appliance is far from its limit) and, if the
+	// appliance is within one pool of connections of the limit, again on the exclusive, exact path (reserveLicensedSlotShared).
+	exclusive := false
+	admit := func(tx pgx.Tx) error {
+		sessionID, reused = "", false
 		// The entitlement must be ours, live and in its window, checked inside the transaction so a racing revocation cannot slip a session in.
 		// maxDevices NULL = no device limit; devicePolicy DISCONNECT_OLDEST admits over the limit by disconnecting the oldest device.
 		var maxDevices *int
@@ -234,19 +238,34 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 		}
 		// The appliance-wide admission lock is taken as late as possible and held only for the count and the insert: every sign-in on the
 		// appliance queues behind it, so the statements above must not run while it is held (capacity acceptance, 2026-10-30).
-		if err := reserveLicensedSlot(ctx, tx, s.applID, s.lic.MaxConcurrentOnlineGuests()); err != nil {
+		if exclusive {
+			if err := reserveLicensedSlot(ctx, tx, s.applID, s.lic.MaxConcurrentOnlineGuests()); err != nil {
+				return err
+			}
+		} else if err := reserveLicensedSlotShared(ctx, tx, s.applID, s.lic.MaxConcurrentOnlineGuests(), s.admissionConcurrency()); err != nil {
 			return err
 		}
 
-		return tx.QueryRow(ctx, `
+		if err := tx.QueryRow(ctx, `
 		    INSERT INTO iam_v2.sessions
 		      (tenant_id, site_id, entitlement_id, device_id, credential_method, state, started,
 		       ip, mac, ingress_interface)
 		    VALUES ($1,$2,$3,$4,$5,'PENDING_ENFORCEMENT',now(),$6::inet,$7::macaddr,$8)
 		 RETURNING id::text`,
 			s.tenID, s.siteID, req.EntitlementID, req.DeviceID, method,
-			ip.String(), mac.String(), nc.Bridge).Scan(&sessionID)
-	})
+			ip.String(), mac.String(), nc.Bridge).Scan(&sessionID); err != nil {
+			return err
+		}
+		// Tell the plan producer (acctd) now, at commit, instead of letting the guest wait for its next period: delivered only if this
+		// transaction commits. acctd coalesces and rate-limits the wake-ups; the periodic submission remains the fallback.
+		_, err = tx.Exec(ctx, `SELECT pg_notify('onegate_session_pending', $1)`, sessionID)
+		return err
+	}
+	err = pgx.BeginFunc(ctx, s.db, admit)
+	if errors.Is(err, errLicenceNearLimit) {
+		exclusive = true
+		err = pgx.BeginFunc(ctx, s.db, admit)
+	}
 	if err != nil {
 		var cap *licenseCapacityError
 		if errors.As(err, &cap) {
@@ -291,6 +310,8 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 
 	// Wait for enforcement before answering: the row is durable but the guest is not online until netd converges, and a connected page for
 	// dropped packets is a lie. Report the state actually reached; the wait is bounded by the caller deadline.
+	// Waiting for the kernel to confirm holds no connection and does no work, so it must not keep one of the guest-capacity slots either.
+	releaseGuestSlot(ctx)
 	state := s.awaitIAMv2Enforcement(ctx, sessionID)
 	if !reused && state == "active" {
 		// SessionsStarted counts only sessions that actually started.
@@ -358,6 +379,20 @@ func (s *server) awaitIAMv2Enforcement(ctx context.Context, sessionID string) st
 			deadline = reserved
 		}
 	}
+	// Woken by the database's own notification when netd activates the session (AD-52); the poll is the safety net, short while the
+	// notification connection is down. Registered BEFORE the first read, so an activation between the read and the wait is not missed.
+	// Without it every waiting sign-in read the row from the pool ten times a second: at five sign-ins a second that is hundreds of
+	// reads a second competing with the sign-ins themselves for sixteen connections.
+	var wake <-chan struct{}
+	poll := iamv2EnforcementPoll
+	if w := s.waiters; w != nil {
+		ch, release := w.wait(sessionID)
+		defer release()
+		wake = ch
+		if w.up.Load() {
+			poll = iamv2EnforcementPollWithNotify
+		}
+	}
 	state := "PENDING_ENFORCEMENT"
 	for {
 		var st string
@@ -370,13 +405,22 @@ func (s *server) awaitIAMv2Enforcement(ctx context.Context, sessionID string) st
 				return st
 			}
 		}
-		if !time.Now().Add(iamv2EnforcementPoll).Before(deadline) {
+		left := time.Until(deadline)
+		if left <= 0 {
 			return state
 		}
+		wait := poll
+		if left < wait {
+			wait = left
+		}
+		t := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
+			t.Stop()
 			return state
-		case <-time.After(iamv2EnforcementPoll):
+		case <-wake:
+			t.Stop()
+		case <-t.C:
 		}
 	}
 }
@@ -388,6 +432,8 @@ const (
 	iamv2EnforcementReserve = 150 * time.Millisecond
 	// Short relative to the enforcement producer's one-second cadence.
 	iamv2EnforcementPoll = 100 * time.Millisecond
+	// The safety-net poll while the activation notification is connected.
+	iamv2EnforcementPollWithNotify = time.Second
 )
 
 // licenseCapacityError: admitting this session would pass the licensed concurrent-guest limit. Distinct from maxDevicesError, since plan device limit and property capacity lead to different actions.

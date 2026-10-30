@@ -140,6 +140,9 @@ func ticker(ctx context.Context, period func() time.Duration, fn func(now time.T
 type submitter struct {
 	kickCh chan struct{}
 	run    func()
+	// minGap, when set, is the shortest time between the start of one submission and a submission started by a kick (not by the period).
+	minGap time.Duration
+	last   time.Time
 }
 
 func newSubmitter(run func()) *submitter { return &submitter{kickCh: make(chan struct{}, 1), run: run} }
@@ -160,8 +163,18 @@ func (s *submitter) loop(ctx context.Context, period func() time.Duration) {
 			return
 		case <-s.kickCh:
 			t.Stop()
+			if wait := s.minGap - time.Since(s.last); wait > 0 {
+				g := time.NewTimer(wait)
+				select {
+				case <-ctx.Done():
+					g.Stop()
+					return
+				case <-g.C:
+				}
+			}
 		case <-t.C:
 		}
+		s.last = time.Now()
 		s.run()
 	}
 }
@@ -171,6 +184,10 @@ func (a *acctd) runLoops(ctx context.Context, c cfg, clock *cutoffClock, netd pl
 	p3 := a.p3
 	sub := newSubmitter(func() { p3.reconcileShaping(ctx, netd, c.LegacyBridge) })
 
+	sub.minGap = pendingMinGap
+	if c.DBURL != "" {
+		go listenPending(ctx, c.DBURL, sub.kick)
+	}
 	go clock.watch(ctx, a.db, cutoffRefreshEvery)
 	go sub.loop(ctx, func() time.Duration { return submitPeriod(clock.period()) })
 

@@ -54,6 +54,10 @@ type phase3 struct {
 	// accounting tick, one at a time.
 	lastRollup  time.Time
 	maintaining atomic.Bool
+
+	// lastIngested holds, per live session, the observation the database last accepted, so an unchanged counter is not sent again
+	// (accountingPass; touched only by the accounting ticker).
+	lastIngested map[string]ingestMark
 }
 
 // newPhase3 returns nil while the enforcement plane is off. It must not be gated on Checkout Grace: the shaping

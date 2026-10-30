@@ -116,16 +116,79 @@ func reserveLicensedSlot(ctx context.Context, tx pgx.Tx, applianceID string, lim
 		`SELECT pg_advisory_xact_lock(hashtextextended($1, 7))`, applianceID); err != nil {
 		return err
 	}
-	var online int64
-	if err := tx.QueryRow(ctx, `
-	    SELECT count(*) FROM iam_v2.sessions se
-	      JOIN iam_v2.devices d ON d.id = se.device_id
-	     WHERE d.appliance_id = $1::uuid AND se.ended IS NULL
-	       AND se.state IN ('active','PENDING_ENFORCEMENT')`, applianceID).Scan(&online); err != nil {
+	return countAgainstLicence(ctx, tx, applianceID, limit)
+}
+
+// countAgainstLicence refuses when the appliance already holds limit live sessions. The caller holds the admission lock (exclusive, or
+// shared with the margin argument of reserveLicensedSlotShared).
+func countAgainstLicence(ctx context.Context, tx pgx.Tx, applianceID string, limit int64) error {
+	online, err := liveSessionCount(ctx, tx, applianceID)
+	if err != nil {
 		return err
 	}
 	if online >= limit {
 		return &licenseCapacityError{Limit: limit, Current: online}
+	}
+	return nil
+}
+
+func liveSessionCount(ctx context.Context, tx pgx.Tx, applianceID string) (int64, error) {
+	var online int64
+	err := tx.QueryRow(ctx, `
+	    SELECT count(*) FROM iam_v2.sessions se
+	      JOIN iam_v2.devices d ON d.id = se.device_id
+	     WHERE d.appliance_id = $1::uuid AND se.ended IS NULL
+	       AND se.state IN ('active','PENDING_ENFORCEMENT')`, applianceID).Scan(&online)
+	return online, err
+}
+
+// admissionConcurrency is the most transactions scd can have open at once: each holds a pool connection. It is the margin of the shared
+// admission path (reserveLicensedSlotShared). A pool that cannot be asked yields a margin no licence passes, so the exact path is used.
+func (s *server) admissionConcurrency() int {
+	if s.db == nil {
+		return 1 << 30
+	}
+	if n := int(s.db.Config().MaxConns); n > 0 {
+		return n
+	}
+	return 1 << 30
+}
+
+// errLicenceNearLimit: the shared admission path found the appliance within one pool of connections of its licensed limit; the caller
+// rolls the transaction back and runs it again on the exclusive path (reserveLicensedSlot), which is exact.
+var errLicenceNearLimit = errors.New("licence limit is near: use the exclusive admission path")
+
+// reserveLicensedSlotShared admits one guest WITHOUT serialising on the appliance-wide lock while the appliance is far from its limit,
+// and is exactly as strict as reserveLicensedSlot everywhere else (a sign-in storm queued every admission behind one lock held across a
+// commit; capacity acceptance 2026-10-30).
+//
+// Protocol. Every admission takes the appliance's advisory lock: this path SHARED, reserveLicensedSlot (and the exclusive retry)
+// EXCLUSIVE. Shared holders do not wait for each other; an exclusive holder waits for every shared one to finish and keeps new ones
+// out, so its count is exact.
+// Safety of the shared path. maxInFlight bounds the number of transactions that can be inside it at once (scd's pool size: every one of
+// them holds a pool connection). After taking the lock the transaction counts committed live sessions, c, with a fresh snapshot
+// and is admitted only when c < limit-maxInFlight. Consider the last shared admission to take its count: everything committed before
+// that is at most c, and rows that become visible later come only from the other shared transactions already past their count and still in
+// flight, at most maxInFlight-1, and nobody new passes after the last count. So the total never exceeds c+maxInFlight-1 < limit. At or
+// above limit-maxInFlight the function returns errLicenceNearLimit and the exact exclusive path decides, so the licensed number is
+// reachable to the last guest and never exceeded.
+func reserveLicensedSlotShared(ctx context.Context, tx pgx.Tx, applianceID string, limit int64, maxInFlight int) error {
+	if limit <= 0 {
+		return nil // unlimited
+	}
+	if int64(maxInFlight) >= limit {
+		return errLicenceNearLimit
+	}
+	if _, err := tx.Exec(ctx,
+		`SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 7))`, applianceID); err != nil {
+		return err
+	}
+	online, err := liveSessionCount(ctx, tx, applianceID)
+	if err != nil {
+		return err
+	}
+	if online >= limit-int64(maxInFlight) {
+		return errLicenceNearLimit
 	}
 	return nil
 }

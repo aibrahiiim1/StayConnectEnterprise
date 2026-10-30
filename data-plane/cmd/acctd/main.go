@@ -116,7 +116,12 @@ func main() {
 	slog.Info("acctd identity resolved", "tenant_id", c.TenantID, "appliance_id", c.ApplianceID)
 	go watchAssignmentReexec(rootCtx, asgStore, assignedGen)
 
-	pool, err := pgxpool.New(rootCtx, c.DBURL)
+	poolCfg, err := acctdPoolConfig(c.DBURL)
+	if err != nil {
+		slog.Error("db config", "err", err)
+		os.Exit(1)
+	}
+	pool, err := pgxpool.NewWithConfig(rootCtx, poolCfg)
 	if err != nil {
 		slog.Error("db open", "err", err)
 		os.Exit(1)
