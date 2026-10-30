@@ -1227,6 +1227,18 @@
       "authorization_evidence": "The Product Owner's continuation of 2026-10-29 (GOAL: continue and fully close the existing AD-1 to AD-68 mission, starting from current master).",
       "does_not_authorize": "Go-Live, production guest cutover, live card transactions, PMS posting or configuration changes, a new Root CA ceremony, networking topology changes, contact with retired hosts, or weakening any gate. Deployment targets remain OneGate Central 41.128.240.133 (private 172.21.96.96) and the test appliance 172.21.96.97.",
       "implementation": "Branch delivery/audit-closure, recorded by T0270: Root CA pin against a fingerprint in appliance-install.sh and install-appliance-root-ca.sh; platform migrations must match the installed release record; Hotel Admin Client access protection page and licence clock card; Central registration-limit card; post-stay sign-in window setting (migration 0179) with isolated tests; netd unit hardening; baseline regenerated through 0179; docs/AUDIT_DECISION_DISPOSITIONS.md updated with the live evidence."
+    },
+    {
+      "id": "D83",
+      "decided_on": "2026-10-30",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-10-30",
+      "status": "ACTIVE",
+      "title": "CLOSURE ROUND OF THE AUDIT-DECISION MISSION (2026-10-30): capacity and first-time offline activation acceptance in an isolated lab, review of the roll-up fix and of AD-36, and the defects they found. Simulated acceptance only; the sustained-churn target of 300 sign-ins a minute is recorded as NOT MET, not as passed.",
+      "authorization_evidence": "The Product Owner's continuation of 2026-10-30 (GOAL: complete and close the existing AD-1 to AD-68 mission; Central 9613fb52, appliance at 2985a88e).",
+      "does_not_authorize": "Go-Live, real PMS traffic, financial operations, Root CA changes, retired hosts, any schema change beyond migration 0180 (entitlement usage survives the raw purge)."
     }
   ]
 }

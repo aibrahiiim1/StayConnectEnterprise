@@ -1,0 +1,34 @@
+{
+  "transition_id": "T0274",
+  "seq": 274,
+  "timestamp": "2026-10-30T00:50:00Z",
+  "timestamp_derivation": "Computed from the session clock after both deployments were read back, before the commit that introduces this receipt.",
+  "record_type": "AUDIT_CLOSURE_CAPACITY_DEPLOYMENT",
+  "authorisation": "D83, the Product Owner's continuation of the mission of 2026-10-30 (deployment to OneGate Central 41.128.240.133 and the test appliance 172.21.96.97).",
+  "deployment": {
+    "central": "central.onegate.getsemantics.com (41.128.240.133, private 172.21.96.96): onegate-central-5ac9cc5c9851 by central-deploy.sh with a pre-deploy dump; smoke PASS; DEPLOYED.json release_commit 5ac9cc5c9851f01c9a9aa87d97acbec0c961e940. The Central change is the offline activation package carrying the signed assignment registry.",
+    "test_appliance": "172.21.96.97: onegate-appliance-5ac9cc5c9851 by appliance-install.sh --upgrade; units PASS; migration 0180 applied; RELEASE.json source_commit 5ac9cc5c9851f01c9a9aa87d97acbec0c961e940; DEPLOYED_BINARIES.sha256 lists all installed binaries.",
+    "lab": "An isolated container lab (new Central, new PKI; nothing registered on the production Central) produced the capacity and offline activation evidence; see docs/runbooks/CAPACITY_AND_OFFLINE_ACCEPTANCE.md."
+  },
+  "verification": "Capacity (simulated, 2 CPU / 4 GB): 1,700 sessions held, ramp 98% at 300 a minute, 3.5-6.6 s per sign-in when idle; the sustained-churn target of 300 sign-ins a minute is NOT MET (19 of 3,000). Failure behaviour: netd and PostgreSQL restarts recover in seconds; a four-minute acctd outage takes guests offline after 90 s and reconciles raw = minute = hour afterwards. Offline first activation on a factory-clean appliance against an isolated Central: activation, assignment, licence binding, single use, tampered and truncated packages refused. Not performed: physical devices at scale, reference hardware, real PMS post-stay traffic, a Central-disconnect test in the lab.",
+  "not_touched": "Every retired host, production users, live payment providers, PMS posting and configuration, the Root CA.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "5ac9cc5c9851f01c9a9aa87d97acbec0c961e940",
+  "previous_delivery": "T0273",
+  "decision": "D83",
+  "go_live": "NOT authorised."
+}
