@@ -1131,3 +1131,11 @@ offline activation request and a forged package were refused on the activated ap
 
 Not exercised: a first activation by package that succeeds (needs a second waiting appliance), the Post-stay flow against a real PMS feed, and 2,000 real devices on the network.
 
+### A3.12 The capacity closure round (2026-10-30)
+
+Migrations **0181** (accounting integrity), **0190** (post-stay sign-in throttle settings), **0191** and **0192** (indexes; a janitor that no longer deadlocks) are applied by the
+upgrade in order, and the production baseline is regenerated through 0192. `deploy/sysctl/99-stayconnect.conf` (neighbour table sized for 1,000+ clients per network) is now
+installed by `--upgrade`, and the acctd unit gains `WatchdogSec=30`. Checks after the upgrade: `grep -E 'WatchdogSec|NotifyAccess' /etc/systemd/system/stayconnect-acctd.service`;
+`tc filter show dev <client bridge> parent 1:` lists `flower` filters (rollback to the earlier classifier: set `NETD_SHAPE_CLASSIFIER=u32`, then `tc filter del dev <bridge> parent 1: pref 1`);
+`sysctl net.ipv4.neigh.default.gc_thresh3`. Evidence: [`CAPACITY_AND_OFFLINE_ACCEPTANCE.md`](CAPACITY_AND_OFFLINE_ACCEPTANCE.md) sections 6 and 7.
+
