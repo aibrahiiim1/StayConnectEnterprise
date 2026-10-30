@@ -40,6 +40,12 @@ var signinCapacityFields = []struct {
 	{"portal_image_max_edge_px", signinCapacityBound{640, 4096, 2560, "pixels", "Uploaded portal background and logo images are scaled down so their longest side is at most this."}},
 	{"portal_image_quality", signinCapacityBound{50, 95, 82, "percent", "Compression quality for uploaded portal images."}},
 	{"post_stay_signin_days", signinCapacityBound{1, 30, 7, "days", "How long after check-out a guest can still sign in with their room number and reservation number. After this the stay no longer opens post-stay access."}},
+	{"post_stay_device_attempts_per_minute", signinCapacityBound{3, 60, 10, "attempts per minute", "Post-stay sign-in: attempts one device may make a minute, right or wrong. More than this locks the device out."}},
+	{"post_stay_ip_attempts_per_minute", signinCapacityBound{5, 200, 20, "attempts per minute", "Post-stay sign-in: attempts one network address may make a minute, whatever devices it uses. Guests behind one shared address count together."}},
+	{"post_stay_wrong_answers_before_lockout", signinCapacityBound{3, 20, 5, "attempts per minute", "Post-stay sign-in: answers a device may give a minute for one stay (or, from a device with no stay of its own, in all) before it is locked out."}},
+	{"post_stay_lockout_minutes", signinCapacityBound{1, 240, 15, "minutes", "Post-stay sign-in: how long a lockout lasts. It ends by itself; nobody has to release it."}},
+	{"post_stay_new_device_room_attempts_per_minute", signinCapacityBound{3, 60, 10, "attempts per minute", "Post-stay sign-in: attempts a minute, from devices that were never on the stay, that name one room or one reservation number, whatever device identity they use. Stops guessing from changing devices; devices already on the stay are not counted."}},
+	{"post_stay_appliance_attempts_per_minute", signinCapacityBound{20, 5000, 200, "attempts per minute", "Post-stay sign-in: attempts the whole appliance accepts a minute. Attempts that were already refused do not use it up."}},
 }
 
 func (s *server) signinCapacityRoutes() http.Handler {

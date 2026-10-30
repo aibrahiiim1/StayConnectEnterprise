@@ -42,16 +42,49 @@ never forwarded.
 
 ## Lockout
 
-The durable throttle (`post_stay_pin` method, the name is historical) is charged **before** any comparison:
+The durable throttle (`post_stay_pin` method, the name is historical) is charged **before** any comparison. Every number
+below is the **default of a per-site setting** (Hotel Admin, sign-in limits; migration 0190; bounded, audited, with a
+mandatory reason), not a constant:
 
-- per device: 10 attempts a minute window, then a 15-minute block;
-- per source address: 20, then a 15-minute block;
-- per **stay identity and device** (the profile of the episode plus the device): 5, then a 15-minute block;
-- a device with no candidate stay: 5 per device, then a 15-minute block;
-- appliance-wide endpoint damper: 200 a minute.
+- per device: 10 attempts a minute (3-60), then a lockout;
+- per source address: 20 (5-200), then a lockout;
+- per **stay identity and device** (the profile of the episode plus the device): 5 (3-20), then a lockout;
+- a device with no candidate stay: 5 per device, and **also per room and per reservation number typed** (10, 3-60), shared
+  by every device identity, then a lockout;
+- appliance-wide: 200 a minute (20-5000); it is charged only for attempts every other rule allowed, so a refused client
+  cannot use it up for everybody;
+- the lockout is 15 minutes (1-240). It ends by itself; there is no permanent lockout and nothing for staff to release.
 
 Because the identity bucket includes the device, one device's wrong guesses do not lock another device out of the same
-stay, and a guesser's own device is locked out on its own. An unreachable throttle store denies the attempt.
+stay. A client that changes its device identity (MAC) on every attempt gets a fresh device budget each time, so for devices
+with no stay of their own the **room and the reservation number they must guess** are counted across identities: guessing
+at one room, or spraying one reservation number across rooms, stops at the cap whatever identities are used. Devices that
+already have a stay are compared with their own stays only, cannot enumerate anything, and are not counted there, so a
+flood against a room does not lock out the guests already on it. The residual: a sustained flood naming one room holds
+**new** devices out of that room for the lockout, only while it keeps sending. An unreachable throttle store denies the attempt.
+
+## One Entitlement, never reset by a device
+
+A Stay has one live Entitlement. A device that signs in after check-out never gets one of its own:
+
+- if the Stay has a live Entitlement (the post-stay one a first device converted into; or the stay's own while it still
+  runs), the device **joins** it: same window, same plan, same allowance and whatever it has already spent; the plan's
+  device limit decides how many devices (a further device over the limit is refused);
+- only when the Stay has none does the zero-price **POST_STAY package** grant a new one. This is the one **Post-Stay
+  benefit**: a designed allowance of the package, granted once per stay (database index `one_conversion_per_episode`), by
+  the stay and not by a device. It is recorded as `post_stay.benefit_granted`; a join is `post_stay.entitlement_joined`;
+- once that benefit has ended or run out, no device can obtain another (`ErrAlreadyConverted`).
+
+A returning device (a new session after the old one ended, or a retry whose answer was lost) gets the same Entitlement and,
+if it still has a live session on it, that session.
+
+## Audit
+
+Every refusal is a row in the audit log (`post_stay.signin_refused`): a closed reason code, the route (known device / new
+device) and how many stays the device had, the throttle scope that stopped it, the source address, and **keyed pseudonyms**
+of the device, the room and the reservation as typed. Never the last name, or the room or reservation in clear. Rows are
+capped per device and minute and the rest are summarised in one `post_stay.signin_refusals_suppressed` row. A guest is
+refused or admitted the same way if a row cannot be written.
 
 ## "New or risky" devices
 

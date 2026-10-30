@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -35,6 +36,9 @@ type Converted struct {
 	Purchase    string
 	Entitlement string
 	WindowEnds  time.Time
+	// Joined is true when the device joined the stay's existing live Entitlement (continuity); false when this call
+	// granted the one Post-Stay benefit (a new Entitlement). Nothing else distinguishes the two outcomes.
+	Joined bool
 }
 
 func (s *Store) Convert(ctx context.Context, req ConvertRequest, ac *authctx.Store) (Converted, error) {
@@ -103,7 +107,49 @@ func (s *Store) ConvertTx(ctx context.Context, tx pgx.Tx, req ConvertRequest, ac
 		return Converted{}, err
 	}
 
-	// One conversion per episode; explicit so a second attempt gets an actionable answer, not a constraint violation.
+	// CONTINUITY FIRST (AD-36). A Stay has one live Entitlement (ent_live_stay) and a device does not get one of its own.
+	// If the stay has a live Entitlement -- the post-stay one a first device converted into, or the stay's own while it
+	// still runs -- this device JOINS it: same window, same plan, same allowance and whatever it has already spent, with
+	// the plan's device limit enforced under the entitlement lock. A returning device and a further device are both this
+	// case. No purchase, no Entitlement and no window are created, so changing device cannot reset anything.
+	// The stay is already locked (ConsumeTx), so no one else is deciding this concurrently.
+	var liveEnt, liveStatus string
+	var liveWindowEnds *time.Time
+	var liveJoinable bool
+	err = tx.QueryRow(ctx, `SELECT e.id::text, e.status, e.window_ends_at,
+		       (e.status='ACTIVE' AND (e.window_ends_at IS NULL OR e.window_ends_at > now()))
+		  FROM iam_v2.entitlements e
+		 WHERE e.tenant_id=$1 AND e.site_id=$2 AND e.stay_id=$3 AND e.status IN ('PENDING','ACTIVE','SUSPENDED')
+		 FOR UPDATE`, req.Tenant, req.Site, stay).Scan(&liveEnt, &liveStatus, &liveWindowEnds, &liveJoinable)
+	switch {
+	case err == nil:
+		if !liveJoinable {
+			// Neither joinable nor replaceable: a second live Entitlement is forbidden, and replacing a suspended or
+			// just-expired one would hand out a fresh allowance. The sweeper ends it; nothing is granted meanwhile.
+			return Converted{}, ErrEntitlementNotJoinable
+		}
+		if _, err := tx.Exec(ctx, `SELECT iam_v2.authorize_entitlement_device($1,$2,now())`,
+			liveEnt, req.Presenter.Device); err != nil {
+			if strings.Contains(err.Error(), "MAX_DEVICES_REACHED") {
+				return Converted{}, ErrDeviceLimit
+			}
+			return Converted{}, err
+		}
+		out := Converted{Profile: consumed.PostStayProfile, Stay: stay, Entitlement: liveEnt, Joined: true}
+		if liveWindowEnds != nil {
+			out.WindowEnds = *liveWindowEnds
+		}
+		s.auditTx(ctx, tx, req.Tenant, AuditActionEntitlementJoined, stay, liveEnt)
+		return out, nil
+	case !errors.Is(err, pgx.ErrNoRows):
+		return Converted{}, err
+	}
+
+	// THE POST-STAY BENEFIT. The stay has no live Entitlement (it ended at check-out). The zero-price POST_STAY package
+	// grants a new one -- ONCE for the stay (one_conversion_per_episode in the database, this check for a clear answer).
+	// This is a designed benefit of the package, granted by the stay and the package and not by the device; every device
+	// after the first joins it above. If it has been granted and has ended or run out, it is over: a device must not be
+	// able to ask for a fresh allowance, so ErrAlreadyConverted, not a second grant.
 	var existing int
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM iam_v2.entitlements e
 		JOIN iam_v2.purchases pu ON pu.tenant_id=e.tenant_id AND pu.site_id=e.site_id AND pu.id=e.purchase_id
@@ -170,8 +216,27 @@ func (s *Store) ConvertTx(ctx context.Context, tx pgx.Tx, req ConvertRequest, ac
 		// The Stay left the episode since consumption, or was never checked out: fail closed.
 		return Converted{}, ErrNotAuthenticable
 	}
+	s.auditTx(ctx, tx, req.Tenant, AuditActionBenefitGranted, stay, entitlement)
 	return Converted{Profile: consumed.PostStayProfile, Stay: stay, Purchase: purchase,
 		Entitlement: entitlement, WindowEnds: windowEnds}, nil
+}
+
+// auditTx writes a grant/join row in the conversion's own transaction, so the record and the access commit or roll back
+// together. It holds ids only (the stay and the entitlement are the appliance's own), no guest data. The insert is a
+// savepoint: a missing audit right costs the row, never the guest's access.
+func (s *Store) auditTx(ctx context.Context, tx pgx.Tx, tenant, action, stay, entitlement string) {
+	sp, err := tx.Begin(ctx)
+	if err != nil {
+		return
+	}
+	if _, err := sp.Exec(ctx, `INSERT INTO public.audit_log
+		(tenant_id, actor_type, actor_id, action, target_type, target_id, payload)
+		VALUES ($1::uuid, 'system', NULL, $2, 'post_stay_signin', $3, $4)`,
+		tenant, action, entitlement, map[string]any{"stay_id": stay, "entitlement_id": entitlement}); err != nil {
+		_ = sp.Rollback(ctx)
+		return
+	}
+	_ = sp.Commit(ctx)
 }
 
 func onlyNotRequired(methods []string) bool {

@@ -6,7 +6,8 @@ package main
 // the device it resolved itself was authorised on (internal/poststay). No PIN is issued, shown, reset or verified.
 //
 // Uniform non-success: every refusal (a wrong room or reservation, no stay, revoked, expired, locked out, moved-on
-// episode) returns the same status and body; the reason goes only to the log.
+// episode) returns the same status and body; the reason goes to the log and, as a closed reason CODE with keyed
+// pseudonyms and no guest data, to the audit log (internal/poststay/audit.go).
 
 import (
 	"context"
@@ -15,6 +16,8 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/authctx"
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
@@ -67,11 +70,22 @@ func (p *phase5PostStay) unavailable(w http.ResponseWriter, reason string) {
 	writeJSONScd(w, http.StatusOK, psResponse{Outcome: psOutcomeUnavailab})
 }
 
+// refuse is unavailable plus the audit row, for refusals the post-stay store did not already record (Verify records its
+// own). code is one of poststay.Refusal*; dev is nil when the device was not resolved.
+func (p *phase5PostStay) refuse(w http.ResponseWriter, r *http.Request, code string, dev *deviceIdentity, detail string) {
+	ev := poststay.RefusalEvent{Tenant: p.srv.tenID, Code: code}
+	if dev != nil {
+		ev.Tenant, ev.Device, ev.IP = dev.Tenant, dev.DeviceID, ipString(*dev)
+	}
+	p.store.AuditRefusal(r.Context(), ev)
+	p.unavailable(w, detail)
+}
+
 func (p *phase5PostStay) decode(w http.ResponseWriter, r *http.Request, dst any) bool {
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
-		p.unavailable(w, "malformed_request")
+		p.refuse(w, r, poststay.RefusalMalformed, nil, "malformed_request")
 		return false
 	}
 	return true
@@ -93,38 +107,41 @@ func (p *phase5PostStay) verifyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	// The licence decision every guest method takes first; the refusal keeps the post-stay envelope.
 	if code, refused := p.p3.pmsLicenseRefusal(); refused {
-		p.unavailable(w, "license_refused: "+code)
+		p.refuse(w, r, poststay.RefusalLicense, nil, "license_refused: "+code)
 		return
 	}
 	ctx := r.Context()
 	dev, err := p.p3.device(ctx, req.Device)
 	if err != nil {
-		p.unavailable(w, "device_identity: "+err.Error())
+		p.refuse(w, r, poststay.RefusalDeviceUnresolved, nil, "device_identity: "+err.Error())
 		return
 	}
 	// An empty answer is not short-circuited: it takes the same throttle charge and the same comparisons, since a cheap
 	// answer would be a free probe for whether this device has a post-stay identity.
+	capacity := p.srv.signinCapacity(ctx)
 	profile, err := p.store.Verify(ctx, poststay.VerifyRequest{
 		Tenant: dev.Tenant, Site: dev.Site, Device: dev.DeviceID, IP: ipString(dev),
 		Room: req.Room, Reservation: req.Reservation, LastName: req.LastName,
-		WindowDays: p.srv.signinCapacity(ctx).PostStaySigninDays})
+		WindowDays: capacity.PostStaySigninDays, Limits: capacity.PostStay})
 	if err != nil {
 		switch {
 		case errors.Is(err, poststay.ErrThrottled):
-			p.unavailable(w, "throttled")
+			p.unavailable(w, "throttled") // Verify already wrote the audit row
+		case errors.Is(err, poststay.ErrNotAuthenticable):
+			p.unavailable(w, "not_authenticable") // likewise
 		default:
-			p.unavailable(w, "not_authenticable")
+			p.refuse(w, r, poststay.RefusalInternal, &dev, "verify_fault: "+err.Error())
 		}
 		return
 	}
 	// A site with no grantable post-stay package issues no context (it could be redeemed against nothing).
 	offers, err := p.store.GrantableOffers(ctx, dev.Tenant, dev.Site)
 	if err != nil {
-		p.unavailable(w, "offers_unreadable: "+err.Error())
+		p.refuse(w, r, poststay.RefusalInternal, &dev, "offers_unreadable: "+err.Error())
 		return
 	}
 	if len(offers) == 0 {
-		p.unavailable(w, "no_grantable_post_stay_package")
+		p.refuse(w, r, poststay.RefusalNoPackage, &dev, "no_grantable_post_stay_package")
 		return
 	}
 	id, err := p.ctxs.IssuePostStay(ctx, authctx.PostStayGrant{
@@ -132,7 +149,7 @@ func (p *phase5PostStay) verifyHandler(w http.ResponseWriter, r *http.Request) {
 		Device: dev.DeviceID, GuestNetwork: dev.GuestNetwork,
 		TTLSeconds: int(p.contextTTL.Seconds())})
 	if err != nil {
-		p.unavailable(w, "context_issue: "+err.Error())
+		p.refuse(w, r, poststay.RefusalContext, &dev, "context_issue: "+err.Error())
 		return
 	}
 	writeJSONScd(w, http.StatusOK, psResponse{
@@ -154,20 +171,20 @@ func (p *phase5PostStay) convertHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	// Conversion grants access, so it answers to the licence like the room grant.
 	if code, refused := p.p3.pmsLicenseRefusal(); refused {
-		p.unavailable(w, "license_refused: "+code)
+		p.refuse(w, r, poststay.RefusalLicense, nil, "license_refused: "+code)
 		return
 	}
 	ctx := r.Context()
 	dev, err := p.p3.device(ctx, req.Device)
 	if err != nil {
-		p.unavailable(w, "device_identity: "+err.Error())
+		p.refuse(w, r, poststay.RefusalDeviceUnresolved, nil, "device_identity: "+err.Error())
 		return
 	}
 	// A retry of a conversion this device already made returns its session once enforced; the context is one-time,
 	// so without this the guest would be stuck behind a consumed context.
 	if sid, ent, ok := p.alreadyConverted(ctx, req.AuthContextID, dev); ok {
 		if enforced, werr := p.p3.awaitEnforced(ctx, sid); werr != nil || !enforced {
-			p.unavailable(w, "retry_enforcement_not_confirmed")
+			p.refuse(w, r, poststay.RefusalEnforcement, &dev, "retry_enforcement_not_confirmed")
 			return
 		}
 		writeJSONScd(w, http.StatusOK, psResponse{Outcome: psOutcomeGranted, SessionID: sid, EntitlementID: ent})
@@ -178,7 +195,7 @@ func (p *phase5PostStay) convertHandler(w http.ResponseWriter, r *http.Request) 
 	// granted, device admitted, licensed slot reserved, session opened PENDING_ENFORCEMENT -- or none of it.
 	tx, err := p.srv.db.Begin(ctx)
 	if err != nil {
-		p.unavailable(w, "begin: "+err.Error())
+		p.refuse(w, r, poststay.RefusalInternal, &dev, "begin: "+err.Error())
 		return
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
@@ -190,20 +207,28 @@ func (p *phase5PostStay) convertHandler(w http.ResponseWriter, r *http.Request) 
 		PackageRevision: req.PackageRevisionID,
 	}, p.ctxs)
 	if err != nil {
-		p.unavailable(w, "convert_refused: "+err.Error())
+		p.refuse(w, r, convertRefusalCode(err), &dev, "convert_refused: "+err.Error())
 		return
 	}
-	if err := reserveLicensedSlot(ctx, tx, p.srv.applID, p.srv.lic.MaxConcurrentOnlineGuests()); err != nil {
-		p.unavailable(w, "capacity: "+err.Error())
-		return
+	// A device that joined an Entitlement it already has a live session on (a retry whose first answer was lost) gets that
+	// session back, not a second one.
+	sessionID := ""
+	if out.Joined {
+		sessionID = p.liveSessionTx(ctx, tx, out.Entitlement, dev.DeviceID)
 	}
-	sessionID, err := p.p3.openSessionWithMethodTx(ctx, tx, out.Entitlement, dev, postStaySessionMethod)
-	if err != nil {
-		p.unavailable(w, "session: "+err.Error())
-		return
+	if sessionID == "" {
+		if err := reserveLicensedSlot(ctx, tx, p.srv.applID, p.srv.lic.MaxConcurrentOnlineGuests()); err != nil {
+			p.refuse(w, r, poststay.RefusalCapacity, &dev, "capacity: "+err.Error())
+			return
+		}
+		sessionID, err = p.p3.openSessionWithMethodTx(ctx, tx, out.Entitlement, dev, postStaySessionMethod)
+		if err != nil {
+			p.refuse(w, r, poststay.RefusalInternal, &dev, "session: "+err.Error())
+			return
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
-		p.unavailable(w, "commit: "+err.Error())
+		p.refuse(w, r, poststay.RefusalInternal, &dev, "commit: "+err.Error())
 		return
 	}
 	// Report GRANTED only once the enforcement owner has promoted the session.
@@ -211,12 +236,42 @@ func (p *phase5PostStay) convertHandler(w http.ResponseWriter, r *http.Request) 
 	if werr != nil || !enforced {
 		slog.Warn("phase5 post-stay: converted but enforcement not confirmed",
 			"session", sessionID, "entitlement", out.Entitlement, "err", werr)
-		p.unavailable(w, "enforcement_not_confirmed")
+		p.refuse(w, r, poststay.RefusalEnforcement, &dev, "enforcement_not_confirmed")
 		return
 	}
-	slog.Info("phase5 post-stay: converted", "stay", out.Stay, "entitlement", out.Entitlement, "session", sessionID)
+	slog.Info("phase5 post-stay: converted", "stay", out.Stay, "entitlement", out.Entitlement, "session", sessionID,
+		"joined_existing_entitlement", out.Joined)
 	writeJSONScd(w, http.StatusOK, psResponse{
 		Outcome: psOutcomeGranted, SessionID: sessionID, EntitlementID: out.Entitlement})
+}
+
+// convertRefusalCode maps a conversion refusal to its audit code. The guest sees the same answer for all of them.
+func convertRefusalCode(err error) string {
+	switch {
+	case errors.Is(err, poststay.ErrAlreadyConverted):
+		return poststay.RefusalBenefitSpent
+	case errors.Is(err, poststay.ErrEntitlementNotJoinable):
+		return poststay.RefusalNotJoinable
+	case errors.Is(err, poststay.ErrDeviceLimit):
+		return poststay.RefusalDeviceLimit
+	case errors.Is(err, authctx.ErrContextInvalid), errors.Is(err, poststay.ErrPackageNotGrantable),
+		errors.Is(err, poststay.ErrSettlementRequired), errors.Is(err, poststay.ErrNotAuthenticable):
+		return poststay.RefusalContext
+	default:
+		return poststay.RefusalInternal
+	}
+}
+
+// liveSessionTx returns this device's live session on the entitlement, or "".
+func (p *phase5PostStay) liveSessionTx(ctx context.Context, tx pgx.Tx, entitlement, device string) string {
+	var sid string
+	if err := tx.QueryRow(ctx, `SELECT id::text FROM iam_v2.sessions
+		 WHERE entitlement_id = $1::uuid AND device_id = $2::uuid AND ended IS NULL
+		   AND state IN ('active','PENDING_ENFORCEMENT')
+		 ORDER BY started DESC LIMIT 1`, entitlement, device).Scan(&sid); err != nil {
+		return ""
+	}
+	return sid
 }
 
 // alreadyConverted reports whether this device already turned this context into a live session, with the same
