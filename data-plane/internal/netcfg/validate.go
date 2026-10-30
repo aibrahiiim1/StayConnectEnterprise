@@ -7,9 +7,12 @@ import (
 )
 
 const (
-	// MinSubnetPrefix is the widest client subnet: /19, 8190 clients (see the subnet_too_large rule). The shaper names a class
-	// per host of the subnet and supports up to /17 (internal/shape minor.go); /19 is the product limit on top of that.
+	// MinSubnetPrefix is the widest client subnet: /19, 8190 usable addresses (see the subnet_too_large rule). This is ADDRESS CAPACITY of
+	// one broadcast domain, not a promise of 8190 simultaneously served clients. The shaper names a class per host of the subnet and
+	// supports up to /17 (internal/shape minor.go); /19 is the product limit on top of that.
 	MinSubnetPrefix = 19
+	// MaxSubnetPrefix is the narrowest client subnet: /30 (a gateway and one host).
+	MaxSubnetPrefix = 30
 	// MinLeaseSeconds / MaxLeaseSeconds bound every DHCP lease timer that is set.
 	MinLeaseSeconds = 60
 	MaxLeaseSeconds = 7 * 24 * 3600
@@ -125,17 +128,8 @@ func ValidateOne(n GuestNetwork, topo Topology, availIfaces, knownIfaces map[str
 				r.add(f("gateway_ip"), "gateway_is_broadcast", "gateway_ip must not be the broadcast address")
 			}
 		}
-		ones, bits := ipnet.Mask.Size()
-		if bits == 32 && ones > 30 {
-			r.add(f("subnet_cidr"), "subnet_too_small",
-				"subnet is too small to host a gateway and a DHCP pool (use /30 or larger)")
-		}
-		// The widest subnet the shaper can tell apart: a client's tc class is named by its host index in the subnet
-		// (internal/shape MinorFor); the extension band reaches /17 and this rule holds the product at MinSubnetPrefix.
-		if bits == 32 && ones < MinSubnetPrefix {
-			r.add(f("subnet_cidr"), "subnet_too_large",
-				fmt.Sprintf("subnet is larger than /%d (8190 clients); per-client speed limits and usage cannot tell "+
-					"clients apart in a wider subnet. Split it into several client networks.", MinSubnetPrefix))
+		for _, iss := range CheckClientSubnetMask(ipnet) {
+			r.add(f("subnet_cidr"), iss.Code, iss.Message)
 		}
 	}
 
@@ -199,6 +193,73 @@ func ValidateOne(n GuestNetwork, topo Topology, availIfaces, knownIfaces map[str
 		validateReservations(&r, n, ipnet, prefix)
 	}
 	return r.Issues
+}
+
+// CheckClientSubnet validates only the width of a client network's subnet text. It is the one rule shared by the netd validator and
+// the edged API, so a subnet that the apply would refuse is refused when it is entered. An empty list means acceptable.
+func CheckClientSubnet(cidr string) []Issue {
+	_, _, ipnet, err := networkAndBroadcast(cidr)
+	if err != nil {
+		return []Issue{{Field: "subnet_cidr", Code: "bad_subnet", Message: "subnet_cidr must be a valid IPv4 CIDR"}}
+	}
+	return CheckClientSubnetMask(ipnet)
+}
+
+// CheckClientSubnetMask is CheckClientSubnet for an already parsed subnet.
+func CheckClientSubnetMask(ipnet *net.IPNet) []Issue {
+	var out []Issue
+	ones, bits := ipnet.Mask.Size()
+	if bits == 32 && ones > MaxSubnetPrefix {
+		out = append(out, Issue{Field: "subnet_cidr", Code: "subnet_too_small",
+			Message: "subnet is too small to host a gateway and a DHCP pool (use /30 or larger)"})
+	}
+	// The widest subnet the shaper can tell apart: a client's tc class is named by its host index in the subnet
+	// (internal/shape MinorFor); the extension band reaches /17 and this rule holds the product at MinSubnetPrefix.
+	if bits == 32 && ones < MinSubnetPrefix {
+		out = append(out, Issue{Field: "subnet_cidr", Code: "subnet_too_large",
+			Message: fmt.Sprintf("subnet is larger than /%d (%d addresses): one client network is limited to /%d, "+
+				"because per-client speed limits and usage cannot tell clients apart in a wider subnet and a single "+
+				"broadcast domain that large is not supported. Split it into several client networks.",
+				MinSubnetPrefix, SubnetHosts(MinSubnetPrefix), MinSubnetPrefix)})
+	}
+	return out
+}
+
+// SubnetHosts is the number of usable host addresses in a prefix (network and broadcast excluded): /19 -> 8190.
+func SubnetHosts(prefix int) int {
+	if prefix < 0 || prefix > 30 {
+		return 0
+	}
+	return (1 << uint(32-prefix)) - 2
+}
+
+// ValidateHostOverlap refuses an enabled client network whose subnet overlaps a subnet the appliance itself carries on its WAN or
+// management interface (the same NIC on a two-port appliance). Client networks live on the LAN port; an overlap with the WAN/management
+// subnet would route the client network's addresses into the uplink. host is the appliance's current IPv4 address list.
+func ValidateHostOverlap(nets []GuestNetwork, topo Topology, host []HostAddr) []Issue {
+	var out []Issue
+	for _, n := range sortEnabled(nets) {
+		_, _, ipnet, err := networkAndBroadcast(n.SubnetCIDR)
+		if err != nil {
+			continue
+		}
+		for _, h := range host {
+			if h.Iface == "" || (h.Iface != topo.WANInterface && h.Iface != topo.MgmtInterface) {
+				continue
+			}
+			_, hsub, err := net.ParseCIDR(h.CIDR)
+			if err != nil || hsub.IP.To4() == nil {
+				continue
+			}
+			if hsub.Contains(ipnet.IP) || ipnet.Contains(hsub.IP) {
+				out = append(out, Issue{Field: fmt.Sprintf("networks[%s].subnet_cidr", n.Name), Code: "subnet_overlaps_host",
+					Message: fmt.Sprintf("subnet %s overlaps %s, the WAN/management network of this appliance (%s); a client network must not share addresses with it",
+						n.SubnetCIDR, hsub, h.Iface)})
+				break
+			}
+		}
+	}
+	return out
 }
 
 func validatePools(r *ValidationResult, n GuestNetwork, ipnet *net.IPNet, gw, network, broadcast net.IP, prefix string) {
