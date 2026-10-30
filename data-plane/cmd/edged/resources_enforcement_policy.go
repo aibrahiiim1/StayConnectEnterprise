@@ -33,7 +33,7 @@ const (
 	enforcementContinuityMin     = 0
 	enforcementContinuityMax     = 120
 	enforcementContinuityDefault = 60
-	enforcementHistory   = 50
+	enforcementHistory           = 50
 )
 
 type enforcementPolicy struct {

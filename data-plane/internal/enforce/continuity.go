@@ -31,14 +31,14 @@ type ContinuityRow struct {
 	Started       time.Time
 	MaxSessionSec int64 // 0 = none
 	// DataQuota is nil when the entitlement has no byte quota.
-	DataQuota     *int64
-	DataConsumed  int64
-	CountsTime    bool
-	TimeQuota     *int64 // seconds; nil = no allowance
-	TimeConsumed  int64
-	WindowEndsAt  *time.Time
-	DownKbps      int
-	UpKbps        int
+	DataQuota    *int64
+	DataConsumed int64
+	CountsTime   bool
+	TimeQuota    *int64 // seconds; nil = no allowance
+	TimeConsumed int64
+	WindowEndsAt *time.Time
+	DownKbps     int
+	UpKbps       int
 }
 
 // BuildContinuity derives the block. window <= 0 returns nil (strict mode). Pure: no database, no clock.

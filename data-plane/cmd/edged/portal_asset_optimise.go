@@ -232,17 +232,17 @@ func applyOrientation(img image.Image, o int) image.Image {
 // ---------------------------------------------------------------------------------------------------------
 
 type assetOptimiser struct {
-	mu      sync.Mutex
-	dir     string
-	params  func() optimiseParams
-	failed  map[string]string // pending id -> reason, kept until the operator clears it by uploading again
+	mu     sync.Mutex
+	dir    string
+	params func() optimiseParams
+	failed map[string]string // pending id -> reason, kept until the operator clears it by uploading again
 	// done maps a pending id to the name its optimised file was stored under, so a client that uploaded several images at
 	// once can tell which result is its own (the name is a hash of the optimised bytes, so it cannot be guessed from the id).
 	// Bounded to the most recent assetDoneKeep entries.
 	done      map[string]string
 	doneOrder []string
-	wake    chan struct{}
-	started sync.Once
+	wake      chan struct{}
+	started   sync.Once
 }
 
 func newAssetOptimiser(dir string, params func() optimiseParams) *assetOptimiser {

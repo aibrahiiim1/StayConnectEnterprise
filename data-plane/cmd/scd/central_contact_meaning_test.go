@@ -28,8 +28,8 @@ func TestLastContactIsNullUntilCentralActuallyAnswers(t *testing.T) {
 // Identity or certificate not loaded and nothing exchanged yet: its own state, neither connected nor unreachable.
 func TestIdentityNotLoadedIsItsOwnState(t *testing.T) {
 	cases := map[string]centralInputs{
-		"no identity yet":            {Now: now0, CentralConfigured: true},
-		"identity but no cert":       {Now: now0, CentralConfigured: true, ApplianceID: "a", CertRequired: true, CertReady: false},
+		"no identity yet":      {Now: now0, CentralConfigured: true},
+		"identity but no cert": {Now: now0, CentralConfigured: true, ApplianceID: "a", CertRequired: true, CertReady: false},
 	}
 	for name, in := range cases {
 		got := centralLinkState(in)

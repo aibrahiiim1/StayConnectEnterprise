@@ -60,8 +60,8 @@ type fixtureNet struct {
 }
 
 const (
-	fixtureNetSecondOctet = 192       // the pool is 10.192.0.0 .. 10.223.255.255
-	fixtureNetPool        = 32 * 256  // /24 subnets in it
+	fixtureNetSecondOctet = 192        // the pool is 10.192.0.0 .. 10.223.255.255
+	fixtureNetPool        = 32 * 256   // /24 subnets in it
 	fixtureNetLockBase    = 0x5CD0F000 // advisory-lock keys fixtureNetLockBase .. +fixtureNetPool-1
 )
 

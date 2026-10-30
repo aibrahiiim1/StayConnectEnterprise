@@ -187,10 +187,10 @@ func main() {
 		fastPath: os.Getenv("NETD_PLAN_FASTPATH") != "false",
 		// A pass batches its tc/nft work and puts new sessions before routine renewal (phase3_batch.go); NETD_PASS_BATCHING=false runs it per session.
 		noBatch: os.Getenv("NETD_PASS_BATCHING") == "false",
-		shp:   shape.New(),
-		mode:  p3mode,
-		authz: p3authz,
-		store: &planStore{path: envOr("NETD_PHASE3_PLAN_STATE", "/var/lib/stayconnect/netd-phase3-plan.json")},
+		shp:     shape.New(),
+		mode:    p3mode,
+		authz:   p3authz,
+		store:   &planStore{path: envOr("NETD_PHASE3_PLAN_STATE", "/var/lib/stayconnect/netd-phase3-plan.json")},
 		// The class creator registers the accounting origin: only it can read the counters before a guest uses it (phase3_origin.go).
 		origins:    timedOrigins{&pgOrigins{pool: pool}},
 		classStore: &classStore{path: envOr("NETD_PHASE3_CLASS_STATE", "/var/lib/stayconnect/netd-phase3-classes.json")},
