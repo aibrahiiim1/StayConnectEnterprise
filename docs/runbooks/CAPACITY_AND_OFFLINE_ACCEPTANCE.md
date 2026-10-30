@@ -81,3 +81,36 @@ Reviewed in [`PR272_ROLLUP_REVIEW.md`](../reviews/PR272_ROLLUP_REVIEW.md): a poi
 3. Kernel limit: at most 2,047 shaped sessions per bridge or IFB; a site above that needs a second client network.
 4. AD-36: the entitlement continuity PO clarification is not met by the new conversion (a new Entitlement is created); refusals after check-out are logged but not audited. See the AD-36 review. Not changed.
 5. Field acceptance still required: physical devices at scale, reference hardware, real PMS post-stay traffic.
+
+(Item 1, the unmet churn target, is answered by section 6 below; sections 2 to 5 stand as the history of the first round. Raw evidence of the new run: [`evidence/signin-capacity-2026-10-30/`](evidence/signin-capacity-2026-10-30/).)
+
+## 6. Sign-in capacity closure round (2026-10-30): 300 enforced sign-ins a minute for one hour, met in the lab
+
+Full account, with the measurements behind every cause: [`reviews/SIGNIN_CAPACITY_CLOSURE.md`](../reviews/SIGNIN_CAPACITY_CLOSURE.md). Lab: [`tools/oglab`](../../tools/oglab/README.md), rebuilt
+(Central and appliance containers installed from release tarballs, 2,400 simulated clients). Release under test `2f687f2406dee6763986b3f5b59c5470d7444501`, installed by
+`appliance-install.sh --upgrade` from `5ac9cc5c9851`. Same simulated-acceptance caveats as section 1; nothing was pushed, merged or deployed to a real host.
+
+**Run: 04:05:37 to 05:05:39 UTC, 1,700 long sessions, 10 percent of them moving 256 KB every 5 s, 300 sign-ins a minute of 60-second vouchers for 60 minutes.**
+
+| Item | Result |
+|---|---|
+| Enforced sign-ins | **17,998 of 18,000 (99.989 percent)**; 303 to `/success` and the session `active` with its kernel authorisation; the two others refused at the 8 s wait (minute 58) |
+| Latency | p50 3.21 s, p95 4.73 s, p99 5.31 s, max 8.07 s; 17,996 inside 8.0 s |
+| 1,700 long sessions | kernel authorisation set never below 1,700 in 651 samples (every 5 s); 0 duplicate live sessions per device |
+| Licence | live count peaked at 2,038 of 2,500; an at-limit run (licence 1,990) peaked at exactly 1,990 with 102 refusals, 1,098 enforced, licence restored |
+| Data quota | ten 8 MiB-quota sessions ended `DATA`, billed 8.55 MB (157 to 181 KB over: one accounting period of the guest's traffic), session bytes equal entitlement bytes |
+| Accounting | raw, per-minute, per-hour, per-session and per-entitlement byte totals equal (76,072,981,815) once the roll-up caught up |
+| CPU / memory | mean 78.8 percent of 2 vCPUs, p95 93.9, max 102; cgroup 4 GiB limit with 0.56 GB anonymous, 0 OOM, no memory pressure |
+| Database | 0 deadlocks, 0 lock timeouts, 0 ERROR lines in any service; scd pool waited 5.2 s in total (was 2,741 s in 40 s) |
+| Forwarding | 119,520 of 119,520 downloads succeeded |
+
+Corrections to this document's first round, from the new measurements:
+
+* **2.2 ("the traffic failures are the generator's")** was the lab VM's kernel neighbour table, limit 1,024, overflowing (`neighbour: arp_cache: neighbor table overflow!`). Real forwarding was not failing in the way the numbers said, but the same limit applies to an
+  appliance with a client network of 1,000 or more devices; the product now sets it (`deploy/sysctl/99-stayconnect.conf`, installed by `--upgrade` as well as a fresh install).
+* **2.1 ("needs further change in scd, acctd and possibly a schema or role decision")**: no role limit was changed. Two additive migrations were made: 0191 (two indexes on `accounting_checkpoints`) and 0192 (the writer guard's janitor no longer scans, locks and deadlocks every writer), both reversible,
+  with the production baseline regenerated through 0192.
+* The earlier "19 of 3,000" was the scd database pool, the licence lock held across commits, and every waiting sign-in polling the pool (a cascade that left the database idle and 53 of 64 request goroutines waiting for a connection), not the database or the CPU.
+
+**Decisions and limits left to the Product Owner** (additions to section 5): (6) the CPU budget at 300 sign-ins a minute is thin (p95 94 percent); the next consumers are netd's per-pass `nft`/`tc` listings and two accounting-owner database functions identified in the closure document;
+(7) the baseline file was regenerated, so branches that add migrations must regenerate it again at merge; (8) the lab VM's neighbour table was raised by hand and is not persistent.

@@ -1,0 +1,40 @@
+1:== netd: sessions confirmed enforced (ACTIVATED) during the run
+2:18010
+3:== journal problems per service (ERROR level lines)
+9:== distinct ERROR messages
+10:== PostgreSQL log: deadlocks, lock timeouts, FATAL since the start
+11:2026-10-30 04:03:32.608 UTC [41184] FATAL:  role "root" does not exist
+12:2026-10-30 04:03:33.761 UTC [41192] FATAL:  role "root" does not exist
+13:2026-10-30 04:03:34.911 UTC [41214] FATAL:  role "root" does not exist
+14:2026-10-30 04:03:39.032 UTC [41224] LOG:  duration: 1600.219 ms  execute stmtcache_55675af2dff69c99162c8991159377448f9b2c85546544be: SELECT id, reason, at FROM (
+37:2026-10-30 04:03:39.778 UTC [41234] LOG:  duration: 958.525 ms  statement: select (select count(*) from pg_stat_activity where datname='stayconnect_site'),
+51:2026-10-30 04:03:40.715 UTC [41224] LOG:  duration: 1459.422 ms  execute stmtcache_4b7d4b837928846093e32504f3fa1b4d79363640712d19db: SELECT entitlement::text, devices, sessions FROM iam_v2.p6_suspend_over_budget($1,$2)
+52:2026-10-30 04:05:28.913 UTC [1] LOG:  received SIGHUP, reloading configuration files
+53:2026-10-30 04:08:23.042 UTC [27] LOG:  checkpoint starting: time
+54:2026-10-30 04:09:22.621 UTC [41866] LOG:  duration: 890.498 ms  execute stmtcache_4b7d4b837928846093e32504f3fa1b4d79363640712d19db: SELECT entitlement::text, devices, sessions FROM iam_v2.p6_suspend_over_budget($1,$2)
+55:2026-10-30 04:10:22.865 UTC [41866] LOG:  duration: 846.528 ms  execute stmtcache_4b7d4b837928846093e32504f3fa1b4d79363640712d19db: SELECT entitlement::text, devices, sessions FROM iam_v2.p6_suspend_over_budget($1,$2)
+56:2026-10-30 04:10:46.910 UTC [41866] LOG:  duration: 1001.217 ms  execute stmtcache_4b7d4b837928846093e32504f3fa1b4d79363640712d19db: SELECT entitlement::text, devices, sessions FROM iam_v2.p6_suspend_over_budget($1,$2)
+57:2026-10-30 04:12:27.201 UTC [41866] LOG:  duration: 815.013 ms  execute stmtcache_4b7d4b837928846093e32504f3fa1b4d79363640712d19db: SELECT entitlement::text, devices, sessions FROM iam_v2.p6_suspend_over_budget($1,$2)
+58:2026-10-30 04:12:53.457 UTC [27] LOG:  checkpoint complete: wrote 22148 buffers (16.9%); 0 WAL file(s) added, 0 removed, 10 recycled; write=270.000 s, sync=0.304 s, total=270.416 s; sync files=208, longest=0.026 s, average=0.002 s; distance=170893 kB, estimate=256739 kB; lsn=0/D6F82D68, redo lsn=0/CBC89B60
+59:2026-10-30 04:13:23.482 UTC [27] LOG:  checkpoint starting: time
+60:2026-10-30 04:15:05.519 UTC [41866] LOG:  duration: 1533.252 ms  execute stmtcache_4b7d4b837928846093e32504f3fa1b4d79363640712d19db: SELECT entitlement::text, devices, sessions FROM iam_v2.p6_suspend_over_budget($1,$2)
+61:2026-10-30 04:17:04.489 UTC [41866] LOG:  duration: 945.449 ms  execute stmtcache_4b7d4b837928846093e32504f3fa1b4d79363640712d19db: SELECT entitlement::text, devices, sessions FROM iam_v2.p6_suspend_over_budget($1,$2)
+62:2026-10-30 04:17:52.609 UTC [41225] LOG:  duration: 923.150 ms  execute stmtcache_4b7d4b837928846093e32504f3fa1b4d79363640712d19db: SELECT entitlement::text, devices, sessions FROM iam_v2.p6_suspend_over_budget($1,$2)
+63:2026-10-30 04:17:53.455 UTC [27] LOG:  checkpoint complete: wrote 22174 buffers (16.9%); 0 WAL file(s) added, 0 removed, 12 recycled; write=269.574 s, sync=0.280 s, total=269.974 s; sync files=146, longest=0.010 s, average=0.002 s; distance=193168 kB, estimate=250382 kB; lsn=0/E2EFFBF8, redo lsn=0/D792DE28
+64:2026-10-30 04:18:23.480 UTC [27] LOG:  checkpoint starting: time
+65:2026-10-30 04:19:35.432 UTC [41239] LOG:  process 41239 still waiting for ShareLock on transaction 515291 after 500.080 ms
+66:2026-10-30 04:19:35.433 UTC [41185] LOG:  process 41185 still waiting for ShareLock on transaction 515291 after 500.066 ms
+67:2026-10-30 04:19:35.434 UTC [41240] LOG:  process 41240 still waiting for ShareLock on transaction 515291 after 500.081 ms
+68:2026-10-30 04:19:35.435 UTC [41236] LOG:  process 41236 still waiting for ShareLock on transaction 515291 after 500.184 ms
+69:2026-10-30 04:19:35.441 UTC [41728] LOG:  process 41728 still waiting for ShareLock on transaction 515291 after 500.076 ms
+70:2026-10-30 04:19:35.448 UTC [41238] LOG:  process 41238 still waiting for ShareLock on transaction 515291 after 500.073 ms
+71:2026-10-30 04:19:35.457 UTC [41236] LOG:  process 41236 acquired ShareLock on transaction 515291 after 522.456 ms
+72:2026-10-30 04:19:35.457 UTC [41728] LOG:  process 41728 acquired ShareLock on transaction 515291 after 516.514 ms
+73:2026-10-30 04:19:35.458 UTC [41238] LOG:  process 41238 acquired ShareLock on transaction 515291 after 510.298 ms
+74:2026-10-30 04:19:35.458 UTC [41185] LOG:  process 41185 acquired ShareLock on transaction 515291 after 525.573 ms
+75:2026-10-30 04:19:35.458 UTC [41240] LOG:  process 41240 acquired ShareLock on transaction 515291 after 524.068 ms
+76:2026-10-30 04:19:35.459 UTC [41239] LOG:  process 41239 acquired ShareLock on transaction 515291 after 526.349 ms
+77:2026-10-30 04:20:24.679 UTC [41225] LOG:  duration: 1513.469 ms  execute stmtcache_4b7d4b837928846093e32504f3fa1b4d79363640712d19db: SELECT entitlement::text, devices, sessions FROM iam_v2.p6_suspend_over_budget($1,$2)
+78:2026-10-30 04:21:43.737 UTC [41225] LOG:  duration: 994.336 ms  execute stmtcache_4b7d4b837928846093e32504f3fa1b4d79363640712d19db: SELECT entitlement::text, devices, sessions FROM iam_v2.p6_suspend_over_budget($1,$2)
+79:2026-10-30 04:22:50.574 UTC [41224] LOG:  duration: 1186.098 ms  execute stmtcache_4b7d4b837928846093e32504f3fa1b4d79363640712d19db: SELECT entitlement::text, devices, sessions FROM iam_v2.p6_suspend_over_budget($1,$2)
+80:2026-10-30 04:22:53.382 UTC [27] LOG:  checkpoint complete: wrote 22515 buffers (17.2%); 0 WAL file(s) added, 0 removed, 12 recycled; write=269.515 s, sync=0.292 s, total=269.902 s; sync files=141, longest=0.010 s, average=0.003 s; distance=194977 kB, estimate=244842 kB; lsn=0/EE8D18E0, redo lsn=0/E37964B8

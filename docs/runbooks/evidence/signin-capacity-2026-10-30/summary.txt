@@ -1,0 +1,97 @@
+# 60-minute acceptance run, release 2f687f2406dee6763986b3f5b59c5470d7444501, 2026-10-30 04:05:37 to 05:05:39 UTC
+
+## attempts (attempts-18000.csv.gz: unix_ms,client,result,latency_ms; client = generator index, no guest data)
+attempts 18000 ok 17998 (99.99%)  p50 3209 p95 4728 p99 5310 max 8068 ms
+failures by kind {'refused:200': 2}
+minutes with failures (minute, failures): [(58, 2)]
+ok within 8 s: 17996 of 17998
+
+## per minute and per ten minutes
+minutes with a full offer (>=295 attempts): 48 of 61
+enforced sign-ins per minute: min 295, median 302, max 314; minutes below 298: [(7, 297), (9, 296), (10, 295), (19, 295), (32, 295), (48, 295), (57, 295)]
+per-minute median latency: lowest 2882, highest 3590 ms; per-minute p99: lowest 4538, highest 7483 ms
+minutes  0- 9:  2992 attempts,  2992 enforced (100.00%), p50 2922 p95 4487 p99 5064 ms
+minutes 10-19:  2992 attempts,  2992 enforced (100.00%), p50 3174 p95 4667 p99 5278 ms
+minutes 20-29:  3004 attempts,  3004 enforced (100.00%), p50 3177 p95 4670 p99 5303 ms
+minutes 30-39:  3000 attempts,  3000 enforced (100.00%), p50 3294 p95 4750 p99 5192 ms
+minutes 40-49:  2994 attempts,  2994 enforced (100.00%), p50 3322 p95 4763 p99 5207 ms
+minutes 50-59:  3005 attempts,  3003 enforced (99.93%), p50 3394 p95 4951 p99 5943 ms
+minutes 60-60:    13 attempts,    13 enforced (100.00%), p50 2739 p95 3933 p99 3933 ms
+
+## appliance samples every 5 s (sample-every-5s.csv)
+samples 651 span_s 3672
+auth_set min/max 1700 2002 | active min/max 1700 2023 | pending max 28
+auth_set below 1700 in 0 samples
+duplicate live sessions per device: max 0 samples with >0: 0
+online (active+pending) max 2038 vs licence 2500 | pg idle-in-tx max 2
+cpu% of 2 vCPU: mean 78.8 p50 78.4 p95 93.9 max 102.3
+cgroup memory MB: max current 4095, peak 4096
+pg connections max 35 scd max 17 acctd max 5
+accounting rows raw/minute/hour at end: 680906 251875 46579
+
+## resident memory, connections, locks
+rss_scd            min     29.3  mean     33.2  max     35.4  MB
+rss_edged          min     23.8  mean     28.4  max    161.2  MB
+rss_netd           min     26.5  mean     41.9  max     88.7  MB
+rss_portald        min     28.6  mean     37.1  max    112.2  MB
+rss_acctd          min     16.8  mean     25.2  max     32.3  MB
+rss_pg_all         min   1907.6  mean   7163.4  max   9263.5  MB
+pg_total           min     23.0  mean     26.4  max     35.0  
+pg_scd             min      8.0  mean      8.5  max     17.0  
+pg_acctd           min      3.0  mean      3.9  max      5.0  
+pg_netd            min      6.0  mean      7.0  max      7.0  
+pg_edged           min      1.0  mean      2.0  max      2.0  
+pg_idle_in_tx      min      0.0  mean      0.2  max      2.0  
+pg_waiting_lock    min      0.0  mean      0.2  max      6.0  
+locks_notgranted   min      0.0  mean      0.2  max      6.0  
+sess_pending       min      0.0  mean     15.1  max     28.0  
+load1              min      1.2  mean      4.1  max      6.8  
+
+## commit-latency probe (tiny write every 250 ms)
+probe n=14800 p50 3.8 p90 9.5 p99 21.9 max 103.4 ms
+
+## scd route latencies (journal)
+route                                                               n     p50     p95     p99     max  status
+POST /v1/sessions/activate                                      18010    3132    4634    5200    8044  {200: 18010}
+POST /v1/commerce/redeem                                        18010      39      82     120    1265  {200: 18010}
+POST /v1/sessions/authorize                                     18020      16      36      59    1160  {200: 18010, 403: 10}
+POST /v1/vouchers/issue                                            48     533     601     625     802  {201: 48}
+GET /v1/tenant/branding                                           407       1       7      19      34  {200: 407}
+GET /v1/portal/tls-state                                          264       0       0       0       4  {200: 264}
+GET /v1/health                                                    395       0       0       0       0  {200: 395}
+
+## netd passes
+pass_ms p50 1971 p95 2784 max 5366
+
+## data-quota sessions (8 MiB)
+   status   | terminal_reason | consumed |  quota  |  over   | state |    end_reason     | session_bytes | lived_s 
+------------+-----------------+----------+---------+---------+-------+-------------------+---------------+---------
+ TERMINATED | DATA            |  8550533 | 8388608 |  161925 | ended | ENTITLEMENT_ENDED |       8550533 |      32
+ TERMINATED | DATA            |  8569139 | 8388608 |  180531 | ended | ENTITLEMENT_ENDED |       8569139 |      33
+ TERMINATED | DATA            |  8563015 | 8388608 |  174407 | ended | ENTITLEMENT_ENDED |       8563015 |      34
+ TERMINATED | DATA            |  8560055 | 8388608 |  171447 | ended | ENTITLEMENT_ENDED |       8560055 |      35
+ TERMINATED | DATA            |  8550211 | 8388608 |  161603 | ended | ENTITLEMENT_ENDED |       8550211 |      36
+ TERMINATED | DATA            |  8545909 | 8388608 |  157301 | ended | ENTITLEMENT_ENDED |       8545909 |      37
+ TERMINATED | DATA            |  8560349 | 8388608 |  171741 | ended | ENTITLEMENT_ENDED |       8560349 |      38
+ TERMINATED | DATA            |  8567651 | 8388608 |  179043 | ended | ENTITLEMENT_ENDED |       8567651 |      39
+ TERMINATED | DATA            |  8564227 | 8388608 |  175619 | ended | ENTITLEMENT_ENDED |       8564227 |      40
+ TERMINATED | DATA            |  8566153 | 8388608 |  177545 | ended | ENTITLEMENT_ENDED |       8566153 |      41
+ TERMINATED | DATA            |  9411056 | 8388608 | 1022448 | ended | ENTITLEMENT_ENDED |       9411056 |      35
+ TERMINATED | DATA            |  9430434 | 8388608 | 1041826 | ended | ENTITLEMENT_ENDED |       9430434 |      36
+
+## at-limit demonstration: licence 1,990 (sample-licence-1990.csv, attempts-licence-1990.csv.gz)
+samples 50 span_s 276
+auth_set min/max 1700 1981 | active min/max 1700 1990 | pending max 23
+auth_set below 1700 in 0 samples
+duplicate live sessions per device: max 0 samples with >0: 0
+online (active+pending) max 1990 vs licence 2500 | pg idle-in-tx max 1
+cpu% of 2 vCPU: mean 76.0 p50 76.1 p95 95.8 max 97.0
+attempts 1200 ok 1098 (91.50%)  p50 2881 p95 4440 p99 4888 max 6560 ms
+failures by kind {'refused:200': 102}
+minutes with failures (minute, failures): [(0, 14), (1, 23), (2, 33), (3, 32)]
+ok within 8 s: 1098 of 1098
+route                                                               n     p50     p95     p99     max  status
+POST /v1/sessions/activate                                       1200    2661    4314    4733    6452  {200: 1098, 403: 102}
+POST /v1/commerce/redeem                                         1200      40      88     141     278  {200: 1200}
+POST /v1/sessions/authorize                                      1200      17      43      74     291  {200: 1200}
+GET /v1/tenant/branding                                           132       1       6       9      12  {200: 132}
