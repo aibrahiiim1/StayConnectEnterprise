@@ -70,7 +70,18 @@ func rkSlab() int {
 	return 0
 }
 
-func rkMeasure(t *testing.T, idx int, down bool, secs int) float64 {
+// rkWarm waits until the host can reach the guest address: the first packets to a new neighbour can be refused (ENOBUFS) while it is resolved.
+func rkWarm(t *testing.T, idx int) {
+	t.Helper()
+	for i := 0; i < 20; i++ {
+		if exec.Command("ping", "-c1", "-W1", rkIP(idx).String()).Run() == nil {
+			return
+		}
+	}
+	t.Fatalf("guest address %s never became reachable", rkIP(idx))
+}
+
+func rkMeasure(t *testing.T, idx int, down bool, secs int) (kbps float64, bytes uint64) {
 	t.Helper()
 	ip := rkIP(idx).String()
 	port := strconv.Itoa(20000 + idx%20000)
@@ -84,12 +95,14 @@ func rkMeasure(t *testing.T, idx int, down bool, secs int) float64 {
 	}
 	var sout strings.Builder
 	srv.Stdout = &sout
+	var serr strings.Builder
+	srv.Stderr = &serr
 	if err := srv.Start(); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(300 * time.Millisecond)
 	if out, err := cli.CombinedOutput(); err != nil {
-		t.Fatalf("client: %v %s", err, out)
+		t.Fatalf("session host-index %d down=%v: client: %v %s; server stderr: %s", idx, down, err, out, serr.String())
 	}
 	if err := srv.Wait(); err != nil {
 		t.Fatalf("server: %v", err)
@@ -100,7 +113,7 @@ func rkMeasure(t *testing.T, idx int, down bool, secs int) float64 {
 	}
 	n, _ := strconv.ParseFloat(f[0], 64)
 	d, _ := strconv.ParseFloat(f[1], 64)
-	return n * 8 / d / 1000 // kbit/s
+	return n * 8 / d / 1000, uint64(n)
 }
 
 func TestRealKernelClassifierAtScale(t *testing.T) {
@@ -129,7 +142,7 @@ func TestRealKernelClassifierAtScale(t *testing.T) {
 
 	// sampled sessions: both bands, first/last of the original band, the very last
 	rate := func(idx int) int { return 1000 * (1 + idx%4) } // 1..4 Mbit
-	samples := []int{10, 2000, 4095, 4096, n / 2, n + 1}
+	samples := []int{10, 2000, 4095, 4096, n/2 + 1, n + 1}
 	sampleSet := map[int]bool{}
 	for _, s := range samples {
 		if s > n+1 {
@@ -197,7 +210,8 @@ func TestRealKernelClassifierAtScale(t *testing.T) {
 		down, up   float64
 		want       int
 		minor      int
-		dBytes, uB uint64
+		dBytes, uB uint64 // class counter deltas over the measurement window
+		appD, appU uint64 // payload bytes the receiving application read
 	}
 	var ms []meas
 	for _, s := range samples {
@@ -205,11 +219,14 @@ func TestRealKernelClassifierAtScale(t *testing.T) {
 			continue
 		}
 		m, _ := MinorFor(br, rkIP(s))
+		rkWarm(t, s)
 		pre := rd()
-		dn := rkMeasure(t, s, true, 4)
-		upr := rkMeasure(t, s, false, 4)
+		dn, dnB := rkMeasure(t, s, true, 4)
+		mid := rd()
+		upr, upB := rkMeasure(t, s, false, 4)
 		post := rd()
-		ms = append(ms, meas{s, dn, upr, rate(s), m, post[0][m].Bytes - pre[0][m].Bytes, post[1][m].Bytes - pre[1][m].Bytes})
+		// each direction's data is counted by its own class in its own window
+		ms = append(ms, meas{s, dn, upr, rate(s), m, mid[0][m].Bytes - pre[0][m].Bytes, post[1][m].Bytes - mid[1][m].Bytes, dnB, upB})
 	}
 	for _, m := range ms {
 		t.Logf("REAL session host-index=%d minor=0x%x configured=%d kbit/s: measured download=%.0f upload=%.0f kbit/s; class bytes down=%d up=%d",
@@ -219,11 +236,10 @@ func TestRealKernelClassifierAtScale(t *testing.T) {
 				t.Errorf("session %d %s = %.0f kbit/s, want %d +-15%%", m.idx, dir, got, m.want)
 			}
 		}
-		// the class counter is the accounting source: it must have counted the traffic (payload plus headers, so slightly more)
-		wantBytes := float64(m.want) * 1000 / 8 * 4
-		for dir, b := range map[string]uint64{"download": m.dBytes, "upload": m.uB} {
-			if float64(b) < wantBytes*0.8 || float64(b) > wantBytes*1.3 {
-				t.Errorf("session %d %s class counter = %d bytes, want about %.0f", m.idx, dir, b, wantBytes)
+		// the class counter is the accounting source: it must have counted the traffic the application received, plus headers
+		for dir, p := range map[string][2]uint64{"download": {m.dBytes, m.appD}, "upload": {m.uB, m.appU}} {
+			if float64(p[0]) < float64(p[1]) || float64(p[0]) > float64(p[1])*1.12 {
+				t.Errorf("session %d %s class counter = %d bytes for %d bytes of payload", m.idx, dir, p[0], p[1])
 			}
 		}
 	}
