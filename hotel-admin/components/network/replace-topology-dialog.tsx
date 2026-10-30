@@ -65,7 +65,7 @@ export function ReplaceTopologyDialog({
   const problem =
     !parent ? "Choose the port." :
     !vlanOk ? "A VLAN id is between 1 and 4094." :
-    same ? "That is the current topology; nothing would change." :
+    same && !readdress ? "That is the current topology; nothing would change." :
     readdress && (!subnet || !gateway || !poolStart || !poolEnd) ? "A new subnet needs its gateway and DHCP pool." :
     readdress && subnetSizeProblem(subnet) ? subnetSizeProblem(subnet) :
     reason.trim().length < 4 ? "Say why (at least 4 characters)." : null;

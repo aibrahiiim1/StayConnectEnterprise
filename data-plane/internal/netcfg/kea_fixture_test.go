@@ -16,7 +16,7 @@ func TestWriteKeaSlash19Fixture(t *testing.T) {
 		BridgeName: "br-k19", GatewayIP: "10.65.0.1", SubnetCIDR: "10.65.0.0/19", PrefixLen: 19, DHCPMode: DHCPLocal, DNSMode: "appliance",
 		DomainName: "guest.local", LeaseDefault: 3600, LeaseMin: 900, LeaseMax: 7200, CaptiveEnabled: true, InternetEnabled: true, NATEnabled: true,
 		Pools:        []Pool{{StartIP: "10.65.0.10", EndIP: "10.65.31.250"}},
-		Reservations: []Reservation{{MAC: "aa:bb:cc:dd:ee:01", ReservedIP: "10.65.31.254", Hostname: "top-of-range", Enabled: true}}}
+		Reservations: []Reservation{{MAC: "02:00:00:00:03:e8", ReservedIP: "10.65.31.254", Hostname: "top-of-range", Enabled: true}}}
 	if iss := ValidateOne(n, DefaultTopology(), nil, nil, ""); len(iss) != 0 {
 		t.Fatalf("the fixture network is not valid: %+v", iss)
 	}
