@@ -203,6 +203,9 @@ type setGraceReq struct {
 var graceReasonCode = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,63}$`)
 
 func (s *server) setGraceConfig(w http.ResponseWriter, r *http.Request) {
+	// DEPRECATED surface (2026-10-30): see putCheckoutGraceConfig; the one policy is edited at /after-checkout-access.
+	w.Header().Set("Deprecation", "true")
+	w.Header().Set("Link", `</edge/v1/after-checkout-access>; rel="successor-version"`)
 	var in setGraceReq
 	if err := decodeJSON(r, &in); err != nil {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")

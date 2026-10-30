@@ -1,19 +1,8 @@
-"use client";
+// Kept so bookmarks of the retired page still work: Checkout Grace and Post-Stay are now After Check-out Access.
 
-// edged enforces RBAC and step-up even if a client bypasses the canAct UI gate.
+import { permanentRedirect } from "next/navigation";
 
-import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
-import { canWrite } from "@/lib/roles";
-import { PostStayView } from "@/components/phase5/post-stay-view";
-
-export default function PostStayPage() {
-  const [roles, setRoles] = useState<string[] | null>(null);
-  useEffect(() => {
-    api
-      .get<{ roles?: string[] }>("/auth/whoami")
-      .then((m) => setRoles(m.roles ?? []))
-      .catch(() => setRoles([]));
-  }, []);
-  return <PostStayView canAct={roles === null ? false : canWrite("post-stay-profiles", roles)} rolesKnown={roles !== null} />;
+// A server redirect (308) answers before any client code runs, so there is no interim page.
+export default function Moved(): never {
+  permanentRedirect("/after-checkout-access");
 }

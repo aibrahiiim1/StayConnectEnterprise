@@ -29,6 +29,7 @@ var surfaceModules = map[string][]string{
 	"guest-signin-protection":   {lic.ModuleHospitality},
 	"guest-signin-restrictions": {lic.ModuleHospitality},
 	"checkout-grace":            {lic.ModuleHospitality},
+	"after-checkout-access":     {lic.ModuleHospitality},
 	"operational-alerts":        {lic.ModuleHospitality},
 	"pms-interfaces":            {lic.ModuleHospitality},
 	"pms-routing":               {lic.ModuleHospitality},

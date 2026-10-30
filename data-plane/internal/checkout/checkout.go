@@ -192,6 +192,11 @@ func (c *Converter) convertTx(ctx context.Context, tx pgx.Tx, tenant, site, ifac
 		return Result{}, err
 	}
 	res.ConfigVersion = configVersion
+	// The site's After Check-out Access switch (migration 0193); the configuration row is already locked above.
+	var switchOn bool
+	if err := tx.QueryRow(ctx, `SELECT iam_v2.p3_after_checkout_enabled($1,$2)`, tenant, site).Scan(&switchOn); err != nil {
+		return Result{}, err
+	}
 
 	// Eligibility is proven from the append-only state history and quota ledger at the boundary.
 	elig, err := eligibleOriginalAtBoundary(ctx, tx, tenant, site, iface, stayID, boundary)
@@ -224,7 +229,11 @@ func (c *Converter) convertTx(ctx context.Context, tx pgx.Tx, tenant, site, ifac
 		AlreadyConvertedThisEpisode:    false,
 		Configured:                     pol,
 		ConfiguredValid:                cfgOK,
+		Disabled:                       !switchOn,
 	})
+	// A checkout processed late (the PMS was down) keeps the verified checkout time as its boundary, and the window runs from
+	// it, never from now: if the window has already ended by the time the checkout is processed, the entitlement is created
+	// over and the expiry writer ends it exactly once; nothing of it can be joined (internal/poststay requires a live window).
 	res.Reason = d.Reason
 	res.IsEmergency = d.IsEmergency
 

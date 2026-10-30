@@ -440,6 +440,7 @@ func main() {
 				mountResource(r, s, "guest-signin-protection", s.signInProtectionRoutes)
 				mountResource(r, s, "guest-signin-restrictions", s.signInRestrictionsRoutes)
 				mountResource(r, s, "checkout-grace", s.checkoutGraceConfigRoutes)
+				mountResource(r, s, "after-checkout-access", s.afterCheckoutAccessRoutes)
 				mountResource(r, s, "operational-alerts", s.operationalAlertsRoutes)
 				mountResource(r, s, "pms-interfaces", s.pmsInterfacesRoutes)
 				r.With(s.resourcePermission("pms-interfaces")).Get("/pms-providers", s.listPMSProviders)

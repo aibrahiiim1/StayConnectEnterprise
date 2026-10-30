@@ -409,8 +409,9 @@ const landingHTML = `<!doctype html>
     <div id="pms-choices" role="group" aria-label="{{index .T "pms.choose"}}" style="display:none"></div>
   </div>
 
-  <!-- POST-STAY — the room number and the reservation number of the stay the guest left (AD-36). The appliance finds the
-       stay from this device's own history; the last name is asked for only on a device that was never on the stay. -->
+  <!-- AFTER CHECK-OUT — the room number and the reservation number of the stay the guest left, and nothing else (AD-36; one
+       feature with Checkout Grace since 2026-10-30). The appliance finds the stay from this device's own history: only a device
+       that was authorised on the stay before check-out can come back; no surname, code or package choice is asked. -->
   <div class="panel" id="panel-poststay">
     <form id="form-poststay" autocomplete="off">
       <div class="field">
@@ -423,16 +424,9 @@ const landingHTML = `<!doctype html>
         <label for="ps-res"><span data-i18n="pms.prompt.reservation" data-i18n-en="Reservation / confirmation number">{{index .T "pms.prompt.reservation"}}</span></label>
         <input id="ps-res" name="reservation" type="text" inputmode="text" autocapitalize="characters" autocorrect="off" spellcheck="false" required dir="ltr">
       </div>
-      <div class="field">
-        <label for="ps-last"><span data-i18n="pms.prompt.lastname" data-i18n-en="Last name on the reservation">{{index .T "pms.prompt.lastname"}}</span></label>
-        <input id="ps-last" name="last_name" type="text" autocomplete="family-name" autocorrect="off" spellcheck="false" dir="auto"
-               aria-describedby="ps-last-hint">
-        <p class="hint" id="ps-last-hint" data-i18n="poststay.lasthint" data-i18n-en="Needed only if this is not the device you used during your stay">{{index .T "poststay.lasthint"}}</p>
-      </div>
       <button class="primary" type="submit"><span data-i18n="btn.reconnect" data-i18n-en="Reconnect">{{index .T "btn.reconnect"}}</span></button>
     </form>
-    <div id="ps-choices" role="group" aria-label="{{index .T "pms.choose"}}" style="display:none"></div>
-    <div class="err" id="ps-err" role="alert" data-for="ps-room ps-res ps-last"></div>
+    <div class="err" id="ps-err" role="alert" data-for="ps-room ps-res"></div>
   </div>
 
   <div class="panel" id="panel-social">
@@ -1625,7 +1619,7 @@ const landingHTML = `<!doctype html>
     // ONE DELIBERATE SUBMISSION, ONE RESOLUTION REQUEST ID. The id is minted where the guest's tap is handled
     // and never reused by a later tap: a derived id froze room sign-in on the guest's own typo.
 
-    // POST-STAY. The body is the room, the reservation and (optionally) the last name, and nothing else.
+    // AFTER CHECK-OUT. The body is the room and the reservation, and nothing else: no surname, code or package choice.
     document.addEventListener('DOMContentLoaded', function () {
       const f = document.getElementById('form-poststay');
       if (!f) return;
@@ -1635,8 +1629,7 @@ const landingHTML = `<!doctype html>
         errEl.textContent = '';
         submitPostStay({
           room: document.getElementById('ps-room').value,
-          reservation: document.getElementById('ps-res').value,
-          last_name: document.getElementById('ps-last').value
+          reservation: document.getElementById('ps-res').value
         }, errEl);
       });
     });
@@ -1654,76 +1647,18 @@ const landingHTML = `<!doctype html>
     }
 
     async function submitPostStay(answers, errEl) {
-      const res = await postStayCall({ room: answers.room, reservation: answers.reservation, last_name: answers.last_name });
+      const res = await postStayCall({ room: answers.room, reservation: answers.reservation });
       const j = res.j;
-      // A single post-stay package is converted by the server in the same request: the answer is the session.
+      // The server verifies and reconnects the device in the same request: the answer is the session.
       if (j.ok && j.session_id) {
         window.location = (j.redirect_to || '/success') + '?s=' + encodeURIComponent(j.session_id);
         return;
       }
-      // Verified, with more than one package: the guest chooses, and the conversion is a second call carrying
-      // the context the server just issued AND the package chosen from the offers it returned.
-      if (j.ok && j.needs_choice && j.auth_context_id && (j.choices || []).length) {
-        renderPostStayChoices(j.auth_context_id, j.choices, errEl);
-        return;
-      }
-      // Every other ANSWER is the same message -- wrong room or reservation, expired, revoked, locked out, the room re-let, or
-      // post-stay not being offered here at all. A request that never reached the server is not an answer, and
-      // telling a guest whose connection dropped to re-check details they typed correctly helps nobody.
+      // Every other ANSWER is the same message -- wrong room or reservation, a device that was not on the stay, the access ended or
+      // used up, revoked, locked out, the room re-let, or after-check-out access not being offered here at all. A request that never
+      // reached the server is not an answer, and telling a guest whose connection dropped to re-check details they typed correctly
+      // helps nobody.
       errEl.textContent = res.reached ? PHASE3_FAIL() : PHASE3_UNREACHED();
-    }
-
-    function renderPostStayChoices(authContextID, choices, errEl) {
-      const box = document.getElementById('ps-choices');
-      const form = document.getElementById('form-poststay');
-      box.innerHTML = '';
-      const h = document.createElement('p');
-      h.className = 'choices-title';
-      h.dataset.i18n = 'pms.choose';
-      h.dataset.i18nEn = BUILTIN.en['pms.choose'];
-      h.textContent = t('pms.choose');
-      box.appendChild(h);
-      choices.forEach(function(c) {
-        const b = document.createElement('button');
-        b.type = 'button';
-        b.className = 'choice';
-        const text = document.createElement('span');
-        text.className = 'c-text';
-        const name = document.createElement('span');
-        name.className = 'c-name';
-        name.dir = 'auto';
-        name.textContent = c.code;
-        text.appendChild(name);
-        const down = Math.round((c.down_kbps || 0) / 1000);
-        if (down > 0) {
-          const detail = document.createElement('span');
-          detail.className = 'c-detail';
-          detail.textContent = t('unit.mbps').split('{n}').join(String(down));
-          text.appendChild(detail);
-        }
-        b.appendChild(text);
-        b.insertAdjacentHTML('beforeend', ICON_CHEV);
-        b.addEventListener('click', async function() {
-          box.querySelectorAll('button').forEach(function(x){ x.disabled = true; });
-          errEl.textContent = '';
-          const res = await postStayCall({ auth_context_id: authContextID, package_revision_id: c.package_revision_id });
-          if (res.j.ok && res.j.session_id) {
-            window.location = (res.j.redirect_to || '/success') + '?s=' + encodeURIComponent(res.j.session_id);
-            return;
-          }
-          // The context is one-time: after a refused conversion the choices cannot be trusted, so they are taken
-          // down and the guest signs in with the PIN again.
-          box.innerHTML = '';
-          box.style.display = 'none';
-          form.style.display = '';
-          errEl.textContent = res.reached ? PHASE3_FAIL() : PHASE3_UNREACHED();
-        });
-        box.appendChild(b);
-      });
-      form.style.display = 'none';
-      box.style.display = 'block';
-      const first = box.querySelector('button.choice');
-      if (first) first.focus();
     }
 
     // phase3ClearFailure takes the page OUT of its failure state, including the countdown that writes to the

@@ -67,7 +67,7 @@ var functionalIDs = []string{
 	"panel-accountlogin", "use-personal", "form-voucher", "voucher", "form-credentials", "ga-username", "ga-password",
 	"panel-email", "form-acct-signin", "acct-email", "acct-password", "form-acct-create", "acct-new-email",
 	"acct-new-password", "acct-new-password2", "form-acct-forgot", "acct-forgot-email", "panel-sms", "phone", "panel-pms", "form-pms", "pms-room", "pms-secondary", "pms-prompt",
-	"pms-err", "pms-choices", "panel-poststay", "form-poststay", "ps-room", "ps-res", "ps-last", "ps-choices", "ps-err", "panel-social",
+	"pms-err", "pms-choices", "panel-poststay", "form-poststay", "ps-room", "ps-res", "ps-err", "panel-social",
 	"social-providers", "alt-methods", "brand-help", "custom-html", "brand-terms-wrap", "brand-terms",
 	"info-btn", "info-panel",
 }

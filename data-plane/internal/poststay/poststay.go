@@ -1,28 +1,30 @@
-// Package poststay is the Post-Stay sign-in: a guest who has checked out comes back with the ROOM NUMBER and the
-// RESERVATION NUMBER of the stay they left (Product-Owner decision on audit item AD-36, replacing the earlier PIN).
+// Package poststay is the guest-facing side of After Check-out Access: a guest who has checked out reconnects a device that
+// was authorised on the stay before check-out with the ROOM NUMBER and the RESERVATION NUMBER of the stay they left, and
+// nothing else (Product-Owner decisions on audit item AD-36 and, 2026-10-30, the unification of Checkout Grace and
+// Post-Stay into one feature; docs/architecture/ONEGATE_AFTER_CHECKOUT_ACCESS.md).
+//
+// This package grants NOTHING. The stay's one After Check-out entitlement is granted once, at the verified checkout, by
+// internal/checkout from the site's one policy. What happens here is that an eligible device is let back onto it.
 //
 // The properties that make that safe, and that the tests attack:
 //
-//   - The stay is never found from what was typed. The candidates are the stays THIS DEVICE was authorised on; the typed
-//     room and reservation are compared with those stays' own records in constant time. Typing another guest's room and
-//     reservation from a device that was never on that stay finds nothing (see below for the new-device route).
-//   - A device with no such stay (a new device) must give one more fact from the stay record, the last name on it, and
-//     then the stay is looked up by all three together; one match, never several.
-//   - Every refusal is the same refusal, after the same work: wrong room, wrong reservation, no stay, revoked,
+//   - The stay is never found from what was typed. The candidates are the stays whose live After Check-out entitlement THIS
+//     DEVICE holds a place on (the checkout carried it over because it was authorised on the stay); the typed room and
+//     reservation are compared with those stays' own records in constant time. A device with no such place finds nothing,
+//     whatever it types: correct room + reservation (+ a surname) never authorise a device without the lineage.
+//   - Every refusal is the same refusal, after the same work: wrong room, wrong reservation, no lineage, revoked,
 //     expired, moved-on episode, locked out. Nothing says which part was wrong or whether a stay exists.
 //   - The lockout is counted per stay identity (the post-stay profile of the episode) AND device, so one device cannot
 //     lock out another device's attempts for the same stay, and a guesser's device is locked out on its own.
 //   - The profile is per stay EPISODE (UNIQUE(origin_stay_id, origin_lifecycle_version)), never per room, so it cannot
 //     be inherited by the next occupant: a reinstatement orphans it in the database.
-//   - A device never gets an Entitlement of its own and never resets what the stay spent. The stay has ONE live
-//     Entitlement: a returning device or a further device JOINS it (the plan's device limit decides), and only when the
-//     stay has none (it ended at check-out) is the Post-Stay BENEFIT granted -- once per stay, a new Entitlement from
-//     the zero-price POST_STAY package, by the package's design and not by the device (see convert.go).
+//   - A device never gets an Entitlement of its own and never resets what the stay spent. It joins the one entitlement
+//     (same window, speed, shared allowance and usage). Reconnecting, a new session or a new address changes nothing.
 //   - Brute-force limits are the site's settings (limits.go, migration 0190); a client that rotates its device
 //     identity is bounded by the room and reservation it must guess, not by the identity it can change for free.
-//   - Every refusal, grant and join is a row in the audit log without guest data (audit.go).
-//   - v1 grants zero-price packages only. No PIN exists any more: the pin_* columns of older profiles are historical
-//     evidence of how those profiles were issued and are never read for a decision.
+//   - Every refusal and join is a row in the audit log without guest data (audit.go).
+//   - No PIN exists any more: the pin_* columns of older profiles are historical evidence of how those profiles were
+//     issued and are never read for a decision.
 package poststay
 
 import (
@@ -45,12 +47,10 @@ const ThrottleMethod = "post_stay_pin"
 
 const CapPostStayIdentity = "post_stay_identity"
 
-// ProfileWindow is how long a profile created by a successful check stays usable for the post-stay conversion.
+// ProfileWindow is how long a profile stays usable when the stay has no live After Check-out entitlement to take its end
+// from (a defensive fallback; a profile is created only for a stay whose device holds such an entitlement, and then it
+// ends with that entitlement's window).
 const ProfileWindow = 24 * time.Hour
-
-// DefaultWindowDays is how long after check-out a guest may still sign in with their room and reservation when the
-// caller names no window (the setting's default, migration 0179).
-const DefaultWindowDays = 7
 
 var (
 	// ErrNotAuthenticable covers every failure alike; any distinction would be an oracle.
@@ -58,15 +58,9 @@ var (
 	// ErrThrottled is separate so the caller can send Retry-After; the guest-visible envelope stays uniform.
 	ErrThrottled   = errors.New("poststay: throttled")
 	ErrNotEligible = errors.New("poststay: stay is not eligible for a post-stay profile")
-	// ErrSettlementRequired: v1 refuses priced packages rather than silently granting them free.
-	ErrSettlementRequired  = errors.New("poststay: post-stay v1 grants zero-price packages only")
-	ErrPackageNotGrantable = errors.New("poststay: package revision is not a grantable post-stay package")
-	ErrAlreadyConverted    = errors.New("poststay: the once-per-stay post-stay benefit was already granted and is no longer available")
-	// ErrEntitlementNotJoinable: the stay has a live Entitlement that a device cannot join now (not active, or its window has
-	// ended). Granting a second one would break one-live-Entitlement-per-Stay and reset what it spent, so nothing is granted.
-	ErrEntitlementNotJoinable = errors.New("poststay: the stay's entitlement cannot be joined now")
-	// ErrDeviceLimit: the entitlement's plan allows no more devices; a device cannot add itself past it.
-	ErrDeviceLimit = errors.New("poststay: the entitlement already has its maximum number of devices")
+	// ErrEntitlementNotJoinable: the stay has no live After Check-out entitlement to rejoin (never granted, ended, expired or
+	// exhausted). Nothing is granted instead: the benefit exists once, at check-out.
+	ErrEntitlementNotJoinable = errors.New("poststay: the stay has no live After Check-out entitlement to rejoin")
 )
 
 type Store struct {
@@ -120,7 +114,7 @@ func (s *Store) Revoke(ctx context.Context, req RevokeRequest) error {
 // It never returns a profile that cannot authenticate (revoked, expired, a moved-on episode, a stay that has not checked
 // out): that is the same refusal as a wrong answer. The insert runs in the controlled-writer scope the table requires,
 // and a concurrent creator is absorbed by the episode's uniqueness.
-func (s *Store) ensureProfile(ctx context.Context, tenant, site, stay string, windowDays int) (string, error) {
+func (s *Store) ensureProfile(ctx context.Context, tenant, site, stay string) (string, error) {
 	// The common case after the first device: the episode already has its profile (the first device's conversion may even
 	// have moved the stay on to POST_STAY_ACTIVE, which the insert below cannot accept). Read before writing.
 	if profile, err := s.currentProfile(ctx, tenant, site, stay); err != nil {
@@ -128,7 +122,7 @@ func (s *Store) ensureProfile(ctx context.Context, tenant, site, stay string, wi
 	} else if profile != "" {
 		return s.authenticable(ctx, tenant, site, profile)
 	}
-	profile, err := s.insertProfile(ctx, tenant, site, stay, windowDays)
+	profile, err := s.insertProfile(ctx, tenant, site, stay)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "P0001" {
@@ -168,7 +162,7 @@ func (s *Store) authenticable(ctx context.Context, tenant, site, profile string)
 	return profile, nil
 }
 
-func (s *Store) insertProfile(ctx context.Context, tenant, site, stay string, windowDays int) (string, error) {
+func (s *Store) insertProfile(ctx context.Context, tenant, site, stay string) (string, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return "", err
@@ -180,12 +174,17 @@ func (s *Store) insertProfile(ctx context.Context, tenant, site, stay string, wi
 	var profile string
 	err = tx.QueryRow(ctx, `INSERT INTO iam_v2.post_stay_profiles
 		(tenant_id, site_id, origin_stay_id, origin_lifecycle_version, valid_until, issued_via, pin_revealed_at)
-		SELECT st.tenant_id, st.site_id, st.id, st.lifecycle_version, now() + make_interval(secs => $4), 'ROOM_RESERVATION', NULL
+		SELECT st.tenant_id, st.site_id, st.id, st.lifecycle_version,
+		       -- the profile ends with the stay's live After Check-out entitlement, so a device that comes back late in a long
+		       -- window is not turned away by a profile that expired before the entitlement did
+		       COALESCE((SELECT max(e.window_ends_at) FROM iam_v2.entitlements e
+		                  WHERE e.tenant_id=st.tenant_id AND e.site_id=st.site_id AND e.stay_id=st.id AND e.status='ACTIVE'
+		                    AND e.window_ends_at > now()), now() + make_interval(secs => $4)),
+		       'ROOM_RESERVATION', NULL
 		  FROM iam_v2.stays st
 		 WHERE st.tenant_id=$1 AND st.site_id=$2 AND st.id=$3 AND st.status = 'CHECKED_OUT'
-		   AND st.effective_checkout_at > now() - make_interval(days => $5)
 		ON CONFLICT (origin_stay_id, origin_lifecycle_version) DO NOTHING
-		RETURNING id::text`, tenant, site, stay, ProfileWindow.Seconds(), windowDays).Scan(&profile)
+		RETURNING id::text`, tenant, site, stay, ProfileWindow.Seconds()).Scan(&profile)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Already there (or the stay is not CHECKED_OUT): read the current episode's profile, whoever created it.
 		err = tx.QueryRow(ctx, `SELECT p.id::text FROM iam_v2.post_stay_profiles p

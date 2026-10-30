@@ -95,7 +95,7 @@ const STAY_WORDS: Record<string, string> = {
   IN_HOUSE: "In house",
   RESERVED: "Arriving",
   CHECKED_OUT: "Checked out",
-  POST_STAY_ACTIVE: "Post-stay access",
+  POST_STAY_ACTIVE: "After check-out access",
   CANCELLED: "Cancelled",
   NO_SHOW: "No show",
 };

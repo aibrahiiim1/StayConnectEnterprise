@@ -35,7 +35,7 @@ states) is defined once in the [OneGate design system](../../design-system/READM
 - **The sidebar and "Find a screen…".** The menu has seven groups: **Overview · Internet offering ·
   Clients · Client Portal · Hotel · Networking · System** (*Clients* and *Client Portal* were formerly *Guests* and
   *Guest portal*; **Hotel** replaces the former *Property management system* and *Charges* groups and also holds
-  Stays, Grace Period and Post-stay access). Hospitality and PMS functions are grouped under Hotel; the rest
+  Stays and After Check-out Access). Hospitality and PMS functions are grouped under Hotel; the rest
   of the console is industry-neutral. At the top is a
   **Find a screen…** filter (press `/` from anywhere outside a text field) that matches page names, group
   names and everyday words ("wifi speed", "room sign in"). The button beside the OneGate mark collapses the
@@ -53,7 +53,7 @@ states) is defined once in the [OneGate design system](../../design-system/READM
   refused. The appliance enforces the same rules on every request. The role for each page is listed below;
   a summary table is at the end of this document.
 - **"Not enabled on this appliance".** Some features are switched on per appliance (for example the Hotel
-  charge pages, Post-stay access or Online-time budgets). A switched-off feature is left out of the menu;
+  charge pages, After Check-out Access or Online-time budgets). A switched-off feature is left out of the menu;
   if you open it by address, the page says **"Not enabled on this appliance"**, explains that this is a
   configuration and not a fault, and states that client internet, sign-in, the PMS connection, sessions and
   accounting are unaffected. Turning a feature on is a deployment decision for Semantics support, not an
@@ -548,31 +548,27 @@ after too many wrong tries.
     viewer.
   - The thresholds themselves are set on **Client Portal → Sign-in methods**.
 
-### Grace Period — `/checkout-grace`
-(Formerly *Checkout grace*.) Keeps a guest online for a short, capped time after checkout so leaving the site does not cut them off.
+### After Check-out Access — `/after-checkout-access`
+(Replaces the former *Grace Period* and *Post-stay access* pages; `/checkout-grace` and `/post-stay` now lead here.
+Contract: `docs/architecture/ONEGATE_AFTER_CHECKOUT_ACCESS.md`.) The one place that sets what a guest's devices keep
+after a **verified check-out**.
 
-- **Shows:** tiles *Policy in force*, *Published version*, *Last changed*, *Emergency fallback used*; any
-  warnings; **what a departing client receives** in plain words (grace time, speeds, data, devices, who
-  qualifies); and the policy history (each version opens with who published it, when and why).
-- **Edit policy / Create site policy** (side sheet, two steps): **Terms** — grace time, download/upload
-  speed, data allowance (MB), device handling and limit, stay rules after checkout, with a live *"Client will
-  receive…"* sentence — then **Review**: every change shown old → new, a **reason** (chosen from a list) and
-  **password confirmation**. Publishing creates a new version.
-- **Who can change it:** Site admin, Site IT manager. **Read-only:** Client services, Client relations, Site
-  viewer.
-
-### Post-stay access — `/post-stay`
-After checkout a guest can reconnect with a PIN for a limited time. A PIN belongs to one stay, never to a
-room.
-
-- **Shows:** tiles *Can reconnect now*, *Active, not usable*, *Ended by staff*; table Room, Reservation, Stay,
-  State, PIN, Valid until. A row opens its details.
-- **Reset PIN** — **reason (at least 4 characters) + password confirmation**, then a **one-time reveal**:
-  *"New PIN — shown once"* with **I have given it to the client**. The PIN is not stored in readable form.
-- **End access** — **reason + typed `REVOKE` + password confirmation**. Permanent for that stay; no
-  replacement PIN is issued.
-- **Who can change it:** Site admin, Site IT manager, Client services, Client relations. **Read-only:** Site
-  viewer. May be *Not enabled on this appliance*.
+- **The rules, in plain words:** every device that was authorised on the stay before check-out can reconnect;
+  they all share **one** data quota; the guest types only the **room number and reservation number**; new devices
+  are refused; the duration starts at the verified check-out; a change applies to **future check-outs only**.
+- **Shows:** tiles *Access after check-out* (on/off), *Setting in force* (**Site policy**, **Emergency fallback**
+  or **Disabled**), *Last changed*, *Emergency fallback used*; any warnings; **what a departing client receives**
+  in plain words; the **history** (every version, including turning the feature on or off; each opens with who
+  saved it, when and why); and **Reconnections** — stays whose guests reconnected, with **End access**
+  (**reason + typed `REVOKE` + password**, permanent for that stay).
+- **Edit settings** (side sheet, two steps): the on/off switch; **duration after verified check-out** (whole hours),
+  download/upload speed, **shared data quota** (MB), **device allowance** and how new devices are handled, each with
+  the allowed range shown from the appliance, then **Review**: every change old → new, a **reason** (from a list)
+  and **password confirmation**. Saving creates a new version (switching on/off is a version too).
+- **Turned off:** nobody is given access at check-out. **On with nothing saved:** the built-in emergency terms apply
+  and each use raises a critical alert.
+- **Who can change it:** Site admin, Site IT manager. **Read-only:** Client services, Client relations, Site viewer.
+  Ending a reconnection: Site admin, Site IT manager, Client services, Client relations.
 
 **Charges.** Charge health, Manual review, Settlements and Recovery cover posting internet charges to a
 guest's room bill in the PMS, and online payments. Selling internet is not switched on today, so these pages
@@ -855,8 +851,7 @@ W = can change, R = read-only, — = not shown. The appliance enforces these on 
 | Guest sign-in attempts (list) | R | R | R | R | — | — | R |
 | Guest sign-in attempts (what was typed) | R | R | R | R | — | — | — |
 | Guest sign-in attempts (release) | W | W | W | W | — | — | R |
-| Grace Period | W | W | R | R | — | — | R |
-| Post-stay access | W | W | W | W | — | — | R |
+| After Check-out Access | W | W | R | R | — | — | R |
 | Charge health, Manual review, Settlements, Recovery | W | R | R | — | — | W | R |
 | PMS routing | W | R | R | R | — | — | R |
 | Cross-PMS transfer | W | W | W | W | — | — | R |
@@ -882,7 +877,7 @@ W = can change, R = read-only, — = not shown. The appliance enforces these on 
 | Save changes to an existing service plan | Service plans | Password |
 | Apply current settings to packages | Service plans | Password, asked once for all the packages moved |
 | Delete a package or service plan | Internet packages, Service plans | Reason + password (refused while in use) |
-| Publish a Grace Period policy | Grace Period | Reason (from a list) + password |
+| Change After Check-out Access (policy or on/off) | After Check-out Access | Reason (from a list) + password |
 | Show a voucher code / export a batch | Vouchers | Reason + password, recorded |
 | Cancel a voucher card | Vouchers | Reason + password |
 | Change the voucher code format | Vouchers → Code security | Reason |
@@ -892,8 +887,7 @@ W = can change, R = read-only, — = not shown. The appliance enforces these on 
 | Remove a client account | Client accounts | Password |
 | Mark an email address verified | Client accounts → Manage | Reason + password |
 | Change client sign-in protection | Sign-in methods | Reason + password |
-| Reset a post-stay PIN | Post-stay access | Reason + password, then one-time reveal |
-| End post-stay access | Post-stay access | Reason + type `REVOKE` + password |
+| End a stay's reconnection | After Check-out Access → Reconnections | Reason + type `REVOKE` + password |
 | Put a PMS configuration live | PMS connection | Reason (from a list) + password |
 | Store or replace a PMS credential | PMS connection | Password |
 | Activate / pause / wind down a PMS connection | PMS connection | Reason (from a list) + password |

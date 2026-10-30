@@ -90,7 +90,7 @@ export function OperationalAlertsView({
             <HelpSection title="What raises an alert">
               <p>
                 A checkout situation the configured policy could not handle on its own — for example when the
-                emergency Grace Period terms were used.
+                emergency After Check-out Access terms were used.
               </p>
             </HelpSection>
             <HelpSection title="Working the queue">

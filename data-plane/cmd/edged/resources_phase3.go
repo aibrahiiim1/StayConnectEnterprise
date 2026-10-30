@@ -986,6 +986,11 @@ func (s *server) emergencyGraceHistory(ctx context.Context) map[string]any {
 }
 
 func (s *server) putCheckoutGraceConfig(w http.ResponseWriter, r *http.Request) {
+	// DEPRECATED surface (2026-10-30): the same single policy is now edited at /after-checkout-access, which also carries the
+	// enable switch and the operator bounds. This route writes the identical record through the identical boundary; it is kept
+	// only until the console has moved over.
+	w.Header().Set("Deprecation", "true")
+	w.Header().Set("Link", `</edge/v1/after-checkout-access>; rel="successor-version"`)
 	var in checkoutGracePublishReq
 	if err := decodeJSON(r, &in); err != nil {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "malformed request body")

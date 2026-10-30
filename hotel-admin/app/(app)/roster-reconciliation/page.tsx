@@ -132,7 +132,7 @@ export default function RosterReconciliationPage() {
               </p>
               <p>
                 A stay the PMS no longer lists is checked out exactly like a departure the PMS sends: its internet
-                access ends (or moves to the departure grace package) and its devices are disconnected.
+                access ends (or moves to After Check-out Access) and its devices are disconnected.
               </p>
               <p>
                 Guests are never affected while it waits: if the PMS list is incomplete or the link is down, the

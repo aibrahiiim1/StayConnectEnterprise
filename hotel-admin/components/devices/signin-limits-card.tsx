@@ -30,13 +30,12 @@ const LABELS: Record<string, string> = {
   device_retention_days: "Keep unused devices for",
   portal_image_max_edge_px: "Portal images: longest side",
   portal_image_quality: "Portal images: quality",
-  post_stay_signin_days: "Post-stay sign-in: days after check-out",
-  post_stay_device_attempts_per_minute: "Post-stay sign-in: attempts per device",
-  post_stay_ip_attempts_per_minute: "Post-stay sign-in: attempts per network address",
-  post_stay_wrong_answers_before_lockout: "Post-stay sign-in: answers before lockout",
-  post_stay_lockout_minutes: "Post-stay sign-in: lockout length",
-  post_stay_new_device_room_attempts_per_minute: "Post-stay sign-in: new-device attempts per room",
-  post_stay_appliance_attempts_per_minute: "Post-stay sign-in: attempts, whole appliance",
+  post_stay_device_attempts_per_minute: "After check-out sign-in: attempts per device",
+  post_stay_ip_attempts_per_minute: "After check-out sign-in: attempts per network address",
+  post_stay_wrong_answers_before_lockout: "After check-out sign-in: answers before lockout",
+  post_stay_lockout_minutes: "After check-out sign-in: lockout length",
+  post_stay_new_device_room_attempts_per_minute: "After check-out sign-in: new-device attempts per room",
+  post_stay_appliance_attempts_per_minute: "After check-out sign-in: attempts, whole appliance",
 };
 
 export function SigninLimitsCard({ canEdit }: { canEdit: boolean }) {

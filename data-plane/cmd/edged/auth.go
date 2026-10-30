@@ -168,7 +168,7 @@ var rolePerms = map[string]map[string]perm{
 		"commercial-packages": permWrite,
 		// This role owns the PMS integration: stays/events/resolutions are read evidence.
 		"pms-stays": permRead, "pms-events": permRead, "pms-resolutions": permRead,
-		"checkout-grace": permWrite, "operational-alerts": permWrite,
+		"checkout-grace": permWrite, "after-checkout-access": permWrite, "operational-alerts": permWrite,
 		"pms-event-decisions": permWrite,
 		// Guest names and reservation numbers are, with the room, the sign-in credential: a field-level key, not a route.
 		"pms-stay-identity": permRead,
@@ -213,7 +213,7 @@ var rolePerms = map[string]map[string]perm{
 		"guest-accounts": permWrite, "sessions": permWrite,
 		"usage": permRead,
 		// Reads stays/events and triages alerts, but never edits the grace policy.
-		"pms-stays": permRead, "pms-events": permRead, "operational-alerts": permWrite, "checkout-grace": permRead,
+		"pms-stays": permRead, "pms-events": permRead, "operational-alerts": permWrite, "checkout-grace": permRead, "after-checkout-access": permRead,
 		// The desk identifies the guest in front of it by name and reservation.
 		"pms-stay-identity": permRead,
 		// Read-only on the integration: it may see whether the PMS is reachable but not publish or rotate.
@@ -237,7 +237,7 @@ var rolePerms = map[string]map[string]perm{
 		"guest-signin-attempts": permRead, "guest-signin-credentials": permWrite,
 		"guest-signin-restrictions": permWrite, "guest-signin-protection": permRead,
 		"guest-accounts": permWrite, "sessions": permWrite, "usage": permRead,
-		"pms-stays": permRead, "pms-events": permRead, "operational-alerts": permWrite, "checkout-grace": permRead,
+		"pms-stays": permRead, "pms-events": permRead, "operational-alerts": permWrite, "checkout-grace": permRead, "after-checkout-access": permRead,
 		// This role already reads guest-signin-credentials (names included), so hiding names on Stays protects nothing.
 		"pms-stay-identity": permRead,
 		"pms-interfaces":    permRead, "pms-routing": permRead, "pms-source-conflicts": permRead,
@@ -286,7 +286,7 @@ var rolePerms = map[string]map[string]perm{
 		"pms-stays": permRead, "pms-events": permRead, "pms-resolutions": permRead,
 		"pms-reconciliation": permRead,
 
-		"checkout-grace": permRead, "operational-alerts": permRead,
+		"checkout-grace": permRead, "after-checkout-access": permRead, "operational-alerts": permRead,
 		"pms-interfaces": permRead, "pms-routing": permRead, "pms-source-conflicts": permRead,
 		"post-stay-profiles":        permRead,
 		"guest-device-self-service": permRead,
