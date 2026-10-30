@@ -530,58 +530,6 @@ export type GuestSignInRestriction = {
   remaining_seconds: number;
 };
 
-export type CheckoutGraceConfig = {
-  grace_package_revision_id?: string | null;
-  grace_duration_seconds: number;
-  grace_down_kbps: number;
-  grace_up_kbps: number;
-  grace_data_quota_bytes: number;
-  grace_device_limit: number;
-  grace_device_limit_policy: string;
-  eligibility_window_seconds: number;
-  config_version: number;
-};
-
-// One published version of the hotel's policy, from the append-only publication ledger.
-export type GraceHistoryEntry = {
-  config_version: number;
-  published_at: string;
-  actor: string;
-  reason_code: string;
-  policy: {
-    grace_duration_seconds?: number;
-    grace_down_kbps?: number;
-    grace_up_kbps?: number;
-    grace_data_quota_bytes?: number;
-    grace_device_limit?: number;
-    grace_device_limit_policy?: string;
-    eligibility_window_seconds?: number;
-  } | null;
-};
-
-// Retained for diagnostics only: the system derives the package that expresses the policy.
-export type GracePackageOption = {
-  package_revision_id: string;
-  package_code: string;
-  revision_no: number;
-  service_plan_revision_id: string;
-  service_plan_code: string;
-  service_plan_revision_no: number;
-  down_kbps: number;
-  up_kbps: number;
-  data_quota_bytes: number;
-  device_limit: number;
-  device_limit_policy: string;
-  time_accounting_mode: string;
-  grace_duration_seconds: number;
-  end_mode: string;
-  policy_version: string;
-  settlement_mode: string;
-  is_current: boolean;
-  is_active: boolean;
-  selected: boolean;
-};
-
 export type OperationalAlert = {
   audit_id: string; stay_id: string; lifecycle_version: number;
   alert_code: string; trigger: string; reason_code?: string | null;

@@ -25,7 +25,7 @@ const NAV_SRC = readFileSync(join(process.cwd(), "components/nav.tsx"), "utf8");
 const CONTRACT = JSON.parse(readFileSync(join(process.cwd(), "capability-contract.json"), "utf8"));
 
 const SERVED = [
-  "audit", "auth-methods", "backups", "checkout-grace", "client-groups",
+  "audit", "auth-methods", "backups", "checkout-grace", "after-checkout-access", "client-groups",
   "commercial-packages", "diagnostics", "guest-accounts", "guest-signin-attempts", "guest-signin-credentials",
   "guest-signin-protection", "guest-signin-restrictions", "license", "network", "notification-providers",
   "operational-alerts", "operators", "pms-events", "pms-interfaces", "pms-reconciliation", "pms-resolutions",
@@ -200,8 +200,8 @@ describe("the Hotel module in the navigation", () => {
   it("holds every hospitality destination in Hotel and none elsewhere", async () => {
     const { NAV_SECTION_OF } = await import("@/components/nav");
     const hotel = [
-      "/pms-interfaces", "/room-sign-in", "/stays", "/stay-events", "/pms-resolutions", "/guest-signin-attempts", "/checkout-grace",
-      "/post-stay", "/financial-health", "/financial-review", "/financial-settlements", "/financial-recovery",
+      "/pms-interfaces", "/room-sign-in", "/stays", "/stay-events", "/pms-resolutions", "/guest-signin-attempts", "/after-checkout-access",
+      "/financial-health", "/financial-review", "/financial-settlements", "/financial-recovery",
       "/pms-routing", "/pms-source-conflicts", "/stay-transfers",
     ];
     for (const href of hotel) expect(NAV_SECTION_OF[href], href).toBe("Hotel");

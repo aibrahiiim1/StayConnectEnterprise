@@ -249,7 +249,7 @@ describe("Client activity on Internet packages", () => {
   it("lists no hospitality or identity way of giving access, and no room search, without those modules", async () => {
     await renderTab();
     const ways = options(/How it was given/);
-    for (const w of ["Grace Period", "Emergency grace", "After-stay access", "Moved between PMS connections",
+    for (const w of ["After Check-out Access", "Emergency grace", "After Check-out Access (earlier reconnection)", "Moved between PMS connections",
       "Email, phone or social sign-in"]) expect(ways).not.toContain(w);
     expect(ways).toContain("Voucher");
     expect(screen.queryByPlaceholderText("Room or reservation")).toBeNull();
@@ -259,7 +259,7 @@ describe("Client activity on Internet packages", () => {
     MODS.history = ["hospitality"]; MODS.licensed = ["email_otp"];
     await renderTab();
     const ways = options(/How it was given/);
-    for (const w of ["Grace Period", "Emergency grace", "After-stay access", "Moved between PMS connections",
+    for (const w of ["After Check-out Access", "Emergency grace", "After Check-out Access (earlier reconnection)", "Moved between PMS connections",
       "Email, phone or social sign-in"]) expect(ways).toContain(w);
     expect(screen.getByPlaceholderText("Room or reservation")).toBeTruthy();
   });

@@ -23,7 +23,7 @@ afterEach(() => vi.resetModules());
 const PRELIVE_SURFACES = [
   "reports", "sessions", "guest-accounts", "auth-methods", "walled-garden", "portal-branding",
   "notification-providers", "social-providers", "network", "diagnostics", "audit", "license", "backups",
-  "operators", "commercial-packages", "checkout-grace", "pms-stays", "pms-events", "pms-resolutions",
+  "operators", "commercial-packages", "checkout-grace", "after-checkout-access", "pms-stays", "pms-events", "pms-resolutions",
   "guest-signin-attempts", "pms-interfaces", "pms-routing", "pms-source-conflicts", "operational-alerts",
 ];
 
@@ -63,7 +63,7 @@ describe("navigation follows the appliance, not the build", () => {
     render(<Nav email="a@b.c" roles={["site_admin"]} onLogout={() => {}} />);
     const hrefs = () =>
       Array.from(document.querySelectorAll("a[href]")).map((a) => a.getAttribute("href"));
-    await waitFor(() => expect(hrefs()).toContain("/post-stay"));
+    await waitFor(() => expect(hrefs()).toContain("/after-checkout-access"));
     expect(hrefs()).toContain("/financial-health");
   });
 

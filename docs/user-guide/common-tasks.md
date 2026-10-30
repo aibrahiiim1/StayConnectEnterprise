@@ -104,7 +104,7 @@ Escalate with specifics: which of the four steps above failed.
 
 ## Too many alerts
 
-Noisy alerts usually mean a policy or threshold needs tuning. Don't just acknowledge everything — figure out which alert is noisy. In the Admin Console, **System → Alerts** lists checkouts the Grace Period policy could not handle (tune it on **Hotel → Grace Period**); in Central, **System → Security alerts** must each be investigated: each records a registration Central refused or a binding that no longer matches.
+Noisy alerts usually mean a policy or threshold needs tuning. Don't just acknowledge everything — figure out which alert is noisy. In the Admin Console, **System → Alerts** lists checkouts After Check-out Access could not handle (tune it on **Hotel → After Check-out Access**); in Central, **System → Security alerts** must each be investigated: each records a registration Central refused or a binding that no longer matches.
 
 ## Someone left the company and still has access
 

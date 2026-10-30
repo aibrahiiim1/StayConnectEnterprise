@@ -8,10 +8,10 @@
   "required_routes": {
     "_note": "EVERY ROUTE THE PRODUCT MUST BE ABLE TO SERVE, and it is now the UNION of what packaging always required with every route the navigation contract names -- including the authorized consolidations, which are not in the sidebar but must still be reachable. They were separate lists, and a navigation entry could name a route the build was never held to: 'no destination leads nowhere' was asserted in the unit tests but not in the contract a release is verified against. A build that cannot serve these is not a candidate for this appliance, whatever else is right about it.",
     "routes": [
+      "/after-checkout-access",
       "/appliance",
       "/audit",
       "/backups",
-      "/checkout-grace",
       "/client-groups",
       "/commercial-packages",
       "/dashboard",
@@ -62,9 +62,9 @@
         "surface": "commercial-packages"
       },
       {
-        "label": "Grace Period",
-        "route": "/checkout-grace",
-        "surface": "checkout-grace"
+        "label": "After Check-out Access",
+        "route": "/after-checkout-access",
+        "surface": "after-checkout-access"
       },
       {
         "label": "Stays",

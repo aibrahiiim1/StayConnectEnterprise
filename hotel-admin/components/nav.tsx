@@ -12,7 +12,7 @@ import {
   ServerCog, Lock, Activity, Package, Gauge, Smartphone, LogIn, Search, X,
   PanelLeftClose, PanelLeftOpen, ClipboardCheck, Ticket,
   DoorOpen, DoorClosed, BedDouble, Plug, Route, Inbox, ShieldCheck, UserX, Layers, ArrowLeftRight, HeartPulse, Receipt,
-  LifeBuoy, Globe, AtSign, MessageSquare, Stethoscope, Bell, Hourglass, CalendarClock, ChartColumn,
+  LifeBuoy, Globe, AtSign, MessageSquare, Stethoscope, Bell, Hourglass, ChartColumn,
   CreditCard, BedSingle, Blocks, UsersRound, UserSearch, ChevronRight,
 } from "lucide-react";
 import { BySemantics, OneGateLockup } from "@/components/brand";
@@ -82,8 +82,7 @@ const SECTIONS: Section[] = [
       { href: "/stay-events",          label: "PMS activity",         icon: Inbox,   resource: "pms-events", keywords: "feed messages check in out log property management system hotel" },
       { href: "/pms-resolutions",      label: "Guest sign-in checks", icon: ShieldCheck,   resource: "pms-resolutions", keywords: "room verification failures evidence client sign-in checks hotel" },
       { href: "/guest-signin-attempts", label: "Guest sign-in attempts", icon: UserX, resource: "guest-signin-attempts", keywords: "attempt failed reason room typed credential mismatch why cannot connect client sign-in attempts hotel" },
-      { href: "/checkout-grace",       label: "Grace Period",         icon: DoorOpen,  resource: "checkout-grace", keywords: "checkout grace after checkout late departure hotel" },
-      { href: "/post-stay",            label: "Post-stay access",     icon: CalendarClock, resource: "post-stay-profiles", keywords: "after departure loyalty guests hotel" },
+      { href: "/after-checkout-access", label: "After Check-out Access", icon: DoorOpen, resource: "after-checkout-access", keywords: "after checkout departure reconnect late grace period post-stay shared data quota hours hotel" },
       { href: "/room-charge",           label: "Room charge",   icon: BedSingle, resource: "pms-financial-onboarding", keywords: "charge to room reservation folio posting fias onboarding approve currency answer meanings hotel" },
       { href: "/financial-health",      label: "Charge health", icon: HeartPulse, resource: "financial-review", keywords: "charges posting queue outbox money hotel" },
       { href: "/financial-review",      label: "Manual review", icon: ClipboardCheck, resource: "financial-review", keywords: "charges failed posting decide hotel" },
