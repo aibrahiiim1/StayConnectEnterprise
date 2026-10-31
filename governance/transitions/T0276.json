@@ -1,0 +1,34 @@
+{
+  "transition_id": "T0276",
+  "seq": 276,
+  "timestamp": "2026-10-31T13:51:00Z",
+  "timestamp_derivation": "Computed from the session clock after the test appliance upgrade was read back (RELEASE.json and DEPLOYED_BINARIES.sha256 written 13:49:56Z), before the commit that introduces this receipt.",
+  "record_type": "FINAL_MISSION_DEPLOYMENT",
+  "authorisation": "D85, the Product Owner's final mission of 2026-10-30 (deployment to the test appliance 172.21.96.97).",
+  "deployment": {
+    "central": "Not deployed: the mission changed no Central code. Production Central stays onegate-central-5ac9cc5c9851.",
+    "test_appliance": "172.21.96.97: onegate-appliance-11a5bfb4c007 by appliance-install.sh --upgrade (a verified encrypted pre-change backup before every migration); migrations 0193, 0198, 0199, 0200, 0201 applied; units PASS; RELEASE.json source_commit 11a5bfb4c0074c03292bb21a0c40543db492ba48; DEPLOYED_BINARIES.sha256 lists the installed binaries. The first deployment of the mission (19b58d49) was found by the end-to-end client journey to leave new sessions unenforced (iam_v2_owner could not read public.guest_networks for the 0200 class-origin check); the grant was made durable in Gate-P (pull request 278), the manual grant was revoked before the final upgrade, and the upgrade restored it.",
+    "lab": "The isolated container lab (a new Central with its own PKI; nothing registered on any real Central) ran outage continuity at real length (60, 65 and 120 minutes), the /19 plan, and 300 sign-ins a minute for 60 minutes on commit 5926f7de; see docs/runbooks/evidence/final-mission-2026-10-30/."
+  },
+  "verification": "Pull requests 277 (19b58d49) and 278 (11a5bfb4). Real-database integration suites for every package, three runs on one database; Playwright 203 tests and the Admin Console unit suite pass; phase3, phase4 and phase5 gates pass on the merged code; the real-kernel gate (34 tests) passes. Lab: outage continuity PASS at 60/65/120 minutes with accounted bytes within 3 percent of the clients' counters; /19 staged apply, rollback, DHCP to the top of the pool and 8,189 neighbour entries; 18,001 of 18,001 sign-ins enforced at an offered 300 a minute for 60 minutes (CPU mean 81 percent, maximum 102 percent of 2 vCPU). Test appliance: client journey 12 of 12 on the final release; continuity setting default 60, bounds 0 to 120 refused above, audited, picked up by acctd within a minute. Not performed: real PMS traffic, physical devices, reference hardware, a real host reboot drill, clock-jump drills, After Check-out Access against a live PMS feed, widening the active test network to /19.",
+  "not_touched": "Every retired host, the production Central, production users, live payment providers, PMS posting and configuration, the Root CA.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "11a5bfb4c0074c03292bb21a0c40543db492ba48",
+  "previous_delivery": "T0275",
+  "decision": "D85",
+  "go_live": "NOT authorised."
+}

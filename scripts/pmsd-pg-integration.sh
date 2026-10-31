@@ -81,9 +81,11 @@ fi
 echo "  ok: every test compiled into this gate is Phase-3-owned"
 
 echo "== go test -tags integration ./internal/pmsd ./internal/stayengine ./internal/authctx ./internal/checkout ./internal/staygrant ./internal/pmsresolve ./internal/enforce ./internal/writerguard ./cmd/edged ./cmd/acctd ./cmd/netd ./cmd/scd (Integration) =="
+# -p 1: these packages share ONE database and its single erasure-ledger chain; run in parallel, one package exports the chain while another
+# appends to it and the edged ledger tests fail intermittently (ledger_local_failed). scripts/db-integration-combined.sh runs the same way.
 # Extra arguments are passed through to `go test`, as scripts/phase4-pg-integration.sh already does, so a run can
 # be narrowed (-run, -v) against the same disposable schema instead of being reproduced by hand.
-( cd "$ROOT/data-plane" && go test -tags integration -run Integration ./internal/pmsd/ ./internal/stayengine/ ./internal/authctx/ ./internal/checkout/ ./internal/staygrant/ ./internal/pmsresolve/ ./internal/enforce/ ./internal/writerguard/ ./cmd/edged/ ./cmd/acctd/ ./cmd/netd/ ./cmd/scd/ -count=1 "$@" )
+( cd "$ROOT/data-plane" && go test -tags integration -p 1 -run Integration ./internal/pmsd/ ./internal/stayengine/ ./internal/authctx/ ./internal/checkout/ ./internal/staygrant/ ./internal/pmsresolve/ ./internal/enforce/ ./internal/writerguard/ ./cmd/edged/ ./cmd/acctd/ ./cmd/netd/ ./cmd/scd/ -count=1 "$@" )
 rc=$?
 echo "PMSD_PG_INTEGRATION rc=$rc"
 exit $rc

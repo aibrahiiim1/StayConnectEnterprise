@@ -1,8 +1,8 @@
 {
   "transition_id": "T0274",
   "seq": 274,
-  "timestamp": "2026-10-30T00:50:00Z",
-  "timestamp_derivation": "Computed from the session clock after both deployments were read back, before the commit that introduces this receipt.",
+  "timestamp": "2026-10-30T00:30:00Z",
+  "timestamp_derivation": "Computed from the session clock after both deployments were read back, before the commit that introduces this receipt. Corrected 2026-10-31 (final mission): the value first recorded, 2026-10-30T00:50:00Z, post-dated the commit that introduces this receipt (2026-10-30T00:32:31Z) by a clock-zone slip, which the transition-time validator reports. The deployment readback preceded that commit, so the timestamp is set to 00:30:00Z as an upper bound before it; it is a bound, not a measurement.",
   "record_type": "AUDIT_CLOSURE_CAPACITY_DEPLOYMENT",
   "authorisation": "D83, the Product Owner's continuation of the mission of 2026-10-30 (deployment to OneGate Central 41.128.240.133 and the test appliance 172.21.96.97).",
   "deployment": {
