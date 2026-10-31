@@ -308,7 +308,7 @@ func (p *phase3Shaping) contRestore() string {
 
 // ---- revocation -------------------------------------------------------------------------------------------------------
 
-func (c *continuity) pruneJournal(now time.Time, asOf time.Time) {
+func (c *continuity) pruneJournal(now time.Time, asOf time.Time) (changed bool) {
 	keep := c.journal[:0:0]
 	for _, e := range c.journal {
 		if now.Sub(e.At) > contRevokeKeep {
@@ -323,7 +323,9 @@ func (c *continuity) pruneJournal(now time.Time, asOf time.Time) {
 	if len(keep) > contRevokeMax {
 		keep = keep[len(keep)-contRevokeMax:]
 	}
+	changed = len(keep) != len(c.journal)
 	c.journal = keep
+	return changed
 }
 
 func (c *continuity) revoked(s *contSess) (string, bool) {
@@ -433,7 +435,14 @@ func (p *phase3Shaping) contNotePlan(env shapeplan.Envelope, now time.Time) {
 		return
 	}
 	asOf := env.Continuity.AsOf
-	c.pruneJournal(now, asOf)
+	if c.pruneJournal(now, asOf) {
+		// The file must mirror the memory. An entry a database read has already absorbed is matched by ADDRESS, so left on disk it
+		// would be reloaded by the next netd start (an outage restart, an upgrade) and applied to whoever holds that address by then:
+		// seen in the lab as five healthy guests cut at a netd restart by staff disconnects made hours earlier.
+		if err := c.saveJournal(); err != nil {
+			slog.Warn("netd: the pruned revocation journal could not be saved", "err", err)
+		}
+	}
 	hard := map[string]*time.Time{}
 	for _, s := range env.Continuity.Sessions {
 		hard[s.SessionID] = s.HardEnd
