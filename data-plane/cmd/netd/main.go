@@ -243,7 +243,7 @@ func main() {
 	p3shaping.cont = &continuity{
 		statePath:   envOr("NETD_PHASE3_CONTINUITY_STATE", "/var/lib/stayconnect/netd-phase3-continuity.json"),
 		journalPath: envOr("NETD_PHASE3_CONTINUITY_JOURNAL", "/var/lib/stayconnect/netd-phase3-continuity-revocations.json"),
-		probe:       &pgEntitlementProbe{pool: pool, tenant: p3mode.TenantID, site: p3mode.SiteID},
+		probe:       &pgEntitlementProbe{pool: pool},
 	}
 	if why := p3shaping.contRestore(); why != "" {
 		slog.Warn("netd: outage-continuity record not restored; strict behaviour until the next plan carries a block", "why", why)
