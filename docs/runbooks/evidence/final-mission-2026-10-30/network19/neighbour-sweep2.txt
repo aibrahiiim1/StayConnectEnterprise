@@ -1,0 +1,10 @@
+cat: /proc/net/stat/arp_cache: No such file or directory
+awk: line 2: function strtonum never defined
+before: 
+sent to 8189 addresses in 0.3s
+awk: line 2: function strtonum never defined
+after 1 s: 
+br-g119 entries: 8189 total: 8192
+awk: line 2: function strtonum never defined
+after 30 s: 
+br-g119 entries: 697

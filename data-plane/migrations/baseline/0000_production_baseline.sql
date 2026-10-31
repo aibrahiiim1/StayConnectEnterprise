@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0192, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0201, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -446,6 +446,55 @@ BEGIN
 
   UPDATE iam_v2.sessions SET state = 'active' WHERE id = p_session;
   RETURN 'ACTIVATED';
+END $$;
+
+
+--
+-- Name: after_checkout_device_guard(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.after_checkout_device_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_mode text;
+BEGIN
+  SELECT e.end_mode INTO v_mode FROM iam_v2.entitlements e WHERE e.id = NEW.entitlement_id;
+  IF v_mode IS DISTINCT FROM 'GRACE_AFTER_CHECKOUT' THEN RETURN NEW; END IF;
+  IF TG_OP = 'INSERT' THEN
+    -- The checkout conversion marks the devices it carries over as grandfathered. authorize_entitlement_device inserts with
+    -- ON CONFLICT DO UPDATE, so an existing row reaches the UPDATE rule below instead of failing here.
+    IF NEW.grandfathered THEN RETURN NEW; END IF;
+    IF EXISTS (SELECT 1 FROM iam_v2.entitlement_devices d
+                WHERE d.entitlement_id = NEW.entitlement_id AND d.device_id = NEW.device_id) THEN
+      RETURN NEW;
+    END IF;
+    RAISE EXCEPTION 'AFTER_CHECKOUT_NEW_DEVICE_REJECTED: a device that was not authorised on the stay before check-out cannot be added to its After Check-out entitlement'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  IF OLD.status IS DISTINCT FROM 'AUTHORIZED' AND NEW.status = 'AUTHORIZED'
+     AND COALESCE(OLD.disconnected_reason, '') <> 'ENTITLEMENT_SUSPENDED' THEN
+    RAISE EXCEPTION 'AFTER_CHECKOUT_NEW_DEVICE_REJECTED: a device that left an After Check-out entitlement cannot rejoin it'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END $$;
+
+
+--
+-- Name: after_checkout_switch_guard(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.after_checkout_switch_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+BEGIN
+  IF NEW.after_checkout_enabled IS DISTINCT FROM OLD.after_checkout_enabled
+     AND NOT iam_v2.p3_controlled_operation_open('grace_publication') THEN
+    RAISE EXCEPTION 'after_checkout_enabled changes only through iam_v2.set_after_checkout_enabled (caller %)', current_user;
+  END IF;
+  RETURN NEW;
 END $$;
 
 
@@ -2482,6 +2531,203 @@ END $$;
 --
 
 COMMENT ON FUNCTION iam_v2.complete_sign_in_attempt(p_tenant uuid, p_site uuid, p_request uuid, p_result text, p_entitlement uuid, p_session uuid) IS 'Stamps the entitlement and session a proved identity ended in, or moves that one row to a terminal grant outcome. Exists so that svc_scd never holds UPDATE on iam_v2.sign_in_attempts: a service that could rewrite an attempt could rewrite the evidence of its own refusals. Idempotent and one-way -- it acts only on a row that is still VERIFIED with no session, and returns the number of rows it touched.';
+
+
+--
+-- Name: continuity_not_entitled(uuid, uuid, uuid[]); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.continuity_not_entitled(p_tenant uuid, p_site uuid, p_sessions uuid[]) RETURNS SETOF uuid
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT i.id
+    FROM unnest(p_sessions) AS i(id)
+    LEFT JOIN iam_v2.sessions s ON s.id = i.id AND s.tenant_id = p_tenant AND s.site_id = p_site
+    LEFT JOIN iam_v2.entitlements e ON e.id = s.entitlement_id
+   WHERE NOT (s.id IS NOT NULL
+          AND s.state IN ('active','PENDING_ENFORCEMENT') AND s.ended IS NULL
+          AND e.status = 'ACTIVE'
+          AND (e.window_ends_at IS NULL OR e.window_ends_at > now()));
+$$;
+
+
+--
+-- Name: FUNCTION continuity_not_entitled(p_tenant uuid, p_site uuid, p_sessions uuid[]); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.continuity_not_entitled(p_tenant uuid, p_site uuid, p_sessions uuid[]) IS 'Which of these sessions is no longer entitled (0199): ended, not active, entitlement not ACTIVE, window past, or unknown in this tenant and site. Mirrors the entitled predicate of the plan derivation. Read-only; used by netd outage continuity.';
+
+
+--
+-- Name: cross_pms_transfer(uuid, uuid, uuid, uuid, uuid, text, integer); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.cross_pms_transfer(p_tenant uuid, p_site uuid, p_from_stay uuid, p_to_stay uuid, p_operator uuid, p_reason text, p_grace_seconds integer) RETURNS TABLE(transfer_id uuid, from_entitlement uuid, to_entitlement uuid, to_package uuid, devices_rebound integer, sessions_rebound integer, window_ends timestamp with time zone)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE
+  n integer;
+  v_from_iface uuid; v_to_iface uuid; v_from_status text; v_to_status text;
+  v_from_ent uuid; v_to_ent uuid; v_purchase uuid; v_transfer uuid;
+  v_pkg_rev uuid; v_plan_rev uuid; v_window timestamptz;
+  v_now timestamptz; v_devices integer := 0; v_sessions integer := 0;
+  c record; r record; v_ok boolean; v_sid uuid;
+BEGIN
+  IF p_operator IS NULL OR p_reason IS NULL OR length(btrim(p_reason)) < 4
+     OR p_grace_seconds IS NULL OR p_grace_seconds <= 0 OR p_grace_seconds > 7 * 24 * 3600 THEN
+    RAISE EXCEPTION 'XFER_NOT_AUTHORIZED: an operator and a bounded reason are required' USING ERRCODE = 'P0001';
+  END IF;
+
+  -- Both stays, in id order (caller order would deadlock two opposite-direction transfers between the same pair).
+  SELECT count(*) INTO n FROM (SELECT id FROM iam_v2.stays
+     WHERE tenant_id = p_tenant AND site_id = p_site AND id IN (p_from_stay, p_to_stay) ORDER BY id FOR UPDATE) l;
+  IF n <> 2 THEN
+    RAISE EXCEPTION 'XFER_DESTINATION_MISSING: the destination stay does not exist yet from verified PMS state' USING ERRCODE = 'P0001';
+  END IF;
+
+  SELECT f.pms_interface_id, t.pms_interface_id, f.status, t.status
+    INTO v_from_iface, v_to_iface, v_from_status, v_to_status
+    FROM iam_v2.stays f, iam_v2.stays t
+   WHERE f.tenant_id = p_tenant AND f.site_id = p_site AND f.id = p_from_stay
+     AND t.tenant_id = p_tenant AND t.site_id = p_site AND t.id = p_to_stay;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'XFER_DESTINATION_MISSING: the destination stay does not exist yet from verified PMS state' USING ERRCODE = 'P0001';
+  END IF;
+  IF v_from_iface = v_to_iface THEN
+    RAISE EXCEPTION 'XFER_SAME_INTERFACE: both stays are on the same PMS interface; this is a room move, not a transfer' USING ERRCODE = 'P0001';
+  END IF;
+  IF v_from_status <> 'IN_HOUSE' THEN
+    RAISE EXCEPTION 'XFER_SOURCE_NOT_IN_HOUSE: the source stay has already checked out; grace access is not transferable' USING ERRCODE = 'P0001';
+  END IF;
+  IF v_to_status <> 'IN_HOUSE' THEN
+    RAISE EXCEPTION 'XFER_DESTINATION_NOT_ELIGIBLE: the destination stay is not currently in house' USING ERRCODE = 'P0001';
+  END IF;
+
+  SELECT e.id INTO v_from_ent FROM iam_v2.entitlements e
+   WHERE e.tenant_id = p_tenant AND e.site_id = p_site AND e.stay_id = p_from_stay
+     AND e.status IN ('PENDING','ACTIVE','SUSPENDED')
+   LIMIT 1 FOR UPDATE;
+  IF v_from_ent IS NULL THEN
+    RAISE EXCEPTION 'XFER_SOURCE_NOT_TRANSFERABLE: the source stay has no transferable live access' USING ERRCODE = 'P0001';
+  END IF;
+  IF EXISTS (SELECT 1 FROM iam_v2.entitlement_transfers t WHERE t.from_entitlement_id = v_from_ent) THEN
+    RAISE EXCEPTION 'XFER_ALREADY_TRANSFERRED: this access has already been transferred' USING ERRCODE = 'P0001';
+  END IF;
+  IF EXISTS (SELECT 1 FROM iam_v2.entitlements e
+              WHERE e.tenant_id = p_tenant AND e.site_id = p_site AND e.stay_id = p_to_stay
+                AND e.status IN ('PENDING','ACTIVE','SUSPENDED')) THEN
+    RAISE EXCEPTION 'XFER_DESTINATION_OCCUPIED: the destination stay already holds live access' USING ERRCODE = 'P0001';
+  END IF;
+
+  -- The landing package: zero price, no posting, deterministic order; a package whose current revision is restricted by a
+  -- PMS_INTERFACE rule to other interfaces is not offered at the destination (an unreadable restriction is refused, never guessed).
+  FOR c IN
+    SELECT ipr.id AS pkg_rev, ipr.service_plan_revision_id AS plan_rev, ip.id AS pkg, ip.is_system AS is_system
+      FROM iam_v2.internet_package_revisions ipr
+      JOIN iam_v2.internet_packages ip
+        ON ip.tenant_id = ipr.tenant_id AND ip.site_id = ipr.site_id AND ip.id = ipr.package_id
+     WHERE ipr.tenant_id = p_tenant AND ipr.site_id = p_site AND ip.active
+       AND ip.current_revision_id = ipr.id
+       AND ipr.price_minor = 0
+       AND ipr.settlement_methods = ARRAY['NOT_REQUIRED']::text[]
+       AND ipr.package_type IN ('CHECKOUT_GRACE','FREE_STAY','GENERAL')
+     ORDER BY CASE ipr.package_type WHEN 'CHECKOUT_GRACE' THEN 0 WHEN 'FREE_STAY' THEN 1 ELSE 2 END, ip.code, ipr.id
+     LIMIT 50
+  LOOP
+    v_ok := true;
+    IF NOT c.is_system THEN
+      FOR r IN SELECT value FROM iam_v2.p2_package_current_conditions(p_tenant, p_site, c.pkg)
+                WHERE kind = 'RULE' AND rule_type = 'PMS_INTERFACE'
+      LOOP
+        BEGIN
+          IF NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(r.value -> 'pms_interface_ids') x
+                          WHERE lower(x) = lower(v_to_iface::text)) THEN
+            v_ok := false;
+          END IF;
+        EXCEPTION WHEN others THEN
+          v_ok := false;
+        END;
+      END LOOP;
+    END IF;
+    IF v_ok THEN
+      v_pkg_rev := c.pkg_rev; v_plan_rev := c.plan_rev;
+      EXIT;
+    END IF;
+  END LOOP;
+  IF v_pkg_rev IS NULL THEN
+    RAISE EXCEPTION 'XFER_NO_LANDING_PACKAGE: no eligible no-posting package at the destination' USING ERRCODE = 'P0001';
+  END IF;
+
+  -- After every lock: the instant the devices and sessions move (a session opened while this waited for the lock started earlier).
+  v_now := clock_timestamp();
+
+  PERFORM iam_v2.apply_entitlement_transition(v_from_ent, 'TERMINATED', v_now, 'TRANSFERRED');
+
+  PERFORM iam_v2.begin_controlled_operation('commerce_intent');
+  INSERT INTO iam_v2.purchases (tenant_id, site_id, package_revision_id, stay_id, trigger, amount_minor, state)
+  VALUES (p_tenant, p_site, v_pkg_rev, p_to_stay, 'CROSS_PMS_TRANSFER', 0, 'GRANTED')
+  RETURNING id INTO v_purchase;
+
+  -- supersedes_entitlement_id stays unset: a transfer crosses subjects, a supersession does not.
+  INSERT INTO iam_v2.entitlements (tenant_id, site_id, stay_id, purchase_id, policy_snapshot, service_plan_revision_id,
+                                   package_revision_id, time_accounting_mode, end_mode, window_ends_at, status)
+  VALUES (p_tenant, p_site, p_to_stay, v_purchase, '{}'::jsonb, v_plan_rev, v_pkg_rev, 'VALIDITY_WINDOW', 'VALIDITY_WINDOW',
+          v_now + make_interval(secs => p_grace_seconds), 'PENDING')
+  RETURNING id, window_ends_at INTO v_to_ent, v_window;
+  PERFORM iam_v2.apply_entitlement_transition(v_to_ent, 'ACTIVE', v_now, NULL);
+
+  -- Devices and live sessions rebind in place. The authorization history is an append-only interval log that accounting
+  -- attribution reads, so the source's open intervals close at the instant the destination's open.
+  PERFORM iam_v2.begin_controlled_operation('device_auth');
+  INSERT INTO iam_v2.entitlement_devices (tenant_id, site_id, entitlement_id, device_id, status, grandfathered,
+                                          first_authorized, last_authorized)
+  SELECT p_tenant, p_site, v_to_ent, ed.device_id, 'AUTHORIZED', ed.grandfathered, ed.first_authorized, v_now
+    FROM iam_v2.entitlement_devices ed
+   WHERE ed.entitlement_id = v_from_ent AND ed.status = 'AUTHORIZED';
+  GET DIAGNOSTICS v_devices = ROW_COUNT;
+
+  INSERT INTO iam_v2.entitlement_device_authorizations (tenant_id, site_id, entitlement_id, device_id, seq, authorized_at)
+  SELECT p_tenant, p_site, v_to_ent, ed.device_id, 1, v_now
+    FROM iam_v2.entitlement_devices ed WHERE ed.entitlement_id = v_to_ent;
+
+  WITH closed AS (
+    UPDATE iam_v2.entitlement_device_authorizations a
+       SET deauthorized_at = GREATEST(v_now, a.authorized_at)
+     WHERE a.entitlement_id = v_from_ent AND a.deauthorized_at IS NULL
+     RETURNING a.entitlement_id, a.device_id)
+  UPDATE iam_v2.entitlement_devices ed
+     SET status = 'DISCONNECTED', disconnected_reason = 'CROSS_PMS_TRANSFER'
+    FROM closed WHERE ed.entitlement_id = closed.entitlement_id AND ed.device_id = closed.device_id;
+
+  -- Sessions move through the binding writer, never by rewriting sessions.entitlement_id, so each sample is charged to the
+  -- entitlement the session was bound to at its instant. Active and pending sessions both move.
+  FOR v_sid IN SELECT s.id FROM iam_v2.sessions s
+                WHERE s.tenant_id = p_tenant AND s.site_id = p_site AND s.entitlement_id = v_from_ent AND s.ended IS NULL
+                  AND s.state IN ('active','PENDING_ENFORCEMENT') ORDER BY s.id
+  LOOP
+    PERFORM iam_v2.rebind_session_entitlement(v_sid, v_to_ent, v_now);
+    v_sessions := v_sessions + 1;
+  END LOOP;
+
+  PERFORM iam_v2.p5_begin_controlled_operation('entitlement_transfer');
+  INSERT INTO iam_v2.entitlement_transfers (tenant_id, site_id, from_entitlement_id, to_entitlement_id, from_stay_id, to_stay_id,
+                                            actor, operator_reason)
+  VALUES (p_tenant, p_site, v_from_ent, v_to_ent, p_from_stay, p_to_stay, p_operator, left(btrim(p_reason), 500))
+  RETURNING id INTO v_transfer;
+  INSERT INTO iam_v2.stay_links (tenant_id, site_id, from_stay, to_stay, reason)
+  VALUES (p_tenant, p_site, p_from_stay, p_to_stay, 'CROSS_PMS_TRANSFER') ON CONFLICT DO NOTHING;
+
+  RETURN QUERY SELECT v_transfer, v_from_ent, v_to_ent, v_pkg_rev, v_devices, v_sessions, v_window;
+END $$;
+
+
+--
+-- Name: FUNCTION cross_pms_transfer(p_tenant uuid, p_site uuid, p_from_stay uuid, p_to_stay uuid, p_operator uuid, p_reason text, p_grace_seconds integer); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.cross_pms_transfer(p_tenant uuid, p_site uuid, p_from_stay uuid, p_to_stay uuid, p_operator uuid, p_reason text, p_grace_seconds integer) IS 'The staff-confirmed Cross-PMS Transfer in one transaction (0201). The only thing the Hotel Admin login may execute for it.';
 
 
 --
@@ -5562,6 +5808,19 @@ END $$;
 
 
 --
+-- Name: p3_after_checkout_enabled(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p3_after_checkout_enabled(p_tenant uuid, p_site uuid) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT COALESCE((SELECT g.after_checkout_enabled FROM iam_v2.site_checkout_grace_config g
+                    WHERE g.tenant_id = p_tenant AND g.site_id = p_site), true);
+$$;
+
+
+--
 -- Name: p3_alert_action_guard(); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -6075,13 +6334,32 @@ END $$;
 --
 
 CREATE FUNCTION iam_v2.p3_expected_class_minor(p_ip inet) RETURNS integer
-    LANGUAGE sql IMMUTABLE
-    SET search_path TO 'iam_v2', 'pg_temp'
+    LANGUAGE plpgsql STABLE
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
     AS $$
-  SELECT CASE
-    WHEN p_ip IS NULL OR family(p_ip) <> 4 THEN NULL
-    ELSE 4096 + (((split_part(host(p_ip), '.', 3)::int & 15) << 8) | split_part(host(p_ip), '.', 4)::int)
-  END;
+DECLARE
+  v_net inet;
+  v_idx bigint;
+BEGIN
+  IF p_ip IS NULL OR family(p_ip) <> 4 THEN
+    RETURN NULL;
+  END IF;
+  SELECT n.subnet_cidr::inet INTO v_net
+    FROM public.guest_networks n
+   WHERE n.enabled AND n.subnet_cidr IS NOT NULL
+     AND masklen(n.subnet_cidr::inet) BETWEEN 17 AND 19
+     AND n.subnet_cidr::inet >>= p_ip
+   ORDER BY masklen(n.subnet_cidr::inet) DESC
+   LIMIT 1;
+  IF v_net IS NULL THEN
+    RETURN 4096 + (((split_part(host(p_ip), '.', 3)::int & 15) << 8) | split_part(host(p_ip), '.', 4)::int);
+  END IF;
+  v_idx := p_ip - network(v_net);
+  IF v_idx < 4096 THEN
+    RETURN 4096 + v_idx::int;
+  END IF;
+  RETURN 12288 + (v_idx - 4096)::int;
+END;
 $$;
 
 
@@ -6168,7 +6446,8 @@ BEGIN
     OR NEW.grace_data_quota_bytes IS DISTINCT FROM OLD.grace_data_quota_bytes
     OR NEW.grace_device_limit IS DISTINCT FROM OLD.grace_device_limit
     OR NEW.grace_device_limit_policy IS DISTINCT FROM OLD.grace_device_limit_policy
-    OR NEW.eligibility_window_seconds IS DISTINCT FROM OLD.eligibility_window_seconds);
+    OR NEW.eligibility_window_seconds IS DISTINCT FROM OLD.eligibility_window_seconds
+    OR NEW.after_checkout_enabled IS DISTINCT FROM OLD.after_checkout_enabled);
   IF NEW.config_version < OLD.config_version THEN
     RAISE EXCEPTION 'site grace config_version cannot decrease (% -> %)', OLD.config_version, NEW.config_version;
   END IF;
@@ -12570,6 +12849,23 @@ $$;
 
 
 --
+-- Name: post_stay_conversion_retired(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.post_stay_conversion_retired() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+BEGIN
+  IF NEW."trigger" = 'POST_STAY_CONVERSION' THEN
+    RAISE EXCEPTION 'POST_STAY_CONVERSION_RETIRED: the separate post-stay benefit no longer exists; After Check-out Access is granted once, at check-out'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END $$;
+
+
+--
 -- Name: posting_lane_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -14573,6 +14869,62 @@ END $$;
 
 
 --
+-- Name: set_after_checkout_enabled(uuid, uuid, boolean, integer, uuid, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.set_after_checkout_enabled(p_tenant uuid, p_site uuid, p_enabled boolean, p_expected_version integer, p_actor uuid, p_reason text) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $_$
+DECLARE v_current int; v_new int; v_now boolean;
+BEGIN
+  PERFORM iam_v2.begin_controlled_operation('grace_publication');
+  IF p_actor IS NULL THEN RAISE EXCEPTION 'GRACE_ACTOR_INVALID: an actor is required'; END IF;
+  PERFORM 1 FROM public.operators o
+    WHERE o.id = p_actor AND o.status = 'active' AND (o.tenant_id IS NULL OR o.tenant_id = p_tenant);
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'GRACE_ACTOR_INVALID: actor % is not an active operator of this tenant', p_actor;
+  END IF;
+  IF p_reason IS NULL OR p_reason !~ '^[A-Z][A-Z0-9_]{0,63}$' THEN
+    RAISE EXCEPTION 'GRACE_ACTOR_INVALID: a bounded machine reason code is required';
+  END IF;
+  IF p_enabled IS NULL THEN RAISE EXCEPTION 'GRACE_POLICY_UNSUPPORTED: enabled must be true or false'; END IF;
+  IF p_expected_version IS NULL OR p_expected_version < 0 THEN
+    RAISE EXCEPTION 'GRACE_VERSION_CONFLICT: an expected config_version (>= 0) is required';
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtextextended(p_tenant::text || ':' || p_site::text || ':grace-config', 0));
+  SELECT config_version, after_checkout_enabled INTO v_current, v_now FROM iam_v2.site_checkout_grace_config
+    WHERE tenant_id = p_tenant AND site_id = p_site FOR UPDATE;
+  IF COALESCE(v_current, 0) <> p_expected_version THEN
+    RAISE EXCEPTION 'GRACE_VERSION_CONFLICT: current version is % (caller expected %)', COALESCE(v_current, 0), p_expected_version;
+  END IF;
+  IF v_current IS NULL THEN
+    -- Nothing published yet: the row holds only the switch (the typed policy fields are all NULL, which the table allows).
+    IF p_enabled THEN RETURN 0; END IF;   -- the default already is enabled: nothing to record
+    INSERT INTO iam_v2.site_checkout_grace_config (tenant_id, site_id, after_checkout_enabled, config_version)
+      VALUES (p_tenant, p_site, p_enabled, 1);
+    v_new := 1;
+  ELSE
+    IF v_now = p_enabled THEN RETURN v_current; END IF;   -- idempotent: no new version, no history row
+    UPDATE iam_v2.site_checkout_grace_config SET after_checkout_enabled = p_enabled, config_version = v_current + 1
+      WHERE tenant_id = p_tenant AND site_id = p_site;
+    v_new := v_current + 1;
+  END IF;
+  INSERT INTO iam_v2.checkout_grace_policy_publications
+    (tenant_id, site_id, config_version, actor, reason_code, grace_package_revision_id, policy_snapshot)
+    SELECT p_tenant, p_site, v_new, p_actor, p_reason, g.grace_package_revision_id,
+           jsonb_build_object('change', 'AFTER_CHECKOUT_ENABLED', 'after_checkout_enabled', p_enabled,
+                              'grace_duration_seconds', g.grace_duration_seconds, 'grace_down_kbps', g.grace_down_kbps,
+                              'grace_up_kbps', g.grace_up_kbps, 'grace_data_quota_bytes', g.grace_data_quota_bytes,
+                              'grace_device_limit', g.grace_device_limit,
+                              'grace_device_limit_policy', g.grace_device_limit_policy,
+                              'eligibility_window_seconds', g.eligibility_window_seconds)
+      FROM iam_v2.site_checkout_grace_config g WHERE g.tenant_id = p_tenant AND g.site_id = p_site;
+  RETURN v_new;
+END $_$;
+
+
+--
 -- Name: signin_capacity_settings_changes_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -16312,6 +16664,13 @@ BEGIN
     END IF;
     SELECT cutoff_seconds::text INTO v_old FROM public.enforcement_policy;
     UPDATE public.enforcement_policy SET cutoff_seconds = p_value::int, updated_by = btrim(p_operator), updated_at = now(), config_version = config_version + 1;
+    v_new := p_value;
+  ELSIF p_field = 'outage_continuity_minutes' THEN
+    IF p_value !~ '^[0-9]{1,3}$' OR p_value::int > 120 THEN
+      RAISE EXCEPTION 'outage_continuity_minutes must be between 0 and 120' USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    SELECT outage_continuity_minutes::text INTO v_old FROM public.enforcement_policy;
+    UPDATE public.enforcement_policy SET outage_continuity_minutes = p_value::int, updated_by = btrim(p_operator), updated_at = now(), config_version = config_version + 1;
     v_new := p_value;
   ELSIF p_field = 'private_allow_cidrs' THEN
     v_cidrs := ARRAY[]::text[];
@@ -21999,6 +22358,7 @@ CREATE TABLE iam_v2.site_checkout_grace_config (
     grace_device_limit integer,
     grace_device_limit_policy text,
     config_version bigint DEFAULT 1 NOT NULL,
+    after_checkout_enabled boolean DEFAULT true NOT NULL,
     CONSTRAINT grace_all_or_none CHECK ((((grace_duration_seconds IS NULL) AND (grace_down_kbps IS NULL) AND (grace_up_kbps IS NULL) AND (grace_data_quota_bytes IS NULL) AND (grace_device_limit IS NULL) AND (grace_device_limit_policy IS NULL)) OR ((grace_duration_seconds IS NOT NULL) AND (grace_down_kbps IS NOT NULL) AND (grace_up_kbps IS NOT NULL) AND (grace_data_quota_bytes IS NOT NULL) AND (grace_device_limit IS NOT NULL) AND (grace_device_limit_policy = 'REJECT_NEW_DEVICE'::text)))),
     CONSTRAINT grace_bounds CHECK (((eligibility_window_seconds > 0) AND (eligibility_window_seconds <= 604800) AND ((grace_duration_seconds IS NULL) OR ((grace_duration_seconds > 0) AND (grace_duration_seconds <= 604800))) AND ((grace_down_kbps IS NULL) OR ((grace_down_kbps > 0) AND (grace_down_kbps <= 10000000))) AND ((grace_up_kbps IS NULL) OR ((grace_up_kbps > 0) AND (grace_up_kbps <= 10000000))) AND ((grace_data_quota_bytes IS NULL) OR ((grace_data_quota_bytes > 0) AND (grace_data_quota_bytes <= '1099511627776'::bigint))) AND ((grace_device_limit IS NULL) OR ((grace_device_limit > 0) AND (grace_device_limit <= 1000))))),
     CONSTRAINT grace_config_no_dup_policy_keys CHECK ((NOT (config ?| ARRAY['eligibility_window_seconds'::text, 'grace_duration_seconds'::text, 'grace_down_kbps'::text, 'grace_up_kbps'::text, 'grace_data_quota_bytes'::text, 'grace_device_limit'::text, 'grace_device_limit_policy'::text, 'device_limit_policy'::text, 'data_quota_bytes'::text, 'duration_seconds'::text, 'down_kbps'::text, 'up_kbps'::text]))),
@@ -23202,10 +23562,12 @@ CREATE TABLE public.enforcement_policy (
     config_version bigint DEFAULT 1 NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_by text,
+    outage_continuity_minutes integer DEFAULT 60 NOT NULL,
     CONSTRAINT enforcement_policy_allow_len CHECK ((cardinality(private_allow_cidrs) <= 64)),
     CONSTRAINT enforcement_policy_config_version_check CHECK ((config_version >= 1)),
     CONSTRAINT enforcement_policy_cutoff_seconds_check CHECK (((cutoff_seconds >= 1) AND (cutoff_seconds <= 60))),
-    CONSTRAINT enforcement_policy_id_check CHECK (id)
+    CONSTRAINT enforcement_policy_id_check CHECK (id),
+    CONSTRAINT enforcement_policy_outage_continuity_range CHECK (((outage_continuity_minutes >= 0) AND (outage_continuity_minutes <= 120)))
 );
 
 
@@ -23214,6 +23576,13 @@ CREATE TABLE public.enforcement_policy (
 --
 
 COMMENT ON TABLE public.enforcement_policy IS 'Singleton data-plane enforcement policy (0166). Written only through enforcement_policy_set(); read by netd and acctd.';
+
+
+--
+-- Name: COLUMN enforcement_policy.outage_continuity_minutes; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.enforcement_policy.outage_continuity_minutes IS 'Minutes (0..120, default 60) that sessions the last healthy plan covered stay authorized after plans stop arriving; 0 = strict 90 s lease (0198).';
 
 
 --
@@ -28283,6 +28652,20 @@ CREATE TRIGGER accounting_retention_changes_append_only BEFORE DELETE OR UPDATE 
 
 
 --
+-- Name: entitlement_devices after_checkout_device_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER after_checkout_device_guard BEFORE INSERT OR UPDATE ON iam_v2.entitlement_devices FOR EACH ROW EXECUTE FUNCTION iam_v2.after_checkout_device_guard();
+
+
+--
+-- Name: site_checkout_grace_config after_checkout_switch_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER after_checkout_switch_guard BEFORE UPDATE ON iam_v2.site_checkout_grace_config FOR EACH ROW EXECUTE FUNCTION iam_v2.after_checkout_switch_guard();
+
+
+--
 -- Name: accounting_records ao_accounting; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
@@ -29218,6 +29601,13 @@ CREATE TRIGGER pms_review_expiry_settings_changes_no_update BEFORE DELETE OR UPD
 --
 
 CREATE TRIGGER pms_room_inventory_changes_no_update BEFORE DELETE OR UPDATE ON iam_v2.pms_room_inventory_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.pms_room_inventory_append_only();
+
+
+--
+-- Name: purchases post_stay_conversion_retired; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER post_stay_conversion_retired BEFORE INSERT ON iam_v2.purchases FOR EACH ROW EXECUTE FUNCTION iam_v2.post_stay_conversion_retired();
 
 
 --
@@ -31398,6 +31788,20 @@ GRANT ALL ON FUNCTION iam_v2.activate_session_enforcement(p_tenant uuid, p_site 
 
 
 --
+-- Name: FUNCTION after_checkout_device_guard(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.after_checkout_device_guard() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION after_checkout_switch_guard(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.after_checkout_switch_guard() FROM PUBLIC;
+
+
+--
 -- Name: FUNCTION allocate_class_generation(p_tenant uuid, p_site uuid, p_appliance uuid); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -31734,6 +32138,22 @@ REVOKE ALL ON FUNCTION iam_v2.client_group_changes_append_only() FROM PUBLIC;
 
 REVOKE ALL ON FUNCTION iam_v2.complete_sign_in_attempt(p_tenant uuid, p_site uuid, p_request uuid, p_result text, p_entitlement uuid, p_session uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.complete_sign_in_attempt(p_tenant uuid, p_site uuid, p_request uuid, p_result text, p_entitlement uuid, p_session uuid) TO svc_scd;
+
+
+--
+-- Name: FUNCTION continuity_not_entitled(p_tenant uuid, p_site uuid, p_sessions uuid[]); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.continuity_not_entitled(p_tenant uuid, p_site uuid, p_sessions uuid[]) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.continuity_not_entitled(p_tenant uuid, p_site uuid, p_sessions uuid[]) TO svc_netd;
+
+
+--
+-- Name: FUNCTION cross_pms_transfer(p_tenant uuid, p_site uuid, p_from_stay uuid, p_to_stay uuid, p_operator uuid, p_reason text, p_grace_seconds integer); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.cross_pms_transfer(p_tenant uuid, p_site uuid, p_from_stay uuid, p_to_stay uuid, p_operator uuid, p_reason text, p_grace_seconds integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.cross_pms_transfer(p_tenant uuid, p_site uuid, p_from_stay uuid, p_to_stay uuid, p_operator uuid, p_reason text, p_grace_seconds integer) TO svc_edged;
 
 
 --
@@ -32304,6 +32724,15 @@ GRANT ALL ON FUNCTION iam_v2.p2_package_current_conditions(p_tenant uuid, p_site
 --
 
 REVOKE ALL ON FUNCTION iam_v2.p3_accounting_needs_binding() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION p3_after_checkout_enabled(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p3_after_checkout_enabled(p_tenant uuid, p_site uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p3_after_checkout_enabled(p_tenant uuid, p_site uuid) TO svc_pmsd;
+GRANT ALL ON FUNCTION iam_v2.p3_after_checkout_enabled(p_tenant uuid, p_site uuid) TO svc_edged;
 
 
 --
@@ -33513,6 +33942,13 @@ GRANT ALL ON FUNCTION iam_v2.pms_site_blocked_after_refusals(p_tenant uuid, p_si
 
 
 --
+-- Name: FUNCTION post_stay_conversion_retired(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.post_stay_conversion_retired() FROM PUBLIC;
+
+
+--
 -- Name: FUNCTION posting_lane_settings_get(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -33772,6 +34208,14 @@ GRANT ALL ON FUNCTION iam_v2.service_plan_delete_unused(p_tenant uuid, p_site uu
 
 REVOKE ALL ON FUNCTION iam_v2.service_plan_deletion_blockers(p_tenant uuid, p_site uuid, p_plan uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.service_plan_deletion_blockers(p_tenant uuid, p_site uuid, p_plan uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION set_after_checkout_enabled(p_tenant uuid, p_site uuid, p_enabled boolean, p_expected_version integer, p_actor uuid, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.set_after_checkout_enabled(p_tenant uuid, p_site uuid, p_enabled boolean, p_expected_version integer, p_actor uuid, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.set_after_checkout_enabled(p_tenant uuid, p_site uuid, p_enabled boolean, p_expected_version integer, p_actor uuid, p_reason text) TO svc_edged;
 
 
 --
@@ -35527,13 +35971,6 @@ GRANT SELECT ON TABLE iam_v2.sessions TO svc_pmsd;
 
 
 --
--- Name: COLUMN sessions.entitlement_id; Type: ACL; Schema: iam_v2; Owner: -
---
-
-GRANT UPDATE(entitlement_id) ON TABLE iam_v2.sessions TO svc_edged;
-
-
---
 -- Name: COLUMN sessions.state; Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -35969,7 +36406,7 @@ GRANT SELECT ON TABLE public.enforcement_policy_changes TO svc_edged;
 -- Name: TABLE guest_networks; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT REFERENCES ON TABLE public.guest_networks TO iam_v2_owner;
+GRANT SELECT,REFERENCES ON TABLE public.guest_networks TO iam_v2_owner;
 GRANT SELECT,UPDATE ON TABLE public.guest_networks TO svc_scd;
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.guest_networks TO svc_edged;
 GRANT SELECT ON TABLE public.guest_networks TO svc_netd;

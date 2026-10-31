@@ -1,0 +1,3 @@
+{'time': '05:34:33', 'sessions': 4157, 'lock_wait_ms': 0, 'pass_ms': 550, 'admit': 0, 'renew': 184, 'precheck': 134, 'individual': 0, 'failed': 0}
+{'time': '05:34:38', 'sessions': 4132, 'lock_wait_ms': 0, 'pass_ms': 923, 'admit': 0, 'renew': 574, 'precheck': 117, 'individual': 0, 'failed': 0}
+pass_ms p50 1863 p95 2652 max 4858

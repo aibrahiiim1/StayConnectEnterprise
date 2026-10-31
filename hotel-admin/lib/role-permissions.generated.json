@@ -3,6 +3,7 @@
   "roles": {
     "front_office_operator": {
       "account-password-settings": "read",
+      "after-checkout-access": "read",
       "audit": "read",
       "auth-methods": "read",
       "backups": "read",
@@ -41,6 +42,7 @@
     },
     "guest_relations_operator": {
       "account-password-settings": "read",
+      "after-checkout-access": "read",
       "audit": "read",
       "auth-methods": "read",
       "backups": "read",
@@ -76,6 +78,7 @@
     },
     "hotel_it_manager": {
       "account-password-settings": "write",
+      "after-checkout-access": "write",
       "audit": "read",
       "auth-methods": "write",
       "backup-download": "write",
@@ -144,6 +147,7 @@
     },
     "site_viewer": {
       "account-password-settings": "read",
+      "after-checkout-access": "read",
       "audit": "read",
       "auth-methods": "read",
       "backups": "read",

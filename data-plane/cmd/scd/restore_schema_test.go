@@ -44,8 +44,8 @@ func TestRestoreSchemaCheckRefusesWhenEitherSchemaCannotBeRead(t *testing.T) {
 	old := schemaInventory
 	defer func() { schemaInventory = old }()
 	for name, fn := range map[string]func(context.Context, string) ([]string, error){
-		"live unreadable":   func(_ context.Context, db string) ([]string, error) { return nil, errors.New("down") },
-		"live empty":        func(_ context.Context, db string) ([]string, error) { return nil, nil },
+		"live unreadable": func(_ context.Context, db string) ([]string, error) { return nil, errors.New("down") },
+		"live empty":      func(_ context.Context, db string) ([]string, error) { return nil, nil },
 		"backup unreadable": func(_ context.Context, db string) ([]string, error) {
 			if db == pgDatabase {
 				return []string{"column a.b.c text NO"}, nil

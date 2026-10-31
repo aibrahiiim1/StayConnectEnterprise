@@ -32,6 +32,8 @@ const nextConfig = {
       { source: "/network/cloud", destination: "/appliance", permanent: true },
       { source: "/setup/enrollment", destination: "/appliance", permanent: true },
       { source: "/commercial-packages", destination: "/internet-packages", permanent: true },
+      { source: "/checkout-grace", destination: "/after-checkout-access", permanent: true },
+      { source: "/post-stay", destination: "/after-checkout-access", permanent: true },
     ];
   },
   // THE API PROXY WAITS AS LONG AS edged DOES. Next's rewrite proxy gives up after 30 s by default, and a

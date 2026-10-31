@@ -1,0 +1,8 @@
+after tamper start: {"s":1705,"a":false,"r":null}
+/var/lib/stayconnect/netd-phase3-continuity.json
+msg:"netd: outage-continuity record not restored; strict behaviour until the next plan carries a block","why":"continuity record is corrupt or altered"}
+after 45 s of healthy plans: {"s":1705,"a":false,"r":null} set=1735
+== (b) journal corruption
+after journal corruption start: {"s":1705,"a":false,"r":null} set=1735
+after 45 s of healthy plans: {"s":1705,"a":false,"r":null} set=1735
+-rw------- 1 root root 103 Oct 31 03:31 /var/lib/stayconnect/netd-phase3-continuity-revocations.json

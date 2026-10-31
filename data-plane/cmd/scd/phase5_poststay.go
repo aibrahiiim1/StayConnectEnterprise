@@ -54,10 +54,10 @@ const (
 
 type psResponse struct {
 	Outcome string `json:"outcome"`
-	// AuthContextID/ExpiresIn/Offers are present on VERIFIED only (poststay.GrantableOffers).
-	AuthContextID string           `json:"auth_context_id,omitempty"`
-	ExpiresIn     int              `json:"expires_in_seconds,omitempty"`
-	Offers        []poststay.Offer `json:"offers,omitempty"`
+	// AuthContextID/ExpiresIn are present on VERIFIED only. There is no offer to choose: the stay's one After Check-out
+	// entitlement is the only thing a verified device can be let back onto.
+	AuthContextID string `json:"auth_context_id,omitempty"`
+	ExpiresIn     int    `json:"expires_in_seconds,omitempty"`
 	// SessionID/EntitlementID are present on GRANTED only and are different rows.
 	SessionID     string `json:"session_id,omitempty"`
 	EntitlementID string `json:"entitlement_id,omitempty"`
@@ -93,10 +93,10 @@ func (p *phase5PostStay) decode(w http.ResponseWriter, r *http.Request, dst any)
 
 type psVerifyReq struct {
 	Device wireDevice `json:"device"`
-	// What the guest typed: the room and the reservation of the stay they left; the last name only from a new device.
+	// What the guest typed: the room and the reservation of the stay they left, and nothing else. A surname (or any other
+	// field) is refused by the strict decoder like any unknown field.
 	Room        string `json:"room"`
 	Reservation string `json:"reservation"`
-	LastName    string `json:"last_name"`
 }
 
 // verifyHandler is the post-stay re-authentication; success mints a one-time Auth Context, never a session.
@@ -121,8 +121,7 @@ func (p *phase5PostStay) verifyHandler(w http.ResponseWriter, r *http.Request) {
 	capacity := p.srv.signinCapacity(ctx)
 	profile, err := p.store.Verify(ctx, poststay.VerifyRequest{
 		Tenant: dev.Tenant, Site: dev.Site, Device: dev.DeviceID, IP: ipString(dev),
-		Room: req.Room, Reservation: req.Reservation, LastName: req.LastName,
-		WindowDays: capacity.PostStaySigninDays, Limits: capacity.PostStay})
+		Room: req.Room, Reservation: req.Reservation, Limits: capacity.PostStay})
 	if err != nil {
 		switch {
 		case errors.Is(err, poststay.ErrThrottled):
@@ -134,16 +133,6 @@ func (p *phase5PostStay) verifyHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	// A site with no grantable post-stay package issues no context (it could be redeemed against nothing).
-	offers, err := p.store.GrantableOffers(ctx, dev.Tenant, dev.Site)
-	if err != nil {
-		p.refuse(w, r, poststay.RefusalInternal, &dev, "offers_unreadable: "+err.Error())
-		return
-	}
-	if len(offers) == 0 {
-		p.refuse(w, r, poststay.RefusalNoPackage, &dev, "no_grantable_post_stay_package")
-		return
-	}
 	id, err := p.ctxs.IssuePostStay(ctx, authctx.PostStayGrant{
 		Tenant: dev.Tenant, Site: dev.Site, Profile: profile,
 		Device: dev.DeviceID, GuestNetwork: dev.GuestNetwork,
@@ -153,17 +142,16 @@ func (p *phase5PostStay) verifyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSONScd(w, http.StatusOK, psResponse{
-		Outcome: psOutcomeVerified, AuthContextID: id, ExpiresIn: int(p.contextTTL.Seconds()), Offers: offers})
+		Outcome: psOutcomeVerified, AuthContextID: id, ExpiresIn: int(p.contextTTL.Seconds())})
 }
 
 type psConvertReq struct {
-	Device            wireDevice `json:"device"`
-	AuthContextID     string     `json:"auth_context_id"`
-	PackageRevisionID string     `json:"package_revision_id"`
+	Device        wireDevice `json:"device"`
+	AuthContextID string     `json:"auth_context_id"`
 }
 
-// convertHandler consumes the post-stay context and grants the zero-price POST_STAY package. Profile and Stay
-// come from the consumed context; the chosen package is re-validated against the rules that produced the offer.
+// convertHandler consumes the post-stay context and lets the device back onto the stay's After Check-out entitlement. It
+// grants nothing: Profile and Stay come from the consumed context, and the device must hold a place on the entitlement.
 func (p *phase5PostStay) convertHandler(w http.ResponseWriter, r *http.Request) {
 	var req psConvertReq
 	if !p.decode(w, r, &req) {
@@ -204,7 +192,6 @@ func (p *phase5PostStay) convertHandler(w http.ResponseWriter, r *http.Request) 
 		Context: req.AuthContextID,
 		Presenter: authctx.Presenter{Tenant: dev.Tenant, Site: dev.Site,
 			Device: dev.DeviceID, GuestNetwork: dev.GuestNetwork},
-		PackageRevision: req.PackageRevisionID,
 	}, p.ctxs)
 	if err != nil {
 		p.refuse(w, r, convertRefusalCode(err), &dev, "convert_refused: "+err.Error())
@@ -248,14 +235,11 @@ func (p *phase5PostStay) convertHandler(w http.ResponseWriter, r *http.Request) 
 // convertRefusalCode maps a conversion refusal to its audit code. The guest sees the same answer for all of them.
 func convertRefusalCode(err error) string {
 	switch {
-	case errors.Is(err, poststay.ErrAlreadyConverted):
-		return poststay.RefusalBenefitSpent
 	case errors.Is(err, poststay.ErrEntitlementNotJoinable):
 		return poststay.RefusalNotJoinable
-	case errors.Is(err, poststay.ErrDeviceLimit):
-		return poststay.RefusalDeviceLimit
-	case errors.Is(err, authctx.ErrContextInvalid), errors.Is(err, poststay.ErrPackageNotGrantable),
-		errors.Is(err, poststay.ErrSettlementRequired), errors.Is(err, poststay.ErrNotAuthenticable):
+	case errors.Is(err, poststay.ErrNoLineage):
+		return poststay.RefusalNoLineage
+	case errors.Is(err, authctx.ErrContextInvalid), errors.Is(err, poststay.ErrNotAuthenticable):
 		return poststay.RefusalContext
 	default:
 		return poststay.RefusalInternal
@@ -284,12 +268,14 @@ func (p *phase5PostStay) alreadyConverted(ctx context.Context, contextID string,
 	var sid, ent string
 	err := p.srv.db.QueryRow(ctx, `
 		SELECT s.id::text, e.id::text
-		  FROM iam_v2.purchases pu
-		  JOIN iam_v2.auth_contexts c ON c.id = pu.auth_context_id
-		  JOIN iam_v2.entitlements e ON e.purchase_id = pu.id
+		  FROM iam_v2.auth_contexts c
+		  JOIN iam_v2.post_stay_profiles psp
+		    ON psp.tenant_id = c.tenant_id AND psp.site_id = c.site_id AND psp.id = c.post_stay_profile_id
+		  JOIN iam_v2.entitlements e
+		    ON e.tenant_id = psp.tenant_id AND e.site_id = psp.site_id AND e.stay_id = psp.origin_stay_id
+		   AND e.status = 'ACTIVE' AND e.end_mode = 'GRACE_AFTER_CHECKOUT'
 		  JOIN iam_v2.sessions s ON s.entitlement_id = e.id
-		 WHERE pu.auth_context_id = $1::uuid AND pu.tenant_id = $2 AND pu.site_id = $3
-		   AND pu.trigger = 'POST_STAY_CONVERSION'
+		 WHERE c.id = $1::uuid AND c.tenant_id = $2 AND c.site_id = $3 AND c.method = 'POST_STAY_PIN'
 		   AND c.consumed_at IS NOT NULL AND c.device_id = $4 AND s.device_id = $4
 		   AND s.state IN ('active','PENDING_ENFORCEMENT') AND s.ended IS NULL
 		 ORDER BY s.started DESC

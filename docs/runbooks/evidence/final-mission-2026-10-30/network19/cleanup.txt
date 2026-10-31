@@ -1,0 +1,25 @@
+disable Lab /19 200
+disable Lab /19 (replaced the /20) 200
+disable Lab /20 to replace 200
+apply 422 took 0.2s {"state": "failed", "revision_id": "e9977c05-4f5d-4c6b-89b4-2ed0b3bd9933", "message": "validation failed", "health": [], "error": null}
+confirm 409 {"error": "revision is not pending confirmation"}
+delete Lab /19 409
+delete Lab /19 (replaced the /20) 409
+delete Lab /20 to replace 409
+[('Lab clients A', '10.60.0.0/20', True), ('Lab clients B', '10.61.0.0/20', True), ('Lab /19', '10.66.0.0/19', False), ('Lab /19 (replaced the /20)', '10.68.0.0/19', False), ('Lab /20 to replace', '10.68.0.0/20', False)]
+disable Lab /19 200
+disable Lab /19 (replaced the /20) 200
+disable Lab /20 to replace 200
+apply 200 took 8.3s {"state": "pending_confirmation", "revision_id": "3d3baafe-7ebe-413d-b0f9-79fc1bccbfcd", "message": "applied; confirm within 2m0s or it rolls back automatically", "health": [["mgmt_reachable", true, "eth0"], ["gateway_up", true, null], ["kea_running", true, null], ["portal_listen
+confirm 200 {"state": "active"}
+delete Lab /19 409
+delete Lab /19 (replaced the /20) 409
+delete Lab /20 to replace 409
+[('Lab clients A', '10.60.0.0/20', True), ('Lab clients B', '10.61.0.0/20', True), ('Lab /19', '10.66.0.0/19', False), ('Lab /19 (replaced the /20)', '10.68.0.0/19', False), ('Lab /20 to replace', '10.68.0.0/20', False)]
+delete Lab /19 409 {"error": "kept_as_history", "message": "this network has client history (sign-ins and devices recorded on it), so it is kept, disabled, as part of that history. A disabled network is not served and d
+archive Lab /19 404 {"raw": "404 page not found\n"}
+delete Lab /19 (replaced the /20) 409 {"error": "conflict", "message": "network has active sessions"}
+archive Lab /19 (replaced the /20) 404 {"raw": "404 page not found\n"}
+delete Lab /20 to replace 409 {"error": "conflict", "message": "network has active sessions"}
+archive Lab /20 to replace 404 {"raw": "404 page not found\n"}
+[('Lab clients A', '10.60.0.0/20', True, False), ('Lab clients B', '10.61.0.0/20', True, False), ('Lab /19', '10.66.0.0/19', False, False), ('Lab /19 (replaced the /20)', '10.68.0.0/19', False, False), ('Lab /20 to replace', '10.68.0.0/20', False, False)]

@@ -124,6 +124,10 @@ jobs:
         if: steps.reuse.outputs.hit != 'true'
         run: python tools/validate-migration-location.py
 
+      - name: Migration location — reserved numbers, pinned identities and the negative cases are proven
+        if: steps.reuse.outputs.hit != 'true'
+        run: python tools/validate-migration-location-selftest.py
+
       # STANDING RECORDS MUST BE TRUE EVERYWHERE, INCLUDING IN THE FILES NOBODY VALIDATES.
       #
       # validate-current-state-parity.py reaches five markdown/json files in DOC_SURFACES and seven in

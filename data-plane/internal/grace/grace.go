@@ -1,7 +1,9 @@
-// Package grace is the Checkout Grace and Emergency Grace decision core. A checked-out Stay with an active valid
-// Entitlement at the effective-checkout boundary gets exactly one Grace conversion per lifecycle episode,
-// whatever the prior package's origin or price; no active Entitlement means no Grace. Emergency Grace is the
-// built-in fallback when the configured policy is invalid at conversion, not a cloud-outage reauthorization.
+// Package grace is the After Check-out Access decision core (formerly "Checkout Grace"; Emergency Grace is its built-in
+// fallback). A checked-out Stay with an active valid Entitlement at the effective-checkout boundary gets exactly one
+// After Check-out conversion per lifecycle episode, whatever the prior package's origin or price; no active Entitlement
+// means none. Emergency Grace is the built-in fallback when the configured policy is invalid at conversion, not a
+// cloud-outage reauthorization. The feature can be switched off per site; then nothing is granted (no fallback either).
+// See docs/architecture/ONEGATE_AFTER_CHECKOUT_ACCESS.md.
 package grace
 
 // Policy is pinned at conversion time so later Admin edits never rewrite an existing Guest's Grace terms.
@@ -43,6 +45,48 @@ func ValidatePolicy(p Policy, enabled, hasPinnedRevision bool) bool {
 	return true
 }
 
+// Operator-facing bounds of the one After Check-out Access policy (Hotel Admin / edged). The database keeps its wider
+// structural CHECKs (up to seven days), so a policy published before these bounds existed stays valid for the checkouts it
+// already governs; only a NEW publication is held to them.
+const (
+	MinDurationHours     = 1
+	MaxDurationHours     = 72
+	DefaultDurationHours = 12
+
+	MinKbps     = 64
+	MaxKbps     = 1000000
+	DefaultDown = 5000
+	DefaultUp   = 2000
+
+	MinQuotaBytes     int64 = 10 << 20  // 10 MiB
+	MaxQuotaBytes     int64 = 100 << 30 // 100 GiB
+	DefaultQuotaBytes int64 = 1 << 30   // 1 GiB
+
+	MinDeviceLimit     = 1
+	MaxDeviceLimit     = 20
+	DefaultDeviceLimit = 5
+)
+
+// ValidateOperatorPolicy holds a policy an operator publishes to the operator bounds (not the structural ones). It returns
+// the reason it is refused, or "".
+func ValidateOperatorPolicy(p Policy) string {
+	switch {
+	case p.DurationSeconds%3600 != 0 || p.DurationSeconds/3600 < MinDurationHours || p.DurationSeconds/3600 > MaxDurationHours:
+		return "duration must be a whole number of hours between 1 and 72"
+	case p.DownKbps < MinKbps || p.DownKbps > MaxKbps:
+		return "download speed must be between 64 kbps and 1,000,000 kbps"
+	case p.UpKbps < MinKbps || p.UpKbps > MaxKbps:
+		return "upload speed must be between 64 kbps and 1,000,000 kbps"
+	case p.DataQuotaBytes < MinQuotaBytes || p.DataQuotaBytes > MaxQuotaBytes:
+		return "the shared data quota must be between 10 MiB and 100 GiB"
+	case p.DeviceLimit < MinDeviceLimit || p.DeviceLimit > MaxDeviceLimit:
+		return "the device allowance must be between 1 and 20"
+	case p.DeviceLimitPolicy != DeviceLimitRejectNew:
+		return "the device policy must be REJECT_NEW_DEVICE"
+	}
+	return ""
+}
+
 type Trigger string
 
 const (
@@ -56,6 +100,9 @@ type ConversionRequest struct {
 	AlreadyConvertedThisEpisode    bool
 	Configured                     Policy
 	ConfiguredValid                bool // enabled, server-valid and a pinned package revision exists
+	// Disabled is the site's After Check-out Access switch (off): nothing is granted, and the Emergency fallback does
+	// not apply either, since "off" is a decision and the fallback answers a broken configuration.
+	Disabled bool
 }
 
 // Conversion's Policy is the one pinned for this conversion.
@@ -75,6 +122,9 @@ func DecideConversion(r ConversionRequest) Conversion {
 	}
 	if !r.HasActiveEntitlementAtCheckout {
 		return Conversion{Create: false, Reason: "NO_ACTIVE_ENTITLEMENT_AT_CHECKOUT"}
+	}
+	if r.Disabled {
+		return Conversion{Create: false, Reason: "AFTER_CHECKOUT_DISABLED"}
 	}
 	if r.ConfiguredValid {
 		return Conversion{Create: true, Trigger: TriggerCheckoutGrace, Policy: r.Configured, Reason: "ELIGIBLE"}

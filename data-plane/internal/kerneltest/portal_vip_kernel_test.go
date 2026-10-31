@@ -70,7 +70,7 @@ func TestKernel_PortalAddressAnswersGuestsOnTheTwoPortalPortsOnly(t *testing.T) 
 		}
 	}
 	// An authenticated guest reaches it the same way.
-	run(t, nftWrapper, "add", "element", "inet", "stayconnect", "auth_ipv4", "{ \""+guestIface+"\" . "+guestIP+" }")
+	run(t, nftWrapper, "add", "element", "inet", "stayconnect", "phase3_auth_ipv4", "{ \""+guestIface+"\" . "+guestIP+" }")
 	if got := tcpProbe(t, guestNS, kgPortalVIP, "443"); got != "refused" {
 		t.Fatalf("an authenticated guest -> portal address :443 = %s", got)
 	}
@@ -111,7 +111,7 @@ func TestKernel_PortalAddressIsNeverForwarded(t *testing.T) {
 		t.Fatalf("place the address upstream: %v %s", err, out)
 	}
 	t.Cleanup(func() { _ = exec.Command("ip", "-n", wan, "addr", "del", kgPortalVIP+"/32", "dev", "lo").Run() })
-	run(t, nftWrapper, "add", "element", "inet", "stayconnect", "auth_ipv4", "{ \""+guestIface+"\" . "+guestIP+" }")
+	run(t, nftWrapper, "add", "element", "inet", "stayconnect", "phase3_auth_ipv4", "{ \""+guestIface+"\" . "+guestIP+" }")
 	if !reaches(t) {
 		t.Fatal("precondition: the authorized guest cannot reach the WAN at all")
 	}

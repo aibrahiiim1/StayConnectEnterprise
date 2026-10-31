@@ -150,6 +150,30 @@ check_names() {
     printf '%s\n' "${base%.up.sql}" | grep -Eq "$VERSION_RE" \
       || die "migration file name '$base' does not match NNNN_lower_case_name.up.sql"
   done
+  check_reserved
+}
+
+# RESERVED NUMBERS: $MIGRATIONS/RESERVED_NUMBERS (one 'FIRST-LAST reason' range per line, a hash starts a comment) holds
+# numbers out of the sequence on purpose -- the same file tools/validate-migration-location.py enforces in CI. A
+# migration file (up or down) whose number is in a reserved range is refused before anything is planned or applied.
+check_reserved() {
+  local rf="$MIGRATIONS/RESERVED_NUMBERS" line range a b f n
+  [ -f "$rf" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%%#*}"
+    range="$(printf '%s' "$line" | awk '{print $1}')"
+    [ -n "$range" ] || continue
+    printf '%s\n' "$range" | grep -Eq '^[0-9]{4}-[0-9]{4}$' || die "$rf: malformed line: $line"
+    a=$((10#${range%-*})); b=$((10#${range#*-}))
+    [ "$a" -le "$b" ] || die "$rf: range runs backwards: $line"
+    for f in "$MIGRATIONS"/[0-9][0-9][0-9][0-9]_*.sql; do
+      [ -e "$f" ] || continue
+      n=$((10#$(basename "$f" | cut -c1-4)))
+      if [ "$n" -ge "$a" ] && [ "$n" -le "$b" ]; then
+        die "$(basename "$f") uses number $(printf '%04d' "$n"), which $rf holds out of the sequence on purpose. Take the next free number."
+      fi
+    done
+  done < "$rf"
 }
 
 # row_state prints MISSING (never applied), NOCHECKSUM (recorded by hand before this ledger existed), or
@@ -275,6 +299,12 @@ up)
     st="$(row_state "$version")"
     case "$st" in
       MISSING)
+        # The same NUMBER already applied under a different NAME is a renamed or replaced migration: a different
+        # history, not a new migration.
+        other="$(printf '%s\n' "SELECT string_agg(version, ',') FROM schema_migrations WHERE substring(version from 1 for 4) = :'n' AND version <> :'v';" \
+                 | QV -v n="${version%%_*}" -v v="$version")"
+        [ -z "$other" ] || die "$version is offered, but this database already ran number ${version%%_*} as $other.
+    A release may not rename or replace a migration the ledger holds."
         apply_one "$version" "$file"
         applied_any=1 ;;
       NOCHECKSUM)

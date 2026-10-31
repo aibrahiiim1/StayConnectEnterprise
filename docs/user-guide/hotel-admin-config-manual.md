@@ -369,7 +369,7 @@ default). Roles:
 | Client relations operator | Vouchers (including showing codes), client accounts, sessions (including disconnect), post-stay access, releasing a waiting device; read-only elsewhere |
 | Client services operator | As client relations, plus read-only charge pages and roster reconciliation |
 | Payments operator | Charge decisions (Hotel); read-only sessions, usage and voucher cards |
-| Site IT manager | Networking, PMS connection, sign-in methods and protection, portal settings, Grace Period, code format, diagnostics; cannot show voucher codes, does not see Internet packages or Service plans, cannot manage operators or take backups |
+| Site IT manager | Networking, PMS connection, sign-in methods and protection, portal settings, After Check-out Access, code format, diagnostics; cannot show voucher codes, does not see Internet packages or Service plans, cannot manage operators or take backups |
 | Site admin | Everything, including operators, internet packages, PMS routing and backups |
 
 > **Reading a printed code is its own permission.** Issuing and cancelling cards
@@ -414,7 +414,7 @@ normally need to intervene. If you do: **Recheck** re-runs a health check,
 | Issue Wi-Fi voucher cards | Internet offering → Vouchers → Issue vouchers |
 | Turn sign-in methods on or off | Client Portal → Sign-in methods |
 | Room-number sign-in | Hotel → PMS connection, PMS routing, Room sign-in |
-| Post-checkout access for guests | Hotel → Grace Period, Post-stay access |
+| Post-checkout access for guests | Hotel → After Check-out Access |
 | Email/SMS codes | Client Portal → Email & SMS |
 | Google/Apple sign-in | Client Portal → Social login |
 | Change how the sign-in page looks | Client Portal → Portal settings |

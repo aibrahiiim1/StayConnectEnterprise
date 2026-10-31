@@ -57,6 +57,7 @@ async function installBackend(page: Page) {
     if (path === "/portal-assets" && method === "POST")
       return route.fulfill(json(200, { name: "aaaa1111bbbb2222.png", url: "/assets/aaaa1111bbbb2222.png", size_bytes: PNG.length }));
     if (path === "/portal-assets") return route.fulfill(json(200, { data: [], meta: { has_more: false } }));
+    if (path.endsWith("/resolved")) return route.fulfill(json(200, { status: "ready", url: "/assets/aaaa1111bbbb2222.png" }));
     if (path.endsWith("/raw")) return route.fulfill({ status: 200, contentType: "image/png", body: PNG });
     return route.fulfill(json(200, { data: [], meta: { has_more: false } }));
   });

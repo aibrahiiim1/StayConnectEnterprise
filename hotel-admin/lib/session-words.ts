@@ -89,8 +89,8 @@ export function methodLabel(method?: string | null): string {
     SOCIAL_FACEBOOK: "Facebook",
     PRINCIPAL: "Email, phone or social login",
     OPEN: "No sign-in (chose a package)",
-    POST_STAY: "Post-stay access",
-    GRACE: "Grace Period",
+    POST_STAY: "After Check-out Access (reconnection)",
+    GRACE: "After Check-out Access",
     ADMIN: "Granted by an operator",
   };
   if (map[method]) return map[method];

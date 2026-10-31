@@ -51,22 +51,31 @@ func pageBodies(t *testing.T) [][]string {
 	return out
 }
 
-func TestPostStayPageSendsTheRoomAndReservationThenTheContextAndTheChosenPackage(t *testing.T) {
+// After Check-out Access (2026-10-30): the page sends the room and the reservation and nothing else. No surname, no code and no
+// package choice exist any more, and the page never carries a context of its own (the server verifies and reconnects in one
+// request), so a guest cannot skip the verification by posting a context.
+func TestPostStayPageSendsOnlyTheRoomAndReservation(t *testing.T) {
 	bodies := pageBodies(t)
-	if len(bodies) != 2 {
-		t.Fatalf("the page makes %d post-stay calls, want 2 (the room and reservation, then the choice): %v", len(bodies), bodies)
+	if len(bodies) != 1 {
+		t.Fatalf("the page makes %d post-stay calls, want exactly 1 (the room and reservation): %v", len(bodies), bodies)
 	}
-	if strings.Join(bodies[0], ",") != "room,reservation,last_name" {
-		t.Fatalf("the check call sends %v, want exactly {room, reservation, last_name}", bodies[0])
+	if strings.Join(bodies[0], ",") != "room,reservation" {
+		t.Fatalf("the call sends %v, want exactly {room, reservation}", bodies[0])
 	}
-	if strings.Join(bodies[1], ",") != "auth_context_id,package_revision_id" {
-		t.Fatalf("the choice call sends %v, want {auth_context_id, package_revision_id}: without the package "+
-			"the conversion can never succeed", bodies[1])
-	}
-	for _, frag := range []string{"j.needs_choice", "j.choices", "j.session_id", "res.j.session_id",
-		"c.package_revision_id", `id="ps-choices"`} {
+	for _, frag := range []string{"j.session_id"} {
 		if !strings.Contains(landingHTML, frag) {
 			t.Fatalf("the page script no longer reads %q", frag)
+		}
+	}
+	for _, gone := range []string{"last_name: document.getElementById('ps-last')", `id="ps-last"`, `id="ps-choices"`,
+		"renderPostStayChoices", "needs_choice", "package_revision_id"} {
+		// package_revision_id and needs_choice still exist for the Room (PMS) flow elsewhere in the page; only the
+		// post-stay panel and its script must be free of them.
+		if gone == "package_revision_id" || gone == "needs_choice" {
+			continue
+		}
+		if strings.Contains(landingHTML, gone) {
+			t.Fatalf("the page still carries %q: after-check-out sign-in asks for the room and reservation only", gone)
 		}
 	}
 }
@@ -80,60 +89,33 @@ func build(keys []string, vals map[string]string) string {
 	return string(raw)
 }
 
-func TestPostStayChoiceFlowThroughPortald(t *testing.T) {
+func TestPostStayVerifiesThenReconnectsInOneRequest(t *testing.T) {
 	bodies := pageBodies(t)
 	s := &pathStub{answers: map[string]any{
-		"/v1/phase5/auth/post-stay": map[string]any{"outcome": "VERIFIED", "auth_context_id": "ctx-1",
-			"offers": []map[string]any{
-				{"package_revision_id": "pkg-a", "code": "PS-A", "down_kbps": 5000},
-				{"package_revision_id": "pkg-b", "code": "PS-B", "down_kbps": 10000}}},
+		"/v1/phase5/auth/post-stay":   map[string]any{"outcome": "VERIFIED", "auth_context_id": "ctx-1"},
 		"/v1/phase5/poststay/convert": map[string]any{"outcome": "GRANTED", "session_id": "sess-1", "entitlement_id": "ent-1"},
 	}}
 	h := pathStubHandler(t, s)
-
 	_, out := postStayPost(t, h, "/auth/post-stay", build(bodies[0], map[string]string{"room": "101", "reservation": "R1"}))
-	if !out.OK || !out.NeedsChoice || out.AuthContextID != "ctx-1" || len(out.Choices) != 2 {
-		t.Fatalf("a verified check with two packages did not ask the guest to choose: %+v", out)
+	if !out.OK || out.SessionID != "sess-1" || out.RedirectTo != "/success" {
+		t.Fatalf("a verified check did not connect the guest: %+v", out)
 	}
-	if s.calls[0] != "/v1/phase5/auth/post-stay" || s.bodies[0]["room"] != "101" || s.bodies[0]["reservation"] != "R1" {
-		t.Fatalf("verify hop = %v %v", s.calls, s.bodies)
-	}
-
-	_, out2 := postStayPost(t, h, "/auth/post-stay", build(bodies[1], map[string]string{
-		"auth_context_id": out.AuthContextID, "package_revision_id": out.Choices[1].PackageRevisionID}))
-	if !out2.OK || out2.SessionID != "sess-1" || out2.RedirectTo != "/success" {
-		t.Fatalf("the choice did not connect the guest: %+v", out2)
-	}
-	if len(s.calls) != 2 || s.calls[1] != "/v1/phase5/poststay/convert" {
+	if len(s.calls) != 2 || s.calls[0] != "/v1/phase5/auth/post-stay" || s.calls[1] != "/v1/phase5/poststay/convert" {
 		t.Fatalf("hops = %v, want verify then convert", s.calls)
 	}
+	if v := s.bodies[0]; v["room"] != "101" || v["reservation"] != "R1" || len(v) != 3 { // room, reservation, device
+		t.Fatalf("verify hop carried %v; scd's decoder refuses anything but room, reservation and the derived device", v)
+	}
 	conv := s.bodies[1]
-	if conv["auth_context_id"] != "ctx-1" || conv["package_revision_id"] != "pkg-b" {
-		t.Fatalf("convert hop carried %v; scd refuses a conversion without the chosen package", conv)
+	if conv["auth_context_id"] != "ctx-1" {
+		t.Fatalf("convert hop carried %v", conv)
 	}
 	if dev, _ := conv["device"].(map[string]any); dev["mac"] != "02:00:00:aa:00:01" {
 		t.Fatalf("convert hop device = %v, want the server-derived one", conv["device"])
 	}
-	// scd's decoder refuses unknown fields.
-	if len(conv) != 3 {
+	// scd's decoder refuses unknown fields: no package, no surname.
+	if len(conv) != 2 {
 		t.Fatalf("convert hop carried extra keys: %v", conv)
-	}
-}
-
-// One offer is not a choice: portald converts it in the same request.
-func TestPostStaySingleOfferConvertsAtOnce(t *testing.T) {
-	s := &pathStub{answers: map[string]any{
-		"/v1/phase5/auth/post-stay": map[string]any{"outcome": "VERIFIED", "auth_context_id": "ctx-1",
-			"offers": []map[string]any{{"package_revision_id": "pkg-a", "code": "PS-A"}}},
-		"/v1/phase5/poststay/convert": map[string]any{"outcome": "GRANTED", "session_id": "sess-1", "entitlement_id": "ent-1"},
-	}}
-	h := pathStubHandler(t, s)
-	_, out := postStayPost(t, h, "/auth/post-stay", `{"room":"101","reservation":"R1"}`)
-	if !out.OK || out.SessionID != "sess-1" {
-		t.Fatalf("a single post-stay package was not converted at once: %+v", out)
-	}
-	if len(s.calls) != 2 || s.bodies[1]["package_revision_id"] != "pkg-a" {
-		t.Fatalf("hops = %v bodies = %v", s.calls, s.bodies)
 	}
 }
 
@@ -152,12 +134,16 @@ func TestPostStayGrantWithoutASessionIsRefused(t *testing.T) {
 	}
 }
 
-func TestPostStayVerifiedWithoutOffersIsTheUniformAnswer(t *testing.T) {
+// scd that says VERIFIED but issues no context cannot be converted: the guest gets the uniform answer.
+func TestPostStayVerifiedWithoutAContextIsTheUniformAnswer(t *testing.T) {
 	s := &pathStub{answers: map[string]any{
-		"/v1/phase5/auth/post-stay": map[string]any{"outcome": "VERIFIED", "auth_context_id": "ctx-1"}}}
+		"/v1/phase5/auth/post-stay": map[string]any{"outcome": "VERIFIED"}}}
 	h := pathStubHandler(t, s)
 	_, out := postStayPost(t, h, "/auth/post-stay", `{"room":"101","reservation":"R1"}`)
-	if out.OK || out.AuthContextID != "" {
-		t.Fatalf("a verification with nothing to grant reached the guest: %+v", out)
+	if out.OK || out.SessionID != "" {
+		t.Fatalf("a verification with no context reached the guest: %+v", out)
+	}
+	if len(s.calls) != 1 {
+		t.Fatalf("hops = %v, want only the verify hop", s.calls)
 	}
 }

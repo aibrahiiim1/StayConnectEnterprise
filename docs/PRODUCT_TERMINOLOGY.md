@@ -90,16 +90,15 @@ appears only when the appliance serves those screens (the navigation is capabili
 | Stays | Reservations and in-house guests as the PMS reports them. |
 | **Room sign-in** | What a guest types besides the room number (one detail from the reservation). Its meaning depends on the PMS stay record, so it is configured here; the on/off switch for the method stays with the other methods in Client Portal → Sign-in methods. |
 | Guest sign-in checks, Guest sign-in attempts | Room sign-in, verified against the PMS guest list — the subject is the PMS guest record. |
-| **Grace Period** | Internet access a guest keeps after PMS checkout (formerly *Checkout grace*). |
-| Post-stay access | Access after departure, keyed to the PMS stay. |
+| **After Check-out Access** | What a guest's devices keep after a verified PMS check-out: one policy, one shared data quota (formerly *Grace Period* and *Post-stay access*, now one feature). |
 | Charge health, Manual review, Settlements, Recovery | Posting internet charges to the guest's room bill in the PMS. |
 
 **Inside Hotel, "guest" is right** when the subject is the PMS guest or reservation record: the guest list,
 guests in house, the guest name on the reservation, G#, a departing guest, *Guest checked out*. Outside Hotel
 the end user is always a **client**.
 
-**Grace Period** is the post-checkout access grace. It is not the licence's renewal *grace period* on the
-Appliance & licence screen, which keeps its own wording.
+**After Check-out Access** replaced the former *Grace Period* and *Post-stay access* pages. It is not the licence's
+renewal *grace period* on the Appliance & licence screen, which keeps its own wording.
 
 ### Role labels
 
@@ -137,7 +136,7 @@ them would change what the text says.
 | **PMS guest** semantics inside the Hotel module: guest name, G#, in-house guest, guest record, guest list/roster as the PMS holds it | The Property Management System's own vocabulary (FIAS and the other PMS integrations). The text describes a PMS record, not the Wi-Fi user. |
 | **Stay**, **Room**, **RN**, **reservation**, **check-in/checkout**, **post-stay** | PMS stay semantics, unchanged by decision. |
 | **Property management system**, **Hotel ID** and other PMS/FIAS field names | The industry name of the system class and integration fields defined by the PMS. |
-| Code, API, database and deployment identifiers: `hotel-admin/`, `guest_accounts`, `guest_networks`, `guest_network_id`, port-role values `guest_access`/`guest_trunk`, the `guest.local` default domain, `/guest-accounts`, `/checkout-grace`, `guest-signin-attempts`, role keys, `check-hotel-admin-integrity.sh`, `stayconnect-*` units, `hotel.stayconnect.local`, the `@layer hotel` CSS layer, translation keys such as `tab.guest` | Renaming them is an API/deployment change with no product-facing benefit; routes keep working and existing bookmarks and integrations are unaffected. |
+| Code, API, database and deployment identifiers: `hotel-admin/`, `guest_accounts`, `guest_networks`, `guest_network_id`, port-role values `guest_access`/`guest_trunk`, the `guest.local` default domain, `/guest-accounts`, `/checkout-grace` (now redirects to `/after-checkout-access`), `guest-signin-attempts`, role keys, `check-hotel-admin-integrity.sh`, `stayconnect-*` units, `hotel.stayconnect.local`, the `@layer hotel` CSS layer, translation keys such as `tab.guest` | Renaming them is an API/deployment change with no product-facing benefit; routes keep working and existing bookmarks and integrations are unaffected. |
 | Historical records: `governance/` history, `docs/manifests/`, `docs/reports/`, `docs/evidence/`, `docs/acceptance/`, phase plans and closed reports | A record of what was true then is not rewritten. |
 
 ## Open decisions (not part of this change)

@@ -58,7 +58,7 @@ The registry lives in the shared `license` module so Central and the appliance u
 
 | Module | Requires | Local switch | What it unlocks |
 |---|---|---|---|
-| `hospitality` | — | Modules screen | Hotel section: PMS interfaces, Room sign-in, stays, Grace Period, post-stay, stay transfers, reconciliation |
+| `hospitality` | — | Modules screen | Hotel section: PMS interfaces, Room sign-in, stays, After Check-out Access, stay transfers, reconciliation |
 | `paid_access` | — | Modules screen | priced Internet Packages |
 | `card_payment` | `paid_access` | Modules screen | Card payment through a provider-hosted page |
 | `room_charge` | `hospitality`, `paid_access` | Modules screen | PMS Room Charge, per-interface financial onboarding, financial review |

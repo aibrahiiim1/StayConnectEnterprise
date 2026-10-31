@@ -12,9 +12,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 )
 
 // CapEntitlementTransfer is the controlled-operation family that owns writes to entitlement_transfers and stay_links.
@@ -156,9 +155,10 @@ func (s *Store) blocker(ctx context.Context, tenant, site, fromStay, toStay, fro
 	return ""
 }
 
-// Execute performs the transfer in one transaction. Lock order is L1 Stay before L3 Entitlement, and both
-// Stays are locked in id order first: caller order would deadlock two opposite-direction transfers between
-// the same pair. Everything the preview checked is re-checked under the locks.
+// Execute performs the transfer by calling iam_v2.cross_pms_transfer (migration 0201): one SECURITY DEFINER function that runs the whole
+// operation in one transaction, with the lock order (both Stays in id order, then the source Entitlement) and every precondition the
+// preview checked re-checked under the locks. The Hotel Admin login holds no table privilege for any of the writes; executing this one
+// function is all it may do. The function's refusals arrive as 'XFER_<CODE>: ...' and map back to the errors below.
 func (s *Store) Execute(ctx context.Context, req Request) (Result, error) {
 	if strings.TrimSpace(req.Operator) == "" || len(strings.TrimSpace(req.Reason)) < 4 {
 		return Result{}, ErrNotAuthorized
@@ -166,181 +166,39 @@ func (s *Store) Execute(ctx context.Context, req Request) (Result, error) {
 	if req.GraceValidFor <= 0 || req.GraceValidFor > 7*24*time.Hour {
 		return Result{}, ErrNotAuthorized
 	}
-	tx, err := s.pool.Begin(ctx)
+	var out Result
+	err := s.pool.QueryRow(ctx, `SELECT transfer_id::text, from_entitlement::text, to_entitlement::text, to_package::text,
+		devices_rebound, sessions_rebound, window_ends
+		  FROM iam_v2.cross_pms_transfer($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6,$7::int)`,
+		req.Tenant, req.Site, req.FromStay, req.ToStay, req.Operator, req.Reason, int(req.GraceValidFor.Seconds())).
+		Scan(&out.TransferID, &out.FromEntitlement, &out.ToEntitlement, &out.ToPackage,
+			&out.DevicesRebound, &out.SessionsRebound, &out.WindowEnds)
 	if err != nil {
-		return Result{}, err
+		return Result{}, mapTransferError(err)
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	return out, nil
+}
 
-	first, second := req.FromStay, req.ToStay
-	if first > second {
-		first, second = second, first
+// mapTransferError turns the function's coded refusals back into the package's errors. Anything else is returned as it came.
+func mapTransferError(err error) error {
+	var pe *pgconn.PgError
+	if !errors.As(err, &pe) {
+		return err
 	}
-	var n int
-	if err := tx.QueryRow(ctx, `SELECT count(*) FROM (
-		SELECT id FROM iam_v2.stays WHERE tenant_id=$1 AND site_id=$2 AND id IN ($3,$4)
-		 ORDER BY id FOR UPDATE) locked`, req.Tenant, req.Site, first, second).Scan(&n); err != nil {
-		return Result{}, err
-	}
-	if n != 2 {
-		return Result{}, ErrDestinationMissing
-	}
-
-	var fromIface, toIface, fromStatus, toStatus string
-	if err := tx.QueryRow(ctx, `SELECT f.pms_interface_id::text, t.pms_interface_id::text, f.status, t.status
-		  FROM iam_v2.stays f, iam_v2.stays t
-		 WHERE f.tenant_id=$1 AND f.site_id=$2 AND f.id=$3
-		   AND t.tenant_id=$1 AND t.site_id=$2 AND t.id=$4`,
-		req.Tenant, req.Site, req.FromStay, req.ToStay).
-		Scan(&fromIface, &toIface, &fromStatus, &toStatus); err != nil {
-		return Result{}, ErrDestinationMissing
-	}
-	if fromIface == toIface {
-		return Result{}, ErrSameInterface
-	}
-	// Under the lock: a checkout that committed first leaves grace, which must not cross properties; and the
-	// destination may have checked out since the preview.
-	if fromStatus != "IN_HOUSE" {
-		return Result{}, ErrSourceNotInHouse
-	}
-	if toStatus != "IN_HOUSE" {
-		return Result{}, ErrDestinationNotEligible
-	}
-
-	var fromEnt string
-	if err := tx.QueryRow(ctx, `SELECT id::text FROM iam_v2.entitlements
-		 WHERE tenant_id=$1 AND site_id=$2 AND stay_id=$3 AND status IN ('PENDING','ACTIVE','SUSPENDED')
-		 FOR UPDATE`, req.Tenant, req.Site, req.FromStay).Scan(&fromEnt); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return Result{}, ErrSourceNotTransferable
+	for code, mapped := range map[string]error{
+		"XFER_NOT_AUTHORIZED":           ErrNotAuthorized,
+		"XFER_DESTINATION_MISSING":      ErrDestinationMissing,
+		"XFER_SAME_INTERFACE":           ErrSameInterface,
+		"XFER_SOURCE_NOT_IN_HOUSE":      ErrSourceNotInHouse,
+		"XFER_DESTINATION_NOT_ELIGIBLE": ErrDestinationNotEligible,
+		"XFER_SOURCE_NOT_TRANSFERABLE":  ErrSourceNotTransferable,
+		"XFER_ALREADY_TRANSFERRED":      ErrAlreadyTransferred,
+		"XFER_DESTINATION_OCCUPIED":     ErrDestinationOccupied,
+		"XFER_NO_LANDING_PACKAGE":       ErrNoGracePackage,
+	} {
+		if strings.HasPrefix(pe.Message, code+":") {
+			return mapped
 		}
-		return Result{}, err
 	}
-	var already int
-	if err := tx.QueryRow(ctx, `SELECT count(*) FROM iam_v2.entitlement_transfers
-		WHERE from_entitlement_id=$1`, fromEnt).Scan(&already); err != nil {
-		return Result{}, err
-	}
-	if already > 0 {
-		return Result{}, ErrAlreadyTransferred
-	}
-	var destLive int
-	if err := tx.QueryRow(ctx, `SELECT count(*) FROM iam_v2.entitlements
-		 WHERE tenant_id=$1 AND site_id=$2 AND stay_id=$3 AND status IN ('PENDING','ACTIVE','SUSPENDED')`,
-		req.Tenant, req.Site, req.ToStay).Scan(&destLive); err != nil {
-		return Result{}, err
-	}
-	if destLive > 0 {
-		return Result{}, ErrDestinationOccupied
-	}
-
-	// The landing package: zero-price, no-posting, chosen inside the transaction.
-	pkgRev, planRev, err := s.landingPackage(ctx, tx, req.Tenant, req.Site, toIface)
-	if err != nil {
-		return Result{}, err
-	}
-
-	// The database requires TERMINATED(TRANSFERRED) before it records the lineage row.
-	if _, err := tx.Exec(ctx,
-		`SELECT iam_v2.apply_entitlement_transition($1,'TERMINATED',now(),'TRANSFERRED')`, fromEnt); err != nil {
-		return Result{}, err
-	}
-
-	if err := writerguard.Open(ctx, tx, "commerce_intent"); err != nil {
-		return Result{}, err
-	}
-	var purchase string
-	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.purchases
-		(tenant_id, site_id, package_revision_id, stay_id, trigger, amount_minor, state)
-		VALUES ($1,$2,$3,$4,'CROSS_PMS_TRANSFER',0,'GRANTED') RETURNING id::text`,
-		req.Tenant, req.Site, pkgRev, req.ToStay).Scan(&purchase); err != nil {
-		return Result{}, err
-	}
-	var toEnt string
-	var windowEnds time.Time
-	// supersedes_entitlement_id must stay unset: a transfer crosses subjects, a supersession does not, and
-	// the guard refuses both claims on one row.
-	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.entitlements
-		(tenant_id, site_id, stay_id, purchase_id, policy_snapshot, service_plan_revision_id,
-		 package_revision_id, time_accounting_mode, end_mode, window_ends_at, status)
-		VALUES ($1,$2,$3,$4,'{}'::jsonb,$5,$6,'VALIDITY_WINDOW','VALIDITY_WINDOW',
-		        now() + make_interval(secs => $7),'PENDING')
-		RETURNING id::text, window_ends_at`,
-		req.Tenant, req.Site, req.ToStay, purchase, planRev, pkgRev,
-		req.GraceValidFor.Seconds()).Scan(&toEnt, &windowEnds); err != nil {
-		return Result{}, err
-	}
-	if _, err := tx.Exec(ctx,
-		`SELECT iam_v2.apply_entitlement_transition($1,'ACTIVE',now(),NULL)`, toEnt); err != nil {
-		return Result{}, err
-	}
-
-	// Devices and live sessions rebind in place (no logout, no nft churn: enforcement is keyed on the
-	// session). entitlement_device_authorizations is an append-only interval history that accounting
-	// attribution reads, so the source's open intervals must close at the same instant the destination's open.
-	movedAt := time.Now().UTC()
-	devices, err := tx.Exec(ctx, `INSERT INTO iam_v2.entitlement_devices
-		(tenant_id, site_id, entitlement_id, device_id, status, grandfathered, first_authorized, last_authorized)
-		SELECT $1,$2,$3, ed.device_id, 'AUTHORIZED', ed.grandfathered, ed.first_authorized, $5
-		  FROM iam_v2.entitlement_devices ed
-		 WHERE ed.entitlement_id=$4 AND ed.status='AUTHORIZED'`,
-		req.Tenant, req.Site, toEnt, fromEnt, movedAt)
-	if err != nil {
-		return Result{}, err
-	}
-	if err := writerguard.Open(ctx, tx, "device_auth"); err != nil {
-		return Result{}, err
-	}
-	if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.entitlement_device_authorizations
-		(tenant_id, site_id, entitlement_id, device_id, seq, authorized_at)
-		SELECT $1,$2,$3, ed.device_id, 1, $4
-		  FROM iam_v2.entitlement_devices ed WHERE ed.entitlement_id=$3`,
-		req.Tenant, req.Site, toEnt, movedAt); err != nil {
-		return Result{}, err
-	}
-	// GREATEST keeps an interval from ending before it began.
-	if _, err := tx.Exec(ctx, `WITH closed AS (
-		UPDATE iam_v2.entitlement_device_authorizations a
-		   SET deauthorized_at = GREATEST($2::timestamptz, a.authorized_at)
-		 WHERE a.entitlement_id=$1 AND a.deauthorized_at IS NULL
-		 RETURNING a.entitlement_id, a.device_id)
-		UPDATE iam_v2.entitlement_devices ed
-		   SET status='DISCONNECTED', disconnected_reason='CROSS_PMS_TRANSFER'
-		  FROM closed WHERE ed.entitlement_id=closed.entitlement_id AND ed.device_id=closed.device_id`,
-		fromEnt, movedAt); err != nil {
-		return Result{}, err
-	}
-	sessions, err := tx.Exec(ctx, `UPDATE iam_v2.sessions
-		SET entitlement_id=$1 WHERE entitlement_id=$2 AND state='active'`, toEnt, fromEnt)
-	if err != nil {
-		return Result{}, err
-	}
-
-	// The database refuses both lineage rows unless everything above holds.
-	if err := writerguard.OpenPhase5(ctx, tx, CapEntitlementTransfer); err != nil {
-		return Result{}, err
-	}
-	var transferID string
-	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.entitlement_transfers
-		(tenant_id, site_id, from_entitlement_id, to_entitlement_id, from_stay_id, to_stay_id, actor, operator_reason)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id::text`,
-		req.Tenant, req.Site, fromEnt, toEnt, req.FromStay, req.ToStay, req.Operator,
-		boundedReason(req.Reason)).Scan(&transferID); err != nil {
-		return Result{}, err
-	}
-	if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.stay_links
-		(tenant_id, site_id, from_stay, to_stay, reason)
-		VALUES ($1,$2,$3,$4,'CROSS_PMS_TRANSFER') ON CONFLICT DO NOTHING`,
-		req.Tenant, req.Site, req.FromStay, req.ToStay); err != nil {
-		return Result{}, err
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return Result{}, err
-	}
-	return Result{
-		TransferID: transferID, FromEntitlement: fromEnt, ToEntitlement: toEnt, ToPackage: pkgRev,
-		DevicesRebound: int(devices.RowsAffected()), SessionsRebound: int(sessions.RowsAffected()),
-		WindowEnds: windowEnds,
-	}, nil
+	return err
 }

@@ -107,21 +107,31 @@ func TestIntegration_JanitorKeepsFreshRowsRemovesExpiredOnesInBoundedBatches(t *
 	owner := ownerPool(t)
 	ctx := context.Background()
 	const base = 9100000000000000
-	_, _ = rawExec(ctx, owner, `DELETE FROM iam_v2.controlled_operation_scope WHERE txid >= 9000000000000000`)
-	if _, err := rawExec(ctx, owner, `INSERT INTO iam_v2.controlled_operation_scope (txid, family, token, opened_at)
+	// Everything happens inside ONE transaction that is rolled back. The rows this test seeds are therefore invisible to every other
+	// transaction, so a writer in another package (the gates run packages in parallel against one database) cannot run the janitor
+	// over them and make the count wrong; and the call under test sees them, because it runs in the same transaction.
+	tx, err := owner.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SET LOCAL session_replication_role = replica`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.controlled_operation_scope (txid, family, token, opened_at)
 	    SELECT $1::bigint + g, 'stay', gen_random_uuid(), now() - interval '3 hours' FROM generate_series(1,250) g`, int64(base)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := rawExec(ctx, owner, `INSERT INTO iam_v2.controlled_operation_scope (txid, family, token, opened_at)
+	if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.controlled_operation_scope (txid, family, token, opened_at)
 	    SELECT $1::bigint + 1000 + g, 'stay', gen_random_uuid(), now() - interval '10 minutes' FROM generate_series(1,50) g`, int64(base)); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		_, _ = rawExec(context.Background(), owner, `DELETE FROM iam_v2.controlled_operation_scope WHERE txid >= 9000000000000000`)
-	})
+	if _, err := tx.Exec(ctx, `SET LOCAL session_replication_role = origin`); err != nil {
+		t.Fatal(err)
+	}
 	count := func(q string) int {
 		var n int
-		if err := owner.QueryRow(ctx, q).Scan(&n); err != nil {
+		if err := tx.QueryRow(ctx, q).Scan(&n); err != nil {
 			t.Fatal(err)
 		}
 		return n
@@ -133,7 +143,7 @@ func TestIntegration_JanitorKeepsFreshRowsRemovesExpiredOnesInBoundedBatches(t *
 		return count(`SELECT count(*) FROM iam_v2.controlled_operation_scope WHERE txid >= 9100000000000000 AND opened_at >= now() - interval '1 hour'`)
 	}
 	call := func() {
-		if _, err := owner.Exec(ctx, `SELECT iam_v2.begin_controlled_operation('stay')`); err != nil {
+		if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation('stay')`); err != nil {
 			t.Fatal(err)
 		}
 	}

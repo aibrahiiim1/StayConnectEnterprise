@@ -1,15 +1,15 @@
 "use client";
 
-// A guest reconnects after checkout with the room number and reservation number of the stay (audit decision AD-36);
-// there is no PIN to give out or reset. Staff can only end a stay's post-stay access, irreversibly.
+// The reconnections list of After Check-out Access: who reconnected with room + reservation number, and staff ending a
+// stay's reconnection, irreversibly. It sets no duration or package; those live in the After Check-out Access policy.
 
 import { usePmsConnections } from "@/lib/pms-scope";
+import * as React from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CalendarClock } from "lucide-react";
 import { api } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
 import { PageHeader, PageShell, StatCard, StatGrid } from "@/components/ui/page";
-import { HelpList, HelpSection } from "@/components/help";
 import { Card } from "@/components/ui/card";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { Badge, StatusBadge } from "@/components/ui/badge";
@@ -45,7 +45,7 @@ const STAY_WORDS: Record<string, string> = {
   IN_HOUSE: "In house",
   RESERVED: "Arriving",
   CHECKED_OUT: "Checked out",
-  POST_STAY_ACTIVE: "Post-stay access",
+  POST_STAY_ACTIVE: "Reconnection period",
   CANCELLED: "Cancelled",
   NO_SHOW: "No show",
 };
@@ -59,8 +59,12 @@ function stateOf(row: Profile): StateWords {
   return { label: "Active, not usable", tone: "warn", hint: "Expired, or the stay moved on" };
 }
 
+function Shell({ embedded, children }: { embedded: boolean; children: React.ReactNode }) {
+  return embedded ? <section aria-label="Reconnections" className="space-y-5">{children}</section> : <PageShell>{children}</PageShell>;
+}
+
 /** Wait for role loading before showing a read-only notice. */
-export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; rolesKnown?: boolean }) {
+export function PostStayView({ canAct, rolesKnown = true, embedded = false }: { canAct: boolean; rolesKnown?: boolean; embedded?: boolean }) {
   const toast = useToast();
   const { multi } = usePmsConnections();
   const [rows, setRows] = useState<Profile[] | null>(null);
@@ -72,6 +76,7 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
   const [reason, setReason] = useState("");
   const [confirmWord, setConfirmWord] = useState("");
   const [detail, setDetail] = useState<Profile | null>(null);
+  const [unavailable, setUnavailable] = useState(false);
 
   const load = useCallback(() => {
     api
@@ -81,11 +86,12 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
         setError(null);
       })
       .catch((e) => {
+        if (embedded && (e?.status === 404 || e?.status === 403)) setUnavailable(true);
         setError(String(e?.message ?? e));
         // Keep the last good list when refresh fails.
         setRows((prev) => prev ?? []);
       });
-  }, []);
+  }, [embedded]);
 
   useEffect(load, [load]);
 
@@ -111,7 +117,7 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
     setDialogError(null);
     try {
       await api.post(`/post-stay-profiles/${dialog.row.id}/revoke`, { password, reason: reason.trim() });
-      toast.success("Post-stay access ended", `Room ${dialog.row.normalized_room_number ?? "—"}${multi && dialog.row.pms_interface_label ? ` at ${dialog.row.pms_interface_label}` : ""} can no longer reconnect after checkout.`);
+      toast.success("Reconnection ended", `Room ${dialog.row.normalized_room_number ?? "—"}${multi && dialog.row.pms_interface_label ? ` at ${dialog.row.pms_interface_label}` : ""} can no longer reconnect after check-out.`);
       closeDialog();
       load();
     } catch (e: unknown) {
@@ -130,30 +136,24 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
     };
   }, [rows]);
 
+  if (unavailable) return null;
+
   return (
-    <PageShell>
-      <PageHeader
-        title="Post-stay access"
-        description="See who can reconnect after checkout, or end a guest's post-stay access."
-        help={
-          <>
-            <HelpSection title="What post-stay access is">
-              <p>
-                After checkout a guest can reconnect for a limited time by typing the room number and the reservation
-                number of the stay they left. The appliance checks them against that stay&apos;s own record, from a
-                device that was on the stay; a device that was never on it must also give the last name on the
-                reservation. Access belongs to one stay, never to a room: when the room is re-let, it stops working on its own.
-              </p>
-            </HelpSection>
-            <HelpSection title="What staff can do">
-              <HelpList items={[
-                <><strong>End access</strong> ends post-stay access for that stay. It cannot be undone.</>,
-                <>There is nothing to hand to the guest and nothing to reset: they need only the details of their reservation.</>,
-              ]} />
-            </HelpSection>
-          </>
-        }
-      />
+    <Shell embedded={embedded}>
+      {embedded ? (
+        <div className="space-y-1">
+          <h2 className="text-lg font-semibold">Reconnections</h2>
+          <p className="text-sm text-muted-foreground">
+            Stays whose guests reconnected after check-out with the room number and reservation number. Ending one
+            stops further reconnection for that stay; it cannot be undone.
+          </p>
+        </div>
+      ) : (
+        <PageHeader
+          title="Reconnections after check-out"
+          description="See who reconnected after check-out, or end a stay's reconnection."
+        />
+      )}
 
       {rolesKnown && !canAct && <ReadOnlyNotice />}
       <ErrorBanner err={error} />
@@ -174,8 +174,8 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
         ) : rows.length === 0 ? (
           <EmptyState size="sm"
             icon={<CalendarClock />}
-            title="No post-stay access yet"
-            hint="A guest who has reconnected after checkout appears here with their room and how long access lasts."
+            title="No reconnections yet"
+            hint="A guest who has reconnected after check-out appears here with their room and until when."
           />
         ) : (
           <Table>
@@ -235,8 +235,8 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
       <DetailsDrawer
         open={detail !== null}
         onOpenChange={(v) => !v && setDetail(null)}
-        eyebrow="Post-stay access"
-        title={detail?.normalized_room_number ? `Room ${detail.normalized_room_number}${multi && detail.pms_interface_label ? ` · ${detail.pms_interface_label}` : ""}` : "Post-stay access"}
+        eyebrow="Reconnection"
+        title={detail?.normalized_room_number ? `Room ${detail.normalized_room_number}${multi && detail.pms_interface_label ? ` · ${detail.pms_interface_label}` : ""}` : "Reconnection"}
         description={detail ? `Reservation ${detail.external_reservation_id || "—"}` : undefined}
         badges={detail ? (
           <>
@@ -260,7 +260,7 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
                 { label: "Valid until", value: formatDate(detail.valid_until) },
                 { label: "Ended", value: detail.revoked_at ? formatDate(detail.revoked_at) : "—" },
                 { label: "Stay reference", value: <MonoId value={detail.stay_id} title="Stay" /> },
-                { label: "Access reference", value: <MonoId value={detail.id} title="Post-stay access" /> },
+                { label: "Access reference", value: <MonoId value={detail.id} title="Reconnection" /> },
               ]}
             />
           </>
@@ -270,7 +270,7 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
       <DialogForm
         open={dialog !== null}
         onOpenChange={(v) => { if (!v) closeDialog(); }}
-        title="End post-stay access"
+        title="End reconnection"
         description={dialog ? `Room ${dialog.row.normalized_room_number ?? "—"} · reservation ${dialog.row.external_reservation_id}` : undefined}
         size="sm"
         submitLabel="End access permanently"
@@ -284,7 +284,7 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
         {dialog?.kind === "revoke" && (
           <ConsequenceList
             items={[
-              `Post-stay access ends for this stay (episode ${dialog.row.origin_lifecycle_version}).`,
+              `Reconnection ends for this stay (episode ${dialog.row.origin_lifecycle_version}).`,
               "This stay cannot be used to reconnect again.",
             ]}
           />
@@ -318,6 +318,6 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
         </Field>
       </DialogForm>
 
-    </PageShell>
+    </Shell>
   );
 }

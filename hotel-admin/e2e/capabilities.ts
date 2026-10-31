@@ -3,7 +3,7 @@ import type { Page, Route } from "@playwright/test";
 // Module pages fail closed without capabilities; install this full-hotel response after each spec's catch-all.
 
 const SURFACES = [
-  "account-password-settings", "audit", "auth-methods", "backups", "checkout-grace", "commercial-packages", "diagnostics", "financial-ops",
+  "account-password-settings", "audit", "auth-methods", "after-checkout-access", "backups", "checkout-grace", "commercial-packages", "diagnostics", "financial-ops",
   "financial-review", "guest-accounts", "guest-device-self-service", "guest-signin-attempts",
   "guest-signin-credentials", "guest-signin-protection", "guest-signin-restrictions", "license", "modules",
   "network", "notification-providers", "operational-alerts", "operators", "payment-providers", "pms-events",

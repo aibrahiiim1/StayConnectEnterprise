@@ -1,0 +1,13 @@
+{"check": "GET initial", "http": 200, "body": {"enabled": true, "configured": false, "config_version": 0, "policy": null, "effective": {"policy": {"data_quota_bytes": 524288000, "device_limit": 0, "device_limit_policy": "REJECT_NEW_DEVICE", "down_kbps": 5000, "duration_seconds": 3600, "policy_version": "EMERGENCY_GRACE_V1", "source": "EMERGENCY_FALLBACK", "up_kbps": 2000}, "source": "EMERGENCY_FALLBACK"}}}
+{"check": "PUT worked-example policy (8 h, 5/2 Mbps, 1 GB shared, 5 devices)", "http": 200, "body": {"config_version": 1}}
+{"check": "GET after", "http": 200, "body": {"enabled": true, "configured": true, "config_version": 1, "policy": {"duration_hours": 8, "duration_seconds": 28800, "down_kbps": 5000, "up_kbps": 2000, "data_quota_bytes": 1000000000, "device_limit": 5, "device_policy": "REJECT_NEW_DEVICE"}, "effective": {"policy": {"duration_hours": 8, "duration_seconds": 28800, "down_kbps": 5000, "up_kbps": 2000, "data_quota_bytes": 1000000000, "device_limit": 5, "device_policy": "REJECT_NEW_DEVICE"}, "source": "PUBLISHED"}}}
+{"check": "PUT with the stale version (expect 409 version_conflict)", "http": 409, "body": {"error": "version_conflict", "message": "the configuration changed since it was read; reload it"}}
+{"check": "PUT duration 100 h (expect 400 validation)", "http": 400, "body": {"error": "validation", "message": "duration must be a whole number of hours between 1 and 72"}}
+{"check": "PUT quota 1000 bytes (expect 400 validation)", "http": 400, "body": {"error": "validation", "message": "the shared data quota must be between 10 MiB and 100 GiB"}}
+{"check": "PUT invalid reason code (expect 400 reason_invalid)", "http": 400, "body": {"error": "reason_invalid", "message": "reason_code must be a bounded machine code matching ^[A-Z][A-Z0-9_]{0,63}$, not free text"}}
+{"check": "PUT wrong step-up password (expect 401/403)", "http": 401, "body": {"error": "reauth_required", "message": "password confirmation required"}}
+{"check": "PUT with nothing to change (expect 400 nothing_to_change)", "http": 400, "body": {"error": "nothing_to_change", "message": "name the switch (enabled) and/or the policy fields to change"}}
+{"check": "PUT switch off", "http": 200, "body": {"config_version": 2}}
+{"check": "GET switch off (effective source DISABLED expected)", "http": 200, "body": {"enabled": false, "config_version": 2, "effective": {"source": "DISABLED"}}}
+{"check": "PUT switch on", "http": 200, "body": {"config_version": 3}}
+{"check": "history (newest first)", "http": 200, "rows": [[3, "LAB_SWITCH_ON", "AFTER_CHECKOUT_ENABLED"], [2, "LAB_SWITCH_OFF", "AFTER_CHECKOUT_ENABLED"], [1, "LAB_WORKED_EXAMPLE", null]]}

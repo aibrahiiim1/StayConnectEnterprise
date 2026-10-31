@@ -43,7 +43,33 @@ ALTER TABLE public.guest_networks
   -- The dashboard's network card reads how each network resolves names (resources_overview.go). 0002's
   -- defaults and CHECK, for the same reason as the three above.
   ADD COLUMN IF NOT EXISTS dns_mode text NOT NULL DEFAULT 'appliance',
-  ADD COLUMN IF NOT EXISTS dns_servers jsonb NOT NULL DEFAULT '[]'::jsonb;
+  ADD COLUMN IF NOT EXISTS dns_servers jsonb NOT NULL DEFAULT '[]'::jsonb,
+  -- Untagged or VLAN, as 0002 declares it. The network pages and the staged-change code SELECT it.
+  ADD COLUMN IF NOT EXISTS network_type text NOT NULL DEFAULT 'untagged';
+-- The transactional apply record of network changes (0002), the same shape: the edged and netd integration tests
+-- join and insert against it, and a JOIN against a table the fixture lacks errors and reads as an empty site.
+CREATE TABLE IF NOT EXISTS public.network_config_revisions (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  seq            bigint GENERATED ALWAYS AS IDENTITY UNIQUE,
+  state          text NOT NULL DEFAULT 'draft'
+                   CHECK (state IN ('draft','validated','applying','pending_confirmation',
+                                    'active','failed','rolled_back','superseded')),
+  summary        text,
+  bundle_path    text,
+  intent         jsonb NOT NULL DEFAULT '{}'::jsonb,
+  validation     jsonb NOT NULL DEFAULT '{}'::jsonb,
+  previous_seq   bigint,
+  created_by     uuid,
+  validated_by   uuid,
+  applied_by     uuid,
+  confirmed_by   uuid,
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  validated_at   timestamptz,
+  applied_at     timestamptz,
+  confirmed_at   timestamptz,
+  confirm_deadline timestamptz,
+  failure_reason text
+);
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'guest_networks_dhcp_mode_check') THEN

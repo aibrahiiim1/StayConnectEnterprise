@@ -1,0 +1,19 @@
+Final mission lab acceptance, 2026-10-30/31. Isolated container lab (tools/oglab). Nothing was pushed, merged or deployed to a real host.
+Release under test: onegate-appliance-5926f7dead47 (commit 5926f7de). deployed-binaries.txt: sha256 of every binary and of the three netd builds.
+netd: S2 ran on the release netd; S3..S6, the capacity runs and the /19 run on netd built from branch lab-fixes-1 (bd411d70, then e30daa7f).
+
+outage/        OUTAGE_CONTINUITY_LAB_PLAN.md runs. <run>.csv = set size and governor state every 2 s (epoch,set,active,sessions,journalled,probe_ok,probe_failures,renewals,refused,record_mtime);
+               <run>.intervals.json = per client address first/last presence in the kernel set; <run>.cont.jsonl = netd continuity status every 15 s;
+               <run>.orch.log = every action with its time; <run>.analysis.json = the evaluation; *.journal.gz = netd and acctd journals.
+               s1 strict baseline; s2 60 min acctd stopped (release netd, one netd panic at +42:51); s3 20 min + accounting reconciliation; s4 120 min; s5 hung acctd 32 min (aborted by me)
+               with netd restarts / kill -9 / SIGSTOP; s5b hung acctd 60 min; s6 PostgreSQL stopped 65 min; s8.txt appliance container restart; s10*.txt negative checks
+               (s10d.txt is the one run with 488 elements at +75 s, finding F5);
+               cpu-outage-measurement/ = the CPU re-measurement (healthy / outage / after).
+               WARNING: the CPU columns in sNN.sampler.csv.gz and cgroup_cpu_percent_of_2vcpu in sNN.analysis.json read the wrong cgroup (/init.scope) and are meaningless.
+               The staff disconnects and entitlement ends of s2 were made by hand (s2.manual_*.out) because the planned clients had been disconnected by the earlier smoke run.
+capacity/      the 60 minute run (primary). cap.signin.log.gz: end_ms,client,result,latency_ms,sched_ms (OFFERED time),start_ms. cap.activations.csv.gz: appliance activation timestamps.
+capacity-run1/ the first run of the same hour: same offered/enforced/latency, CPU columns wrong (same instrument fault).
+network19/     NETWORK_19_LAB_PLAN.md run: refusals, staged apply, rollbacks, DHCP, the upper-half failure (upper-half-failure.txt) and the hotfix SQL, u32, neighbour sweep, isolation, restarts.
+container-lab/ real-kernel /19 test (6,000 sessions) and the Kea 2.2 container proof, re-run.
+aftercheckout/ After Check-out Access: integration test logs (real PostgreSQL, scratch database built from the migrations), the live lab API checks and RESULTS.txt (what was and was not exercised).
+No guest personal data exists in the lab (simulated clients); voucher codes are not stored here.

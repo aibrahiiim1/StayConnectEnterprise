@@ -1,0 +1,19 @@
+== baseline 07:11:47
+lo               UNKNOWN        127.0.0.1/8 
+eth0@if6004      UP             172.30.10.20/24 
+docker0          DOWN           172.17.0.1/16 
+br-4dc130c38cfd  UP             172.18.0.1/16 
+br-g-9252e124    UP             10.60.0.1/20 
+br-g102          UP             10.61.0.1/20 
+default via 172.30.10.1 dev eth0 
+10.60.0.0/20 dev br-g-9252e124 proto kernel scope link src 10.60.0.1 
+10.61.0.0/20 dev br-g102 proto kernel scope link src 10.61.0.1 
+172.17.0.0/16 dev docker0 proto kernel scope link src 172.17.0.1 linkdown 
+172.18.0.0/16 dev br-4dc130c38cfd proto kernel scope link src 172.18.0.1 
+172.30.10.0/24 dev eth0 proto kernel scope link src 172.30.10.20 
+92e478e97fb50cde908a8639ccbe8409e43668a21e4b142cf4787b8fa1779bfd  -
+br-g-9252e124 classes=1035 flower=1036
+br-g102 classes=700 flower=701
+active active active active active active 
+br-4dc130c38cfd br-g-9252e124 br-g102 docker0 eth0 eth1 eth1.102 ifb-g-9252e124 ifb-g102 lo vethd64fb53 
+{"enabled":true,"active":false,"window_seconds":3600,"sessions":1705,"database_probe_ok":true,"database_probe_failures":

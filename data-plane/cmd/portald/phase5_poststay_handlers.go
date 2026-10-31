@@ -1,7 +1,8 @@
 package main
 
-// A post-stay guest submits the room number and the reservation number of the stay they left (audit decision AD-36);
-// from a device that was never on that stay they also give the last name on it. The stay itself is never named: scd
+// A guest who has checked out submits the room number and the reservation number of the stay they left, and nothing else
+// (After Check-out Access, Product-Owner decisions AD-36 and 2026-10-30): no surname, first name, code or package choice. The
+// appliance lets back only a device that was authorised on that stay before check-out. The stay itself is never named: scd
 // derives the candidates from the connection's device, so no stay, profile or interface appears in any body.
 //
 // Non-success uses the same uniform builder and response-time budget as the Phase-3 flow (a faster wrong-answer
@@ -18,43 +19,25 @@ import (
 type postStayIn struct {
 	Room        string `json:"room,omitempty"`
 	Reservation string `json:"reservation,omitempty"`
-	LastName    string `json:"last_name,omitempty"`
-	// AuthContextID and PackageRevisionID appear only on the second call, after a successful check.
-	AuthContextID     string `json:"auth_context_id,omitempty"`
-	PackageRevisionID string `json:"package_revision_id,omitempty"`
 }
 
 type postStayOut struct {
-	OK      bool   `json:"ok"`
-	Message string `json:"message,omitempty"`
-
-	// NeedsChoice and Choices: a verified check awaiting the package choice (more than one offered).
-	NeedsChoice   bool             `json:"needs_choice,omitempty"`
-	AuthContextID string           `json:"auth_context_id,omitempty"`
-	Choices       []postStayChoice `json:"choices,omitempty"`
-	SessionID     string           `json:"session_id,omitempty"`
-	RedirectTo    string           `json:"redirect_to,omitempty"`
-}
-
-// Post-stay grants zero-price packages only, so there is no method or price.
-type postStayChoice struct {
-	PackageRevisionID string `json:"package_revision_id"`
-	Code              string `json:"code"`
-	DownKbps          int    `json:"down_kbps"`
-	UpKbps            int    `json:"up_kbps"`
+	OK         bool   `json:"ok"`
+	Message    string `json:"message,omitempty"`
+	SessionID  string `json:"session_id,omitempty"`
+	RedirectTo string `json:"redirect_to,omitempty"`
 }
 
 type scdPostStayResp struct {
-	Outcome       string           `json:"outcome"`
-	AuthContextID string           `json:"auth_context_id"`
-	ExpiresIn     int              `json:"expires_in_seconds"`
-	Offers        []postStayChoice `json:"offers"`
-	SessionID     string           `json:"session_id"`
-	EntitlementID string           `json:"entitlement_id"`
+	Outcome       string `json:"outcome"`
+	AuthContextID string `json:"auth_context_id"`
+	ExpiresIn     int    `json:"expires_in_seconds"`
+	SessionID     string `json:"session_id"`
+	EntitlementID string `json:"entitlement_id"`
 }
 
-// postStayAuth serves POST /auth/post-stay. Success yields a one-time Auth Context, never a session;
-// the session exists only after the conversion reaches GRANTED.
+// postStayAuth serves POST /auth/post-stay. The check yields a one-time Auth Context, never a session, and the portal
+// completes the reconnection in the same request; the session exists only after scd reports GRANTED.
 func (h *handler) postStayAuth(w http.ResponseWriter, r *http.Request) {
 	b := h.newPhase3Budget(r)
 	defer b.cancel()
@@ -66,39 +49,21 @@ func (h *handler) postStayAuth(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// A context on the call means the guest is choosing a package after a successful PIN.
-	if strings.TrimSpace(in.AuthContextID) != "" {
-		h.postStayConvert(w, r, b, in.AuthContextID, in.PackageRevisionID, device)
-		return
-	}
-	body, _ := json.Marshal(map[string]any{"device": device, "room": in.Room, "reservation": in.Reservation, "last_name": in.LastName})
+	body, _ := json.Marshal(map[string]any{"device": device, "room": in.Room, "reservation": in.Reservation})
 	var out scdPostStayResp
-	if !h.scdPhase3Call(b, "http://unix/v1/phase5/auth/post-stay", body, &out) || out.Outcome != "VERIFIED" {
+	if !h.scdPhase3Call(b, "http://unix/v1/phase5/auth/post-stay", body, &out) || out.Outcome != "VERIFIED" || out.AuthContextID == "" {
 		// Every non-success, including Phase 5 being dark, gets this one answer.
 		h.phase3Fail(w, r, b, "poststay_not_verified", classPostStay)
 		return
 	}
-	// One offer is converted at once, as the room path does; more than one is the guest's choice.
-	switch len(out.Offers) {
-	case 0:
-		// scd issues no context without an offer, so this is a contract break, not a guest condition.
-		h.phase3Fail(w, r, b, "poststay_verified_without_offers", classPostStay)
-		return
-	case 1:
-		h.postStayConvert(w, r, b, out.AuthContextID, out.Offers[0].PackageRevisionID, device)
-		return
-	}
-	b.wait(r)
-	writeJSONPortal(w, http.StatusOK, postStayOut{
-		OK: true, NeedsChoice: true, AuthContextID: out.AuthContextID, Choices: out.Offers})
+	h.postStayConvert(w, r, b, out.AuthContextID, device)
 }
 
 // scd answers GRANTED only once the session is enforced, so a session id means the device is online. GRANTED
 // without a session id (or with the entitlement id as the session id) is not access and is refused.
 func (h *handler) postStayConvert(w http.ResponseWriter, r *http.Request, b *phase3Budget,
-	contextID, packageRevision string, device map[string]string) {
-	body, _ := json.Marshal(map[string]any{
-		"device": device, "auth_context_id": contextID, "package_revision_id": packageRevision})
+	contextID string, device map[string]string) {
+	body, _ := json.Marshal(map[string]any{"device": device, "auth_context_id": contextID})
 	var out scdPostStayResp
 	if !h.scdPhase3Call(b, "http://unix/v1/phase5/poststay/convert", body, &out) || out.Outcome != "GRANTED" ||
 		out.SessionID == "" || out.SessionID == out.EntitlementID {

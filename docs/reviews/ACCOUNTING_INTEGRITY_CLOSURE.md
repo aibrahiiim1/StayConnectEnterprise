@@ -105,6 +105,32 @@ Results are in section 5.
 * A purge that races a retroactive rebind of the same session is covered only by the event (always written when `p_at` is older than the
   retention), not by a charge.
 * The crossing instant for a quota reached inside the folded part is only known to the hour (event recorded).
-* The 0180 note stands: `testdata/iamv2_tenant_tables.txt` is stale on master; cross-tenant transition and `sitemigrate` do not carry the
-  roll-up tiers or the accumulator (the legacy `public.accounting_records` is what they list).
+* ~~The 0180 note stands: `testdata/iamv2_tenant_tables.txt` is stale on master; cross-tenant transition and `sitemigrate` do not carry the
+  roll-up tiers or the accumulator.~~ **Reviewed in the final engineering round (see section 9 below):** the catalog list was regenerated
+  and the missing exemption added; `sitemigrate` and the cross-tenant transition carrying nothing of the usage tiers is correct by
+  construction, not a gap.
 * Nothing was run against a real appliance, Central, or the network.
+
+## 9. Final engineering round (2026-10-30): what was reviewed, fixed and left
+
+| Limit named above | Outcome |
+|---|---|
+| "Old entitlement not refunded after a retroactive rebind" | **Kept, by design, and now stated as such.** The previous entitlement keeps what it was charged and the new one is charged an upper bound. A refund would have to subtract bytes whose per-sample history no longer exists (they are folded into hour buckets), so it could only be a guess, and a guess in the guest's favour is extra quota. The direction can only be conservative; every case is recorded in `accounting_integrity_events`. |
+| "The crossing instant is only known to the hour inside folded data" | **Kept.** The folded hour tier has no finer time. The case is recorded as an event and the entitlement is treated as already over its limit from the hour, never later. |
+| "`sitemigrate` / cross-tenant transition do not carry the roll-up tiers or the accumulator" | **Not a defect.** `sitemigrate` is the delivered one-time copy of the legacy `public.*` guest tables from the former cloud database; the usage tiers (`iam_v2.accounting_usage_*`, `accounting_usage_entitlement`) and the entitlements and sessions they describe never existed there, and a tier without its entitlements would be unattributable. The cross-tenant transition purges the previous customer's tenant-owned `public` tables and holds the appliance fail-closed while another customer's `iam_v2` guest records exist (`cmd/scd/tenant_transition.go`); usage rows are keyed by tenant and site and are never read under another tenant, so nothing is carried and nothing can be fabricated or reset into extra allowance. Neither path creates an entitlement. |
+| "No admin visibility of `accounting_integrity_summary`" | **Added**, read-only: `GET /edge/v1/accounting-integrity` in edged (permission `reports`, counts and bytes per kind, `exact: true` when nothing is recorded; no guest, device, session or entitlement identifier). Real-PostgreSQL test `TestIntegration_AccountingIntegrity_TheOperatorViewIsReadOnlyAndExact`. The Hotel Admin screen is not built. |
+| `testdata/iamv2_tenant_tables.txt` stale; `stay_event_payload_reductions` failed the catalog test | **Fixed**: the table is named in `unscopedTables` (an ids-only undo record of 0171, child of `stay_events`) and the list regenerated. |
+
+**A defect found while reviewing usage continuity of the Cross-PMS Transfer (`internal/transfer`), fixed:** the transfer re-pointed
+live sessions with `UPDATE sessions SET entitlement_id`, which leaves the session's OPEN binding on the terminated source entitlement.
+Accounting charges a sample to the entitlement the session was *bound* to at the sample's instant, so after a transfer the destination's
+own data limit was never charged for what the guest then used (and the terminated source kept accruing). The transfer now moves each
+live session (active and pending enforcement) through `rebind_session_entitlement`, which closes the source interval and opens the
+destination's at the instant the devices move. Tests: `TestIntegration_F9_TransferMovesTheSessionBindingSoUsageIsChargedToTheDestination`
+and `..._TransferAlsoMovesAPendingSession`. **The privilege defect found with it, fixed afterwards (migration 0201):** with the production grants the role edged connects as
+(`svc_edged`) held neither `EXECUTE` on `apply_entitlement_transition` nor `INSERT` on `purchases`, `entitlements`, `entitlement_devices`,
+`entitlement_device_authorizations`, `entitlement_transfers` or `stay_links`, so the transfer could not complete on a real appliance (it failed
+closed). The whole operation is now one `SECURITY DEFINER` function, `iam_v2.cross_pms_transfer`, owned by `iam_v2_owner`, with the same preconditions,
+lock order, landing-package choice, lineage and session rebinding; `svc_edged` may only EXECUTE it (`deploy/gatep/svc-stay-transfer-grants.sql`), no table
+privilege was added, and the column `UPDATE` of `sessions.entitlement_id` it held for the old code is withdrawn. Tests run the transfer as `svc_edged` under the
+Gate-P grants and prove the role still cannot write those tables directly.

@@ -8,6 +8,7 @@ import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Trash2, Plus, ChevronDown, ChevronRight } from "lucide-react";
 import { addressingFor, suggestSubnet } from "@/lib/network-trunk";
+import { subnetSizeProblem } from "@/lib/network-subnet";
 
 export type VlanRow = {
   key: number;
@@ -61,6 +62,7 @@ export function vlanPlanProblems(
     else if (seenVLAN.has(v)) out[r.key] = `VLAN ${v} is listed twice.`;
     else if (!r.name.trim()) out[r.key] = "Name it.";
     else if (!r.subnet || !r.gateway || !r.poolStart || !r.poolEnd) out[r.key] = "Subnet, gateway and pool are needed.";
+    else if (subnetSizeProblem(r.subnet)) out[r.key] = subnetSizeProblem(r.subnet)!;
     else if (usedSubnets.has(r.subnet)) out[r.key] = "That subnet is already used by another client network.";
     else if (seenSubnet.has(r.subnet)) out[r.key] = "Each VLAN needs its own subnet.";
     else if (r.dnsMode === "custom" && !r.dnsServers.trim()) out[r.key] = "Give at least one DNS server.";

@@ -1,0 +1,22 @@
+   rolname   | calls  | total_ms | mean_ms | max_ms |                                                       q                                                        
+-------------+--------+----------+---------+--------+----------------------------------------------------------------------------------------------------------------
+ svc_acctd   | 323257 |   798421 |    2.47 |    131 | SELECT iam_v2.ingest_absolute_counters($1,$2,$3::uuid,$4::uuid,$5,$6,$7,$8,$9,$10)
+ svc_acctd   |    635 |   282510 |  444.90 |   1102 | SELECT entitlement::text, devices, sessions FROM iam_v2.p6_suspend_over_budget($1,$2)
+ svc_netd    |  10566 |   250382 |   23.70 |    747 | SELECT iam_v2.end_session_enforcement($1,$2,$3::uuid,$4)
+ svc_netd    |  18001 |   208478 |   11.58 |    160 | SELECT iam_v2.allocate_class_generation($1::uuid,$2::uuid,$3::uuid)
+ svc_acctd   |    635 |   172780 |  272.09 |    939 | SELECT id, reason, at FROM ( SELECT e.id::text AS id, CASE WHEN dat.at IS NOT NULL AND (win.at IS NULL OR dat.
+ svc_scd     |  18001 |   120918 |    6.72 |     80 | SELECT entitlement_id::text, already_granted, superseded::text FROM iam_v2.p4_grant_voucher_entitlement($1,$2,
+ svc_acctd   |  18061 |   103812 |    5.75 |    101 | SELECT reason, at, devices, sessions FROM iam_v2.p6_expire_entitlement($1)
+ svc_acctd   |   1686 |    95991 |   56.93 |    282 | SELECT s.id::text, s.entitlement_id::text, s.device_id::text, COALESCE(host(s.ip),''), COALESCE(s.mac::text,''
+ stayconnect |    685 |    72463 |  105.79 |    329 | select (select count(*) from pg_stat_activity where datname=$1), (select count(*) from pg_stat_activity where 
+ svc_scd     | 126007 |    48035 |    0.38 |     34 | SELECT iam_v2.begin_controlled_operation($1)
+ svc_scd     |  18001 |    46191 |    2.57 |     29 | SELECT count(*) FROM iam_v2.sessions se JOIN iam_v2.devices d ON d.id = se.device_id WHERE d.appliance_id = $1
+ svc_netd    |  18001 |    44300 |    2.46 |     79 | SELECT iam_v2.activate_session_enforcement($1,$2,$3::uuid,$4,$5,$6)
+ svc_scd     |  18001 |    37677 |    2.09 |     59 | SELECT iam_v2.authorize_entitlement_device($1,$2,now())
+ svc_acctd   |    635 |    30912 |   48.68 |    257 | SELECT iam_v2.p6_advance_data_crossing($1,$2)
+ svc_scd     |  18001 |    29913 |    1.66 |     24 | INSERT INTO iam_v2.purchases (tenant_id, site_id, package_revision_id, offer_quote_id, auth_context_id, trigge
+ svc_netd    |  18001 |    27496 |    1.53 |     41 | SELECT iam_v2.register_class_origin($1,$2,$3::uuid,$4::uuid,$5,$6,$7,$8,$9,$10)
+ svc_scd     |  18001 |    27255 |    1.51 |     33 | INSERT INTO iam_v2.sessions (tenant_id, site_id, entitlement_id, device_id, credential_method, state, started,
+ svc_scd     |  18001 |    26592 |    1.48 |     48 | INSERT INTO iam_v2.auth_contexts (tenant_id, site_id, method, voucher_id, guest_account_id, guest_principal_id
+(18 rows)
+

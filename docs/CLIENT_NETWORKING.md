@@ -28,6 +28,45 @@ unchanged; nothing is created.
 **Activate** (Admin Console → Client networks → Factory network) requires the acknowledgement that no other DHCP server serves the segment. It creates the
 row switched off and stages a switch-on (§2); the network serves clients only after the change is applied *and confirmed*.
 
+## 1a. How large a client network can be (/19)
+
+**Product Owner decision (2026-10-30): the widest client network is `/19`.** A `/19` has 8,190 usable addresses (`/20` has 4,094, `/24` has 254). This is the
+*address capacity* of one broadcast domain. It is **not** a claim that 8,190 clients are served at once: concurrent sessions are bounded by what the
+appliance can shape, track and forward (see the capacity records), and a site that needs more splits it into several client networks.
+
+| Rule | Where | Behaviour |
+|---|---|---|
+| `/19` through `/30` | `netcfg.CheckClientSubnet` (one rule, used by netd's apply-time validator and by the Admin API on create, batch, update, replacement and trunk planning) | wider than `/19`: `subnet_too_large` (HTTP 400 on the API, a validation issue at apply); narrower than `/30`: `subnet_too_small` |
+| No overlap between client networks | database range check at create/edit/enable and again at apply (`subnet_overlap`) | a `/19` over an existing `/20` or `/24`, or over half of one, is refused; an adjacent `/19` is accepted; a switched-off network does not block |
+| No overlap with the WAN/management network | netd, from the live address list of the WAN and management interfaces, at apply (`subnet_overlaps_host`); the Admin API refuses it earlier when the appliance can say what its WAN is | containment in either direction is refused (a `/19` over the WAN `/24`, or inside a wide WAN) |
+| The LAN base address (Network → System) follows the same size rule | `sysnet` | `/19` to `/30`; WAN and LAN may not overlap (containment, not only equality) |
+| An existing network is **never widened in place** | Admin API update (`subnet_widen_refused`, HTTP 409) | see below |
+
+**Widening a network that is switched on is refused, not staged.** The decision is explicit: changing the prefix of a live network moves the address range its
+clients, DHCP leases, per-client speed classes and the gateway's own bridge address belong to. The supported route is a new client network with the wider subnet
+(created switched off, applied and confirmed with the normal rollback window), then switching the old one off. A network that is switched **off** can have its
+subnet edited (it is not live), narrowing keeps the previous behaviour, and no existing `/20` is touched by the `/19` rule: it simply remains available. Management
+addresses never change as a result.
+
+What a `/19` changes underneath (all covered by tests; see [`docs/runbooks/NETWORK_19_LAB_PLAN.md`](runbooks/NETWORK_19_LAB_PLAN.md) for what the lab still has to prove):
+
+* **DHCP (Kea).** One `subnet4` entry with the pool(s) the operator gave (for example `x.x.0.10 - x.x.31.250`), reservations anywhere in the range (outside the
+  pools), the gateway as `routers`, option 114 by code, the same lease timers and `memfile` lease database as any other size. Kea binds the bridge and answers
+  broadcasts on it. The lease file grows with the clients, not with the prefix.
+* **Shaping class ids.** Per bridge, host index 0..4095 is `0x1000 + index` (identical to `/20` and narrower), 4096.. is `0x3000 + index - 4096`, up to `0x4fff` for
+  the last address of a `/19`. All 8,189 client addresses (the gateway holds none) map to distinct classes; the network and broadcast addresses map to classes no
+  session uses. Classification is one `flower` filter per session direction at priority 1 with the class minor as handle (O(1) lookup however many sessions). The
+  legacy `u32` fallback (`NETD_SHAPE_CLASSIFIER=u32`, or a kernel without `cls_flower`) is **supported on a `/19` with its known limit**: one filter per priority, so
+  at most **2,047** simultaneously classified sessions per bridge; further sessions fail closed (not admitted, reported). It is a rollback switch, not a configuration
+  refusal, so a `/19` is not rejected when the fallback is active.
+* **Accounting.** acctd reads the per-class counters and derives each session's class from its address and the bridge's own subnet, exactly as netd does; the IFB per
+  bridge is unchanged.
+* **Firewall.** nftables keys on the subnet, not on hosts: a `/19` is one element in `guest_subnets` and one masquerade rule, so the ruleset does not grow with the
+  prefix. The authorisation sets are dynamic and hold one element per authorised device. Admin `443` stays pinned to the management address; the WAN is untouched.
+* **Neighbour (ARP) table.** One kernel table for all interfaces. A full `/19` is about 8,200 entries; `deploy/sysctl/99-stayconnect.conf` sets
+  `gc_thresh1/2/3 = 8192/32768/65536` (room for three full networks). Real-kernel sweep of every address of a `/19`: 8,189 entries, no overflow.
+* **Two NICs.** Unchanged: WAN is also management; the LAN carries every client network and VLAN.
+
 ## 2. Staged changes
 
 Activation, Access/Trunk conversion and the three recovery operations switch networks on and off, and change their settings, **together or not at all**.

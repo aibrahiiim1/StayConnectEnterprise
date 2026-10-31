@@ -1,0 +1,9 @@
+== neighbour sweep 07:50:01
+dmesg overflow lines before: 3100
+neigh entries on br-g119 before: 700  all devs: 2889
+sent to 8189 addresses in 0.4s
+neigh entries on br-g119 after: 762  all devs: 765
+    609 DELAY      62 FAILED      91 REACHABLE 
+dmesg overflow lines after: 3100
+bridge rx multicast/broadcast counters:  alias onegate:25e121f4-4f6d-4e9b-bd10-4ef277003d9e  RX: bytes packets errors dropped missed mcast  
+neigh entries 60 s later: 762

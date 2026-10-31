@@ -53,6 +53,10 @@ const (
 	// centralCredentialRefused: Central answers but refuses this appliance's certificate (e.g. after Reissue certificate); not "unreachable".
 	centralCredentialRefused = "credential_refused"
 	centralNotConfigured     = "not_configured"
+	// centralIdentityNotLoaded: Central is configured, but this appliance has no identity or no client certificate loaded yet AND has not
+	// completed (or even attempted) one exchange with Central since scd started. Nothing is known about the link either way, so it is
+	// neither "connected" nor "unreachable".
+	centralIdentityNotLoaded = "identity_not_loaded"
 )
 
 // expiringWithin is when an active licence starts being reported as "expiring" (section 3: <= 30 days).
@@ -223,7 +227,10 @@ type centralLicense struct {
 }
 
 type centralLink struct {
-	State         string     `json:"state"`
+	State string `json:"state"`
+	// LastContactAt is the last SUCCESSFUL exchange with Central since scd started: an answered call, including "nothing for you
+	// yet". It is never set by loading an identity or certificate from disk, by a waiting log line or by a failed call, and it is
+	// null until the first real answer (it is not persisted across a restart).
 	LastContactAt *time.Time `json:"last_contact_at"`
 	LastError     *string    `json:"last_error"`
 }
@@ -289,6 +296,10 @@ func centralLinkState(in centralInputs) centralLink {
 	case !in.CentralConfigured:
 		out.State = centralNotConfigured
 		out.LastContactAt = nil
+		return out
+	case in.LastOK.IsZero() && in.LastFail.IsZero() && (in.ApplianceID == "" || (in.CertRequired && !in.CertReady)):
+		// Identity or certificate not loaded, and no exchange yet: say so rather than claim a link state nobody has measured.
+		out.State = centralIdentityNotLoaded
 		return out
 	case !in.LastOK.IsZero() && !in.LastOK.Before(in.LastFail) && in.Now.Sub(in.LastOK) <= connectedWithin:
 		out.State = centralConnected

@@ -117,10 +117,13 @@ fi
 #     Two separate things are checked because they fail differently. productionProvider returning nil is
 #     what stops the runtime persisting an invented provider identity; the absence of an exported
 #     constructor taking a Provider is what stops a caller supplying its own money sender.
-if grep -q 'return nil, nil' data-plane/internal/payment/provider.go    && grep -q 'provider execution is enabled but this build has no payment provider adapter'         data-plane/internal/payment/provider.go; then
-  say "the payment runtime ships no provider adapter and fails closed if egress is enabled without one"
+# AD-44 deleted the dormant Engine.Execute and productionProvider. Provider adapters (stripe, paymob) now exist as
+# their own sub-packages, so the invariant that remains and is checkable here is the layering: the payment runtime
+# package itself opens no socket and names no network package; only an adapter sub-package does.
+if ! grep -nE '^\s*"(net|net/http|crypto/tls)"$' data-plane/internal/payment/*.go | grep -v '_test.go' | grep -q .; then
+  say "the payment runtime package itself imports no network package (adapters live in their own sub-packages)"
 else
-  bad "productionProvider no longer fails closed without an adapter"
+  bad "the payment runtime package imports a network package directly"
 fi
 
 # An exported constructor taking a Provider or a Config would be an independently-configured money sender.
@@ -177,7 +180,7 @@ if [ "$fin_writers" = 1 ] && grep -q 'func (w \*serialWriter) SubmitFinancial' d
 else
   bad "pmsd's financial write path is no longer the single, flag-gated, authorised PS-only relay path"
 fi
-if grep -q '"PS": {}, // financial Posting (Phase 4 only)' data-plane/internal/pmsd/fias_adapter.go \
+if grep -q '"PS": {}, // financial Posting' data-plane/internal/pmsd/fias_adapter.go \
    && grep -q '"PA": {}, // posting answer (financial)' data-plane/internal/pmsd/fias_adapter.go; then
   say "pmsd still classifies PS and PA as forbidden outbound records"
 else

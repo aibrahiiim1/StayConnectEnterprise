@@ -7,6 +7,8 @@ export type EnforcementPolicy = {
   allow_upstream_infrastructure: boolean;
   mac_binding_enabled: boolean;
   cutoff_seconds: number;
+  /** Minutes guests stay online if OneGate's own services fail (0 = off). Absent on an older appliance. */
+  outage_continuity_minutes?: number;
   config_version: number;
   updated_at: string;
   updated_by?: string;
@@ -35,7 +37,10 @@ export type EnforcementChange = {
 export type EnforcementDoc = {
   policy: EnforcementPolicy;
   settings: EnforcementSetting[];
-  limits: { max_cidrs: number; min_prefix: number; max_prefix: number; cutoff_min: number; cutoff_max: number };
+  limits: {
+    max_cidrs: number; min_prefix: number; max_prefix: number; cutoff_min: number; cutoff_max: number;
+    continuity_min?: number; continuity_max?: number;
+  };
   history: EnforcementChange[];
 };
 
@@ -45,6 +50,7 @@ export const FIELD_LABEL: Record<string, string> = {
   allow_upstream_infrastructure: "Upstream gateway and DNS",
   mac_binding_enabled: "Device-address (MAC) binding",
   cutoff_seconds: "Cut-off delay",
+  outage_continuity_minutes: "Online during a OneGate failure",
   all: "All settings",
 };
 
@@ -52,6 +58,7 @@ export const FIELD_LABEL: Record<string, string> = {
 export function valueWords(field: string, v: string | null): string {
   if (v === null || v === undefined) return "—";
   if (field === "cutoff_seconds") return `${v} s`;
+  if (field === "outage_continuity_minutes") return v === "0" ? "off" : `${v} min`;
   if (field === "private_allow_cidrs") return v === "" ? "none" : v.split(",").join(", ");
   if (v === "true") return "on";
   if (v === "false") return "off";
@@ -110,3 +117,23 @@ export function sameList(a: string[], b: string[]): boolean {
 
 /** The exact text the operator must type before private-network denial can be turned off. */
 export const TURN_OFF_PHRASE = "TURN OFF";
+
+/** What a continuity setting means for guests, in words (the number alone is not enough to decide). */
+export function continuityWords(minutes: number): string {
+  if (!Number.isFinite(minutes) || minutes <= 0) {
+    return "Off. If OneGate's accounting service stops, guests lose their connection about 90 seconds later.";
+  }
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  const span = h > 0 ? `${h} h${m ? ` ${m} min` : ""}` : `${m} min`;
+  return `Guests who are online stay online for up to ${span} after a failure, ended earlier by anything that ends their access.`;
+}
+
+/** The problem with a typed value, or null. Whole minutes only. */
+export function continuityProblem(raw: string, min = 0, max = 120): string | null {
+  const n = Number(raw);
+  if (raw.trim() === "" || !Number.isInteger(n) || n < min || n > max) {
+    return `Enter a whole number of minutes between ${min} and ${max}.`;
+  }
+  return null;
+}

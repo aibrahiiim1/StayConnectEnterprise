@@ -1,0 +1,24 @@
+{"check": "1.1 /18", "http": 400, "code": "subnet_too_large", "message": "subnet is larger than /19 (8190 addresses): one client network is limited to /19, because per-client speed limits and usage cannot tell clients apart in a wider", "expected": "400 subnet_too_large"}
+{"check": "1.2 10.64.0.0/17", "http": 400, "code": "subnet_too_large", "message": "subnet is larger than /19 (8190 addresses): one client network is limited to /19, because per-client speed limits and usage cannot tell clients apart in a wider", "expected": "400 subnet_too_large"}
+{"check": "1.2 10.0.0.0/8", "http": 400, "code": "subnet_too_large", "message": "subnet is larger than /19 (8190 addresses): one client network is limited to /19, because per-client speed limits and usage cannot tell clients apart in a wider", "expected": "400 subnet_too_large"}
+{"check": "1.3 /31", "http": 400, "code": "subnet_too_small", "message": "subnet is too small to host a gateway and a DHCP pool (use /30 or larger)", "expected": "400 subnet_too_small"}
+{"check": "1.4 setup /24", "http": 201, "code": null, "message": "", "expected": "201"}
+{"check": "1.4 /19 over a /24", "http": 409, "code": "subnet_overlap", "message": "subnet 10.66.0.0/19 overlaps client network \"lab24\"; every client network needs its own, non-overlapping subnet", "expected": "409 subnet_overlap"}
+{"check": "1.4 cleanup /24", "http": 409}
+{"check": "1.5 /19 containing the WAN address", "http": 400, "code": "subnet_overlaps_host", "message": "subnet 172.30.0.0/19 overlaps 172.30.10.0/24, the WAN/management network of this appliance; a client network must not share addresses with it", "expected": "400 subnet_overlaps_host"}
+{"check": "1.6 widen enabled /20 in place", "http": 400, "code": "bad_request", "message": "json: unknown field \"id\"", "expected": "409 subnet_widen_refused"}
+{"check": "1.6 the /20 is untouched", "subnet_cidr": "10.60.0.0/20", "enabled": true}
+{"check": "1.7 system read", "http": 200, "keys": ["wan", "lan"]}
+disable 200
+delete lab24 200
+{"check": "1.6 widen enabled /20 in place", "http": 409, "code": "subnet_widen_refused", "message": "the subnet of a client network that is switched on cannot be made wider in place (10.60.0.0/20 to 10.60.0.0/19): its clients, DHCP leases and per-client speed classes belong to the current range. Create a new client netw", "expected": "409 subnet_widen_refused"}
+{"check": "1.6 the /20 is untouched", "subnet_cidr": "10.60.0.0/20", "enabled": true}
+{"check": "1.7 LAN prefix 18", "http": 200, "ok": null, "issues": []}
+{"check": "1.7 LAN prefix 19 beside the WAN", "http": 200, "ok": null, "issues": []}
+{"check": "1.7 LAN /19 containing the WAN subnet", "http": 200, "ok": null, "issues": []}
+10.70.0.1 18 200 {"effective": {"lan": {"physical_interface": "eth1", "bridge": "br-lan", "ip": "10.70.0.1", "prefix_len": 18, "dhcp_enabled": false, "dhcp_start": "", "dhcp_end": "", "dhcp_lease_seconds": 0, "dns": [""]}, "wan": {"interface": "eth0", "mode": "static", "ip": "172.30.10.20", "prefix_len": 24, "gateway": "172.30.10.1", "dns": null}}, "management_url": "https://172.30.10.20", "validation": {"ok": false, "issues": [{"fie
+10.70.0.1 19 200 {"effective": {"lan": {"physical_interface": "eth1", "bridge": "br-lan", "ip": "10.70.0.1", "prefix_len": 19, "dhcp_enabled": false, "dhcp_start": "", "dhcp_end": "", "dhcp_lease_seconds": 0, "dns": [""]}, "wan": {"interface": "eth0", "mode": "static", "ip": "172.30.10.20", "prefix_len": 24, "gateway": "172.30.10.1", "dns": null}}, "management_url": "https://172.30.10.20", "validation": {"ok": false, "issues": [{"fie
+172.30.0.1 19 200 {"effective": {"lan": {"physical_interface": "eth1", "bridge": "br-lan", "ip": "172.30.0.1", "prefix_len": 19, "dhcp_enabled": false, "dhcp_start": "", "dhcp_end": "", "dhcp_lease_seconds": 0, "dns": [""]}, "wan": {"interface": "eth0", "mode": "static", "ip": "172.30.10.20", "prefix_len": 24, "gateway": "172.30.10.1", "dns": null}}, "management_url": "https://172.30.10.20", "validation": {"ok": false, "issues": [{"fi
+10.70.0.1 18 200 [["invalid_prefix", "lan.prefix_len", "LAN prefix length must be 19-30 (a client network is at most /19, 8190 addresses)"], ["invalid_dns", "lan.dns", "invalid LAN DNS address: "]]
+10.70.0.1 19 200 [["invalid_dns", "lan.dns", "invalid LAN DNS address: "]]
+172.30.0.1 19 200 [["invalid_dns", "lan.dns", "invalid LAN DNS address: "], ["subnet_overlap", "lan.ip", "WAN and LAN cannot use the same or overlapping subnets"]]

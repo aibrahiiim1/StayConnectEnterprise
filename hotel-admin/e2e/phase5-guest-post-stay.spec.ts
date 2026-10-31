@@ -34,7 +34,7 @@ async function serve(page: Page, answers: unknown[], calls: Call[]) {
 }
 
 test.describe("the post-stay guest panel", () => {
-  test("asks for the PIN and nothing else", async ({ page }) => {
+  test("asks for the room number and the reservation number and nothing else", async ({ page }) => {
     await serve(page, [{}], []);
     await page.goto("/portal");
     await page.getByRole("button", { name: "Post-stay" }).click().catch(async () => {
@@ -42,26 +42,18 @@ test.describe("the post-stay guest panel", () => {
     });
 
     const panel = page.locator("#panel-poststay");
-    await expect(panel.getByLabel(/post-stay pin/i)).toBeVisible();
-    // The appliance already knows the device's stay, so no room or guest identity is requested.
-    await expect(panel.locator('input[name="room"]')).toHaveCount(0);
+    await expect(panel.locator("#ps-room")).toBeVisible();
+    await expect(panel.locator("#ps-res")).toBeVisible();
+    // After Check-out Access: no surname, no first name, no PIN and no one-time code.
     await expect(panel.locator('input[name="last_name"]')).toHaveCount(0);
-    await expect(panel.locator('input[name="reservation_number"]')).toHaveCount(0);
-    await expect(panel.locator("input")).toHaveCount(1);
+    await expect(panel.locator('input[name="first_name"]')).toHaveCount(0);
+    await expect(panel.getByLabel(/pin|one-time|code/i)).toHaveCount(0);
+    await expect(panel.locator("input")).toHaveCount(2);
   });
 
-  test("sends the PIN alone — no stay, room, profile or device", async ({ page }) => {
+  test("sends the room and reservation alone and connects without a second step", async ({ page }) => {
     const calls: Call[] = [];
-    await serve(page, [
-      {
-        ok: true, needs_choice: true, auth_context_id: "ctx-1",
-        choices: [
-          { code: "POSTSTAY-BASIC", package_revision_id: "rev-basic", down_kbps: 4000 },
-          { code: "POSTSTAY-PLUS", package_revision_id: "rev-plus", down_kbps: 10000 },
-        ],
-      },
-      { ok: true, session_id: "sess-1" },
-    ], calls);
+    await serve(page, [{ ok: true, session_id: "sess-1" }], calls);
     await page.goto("/portal");
     await page.locator('[data-tab="poststay"]').click();
     await page.locator("#ps-room").fill("101");
@@ -69,19 +61,16 @@ test.describe("the post-stay guest panel", () => {
     await page.locator("#form-poststay button[type=submit]").click();
 
     await expect.poll(() => calls.length).toBeGreaterThan(0);
-    // The room and reservation the guest typed (and the optional last name), and nothing that names a stay.
-    expect(Object.keys(calls[0].body).sort()).toEqual(["last_name", "reservation", "room"]);
+    // Exactly what the guest typed, and nothing that names a stay, a profile, a device or a package.
+    expect(Object.keys(calls[0].body).sort()).toEqual(["reservation", "room"]);
     expect(calls[0].body.room).toBe("101");
     expect(calls[0].body.reservation).toBe("R1");
-    for (const forbidden of ["stay", "stay_id", "room_number", "profile", "profile_id",
-      "pms_interface_id", "reservation_number", "device", "pin"]) {
+    for (const forbidden of ["last_name", "stay", "stay_id", "room_number", "profile", "profile_id",
+      "pms_interface_id", "reservation_number", "device", "pin", "package_revision_id", "auth_context_id"]) {
       expect(calls[0].body).not.toHaveProperty(forbidden);
     }
-    // Reuse server-issued context rather than client-chosen stay or device identifiers.
-    await page.locator("#ps-choices button.choice", { hasText: "POSTSTAY-PLUS" }).click();
-    await expect.poll(() => calls.length).toBe(2);
-    expect(Object.keys(calls[1].body).sort()).toEqual(["auth_context_id", "package_revision_id"]);
-    expect(calls[1].body).toEqual({ auth_context_id: "ctx-1", package_revision_id: "rev-plus" });
+    // One entitlement is granted at checkout: there is no package choice to make, so exactly one call is made.
+    expect(calls.length).toBe(1);
   });
 
   test("every failure is the same message and reveals nothing", async ({ page }) => {

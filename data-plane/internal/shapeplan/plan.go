@@ -71,6 +71,9 @@ type Envelope struct {
 
 	Sessions         []Session `json:"sessions"`
 	DesiredStateHash string    `json:"desired_state_hash"`
+
+	// Continuity is optional and outside DesiredStateHash (see continuity.go). Absent = strict: leases lapse with the plan.
+	Continuity *Continuity `json:"continuity,omitempty"`
 }
 
 // Scope is the applier's own identity from its enrollment and signed assignment, never from the envelope.

@@ -57,7 +57,9 @@ func (k MACKey) Receipt(hash string) string { return k.mac(receiptDomain, hash) 
 func eq(a, b string) bool { return hmac.Equal([]byte(a), []byte(b)) }
 
 // EntryOK reports whether e carries a MAC that this key makes.
-func (k MACKey) EntryOK(e Entry) bool { return e.Mac != "" && e.Hash != "" && eq(e.Mac, k.EntryMAC(e.Hash)) }
+func (k MACKey) EntryOK(e Entry) bool {
+	return e.Mac != "" && e.Hash != "" && eq(e.Mac, k.EntryMAC(e.Hash))
+}
 
 // HeadMAC authenticates the note kept beside the secondary copy.
 func (k MACKey) HeadMAC(h HeadInfo) string {

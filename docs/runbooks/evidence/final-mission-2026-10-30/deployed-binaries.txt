@@ -1,0 +1,11 @@
+ad772bbb704835e47b84e4c167db494072306bbca8924f2e7aa449460b72545f  /root/netd.release-5926f7de
+473a1e5e559dcc62a27f1421d3149400e4e06142be6c70f35acaa3b45e8a17f9  /root/netd-fixed
+e19139371248d297f3490b39cb2d5a5d7787f2d5d8d62e67a9e393438e07ddc5  /root/netd-fixed2
+e19139371248d297f3490b39cb2d5a5d7787f2d5d8d62e67a9e393438e07ddc5  /opt/stayconnect/bin/netd
+798ab3e6e42917f9e64495886f61f59ddfa652aa9b6c38b5a1161a7264a3ca95  /opt/stayconnect/bin/acctd
+0ee86f1540642782bf6eb7da3b371723a2b8bb1469f09ba4e9aa5b6fb5bd3e18  /opt/stayconnect/bin/scd
+04de01dc095b08db2d4cc05c43e9c883f599c3f607f3cfd189f9239a6ea936eb  /opt/stayconnect/bin/edged
+5d79d0dd7ec7bca0028a864b2fe10b52fad4b06fa34034a1c2863704bc6bd9a6  /opt/stayconnect/bin/portald
+{"source_commit":"5926f7dead4736abeb7258814499bc72562346b3"}
+2.0.2
+6.6.87.2-microsoft-standard-WSL2

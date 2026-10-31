@@ -53,7 +53,7 @@ END $$;
 -- file is applied again after the schema exists. It is idempotent either way.
 DO $$ BEGIN
   IF to_regclass('public.guest_networks') IS NOT NULL THEN
-    EXECUTE 'GRANT REFERENCES ON public.guest_networks TO iam_v2_owner';
+    EXECUTE 'GRANT REFERENCES, SELECT ON public.guest_networks TO iam_v2_owner';  -- SELECT: iam_v2.p3_expected_class_minor reads the network (0200)
   ELSE
     RAISE NOTICE 'public.guest_networks does not exist yet; re-run this file after the schema is built';
   END IF;

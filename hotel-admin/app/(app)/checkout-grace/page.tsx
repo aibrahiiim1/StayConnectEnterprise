@@ -1,17 +1,8 @@
-"use client";
+// Kept so bookmarks of the retired page still work: Checkout Grace and Post-Stay are now After Check-out Access.
 
-import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
-import { canWrite } from "@/lib/roles";
-import { CheckoutGraceScreen } from "@/components/checkout-grace/checkout-grace-screen";
+import { permanentRedirect } from "next/navigation";
 
-export default function CheckoutGracePage() {
-  const [roles, setRoles] = useState<string[] | null>(null);
-  useEffect(() => {
-    api
-      .get<{ roles?: string[] }>("/auth/whoami")
-      .then((m) => setRoles(m.roles ?? []))
-      .catch(() => setRoles([]));
-  }, []);
-  return <CheckoutGraceScreen canWrite={roles === null ? false : canWrite("checkout-grace", roles)} />;
+// A server redirect (308) answers before any client code runs, so there is no interim page.
+export default function Moved(): never {
+  permanentRedirect("/after-checkout-access");
 }

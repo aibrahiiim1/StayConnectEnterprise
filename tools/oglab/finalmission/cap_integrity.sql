@@ -1,0 +1,14 @@
+select 'raw', count(*), coalesce(sum(bytes_up+bytes_down),0) from iam_v2.accounting_records;
+select 'minute', count(*), coalesce(sum(bytes_up+bytes_down),0) from iam_v2.accounting_usage_minute;
+select 'hour', count(*), coalesce(sum(bytes_up+bytes_down),0) from iam_v2.accounting_usage_hour;
+select 'session', count(*), coalesce(sum(bytes_up+bytes_down),0) from iam_v2.sessions;
+select 'entitlement', count(*), coalesce(sum(consumed_data_bytes),0) from iam_v2.entitlements;
+select 'sessions_total', count(*), count(*) filter (where ended is null), count(*) filter (where state='active' and ended is null) from iam_v2.sessions;
+select 'dup_live_per_device', count(*) from (select device_id from iam_v2.sessions where ended is null and state in ('active','PENDING_ENFORCEMENT') group by device_id having count(*)>1) x;
+select 'db_mb', round(pg_database_size('stayconnect_site')/1048576.0,1);
+select 'wal_bytes', wal_bytes, wal_records, wal_fpi from pg_stat_wal;
+select 'xact', xact_commit, xact_rollback, deadlocks, conflicts, temp_files, blks_hit, blks_read from pg_stat_database where datname='stayconnect_site';
+select 'rel', c.relname, c.reltuples::bigint, pg_total_relation_size(c.oid) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='iam_v2' and c.relname in ('accounting_records','accounting_usage_minute','accounting_usage_hour','sessions','entitlements','accounting_checkpoints','devices','auth_contexts','vouchers');
+select 'rel_public', c.relname, c.reltuples::bigint, pg_total_relation_size(c.oid) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname in ('audit_log');
+select 'hyper_chunks', hypertable_name, num_chunks from timescaledb_information.hypertables;
+select 'lab_activations', count(*) from lab.session_activation;

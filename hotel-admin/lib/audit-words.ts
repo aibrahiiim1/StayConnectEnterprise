@@ -120,8 +120,13 @@ const WORDS: Record<string, AuditWords> = {
   "commercial_package.activated": { title: "Made an internet package available", category: "Internet offering", severity: "change" },
   "commercial_package.deactivated": { title: "Withdrew an internet package", category: "Internet offering", severity: "change" },
   "service_plan.published": { title: "Published a service plan", category: "Internet offering", severity: "change" },
+  "after_checkout_access.updated": {
+    title: "Changed After Check-out Access", category: "Hotel", severity: "change",
+    note: "How long a departing guest's devices keep internet after a verified check-out, or turning that on or off.",
+  },
+  // Earlier records keep this action name; they remain readable under the feature's new name.
   "checkout_grace.published": {
-    title: "Changed the Grace Period policy", category: "Hotel", severity: "change",
+    title: "Changed After Check-out Access (earlier Grace Period policy)", category: "Hotel", severity: "change",
     note: "How long a departing guest keeps internet after checking out.",
   },
 
@@ -207,7 +212,7 @@ function categoryFromPrefix(action: string): AuditCategory {
   switch (p) {
     case "branding": case "portal_asset": return "Client Portal";
     case "commercial_package": case "service_plan": return "Internet offering";
-    case "checkout_grace": case "pms_interface": case "pms_provider": case "pms_routing": case "pms_interface_revision":
+    case "checkout_grace": case "after_checkout_access": case "pms_interface": case "pms_provider": case "pms_routing": case "pms_interface_revision":
       return "Hotel";
     case "network": return "Networks";
     case "license": case "cloud": case "renewal_started": case "renewal_succeeded": case "hotel_admin_cert":

@@ -1,0 +1,19 @@
+AFTER CHECK-OUT ACCESS in the lab. What was and was not exercised.
+
+EXERCISED
+1. The worked example of docs/architecture/ONEGATE_AFTER_CHECKOUT_ACCESS.md, end to end at database level with the real converter and the real sign-in:
+   internal/checkout TestAC_* (10 tests, all PASS, ac-checkout-integration.log) and the whole internal/checkout + internal/poststay integration suites (46 PASS, ac-integration-full.log);
+   cmd/scd PostStay and Phase5 integration (verify -> rejoin -> enforced session, new device refused with correct credentials, refusals audited) and the cmd/edged
+   AfterCheckout API integration (8 PASS, ac-integration-scd-edged.log). Covered: online-at-checkout transfer without a logout, an offline previously authorised device reconnecting with room + reservation
+   only, a new device refused, the shared quota exhausted by two devices ending access once, expiry at the window end regardless of bytes left, revoked / MAC-change / LAN-only devices, room reuse,
+   concurrency, switch off/on affecting later checkouts only.
+   Database: a disposable PostgreSQL 16 / TimescaleDB 2.16.1 container built by scripts/lib-fullschema-testdb.sh (baseline + all migrations to 0199). It is NOT the lab appliance's own PostgreSQL.
+2. Live on the lab appliance (real edged, real database): GET/PUT /after-checkout-access and /history: publication of the worked-example terms (8 h, 5/2 Mbps, 1 GB shared, 5 devices), version conflict (409),
+   bounds (400 validation x2), invalid reason code (400), wrong step-up password (401), nothing to change (400), switch off (effective source DISABLED) and on, history newest first (live-api.txt).
+   The hospitality module had to be added to the lab licence first (module_not_available otherwise).
+3. Live portal POST /auth/post-stay from a simulated device with the room and reservation of no stay: the same refusal text for three different bodies (live-portal-poststay.txt).
+
+NOT EXERCISED
+- A real or stub PMS check-out on the lab appliance (no PMS interface, no stay and no stub seed were configured), hence no live online-at-checkout transfer, no live reconnect of a previously authorised
+  device, no shared-quota exhaustion on live traffic, no live expiry. Those are proven only by the integration tests above, against a separate disposable database.
+- The Hotel Admin pages for the feature (no browser).

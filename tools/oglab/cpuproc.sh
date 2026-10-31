@@ -1,6 +1,7 @@
 #!/bin/bash
 # cpuproc.sh <seconds>: CPU used per systemd service cgroup over the window (percent of ONE cpu), top first
 CG=/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup | sed -E 's#(/docker/[0-9a-f]+).*#\1#')
+[ -d /sys/fs/cgroup/system.slice ] && CG=/sys/fs/cgroup  # private cgroup namespace: the exec'd shell sits in /init.scope, the container is the namespace root
 W=${1:-60}
 declare -A A
 for d in $CG/system.slice/*.service $CG/system.slice/*.scope; do

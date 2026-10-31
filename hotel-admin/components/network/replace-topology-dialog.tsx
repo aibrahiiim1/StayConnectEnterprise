@@ -10,6 +10,7 @@ import { Callout } from "@/components/ui/error-banner";
 import { ImpactPanel } from "@/components/network/impact-panel";
 import type { NetworkConsequence } from "@/lib/api/pms-routing";
 import { topologyWords } from "@/lib/network-state";
+import { subnetSizeProblem } from "@/lib/network-subnet";
 
 const SELECTABLE = new Set(["guest_access", "guest_trunk", "unused"]);
 
@@ -64,8 +65,9 @@ export function ReplaceTopologyDialog({
   const problem =
     !parent ? "Choose the port." :
     !vlanOk ? "A VLAN id is between 1 and 4094." :
-    same ? "That is the current topology; nothing would change." :
+    same && !readdress ? "That is the current topology; nothing would change." :
     readdress && (!subnet || !gateway || !poolStart || !poolEnd) ? "A new subnet needs its gateway and DHCP pool." :
+    readdress && subnetSizeProblem(subnet) ? subnetSizeProblem(subnet) :
     reason.trim().length < 4 ? "Say why (at least 4 characters)." : null;
 
   // The consequences are read for the topology as currently entered, before anything is recorded.

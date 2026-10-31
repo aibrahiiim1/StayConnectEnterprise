@@ -33,18 +33,23 @@ WHAT IT CHECKS
      is not optional.
   3. UNIQUENESS. No two migrations in one directory share a number. Two 0084s mean one of them never runs,
      and which one depends on a sort order nobody chose.
-  4. CONTIGUITY. The numbers run 1..N with no gap. A gap is the signature of exactly this defect -- a file
+  5. IDENTITY. <dir>/IDENTITIES pins the sha256 of every shipped migration; editing a shipped file fails.
+     `--freeze` appends the unpinned ones once they have shipped.
+  6. RESERVED NUMBERS. <dir>/RESERVED_NUMBERS declares ranges held out on purpose (the runtime reads the same
+     file). A file using one is refused; the numbers are not counted as a gap.
+  4. CONTIGUITY. The numbers run 1..N with no gap (apart from reserved numbers). A gap is the signature of exactly this defect -- a file
      that was moved, renamed or dropped -- and it is cheap to notice here and expensive to notice live.
 
 WHAT IT DOES NOT CHECK. Content, order of application, whether a migration is applied anywhere, or whether
 it is correct. Those belong to edge-migrate.sh, to the gates and to review. This answers one question: can
 the tooling see it at all.
 """
+import hashlib
 import os
 import re
 import sys
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.environ.get("MIGRATION_LOCATION_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # The directories a numbered migration may live in, and who reads each one.
 CANONICAL = {
@@ -147,6 +152,134 @@ def scan():
     return found, strays
 
 
+RESERVED_FILE = "RESERVED_NUMBERS"
+IDENTITY_FILE = "IDENTITIES"
+_RANGE = re.compile(r"^(\d{4})-(\d{4})(?:\s+.*)?$")
+
+
+def reserved_ranges(d, root=None):
+    """The (first, last, line) ranges declared in <d>/RESERVED_NUMBERS; ValueError on a malformed line."""
+    path = os.path.join(root or ROOT, d, RESERVED_FILE)
+    out = []
+    if not os.path.isfile(path):
+        return out
+    with open(path, encoding="utf-8") as fh:
+        for i, line in enumerate(fh, 1):
+            line = line.split("#", 1)[0].strip()
+            if not line:
+                continue
+            m = _RANGE.match(line)
+            if not m or int(m.group(1)) > int(m.group(2)):
+                raise ValueError("%s line %d is not 'FIRST-LAST [reason]' with FIRST <= LAST: %r" % (path, i, line))
+            out.append((int(m.group(1)), int(m.group(2)), line))
+    return out
+
+
+def reserved_numbers(d, root=None):
+    nums = set()
+    for lo, hi, _ in reserved_ranges(d, root):
+        nums.update(range(lo, hi + 1))
+    return nums
+
+
+def check_reserved(d, by_number):
+    """A numbered file inside a reserved range is refused: the number was held out on purpose."""
+    try:
+        reserved = reserved_numbers(d)
+    except ValueError as e:
+        bad("migration-reserved-declaration", str(e), d)
+        return
+    hit = False
+    for n in sorted(by_number):
+        if int(n) in reserved:
+            hit = True
+            names = sorted(fn for fns in by_number[n].values() for fn in fns)
+            bad("migration-reserved", "%s uses reserved number %s (see %s/%s); take the next free number"
+                % (", ".join(names), n, d, RESERVED_FILE), d)
+    if not hit and reserved:
+        ok("%s: no file uses a reserved number (%d reserved)" % (d, len(reserved)))
+
+
+def sha256_of(path):
+    with open(path, "rb") as fh:
+        return hashlib.sha256(fh.read()).hexdigest()
+
+
+def read_identities(d, root=None):
+    """{NNNN_name: sha256 of its up file} from <d>/IDENTITIES (empty when the directory has none)."""
+    path = os.path.join(root or ROOT, d, IDENTITY_FILE)
+    out = {}
+    if not os.path.isfile(path):
+        return out
+    with open(path, encoding="utf-8") as fh:
+        for i, line in enumerate(fh, 1):
+            line = line.split("#", 1)[0].strip()
+            if not line:
+                continue
+            parts = line.split()
+            if len(parts) != 2 or not re.fullmatch(r"\d{4}_\S+", parts[0]) or not re.fullmatch(r"[0-9a-f]{64}", parts[1]):
+                raise ValueError("%s line %d is not 'NNNN_name sha256': %r" % (path, i, line))
+            if parts[0] in out:
+                raise ValueError("%s lists %s twice" % (path, parts[0]))
+            out[parts[0]] = parts[1]
+    return out
+
+
+def check_identities(d, by_number):
+    """A shipped migration is immutable: its name and content hash are pinned in IDENTITIES. An unpinned migration is
+    allowed only ABOVE the highest pinned number (a new one, not yet frozen)."""
+    try:
+        ids = read_identities(d)
+    except ValueError as e:
+        bad("migration-identity-declaration", str(e), d)
+        return
+    if not ids:
+        return
+    top = max(int(k[:4]) for k in ids)
+    problems = 0
+    for stem, want in sorted(ids.items()):
+        n = stem[:4]
+        ups = by_number.get(n, {}).get("up", [])
+        if ups != [stem + ".up.sql"]:
+            bad("migration-identity", "%s is pinned in %s but the file for number %s is %s" % (stem, IDENTITY_FILE, n, ups or "missing"), d)
+            problems += 1
+            continue
+        got = sha256_of(os.path.join(ROOT, d, ups[0]))
+        if got != want:
+            bad("migration-identity", "%s changed after it shipped (sha256 %s, pinned %s); a migration that has run "
+                "anywhere is never edited -- add a new one" % (stem, got[:12], want[:12]), d)
+            problems += 1
+    reserved = reserved_numbers(d)
+    for n in sorted(by_number):
+        ups = by_number[n].get("up") or []
+        stem = ups[0][: -len(".up.sql")] if ups else ""
+        if stem and stem not in ids and int(n) <= top and int(n) not in reserved:
+            bad("migration-identity", "%s is not pinned in %s but its number is below the highest pinned one (%04d)"
+                % (stem, IDENTITY_FILE, top), d)
+            problems += 1
+    if not problems:
+        ok("%s: %d shipped migrations match their pinned identity" % (d, len(ids)))
+
+
+def freeze(d):
+    """Append every unpinned migration to IDENTITIES (explicit, after it has shipped)."""
+    found, _ = scan()
+    by_number = found.get(d, {})
+    ids = read_identities(d)
+    path = os.path.join(ROOT, d, IDENTITY_FILE)
+    added = 0
+    with open(path, "a", encoding="utf-8", newline="\n") as fh:
+        for n in sorted(by_number):
+            ups = by_number[n].get("up")
+            if not ups:
+                continue
+            stem = ups[0][: -len(".up.sql")]
+            if stem not in ids:
+                fh.write("%s %s\n" % (stem, sha256_of(os.path.join(ROOT, d, ups[0]))))
+                added += 1
+    print("froze %d migration(s) into %s" % (added, rel(path)))
+
+
 def check_location(strays):
     if not strays:
         ok("every numbered migration is in a canonical directory (%s)" % ", ".join(sorted(CANONICAL)))
@@ -228,12 +361,10 @@ def check_directory(d, by_number):
 
     # 4. CONTIGUITY
     lo, hi = min(numbers), max(numbers)
-    # RESERVED_UNUSED: numbers deliberately never used. 0182..0189 were set aside while the closure-round work ran in
-    # parallel (accounting 0181, then post-stay 0190, capacity 0191/0192) and the first migration after the block took
-    # 0190; 0190..0192 are already applied on the test appliance, so renumbering would re-apply them. The runner
-    # checks that every migration FILE below the one it applies is applied, so the hole is harmless. The list is
-    # closed: a new gap anywhere else is still refused.
-    reserved = set(range(182, 190)) if d.endswith("data-plane/migrations") or d == "data-plane/migrations" else set()
+    # RESERVED NUMBERS come from the one declaration the runtime also reads (<dir>/RESERVED_NUMBERS). A reserved
+    # number is not a gap; a FILE using one is refused (check_reserved). The runner checks that every migration FILE
+    # below the one it applies is applied, so the hole is harmless. A new gap anywhere else is still refused.
+    reserved = reserved_numbers(d)
     missing = [n for n in range(lo, hi + 1) if n not in numbers and n not in reserved]
     if missing:
         bad(
@@ -247,10 +378,16 @@ def check_directory(d, by_number):
 
 
 def main():
+    if "--freeze" in sys.argv:
+        for d in sorted(CANONICAL):
+            freeze(d)
+        return 0
     print("== migration location and sequence ==")
     found, strays = scan()
     check_location(strays)
     for d in sorted(CANONICAL):
+        check_reserved(d, found.get(d, {}))
+        check_identities(d, found.get(d, {}))
         check_directory(d, found.get(d, {}))
 
     print("=" * 50)

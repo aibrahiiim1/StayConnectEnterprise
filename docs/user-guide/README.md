@@ -85,7 +85,7 @@ and no action buttons.
 | **Internet offering** | Internet packages · Service plans · Vouchers |
 | **Clients** | Client accounts · Active sessions · Usage explorer · Client devices · Online-time budgets |
 | **Client Portal** | Sign-in methods · Portal settings · Allowed sites · Social login · Email & SMS |
-| **Hotel** | PMS connection · Room sign-in · Stays · PMS activity · Guest sign-in checks · Guest sign-in attempts · Grace Period · Post-stay access · Charge health · Manual review · Settlements · Recovery · PMS routing · Duplicate sources · Cross-PMS transfer |
+| **Hotel** | PMS connection · Room sign-in · Stays · PMS activity · Guest sign-in checks · Guest sign-in attempts · After Check-out Access · Charge health · Manual review · Settlements · Recovery · PMS routing · Duplicate sources · Cross-PMS transfer |
 | **Networking** | Client networks · DHCP & leases · WAN / LAN settings · Config history · TLS certificate |
 | **System** | Diagnostics · Alerts · Activity · Appliance & licence · Backups · Operators |
 
