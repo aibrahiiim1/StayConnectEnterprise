@@ -1,0 +1,34 @@
+{
+  "transition_id": "T0277",
+  "seq": 277,
+  "timestamp": "2026-10-31T23:04:30Z",
+  "timestamp_derivation": "Computed from the session clock after the last verification run of the delivery branch, before the commit that introduces this receipt.",
+  "record_type": "PACKAGE_CONTROLS_REMEDIATION_DELIVERY",
+  "authorisation": "D86, the Product Owner's final authorization of 2026-11-01 (complete, verify and merge; no deployment).",
+  "deployment": {
+    "central": "Not deployed. Production Central is unchanged.",
+    "test_appliance": "Not deployed by this delivery: the test appliance 172.21.96.97 is unchanged (onegate-appliance-11a5bfb4c007). Migrations 0202 and 0203 are not applied anywhere but disposable databases.",
+    "lab": "No container lab was built for this delivery; disposable databases and disposable SFTP and S3 servers only."
+  },
+  "verification": "Disposable full-schema databases built the way a live upgrade applies migrations (as iam_v2_owner, platform migrations as the platform role) followed by a Gate-P reconcile; integration suites as the production roles svc_edged and svc_scd; the erasure-ledger restore drill; the ledger destinations against real OpenSSH SFTP (chrooted) and an S3 server that checks SigV4; the Admin Console unit suite and typecheck; the four comprehensive gates on the delivery head. Exact results are in docs/reviews/PACKAGE_CONTROLS_AND_STORAGE_REMEDIATION.md section 7. Not performed: any deployment, real PMS traffic, physical devices, real-length outages, the golden-lab scenarios.",
+  "not_touched": "Every retired host, the production Central, the test appliance, production users, live payment providers, PMS posting and configuration, live external storage, the Root CA.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "f059af959e020b04090d5c2e653e9fa738638d8e",
+  "previous_delivery": "T0276",
+  "decision": "D86",
+  "go_live": "NOT authorised."
+}

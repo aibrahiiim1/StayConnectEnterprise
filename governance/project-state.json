@@ -344,7 +344,7 @@
   "next_authorized_action": "Work normal missions under the PRODUCT-OWNER-LED DELIVERY model D42 (2026-09-26): implement, target-test, deploy routine software to the test appliance 172.21.96.97 under its standing deployment authorization (current_state_facts.standing_test_appliance_deployment_authorization) (the production Central only when a mission names it), stop at READY FOR PRODUCT OWNER TESTING, and merge only after explicit Product Owner acceptance (po-merge-approved). The comprehensive validation runs only on 'FULL CHECK THE WHOLE CODE'. Retired hosts (current_state_facts.retired_hosts) are never contacted.",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase7-Plan.md",
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
-  "latest_accepted_po_decision": "D85",
+  "latest_accepted_po_decision": "D86",
   "current_state_facts": {
     "_note": "MACHINE-READABLE CURRENT STATE. Every current-state surface in this repository is validated against these fields by tools/validate-current-state-parity.py, which runs in the Project Governance gate. They exist because prose alone let a contradiction survive a green gate: current_maturity still said an authorization was awaited and iam_v2 was 49/0 while this file already recorded 63 tables and an executed Live Increment 9. A fact that is only asserted in sentences cannot be diffed; a fact recorded here can be.",
     "phase": "7",
@@ -1362,7 +1362,7 @@
       "dispositions": "docs/AUDIT_DECISION_DISPOSITIONS.md"
     }
   },
-  "latest_transition_id": "T0276",
+  "latest_transition_id": "T0277",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1858,16 +1858,16 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "FINAL_MISSION_DEPLOYMENT",
-    "decision": "D85 (Product-Owner final mission of 2026-10-30: unified After Check-out Access, configurable outage continuity, client networks up to /19, and the remaining engineering corrections).",
-    "decision_note": "Deployment record: the final mission release is installed on the test appliance (onegate-appliance-11a5bfb4c007); Central is unchanged (5ac9cc5c9851); evidence in docs/runbooks/evidence/final-mission-2026-10-30/ and docs/AUDIT_DECISION_DISPOSITIONS.md section 15.",
-    "manifest": "docs/manifests/FinalMission-change-manifest.md",
-    "base": "11a5bfb4c0074c03292bb21a0c40543db492ba48",
-    "base_note": "Master after the merge of PR #278.",
-    "transition": "T0276",
-    "previous_delivery": "T0275",
-    "branch": "governance/final-mission",
-    "note": "T0276. Go-Live not authorised."
+    "kind": "PACKAGE_CONTROLS_REMEDIATION_DELIVERY",
+    "decision": "D86 (Product-Owner authorization of 2026-11-01: staff End/Reset Package, no automatic re-acquisition after an End, secondary storage and backup remediation, restore correctness; merge authorised, no deployment).",
+    "decision_note": "Delivery record: merged through the protected pull request; nothing deployed (the test appliance stays onegate-appliance-11a5bfb4c007, Central unchanged); verification in docs/reviews/PACKAGE_CONTROLS_AND_STORAGE_REMEDIATION.md section 7.",
+    "manifest": "docs/manifests/PackageControls-change-manifest.md",
+    "base": "f059af959e020b04090d5c2e653e9fa738638d8e",
+    "base_note": "Master after the merge of PR #279.",
+    "transition": "T0277",
+    "previous_delivery": "T0276",
+    "branch": "delivery/package-controls-backup-remediation",
+    "note": "T0277. Go-Live not authorised."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
