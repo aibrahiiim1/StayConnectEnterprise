@@ -1,0 +1,4 @@
+{"time":"2026-10-31T07:37:54.675750807Z","level":"WARN","msg":"phase3 shaping applied with problems","failed":1,"first":"class origin not registered for 3a07f3b3-d062-4cee-860a-758d24ed8b90: ERROR: ACCT_SOURCE_MISMATCH: the class origin does not describe session 3a07f3b3-d062-4cee-860a-758d24ed8b90 (SQLSTATE P0001)"}
+{"time":"2026-10-31T07:37:55.647159521Z","level":"WARN","msg":"phase3 shaping applied with problems","failed":6,"first":"class origin not registered for d68beaa6-26d8-4641-86a5-18c258215dd2: ERROR: ACCT_SOURCE_MISMATCH: the class origin does not describe session d68beaa6-26d8-4641-86a5-18c258215dd2 (SQLSTATE P0001)"}
+{"time":"2026-10-31T07:37:56.490471498Z","level":"WARN","msg":"phase3 shaping applied with problems","failed":12,"first":"class origin not registered for d68beaa6-26d8-4641-86a5-18c258215dd2: ERROR: ACCT_SOURCE_MISMATCH: the class origin does not describe session d68beaa6-26d8-4641-86a5-18c258215dd2 (SQLSTATE P0001)"}
+75

@@ -368,12 +368,16 @@ func cmdSignin() {
 		lw = bufio.NewWriterSize(lf, 1<<16)
 		defer lw.Flush()
 	}
-	attemptLog := func(idx int, result string, d time.Duration) {
+	// One line per attempt: end_ms (completion), client, result, latency_ms, sched_ms, start_ms.
+	// sched_ms is the OFFERED time from the generator's own fixed schedule (attempt n is offered at t0 + n*period,
+	// independent of how long earlier attempts took); start_ms is when the request was actually dispatched. The offered
+	// rate per minute is counted on sched_ms, never on the completion time (which is shifted by the latency).
+	attemptLog := func(idx int, result string, d time.Duration, sched, start time.Time) {
 		if lw == nil {
 			return
 		}
 		lmu.Lock()
-		fmt.Fprintf(lw, "%d,%d,%s,%d\n", time.Now().UnixMilli(), idx, strings.ReplaceAll(result, ",", ";"), d.Milliseconds())
+		fmt.Fprintf(lw, "%d,%d,%s,%d,%d,%d\n", time.Now().UnixMilli(), idx, strings.ReplaceAll(result, ",", ";"), d.Milliseconds(), sched.UnixMilli(), start.UnixMilli())
 		lmu.Unlock()
 	}
 	cs := load()
@@ -402,8 +406,9 @@ func cmdSignin() {
 	next := int64(0)
 	st := newStats()
 	var wg sync.WaitGroup
-	tick := time.NewTicker(time.Duration(float64(time.Minute) / *rate))
-	defer tick.Stop()
+	period := time.Duration(float64(time.Minute) / *rate)
+	schedBase := time.Now()
+	var seq int64
 	deadline := time.Now().Add(*loopFor)
 	progress := time.NewTicker(30 * time.Second)
 	defer progress.Stop()
@@ -427,7 +432,12 @@ func cmdSignin() {
 				emit(map[string]any{"progress": "signin", "attempts": attempts, "ok": atomic.LoadInt64(&okN), "errors": atomic.LoadInt64(&errN), "elapsed_s": time.Since(st.t0).Seconds()})
 			default:
 			}
-			<-tick.C
+			// fixed schedule: offer n at schedBase + n*period; a late loop catches up (no offer is dropped or merged)
+			sched := schedBase.Add(time.Duration(seq) * period)
+			seq++
+			if w := time.Until(sched); w > 0 {
+				time.Sleep(w)
+			}
 			i := int(atomic.AddInt64(&next, 1)) - 1
 			if i >= len(codes) {
 				emit(map[string]any{"warning": "out of vouchers"})
@@ -436,7 +446,7 @@ func cmdSignin() {
 			}
 			attempts++
 			wg.Add(1)
-			go func(c *Client, code string) {
+			go func(c *Client, code string, sched time.Time) {
 				defer wg.Done()
 				t := time.Now()
 				resp, err := clients[c.Idx].PostForm(fmt.Sprintf("http://%s:%d/auth/voucher", c.Gateway, *portalPort), url.Values{"code": {code}})
@@ -444,7 +454,7 @@ func cmdSignin() {
 				if err != nil {
 					atomic.AddInt64(&errN, 1)
 					st.add("error:"+short(err), d, 0)
-					attemptLog(c.Idx, "error", d)
+					attemptLog(c.Idx, "error", d, sched, t)
 					return
 				}
 				io.Copy(io.Discard, resp.Body)
@@ -456,17 +466,17 @@ func cmdSignin() {
 					c.SignedIn, c.Voucher = true, code
 					atomic.AddInt64(&okN, 1)
 					st.add("ok", d, 0)
-					attemptLog(c.Idx, "ok", d)
+					attemptLog(c.Idx, "ok", d, sched, t)
 				case strings.Contains(loc, "/packages"):
 					atomic.AddInt64(&errN, 1)
 					st.add("needs_package_choice", d, 0)
-					attemptLog(c.Idx, "needs_package_choice", d)
+					attemptLog(c.Idx, "needs_package_choice", d, sched, t)
 				default:
 					atomic.AddInt64(&errN, 1)
 					st.add(fmt.Sprintf("refused:%d", resp.StatusCode), d, 0)
-					attemptLog(c.Idx, fmt.Sprintf("refused:%d", resp.StatusCode), d)
+					attemptLog(c.Idx, fmt.Sprintf("refused:%d", resp.StatusCode), d, sched, t)
 				}
-			}(c, codes[i])
+			}(c, codes[i], sched)
 		}
 		if *loopFor == 0 {
 			break
@@ -496,7 +506,11 @@ func cmdTraffic() {
 	spread := flag.Duration("spread", 0, "spread the requests of a round evenly at random over this long instead of starting them all at once")
 	from := flag.Int("from", 0, "first client index")
 	to := flag.Int("to", 1<<30, "client index to stop before")
+	upBytes := flag.Int("up", 0, "after each successful download, also POST this many bytes to the sink (/up)")
+	perClient := flag.String("perclient", "", "write {client index: {ok_bytes, ok, fail}} (body bytes actually received) to this JSON file at the end")
 	flag.Parse()
+	var pcMu sync.Mutex
+	pcBytes, pcOK, pcFail, pcUp := map[int]int64{}, map[int]int64{}, map[int]int64{}, map[int]int64{}
 	cs := load()
 	var live []*Client
 	for _, c := range cs {
@@ -528,10 +542,36 @@ func cmdTraffic() {
 				resp, err := hcs[c.Idx].Get(fmt.Sprintf("%s/blob?n=%d", *sink, *nbytes))
 				if err != nil {
 					st.add("error:"+short(err), time.Since(t), 0)
+					pcMu.Lock()
+					pcFail[c.Idx]++
+					pcMu.Unlock()
 					return
 				}
 				n, _ := io.Copy(io.Discard, resp.Body)
 				resp.Body.Close()
+				pcMu.Lock()
+				pcBytes[c.Idx] += n
+				if resp.StatusCode == 200 && n == int64(*nbytes) {
+					pcOK[c.Idx]++
+				} else {
+					pcFail[c.Idx]++
+				}
+				pcMu.Unlock()
+				if *upBytes > 0 && resp.StatusCode == 200 {
+					rq, rerr := http.NewRequest(http.MethodPost, *sink+"/up", io.LimitReader(zeroReader{}, int64(*upBytes)))
+					if rerr == nil {
+						rq.ContentLength = int64(*upBytes)
+						if r2, e2 := hcs[c.Idx].Do(rq); e2 == nil {
+							io.Copy(io.Discard, r2.Body)
+							r2.Body.Close()
+							if r2.StatusCode == 200 {
+								pcMu.Lock()
+								pcUp[c.Idx] += int64(*upBytes)
+								pcMu.Unlock()
+							}
+						}
+					}
+				}
 				if resp.StatusCode == 200 {
 					st.add("ok", time.Since(t), n)
 				} else {
@@ -544,6 +584,16 @@ func cmdTraffic() {
 		if w := *every - time.Since(start); w > 0 {
 			time.Sleep(w)
 		}
+	}
+	if *perClient != "" {
+		out := map[string]map[string]int64{}
+		pcMu.Lock()
+		for _, c := range live {
+			out[strconv.Itoa(c.Idx)] = map[string]int64{"ok_bytes": pcBytes[c.Idx], "up_bytes": pcUp[c.Idx], "ok": pcOK[c.Idx], "fail": pcFail[c.Idx]}
+		}
+		pcMu.Unlock()
+		b, _ := json.Marshal(out)
+		_ = os.WriteFile(*perClient, b, 0o600)
 	}
 	st.report("traffic", map[string]any{"rounds": rounds, "live_clients": len(live), "pct": *pct, "bytes_per_mover": *nbytes})
 }
@@ -591,6 +641,21 @@ func cmdSink() {
 		}
 		atomic.AddInt64(&total, int64(n))
 	})
+	http.HandleFunc("/up", func(w http.ResponseWriter, r *http.Request) {
+		n, _ := io.Copy(io.Discard, r.Body)
+		atomic.AddInt64(&total, n)
+		fmt.Fprintln(w, n)
+	})
 	http.HandleFunc("/total", func(w http.ResponseWriter, r *http.Request) { fmt.Fprintln(w, atomic.LoadInt64(&total)) })
 	fatal("sink: %v", http.ListenAndServe(*listen, nil))
+}
+
+// zeroReader yields an endless stream of zero bytes (the upload payload).
+type zeroReader struct{}
+
+func (zeroReader) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = 0
+	}
+	return len(p), nil
 }

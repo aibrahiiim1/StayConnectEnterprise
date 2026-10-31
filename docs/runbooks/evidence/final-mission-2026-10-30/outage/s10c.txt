@@ -1,0 +1,37 @@
+== clean state
+03:34:12 {"s":1705,"a":false,"w":3600,"r":null,"j":0} set=1735
+== (b) journal corrupt during an outage
+03:35:27 outage +75 s: {"s":1705,"a":true,"w":3600,"r":null,"j":0} set=1705
+03:35:47 netd restarted with a corrupt journal: {"s":0,"a":false,"w":0,"r":"revocation journal is corrupt","j":0} set=1705
+msg:"netd: outage-continuity record not restored; strict behaviour until the next plan carries a block","why":"revocation journal is corrupt"}
+03:37:27 +100 s later: {"s":0,"a":false,"w":0,"r":"revocation journal is corrupt","j":0} set=0   (no renewal expected: set should be ~0)
+03:38:07 acctd back: {"s":1705,"a":false,"w":3600,"r":null,"j":0} set=1735
+-rw-r--r-- 1 root root 39 Oct 31 03:35 /var/lib/stayconnect/netd-phase3-continui
+== reset for (c)/(d)
+03:39:17 {"s":1705,"a":false,"w":3600,"r":null,"j":0} set=1735
+== (c)+(d) outage: setting to 0 and a direct nft removal
+03:40:33 outage +75 s: {"s":1705,"a":true,"w":3600,"r":null,"j":0} set=1735 record_mtime=2026-10-31 03:39:19
+03:40:53 setting=0 written during the outage: {"s":1705,"a":true,"w":3600,"r":null,"j":0} set=1705  (netd cannot learn it: window unchanged expected)
+removing element: 
+Error: syntax error, unexpected .
+delete element inet stayconnect phase3_auth_ipv4 {  .  }
+                                                    ^
+03:41:13 removed element present=1712  set=1705
+03:41:33 removed element present=1712  set=1705
+03:41:53 removed element present=1712  set=1705
+03:42:13 removed element present=1712  set=1705
+03:42:33 removed element present=1712  set=1705
+03:42:54 removed element present=1712  set=1705
+03:43:14 removed element present=1712  set=1705
+03:43:34 removed element present=1712  set=1705
+03:43:54 removed element present=1712  set=1705
+03:44:14 removed element present=1712  set=1705
+03:44:34 removed element present=1712  set=1705
+03:44:54 removed element present=1712  set=1705
+03:45:14 removed element present=1712  set=1705
+03:45:34 removed element present=1712  set=1705
+03:45:55 removed element present=1712  set=1705
+03:46:15 acctd back (setting 0 in force): {"s":0,"a":false,"w":0,"r":null,"j":0} set=1735
+03:46:35 +40 s: {"s":0,"a":false,"w":0,"r":null,"j":0} set=1735 record=ls: cannot access '/var/lib/stayconnect/netd-phase3-continuity.json': No such file or directory
+03:47:05 setting back to 60: {"s":1705,"a":false,"w":3600,"r":null,"j":0} set=1735
+S10C_EXIT=0

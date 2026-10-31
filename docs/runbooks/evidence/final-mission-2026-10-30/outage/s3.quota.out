@@ -1,0 +1,1 @@
+{"bytes":2428341812,"bytes_per_mover":2097152,"live_clients":20,"max_ms":20004,"n":2160,"p50_ms":2192,"p95_ms":15010,"p99_ms":15015,"pct":100,"phase":"traffic","results":{"error:Get \"http://172.30.10.50:8080/blob?n=2097152\": context deadl":16,"error:Get \"http://172.30.10.50:8080/blob?n=2097152\": dial tcp 172.":984,"ok":1160},"rounds":108,"seconds":900.519226066}

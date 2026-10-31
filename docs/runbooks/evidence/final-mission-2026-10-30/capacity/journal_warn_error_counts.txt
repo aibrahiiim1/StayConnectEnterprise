@@ -1,0 +1,2 @@
+   2538 phase3: session's class is absent from the counters; not accounted
+      1 erasure ledger: the secondary storage is not set up; erasure requests are refused until it is

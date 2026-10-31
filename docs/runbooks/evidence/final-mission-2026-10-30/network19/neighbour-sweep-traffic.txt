@@ -1,0 +1,1 @@
+{"bytes":330301440,"bytes_per_mover":262144,"live_clients":700,"max_ms":254,"n":1260,"p50_ms":100,"p95_ms":105,"p99_ms":106,"pct":10,"phase":"traffic","results":{"ok":1260},"rounds":18,"seconds":90.011988121}

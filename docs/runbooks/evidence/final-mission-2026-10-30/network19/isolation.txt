@@ -1,0 +1,17 @@
+lower-half client idx=3004 10.66.0.10 ; upper-half client idx=3003 10.66.31.250
+-- lower -> upper (isolation, expected: no reply):
+2 packets transmitted, 0 received, 100% packet loss, time 1020ms
+
+-- upper -> lower (expected: no reply):
+2 packets transmitted, 0 received, 100% packet loss, time 1035ms
+
+-- both reach the portal on the gateway 10.66.0.1:8380:
+cl3004 portal http=200
+cl3003 portal http=200
+-- DNS to the gateway:
+;; communications error to 10.66.0.1#53: timed out  (cl3004)
+;; communications error to 10.66.0.1#53: timed out Address: 172.66.157.237  (cl3003)
+-- management / WAN address from a client (expected: fail):
+cl3004 https://172.30.10.20/ http=000 (000 = no answer)
+cl3003 https://172.30.10.20/ http=000 (000 = no answer)
+cl3003 https://10.66.0.1/ http=000

@@ -1,0 +1,4 @@
+create a19 201 {"bridge_name": "br-g119", "id": "25e121f4-4f6d-4e9b-bd10-4ef277003d9e", "portal_url": "http://10.66.0.1:8380/"}
+validate 200 {"revision_id": "3921ddf7-229e-42fb-8178-377842cd3448", "seq": 2, "state": "validated", "validation": {"ok": true, "issues": []}, "health": null}
+apply 200 took 7.1s {"state": "pending_confirmation", "revision_id": "0a4088a2-1b31-4523-ba7e-6bbe9564305e", "message": "applied; confirm within 2m0s or it rolls back automatically", "health": [["mgmt_reachable", true, "eth0"], ["gateway_up", true, null], ["kea_running", true, null], ["portal_listen", true, "8380"], ["portal_address", true, null]], "error": null}
+confirm 200 {"state": "active"}

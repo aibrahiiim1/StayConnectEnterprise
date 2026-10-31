@@ -1,0 +1,35 @@
+== (d) direct removal during an outage, clean start
+04:06:27 outage +80 s: {"s":1705,"a":true} set=1705
+present before: 1
+deleted 10.60.3.3
+del+10s present=0 set=1704
+del+20s present=1 set=1705
+del+30s present=1 set=1705
+del+40s present=1 set=1705
+del+50s present=1 set=1705
+del+60s present=1 set=1705
+del+71s present=1 set=1705
+del+81s present=1 set=1705
+del+91s present=1 set=1705
+del+101s present=1 set=1705
+del+111s present=1 set=1705
+del+121s present=1 set=1705
+del+131s present=1 set=1705
+del+141s present=1 set=1705
+del+151s present=1 set=1705
+del+161s present=1 set=1705
+del+172s present=1 set=1705
+del+182s present=1 set=1705
+del+192s present=1 set=1705
+del+202s present=1 set=1705
+del+212s present=1 set=1705
+del+222s present=1 set=1705
+del+232s present=1 set=1705
+del+242s present=1 set=1705
+del+253s present=1 set=1705
+del+263s present=1 set=1705
+del+273s present=1 set=1705
+del+283s present=1 set=1705
+del+293s present=1 set=1705
+del+303s present=1 set=1705
+04:11:55 acctd back: {"s":1705,"a":false} set=1735 present=1

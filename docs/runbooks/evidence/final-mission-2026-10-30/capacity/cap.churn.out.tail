@@ -1,0 +1,2 @@
+{"attempts":17851,"elapsed_s":3570.001089615,"errors":0,"ok":17835,"progress":"signin"}
+{"attempts":18001,"bytes":0,"from":2000,"max_ms":7306,"n":18001,"ok":18001,"p50_ms":3090,"p95_ms":4530,"p99_ms":5127,"phase":"signin","results":{"ok":18001},"seconds":3602.838184385,"target_rate_per_min":300,"to":2400}

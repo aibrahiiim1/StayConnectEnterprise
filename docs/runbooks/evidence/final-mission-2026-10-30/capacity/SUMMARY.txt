@@ -1,0 +1,15 @@
+300 sign-ins a minute for 60 minutes, 1,700 long sessions, 10 percent of them moving 256 KB every 5 s, 60-second churn vouchers (400 simulated clients), licence 2,500.
+Lab: appliance container 2 vCPU / 4 GB (cpuset), release onegate-appliance-5926f7dead47, netd from lab-fixes-1. Run 05:42:03 to 06:42:06 UTC 2026-10-31 (T0 in cap.T0).
+
+OFFERED (generator's own fixed schedule, column sched_ms of cap.signin.log): 18,001 attempts, exactly 300 in each of the 60 minutes (mean 300.02/min), dispatched within 3 ms of the schedule.
+ENFORCED (appliance database, instant the session became active, lab.session_activation trigger -> cap.activations.csv): 18,001 of 18,001; per full minute min 289, median 301, max 309;
+  per ten minutes 2,989 / 3,000 / 2,996 / 3,004 / 2,994 / 3,004 (offered 3,000 each).
+Client-observed: 18,001 ok (portal 303 to /success); latency p50 3.090 s, p95 4.530 s, p99 5.127 s, max 7.306 s, all 18,001 inside 8 s.
+CPU (cgroup of the appliance container, 5 s windows, 631): mean 80.6 %, p50 79.1, p95 95.4, p99 99.6, max 102.4 of 2 vCPU; 37 windows >= 95 %, 7 >= 100 %. PSI cpu some avg10 mean 41 %, max 53; io mean 3.8 %; memory 0.
+  By service (percent of one CPU, 12 one-minute windows): netd 66.8, PostgreSQL 58.1, docker 4.7, scd 3.9, portald 3.8, acctd 3.8, kea 1.1, containerd 1.0.
+Memory: cgroup memory.current max 3.1 GB, memory.events low/high/max/oom/oom_kill all 0.
+PostgreSQL: connections 21-25 (max 25), lock waiters max 6 (45 of 632 samples), 0 deadlocks, 0 lock timeouts, 31 log_lock_waits lines; top statements in pg_stat_statements_top.txt.
+Forwarding: 122,400 of 122,400 downloads ok (cap.movers.out.tail).
+Accounting: raw = minute = hour = session = entitlement = 273,952,681,817 bytes (post-integrity-t0.txt; cumulative in the lab database), 0 devices with a second live session; authorization set never below 1,736.
+Warnings in the services' journals: 2,538 x "phase3: session's class is absent from the counters; not accounted" (class already torn down when acctd sampled), 1 x erasure ledger secondary storage not set up.
+Run 1 (capacity-run1/): same offered/enforced/latency (p50 2.97, p95 4.46, p99 5.22, max 7.97 s); CPU figures invalid (instrument fault).

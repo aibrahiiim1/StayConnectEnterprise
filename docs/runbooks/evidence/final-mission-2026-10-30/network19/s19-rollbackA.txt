@@ -1,0 +1,9 @@
+=== Rollback path A: unconfirmed apply of a second /19 (watchdog)
+create b19 201 {"bridge_name": "br-g120", "id": "de0ca5a4-0d40-487f-8504-ab1edb502726", "portal_url": "http://10.67.0.1:8380/"}
+apply 200 took 7.0s {"state": "pending_confirmation", "revision_id": "ced3b0c6-6c0d-449a-a4fe-cbbf1ee4ec7e", "message": "applied; confirm within 2m0s or it rolls back automatically", "health": [["mgmt_reachable", true, "eth0"], ["gateway_up", true, null], ["ke
+[pending] 07:14:07 bridges: br-g-9252e124 br-g102 br-g119 br-g120  | b19 addr: br-g120          UP             10.67.0.1/19  | kea subnets: 10.60.0.0/20 10.66.0.0/19 10.67.0.0/19 10.61.0.0/20 
+[after 140 s] 07:16:27 bridges: br-g-9252e124 br-g102 br-g119  | b19 addr: Device "br-g120" does not exist. | kea subnets: 10.60.0.0/20 10.66.0.0/19 10.61.0.0/20 
+{"id": "ced3b0c6-6c0d-449a-a4fe-cbbf1ee4ec7e", "seq": 4, "state": "rolled_back", "reason": null, "created_at": "2026-10-31T07:14:00.659159Z"}
+{"id": "0a4088a2-1b31-4523-ba7e-6bbe9564305e", "seq": 3, "state": "active", "reason": null, "created_at": "2026-10-31T07:13:12.244108Z"}
+{"id": "3921ddf7-229e-42fb-8178-377842cd3448", "seq": 2, "state": "validated", "reason": null, "created_at": "2026-10-31T07:13:11.920228Z"}
+nft diff lines above (none = equal to the confirmed /19 state)

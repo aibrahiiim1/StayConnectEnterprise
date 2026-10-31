@@ -1,0 +1,36 @@
+== (d) direct removal from BOTH authorization sets during an outage
+04:24:59 outage +125 s: {"s":1705,"a":true} set=1705
+mac=02:0d:ab:00:02:f9
+deleted from ip set
+deleted from mac set
+del+10s ip_set=0 mac_set=0 set=1704
+del+21s ip_set=0 mac_set=0 set=1704
+del+31s ip_set=0 mac_set=0 set=1704
+del+41s ip_set=0 mac_set=0 set=1704
+del+51s ip_set=0 mac_set=0 set=1704
+del+61s ip_set=0 mac_set=0 set=1704
+del+72s ip_set=0 mac_set=0 set=1704
+del+82s ip_set=0 mac_set=0 set=1704
+del+92s ip_set=0 mac_set=0 set=1704
+del+102s ip_set=0 mac_set=0 set=1704
+del+112s ip_set=0 mac_set=0 set=1704
+del+122s ip_set=0 mac_set=0 set=1704
+del+133s ip_set=0 mac_set=0 set=1704
+del+143s ip_set=0 mac_set=0 set=1704
+del+153s ip_set=0 mac_set=0 set=1704
+del+163s ip_set=0 mac_set=0 set=1704
+del+173s ip_set=0 mac_set=0 set=1704
+del+184s ip_set=0 mac_set=0 set=1704
+del+194s ip_set=0 mac_set=0 set=1704
+del+204s ip_set=0 mac_set=0 set=1704
+del+214s ip_set=0 mac_set=0 set=1704
+del+224s ip_set=0 mac_set=0 set=1704
+del+234s ip_set=0 mac_set=0 set=1704
+del+245s ip_set=0 mac_set=0 set=1704
+del+255s ip_set=0 mac_set=0 set=1704
+del+265s ip_set=0 mac_set=0 set=1704
+del+275s ip_set=0 mac_set=0 set=1704
+del+285s ip_set=0 mac_set=0 set=1704
+del+296s ip_set=0 mac_set=0 set=1704
+del+306s ip_set=0 mac_set=0 set=1704
+04:30:30 acctd back: {"s":1705,"a":false} set=1735 ip_set=1

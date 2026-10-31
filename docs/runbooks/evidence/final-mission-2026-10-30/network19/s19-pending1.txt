@@ -1,0 +1,23 @@
+== pending window checks 07:13:26
+br-g-9252e124    UP             10.60.0.1/20 
+br-g102          UP             10.61.0.1/20 
+br-g119          UP             10.66.0.1/19 
+3563:			     10.66.0.0/19 }
+3647:		ip saddr 10.66.0.0/19 oifname "eth0" masquerade
+-- admin 443 accept rules:
+		iifname "eth0" ip daddr 172.30.10.20 tcp dport 443 accept comment "Caddy TLS (admin, mgmt IP only)"
+-- Kea rendered config has the subnet and pool:
+/etc/kea/kea-dhcp4.conf subnet matches: 0
+"pool": "10.66.0.10 - 10.66.31.250"
+-- live kea control socket subnet4-list:
+kea-dhcp4.kea-dhcp4.pid
+kea4-ctrl-socket
+kea4-ctrl-socket.lock
+-- WAN:
+    inet 172.30.10.20/24 brd 172.30.10.255 scope global eth0
+default via 172.30.10.1 dev eth0 
+-- netd warn/error last 2 min:
+      3 guest bridge is not RUNNING yet; Kea may refuse to bind it. This is expected when the guest NIC is unplugged, and the listening check will r
+br-g-9252e124 classes=1035
+br-g102 classes=700
+br-g119 classes=0

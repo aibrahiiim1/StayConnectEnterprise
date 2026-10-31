@@ -1,0 +1,4 @@
+{"time":"2026-10-31T08:04:10.578730698Z","level":"WARN","msg":"shape: classifier forced to u32 by NETD_SHAPE_CLASSIFIER; limited to 2,047 sessions per bridge"}
+before: classes=2078 u32=6141 flower=0 set=4482
+env: 0 vars
+after:  classes=2150 u32=6141 flower=104 set=4585

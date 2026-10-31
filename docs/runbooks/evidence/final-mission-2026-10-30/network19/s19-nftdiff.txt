@@ -1,0 +1,17 @@
+< 		comment "netd-render-fp=16df85b7fe36cbb3078ff1ef028397da"
+> 		comment "netd-render-fp=20445ad698d34d5c31843298dd459963"
+< 			     8.8.4.4 . 53,
+< 			     8.8.8.8 . 53 }
+> 			     8.8.8.8 . 53,
+> 			     8.8.4.4 . 53 }
+< 			     8.8.4.4 . 53,
+< 			     8.8.8.8 . 53 }
+> 			     8.8.8.8 . 53,
+> 			     8.8.4.4 . 53 }
+> 			     10.66.0.0/19 }
+> 		iifname "br-g119" ip daddr { 10.66.0.1, 255.255.255.255 } udp dport { 67, 68 } accept comment "DHCP (own gateway or broadcast)"
+> 		iifname "br-g119" ip daddr 10.66.0.1 udp dport 53 accept comment "DNS (own gateway)"
+> 		iifname "br-g119" ip daddr 10.66.0.1 tcp dport 53 accept comment "DNS (own gateway)"
+> 		iifname "br-g119" ip daddr 10.66.0.1 tcp dport 8380 accept comment "portal (own gateway)"
+> 		iifname "br-g119" ip daddr 10.66.0.1 icmp type echo-request accept comment "ping own gateway"
+> 		iifname "br-g119" oifname "br-g119" drop comment "client isolation"

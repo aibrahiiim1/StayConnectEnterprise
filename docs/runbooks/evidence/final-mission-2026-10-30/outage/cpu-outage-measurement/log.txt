@@ -1,0 +1,6 @@
+healthy window: 06:44:56
+acctd stopped 06:54:56
+outage window: 06:57:56
+outage window end 07:07:56 set=1705
+recovery window: 07:08:56
+done
