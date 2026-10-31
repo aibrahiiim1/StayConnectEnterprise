@@ -1,5 +1,12 @@
 # OneGate post-stay sign-in: room number and reservation number
 
+> **Amended 2026-10-30.** Checkout Grace and Post-Stay are now one feature, **After Check-out Access**
+> ([`ONEGATE_AFTER_CHECKOUT_ACCESS.md`](ONEGATE_AFTER_CHECKOUT_ACCESS.md) is the authority). Where this page differs, that page
+> wins: a device that was not authorised on the stay before check-out is **never** let in (the "new device + last name" route is
+> removed), nothing is granted at sign-in (the separate Post-Stay benefit is retired; the stay's one After Check-out entitlement
+> is granted at the checkout and the device only rejoins it), and `post_stay_signin_days` is retired (the window is the
+> entitlement's own duration). The refusal, lockout and audit rules below still hold.
+
 Status: current contract (audit decision AD-36, Product-Owner replacement, migration 0165). It replaces the Post-Stay PIN
 contract of `StayConnect-IAM-Phase5-Plan.md` for everything that concerns how a guest proves themselves. The profile,
 auth-context and conversion rules of that plan (episode binding, zero-price packages, one-time context, enforced session)

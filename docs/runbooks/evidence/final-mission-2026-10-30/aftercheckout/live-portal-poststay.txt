@@ -1,0 +1,6 @@
+http=200 {"ok":false,"message":"We could not verify your stay. Please check your details or contact the site team for assistance."}
+
+http=200 {"ok":false,"message":"We could not verify your stay. Please check your details or contact the site team for assistance."}
+
+http=200 {"ok":false,"message":"We could not verify your stay. Please check your details or contact the site team for assistance."}
+

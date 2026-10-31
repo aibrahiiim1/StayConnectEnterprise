@@ -201,5 +201,5 @@ test("a stored collapse does not leak into the mobile drawer", async ({ page }) 
   await page.getByRole("button", { name: "Open navigation" }).click();
   const drawer = page.getByLabel("Navigation", { exact: true });
   await drawer.getByRole("button", { name: "Hotel" }).click();
-  await expect(drawer.getByRole("link", { name: "Grace Period" })).toBeVisible();
+  await expect(drawer.getByRole("link", { name: "After Check-out Access" })).toBeVisible();
 });

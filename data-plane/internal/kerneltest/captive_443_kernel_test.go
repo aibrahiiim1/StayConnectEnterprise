@@ -92,7 +92,7 @@ func TestKernel_UnauthenticatedGuest443GetsNoResetAndNeverLeavesTheWAN(t *testin
 		t.Fatalf("%d SYN(s) to :443 from an unauthenticated guest arrived on the WAN side", n)
 	}
 
-	run(t, nftWrapper, "add", "element", "inet", "stayconnect", "auth_ipv4", "{ \""+guestIface+"\" . "+guestIP+" }")
+	run(t, nftWrapper, "add", "element", "inet", "stayconnect", "phase3_auth_ipv4", "{ \""+guestIface+"\" . "+guestIP+" }")
 	if got := tcpProbe(t, guestNS, wanIP, "443"); got != "connected" {
 		t.Fatalf("authenticated guest -> %s:443 = %s; a signed-in guest must reach HTTPS", wanIP, got)
 	}
@@ -100,7 +100,7 @@ func TestKernel_UnauthenticatedGuest443GetsNoResetAndNeverLeavesTheWAN(t *testin
 		t.Fatal("the authenticated SYN connected but the WAN counter saw nothing; the instrument is broken")
 	}
 
-	run(t, nftWrapper, "delete", "element", "inet", "stayconnect", "auth_ipv4", "{ \""+guestIface+"\" . "+guestIP+" }")
+	run(t, nftWrapper, "delete", "element", "inet", "stayconnect", "phase3_auth_ipv4", "{ \""+guestIface+"\" . "+guestIP+" }")
 	before := synsAtWAN()
 	if got := tcpProbe(t, guestNS, wanIP, "443"); got != "timeout" {
 		t.Fatalf("after sign-out, guest -> %s:443 = %s; want timeout", wanIP, got)

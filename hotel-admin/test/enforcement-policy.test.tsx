@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { allowListProblem, cidrProblem, sameList, splitCidrs, valueWords } from "@/lib/enforcement-policy";
+import { allowListProblem, cidrProblem, continuityProblem, continuityWords, sameList, splitCidrs, valueWords } from "@/lib/enforcement-policy";
 
 const get = vi.fn();
 const patch = vi.fn();
@@ -18,7 +18,7 @@ function doc(over: Record<string, any> = {}) {
   return {
     policy: {
       private_deny_enabled: true, private_allow_cidrs: [], allow_upstream_infrastructure: true, mac_binding_enabled: false,
-      cutoff_seconds: 5, config_version: 1, updated_at: "2026-10-29T08:00:00Z", updated_by: "migration 0166", ...(over.policy ?? {}),
+      cutoff_seconds: 5, outage_continuity_minutes: 60, config_version: 1, updated_at: "2026-10-29T08:00:00Z", updated_by: "migration 0166", ...(over.policy ?? {}),
     },
     settings: [
       { field: "private_deny_enabled", label: "Deny guests the hotel's private networks", default: true, explanation: "Explains denial." },
@@ -26,8 +26,9 @@ function doc(over: Record<string, any> = {}) {
       { field: "allow_upstream_infrastructure", label: "Keep the upstream gateway and DNS reachable", default: true, explanation: "Explains upstream." },
       { field: "mac_binding_enabled", label: "Bind a guest's access to its device address (MAC)", default: false, explanation: "The AD-23 control." },
       { field: "cutoff_seconds", label: "Cut-off delay when an allowance is used up", default: 5, unit: "seconds", explanation: "Explains cut-off.", min: 1, max: 60 },
+      { field: "outage_continuity_minutes", label: "Keep guests online when OneGate itself fails", default: 60, unit: "minutes", explanation: "Explains continuity.", min: 0, max: 120 },
     ],
-    limits: { max_cidrs: 64, min_prefix: 8, max_prefix: 32, cutoff_min: 1, cutoff_max: 60 },
+    limits: { max_cidrs: 64, min_prefix: 8, max_prefix: 32, cutoff_min: 1, cutoff_max: 60, continuity_min: 0, continuity_max: 120 },
     history: over.history ?? [
       { changed_at: "2026-10-29T08:00:00Z", changed_by: "migration 0166", reason: "defaults created", field: "all", old_value: null, new_value: "defaults", config_version: 1 },
       { changed_at: "2026-10-30T08:00:00Z", changed_by: "ops@hotel.example", reason: "printer network", field: "private_allow_cidrs", old_value: "", new_value: "192.168.50.0/24", config_version: 2 },
@@ -78,7 +79,7 @@ describe("enforcement policy page", () => {
     await renderPage();
     expect(screen.getByText(/The AD-23 control/)).toBeTruthy();
     expect(screen.getByText(/Explains allow-list/)).toBeTruthy();
-    expect(screen.getAllByText(/Default:/).length).toBe(5);
+    expect(screen.getAllByText(/Default:/).length).toBe(6);
     const hist = screen.getByRole("list", { name: "Change history" });
     expect(hist.textContent).toContain("printer network");
     expect(hist.textContent).toContain("none → 192.168.50.0/24");
@@ -159,5 +160,69 @@ describe("enforcement policy page", () => {
     await user.type(screen.getByLabelText(/Your password/), "pw-1234567890");
     await user.click(screen.getByRole("button", { name: "Save settings" }));
     expect(await screen.findByText(/at most 64 networks may be allowed/)).toBeTruthy();
+  });
+
+  it("shows the continuity window in words and sends only that field when it changes", async () => {
+    serve(doc(), ["hotel_it_manager"]);
+    patch.mockResolvedValue(doc({ policy: { outage_continuity_minutes: 90, config_version: 2 } }));
+    const user = userEvent.setup();
+    await renderPage();
+    const c = screen.getByLabelText(/Keep guests online when OneGate itself fails/) as HTMLInputElement;
+    expect(c.value).toBe("60");
+    expect(screen.getByTestId("continuity-effect").textContent).toContain("up to 1 h");
+    await user.clear(c);
+    await user.type(c, "90");
+    expect(screen.getByTestId("continuity-effect").textContent).toContain("up to 1 h 30 min");
+    await user.type(screen.getByLabelText(/Reason for the change/), "Agreed with the general manager");
+    await user.type(screen.getByLabelText(/Your password/), "pw-1234567890");
+    await user.click(screen.getByRole("button", { name: "Save settings" }));
+    await waitFor(() => expect(patch).toHaveBeenCalledWith("/network/enforcement-policy", { reason: "Agreed with the general manager", password: "pw-1234567890", outage_continuity_minutes: 90 }));
+  });
+
+  it("refuses a continuity value outside 0..120 before sending, and says what 0 means", async () => {
+    serve(doc(), ["hotel_it_manager"]);
+    const user = userEvent.setup();
+    await renderPage();
+    const c = screen.getByLabelText(/Keep guests online when OneGate itself fails/);
+    await user.clear(c);
+    await user.type(c, "121");
+    expect(screen.getByText(/between 0 and 120/, { selector: "p" })).toBeTruthy();
+    await user.type(screen.getByLabelText(/Reason for the change/), "A valid reason");
+    await user.type(screen.getByLabelText(/Your password/), "pw-1234567890");
+    expect((screen.getByRole("button", { name: "Save settings" }) as HTMLButtonElement).disabled).toBe(true);
+    await user.clear(c);
+    await user.type(c, "0");
+    expect(screen.getByTestId("continuity-effect").textContent).toContain("about 90 seconds");
+    expect(patch).not.toHaveBeenCalled();
+  });
+
+  it("does not show the row on an appliance that does not serve the setting", async () => {
+    const old = doc();
+    delete (old.policy as any).outage_continuity_minutes;
+    old.settings = old.settings.filter((x: any) => x.field !== "outage_continuity_minutes");
+    serve(old, ["hotel_it_manager"]);
+    await renderPage();
+    expect(screen.queryByLabelText(/Keep guests online when OneGate itself fails/)).toBeNull();
+  });
+
+  it("the continuity field is read-only for a role that cannot write the network", async () => {
+    serve(doc(), ["site_viewer"]);
+    await renderPage();
+    expect((screen.getByLabelText(/Keep guests online when OneGate itself fails/) as HTMLInputElement).disabled).toBe(true);
+  });
+});
+
+describe("continuity words", () => {
+  it("states the effect of the value", () => {
+    expect(continuityWords(0)).toContain("90 seconds");
+    expect(continuityWords(45)).toContain("45 min");
+    expect(continuityWords(120)).toContain("2 h");
+    expect(continuityProblem("120")).toBeNull();
+    expect(continuityProblem("121")).not.toBeNull();
+    expect(continuityProblem("-1")).not.toBeNull();
+    expect(continuityProblem("1.5")).not.toBeNull();
+    expect(continuityProblem("")).not.toBeNull();
+    expect(valueWords("outage_continuity_minutes", "0")).toBe("off");
+    expect(valueWords("outage_continuity_minutes", "60")).toBe("60 min");
   });
 });

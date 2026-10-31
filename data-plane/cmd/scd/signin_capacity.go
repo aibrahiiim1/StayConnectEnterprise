@@ -23,7 +23,7 @@ type signinCapacity struct {
 	DeviceRetentionDays int
 	ImageMaxEdgePx      int
 	ImageQuality        int
-	PostStaySigninDays  int
+	PostStaySigninDays  int             // RETIRED (migration 0193): read for the record only; the window is the After Check-out entitlement's own
 	PostStay            poststay.Limits // post-stay brute-force bounds (migration 0190)
 	FromDatabase        bool
 }

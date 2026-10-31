@@ -1,0 +1,7 @@
+FROM debian:12
+ENV DEBIAN_FRONTEND=noninteractive
+# IPv4 only, retried, tolerant of a failing bookworm-updates index: the package CDN dropped connections on the lab workstation's network.
+RUN echo 'Acquire::ForceIPv4 true; Acquire::Retries 8;' > /etc/apt/apt.conf.d/99lab \
+ && (apt-get update || true) \
+ && for i in 1 2 3 4 5 6; do apt-get install -y --no-install-recommends --fix-missing kea-dhcp4-server iproute2 python3 && break || sleep 5; done \
+ && which kea-dhcp4 && rm -rf /var/lib/apt/lists/*

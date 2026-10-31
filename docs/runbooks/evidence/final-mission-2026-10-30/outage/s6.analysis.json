@@ -1,0 +1,207 @@
+{
+ "name": "s6",
+ "window_min": 60,
+ "T0": 1793412739.145192,
+ "Tr": 1793416639.5834332,
+ "results": {
+  "long_present_at_T0": 1689,
+  "long_last_seen_rel_deadline_s": {
+   "min": -3.1451919078826904,
+   "p50": -3.1451919078826904,
+   "max": -3.1451919078826904
+  },
+  "long_left_before_deadline_minus_5s": 0,
+  "long_left_after_deadline_plus_15s": 0,
+  "authset_min_during_window": 1705,
+  "authset_max_during_window": 1785,
+  "authset_at_T0": 1785,
+  "set_first_<=5_elements_rel_deadline_s": -1.1451919078826904,
+  "clients_that_became_online_during_outage": 0,
+  "new_online_idx_sample": [],
+  "q200": {
+   "1700": {
+    "last_seen_rel_T0_s": 2828.9,
+    "bytes_rx": 124526551
+   },
+   "1701": {
+    "last_seen_rel_T0_s": 2833.9,
+    "bytes_rx": 125829120
+   },
+   "1702": {
+    "last_seen_rel_T0_s": 2833.9,
+    "bytes_rx": 125829120
+   },
+   "1703": {
+    "last_seen_rel_T0_s": 2828.9,
+    "bytes_rx": 124726375
+   },
+   "1704": {
+    "last_seen_rel_T0_s": 2833.9,
+    "bytes_rx": 125829120
+   },
+   "1705": {
+    "last_seen_rel_T0_s": 2833.9,
+    "bytes_rx": 125829120
+   },
+   "1706": {
+    "last_seen_rel_T0_s": 2828.9,
+    "bytes_rx": 124933439
+   },
+   "1707": {
+    "last_seen_rel_T0_s": 2833.9,
+    "bytes_rx": 125829120
+   },
+   "1708": {
+    "last_seen_rel_T0_s": 2828.9,
+    "bytes_rx": 125123127
+   },
+   "1709": {
+    "last_seen_rel_T0_s": 2833.9,
+    "bytes_rx": 125829120
+   },
+   "1710": {
+    "last_seen_rel_T0_s": 2833.9,
+    "bytes_rx": 125829120
+   },
+   "1711": {
+    "last_seen_rel_T0_s": 2833.9,
+    "bytes_rx": 125829120
+   },
+   "1712": {
+    "last_seen_rel_T0_s": 2828.9,
+    "bytes_rx": 125334535
+   },
+   "1713": {
+    "last_seen_rel_T0_s": 2828.9,
+    "bytes_rx": 124307903
+   },
+   "1714": {
+    "last_seen_rel_T0_s": 2833.9,
+    "bytes_rx": 125829120
+   },
+   "1715": {
+    "last_seen_rel_T0_s": 2833.9,
+    "bytes_rx": 125541599
+   },
+   "1716": {
+    "last_seen_rel_T0_s": 2833.9,
+    "bytes_rx": 125829120
+   },
+   "1717": {
+    "last_seen_rel_T0_s": 2833.9,
+    "bytes_rx": 125829120
+   },
+   "1718": {
+    "last_seen_rel_T0_s": 2833.9,
+    "bytes_rx": 125829120
+   },
+   "1719": {
+    "last_seen_rel_T0_s": 2833.9,
+    "bytes_rx": 125753007
+   }
+  },
+  "q50": {
+   "1720": {
+    "last_seen_rel_T0_s": 71.9,
+    "bytes_rx": null
+   },
+   "1721": {
+    "last_seen_rel_T0_s": 71.9,
+    "bytes_rx": null
+   },
+   "1722": {
+    "last_seen_rel_T0_s": 71.9,
+    "bytes_rx": null
+   },
+   "1723": {
+    "last_seen_rel_T0_s": 71.9,
+    "bytes_rx": null
+   },
+   "1724": {
+    "last_seen_rel_T0_s": 71.9,
+    "bytes_rx": null
+   },
+   "1725": {
+    "last_seen_rel_T0_s": 71.9,
+    "bytes_rx": null
+   },
+   "1726": {
+    "last_seen_rel_T0_s": 71.9,
+    "bytes_rx": null
+   },
+   "1727": {
+    "last_seen_rel_T0_s": 71.9,
+    "bytes_rx": null
+   },
+   "1728": {
+    "last_seen_rel_T0_s": 71.9,
+    "bytes_rx": null
+   },
+   "1729": {
+    "last_seen_rel_T0_s": 71.9,
+    "bytes_rx": null
+   }
+  },
+  "w5_last_seen_minus_expiry_s": {
+   "n": 50,
+   "min": -2.0,
+   "max": 3.0
+  },
+  "journalled_revocations_max": 0,
+  "renewals_max": 343970,
+  "governor_active_first_t_rel_T0": 59.85480809211731,
+  "probe_ok_fraction_in_outage": 0.0,
+  "probe_failures_max": 815,
+  "dropped_reasons_last_snapshot": {
+   "t_rel_T0": 3896.8548080921173,
+   "reasons": {
+    "continuity window or hard end reached": 438
+   }
+  },
+  "budget_used_limit_last_snapshot": {
+   "used": 20,
+   "sample": [
+    [
+     "04e54630-db63-427c-a2f6-acecaebef9d5",
+     0
+    ],
+    [
+     "27820bec-1967-435b-915f-846b8092694a",
+     0
+    ],
+    [
+     "2bc1f8e2-7c8f-4086-89d0-7e0d67ed4505",
+     0
+    ]
+   ]
+  },
+  "recovery_to_50_percent_of_pre_s": 5.416566848754883,
+  "recovery_to_90_percent_of_pre_s": 5.416566848754883,
+  "recovery_to_99_percent_of_pre_s": null,
+  "authset_final": 1735,
+  "bg_traffic": {
+   "results": {
+    "ok": 98140
+   },
+   "n": 98140,
+   "p50_ms": 94,
+   "p99_ms": 176,
+   "bytes": 25726812160
+  },
+  "record_rewrite_gap_s": {
+   "n": 53,
+   "min": 3.1,
+   "p50": 15.5,
+   "max": 2672.5
+  },
+  "cgroup_cpu_percent_of_2vcpu": {
+   "healthy_before_T0": 3.5,
+   "during_window": 3.0,
+   "mem_cur_max_mb": 398
+  },
+  "netd_rss_kb": {
+   "min": 32656,
+   "max": 79640
+  }
+ }
+}

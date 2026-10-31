@@ -446,7 +446,7 @@ Not findings in the source, so no rows: X4 (no real hard-coded credentials), X5 
 | D4-M3 | Medium | Shared-allowance groups collide by chance and are refused | `internal/shape/shape.go:75-95` | OPEN | Deferred-controlled: durable group-class allocation, with D4-H1 |
 | D4-L1 | Low | Class counters dumped four times a second per guest network | `internal/shape/shape.go:494`; `cmd/acctd/phase3_accounting.go:107` | FIXED | `4779ff77` netd half; `TestARenewalPassReadsEachBridgeOnce`. acctd half not reproducible (already one read per pass) |
 | D4-L2 | Low | Structure check dumps the whole nftables table every 10 s | `internal/nftconverge/converge.go:152`; `cmd/netd/nft_watch.go:59` | OPEN | Deferred-controlled (batch B2) |
-| D4-L3 | Low | Guest networks wider than /20 alias device classes | `internal/shape/shape.go:58` | ALREADY-FIXED | `85f1b1c4`: `internal/netcfg/validate.go` refuses subnets wider than /20 |
+| D4-L3 | Low | Guest networks wider than /20 alias device classes | `internal/shape/shape.go:58` | ALREADY-FIXED | `85f1b1c4`: `internal/netcfg/validate.go` refuses subnets wider than /20 (superseded 2026-10-30: the limit is now /19, with class ids that tell every /19 host apart; see `CLIENT_NETWORKING.md` 1a) |
 | D4-CC1 | CC | Every kernel operation is a separate process | `internal/shape/shape.go:45`; `internal/nft/nft.go:38,243` | OPEN | Deferred-controlled (batch B2) |
 | D5-H1 | High | Sessions cannot be found by entitlement; expiry sweep looks them up that way every second | `iam_v2.sessions` (no `entitlement_id` index) | FIXED | Migration 0159 (`47ed5065`), `sessions(entitlement_id)`; verified on a full-schema test DB |
 | D5-H2 | High | acctd runs every step in one serial loop | `cmd/acctd/main.go:182-206` | OPEN-DECISION | AD-47 |

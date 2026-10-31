@@ -51,6 +51,7 @@ var unscopedTables = map[string]string{
 	"ledger_meta":                    "the one erasure-ledger identity of this appliance",
 	"retention_floor":                "a singleton: the earliest time retention may reach",
 	"scrub_registry":                 "static registry of columns the erasure scrub reaches",
+	"stay_event_payload_reductions":  "child of stay_events (event_id, which carries tenant and site): ids only, the undo record of 0171",
 }
 
 const (

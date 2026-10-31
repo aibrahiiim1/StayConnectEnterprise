@@ -65,3 +65,7 @@ Differences from the first lab, each a property of the lab host that decided wha
   `probe.sh` (commit latency), `lab_quota.py` (data-quota vouchers). The scripts assume the lab's layout (`/rel` is the shared directory, `/root` the working directory).
   Diagnostic binaries: `build-lab-binaries.sh stayconnect_production,oglabdiag <svc>` serves pprof on loopback (scd 6061, netd 6062, acctd 6063); a release is
   never built with that tag.
+
+## Final mission round (2026-10-31): outage continuity, /19 and capacity tools (`finalmission/`)
+
+Host-side orchestration and analysis for `docs/runbooks/OUTAGE_CONTINUITY_LAB_PLAN.md`, `NETWORK_19_LAB_PLAN.md` and the capacity rerun (paths are the lab workstation paths, edit before reuse): `orch.py` (one continuity run: population, outage, timed events, collection), `setwatch.py` (the kernel set and netd governor every 2 s), `analyze_cont.py`, `analyze_acct.py`, `cap_run.sh` / `cap_remote.sh` / `cap_analyze.py` / `cap_stats.py` (offered rate from `ogload signin -log` column 5, enforced rate from the activation timestamps the lab trigger `cap_trigger.sql` records), `s19_*` and `u32_*` (the /19 plan), `ac_api.py`. `ogload` now logs the OFFERED (scheduled) time of every sign-in attempt next to its start and end, schedules offers on a fixed grid, and `traffic` takes `-perclient` and `-up`. **`sampler.sh` and `cpuproc.sh` read the wrong cgroup in a container with a private cgroup namespace before this round** (they used /init.scope); they now use the namespace root and `sampler.sh` also records CPU/IO/memory pressure.

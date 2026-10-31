@@ -42,8 +42,9 @@ func aiTotal(t *testing.T, p *pgxpool.Pool, ent string) int64 {
 }
 
 // ---------------------------------------------------------------------------------------------------------
-// 1. THE QUOTA HOLE. A session whose samples were all purged (idle past raw_retention_days) restarted its sample_seq at 1, below the
-//    crossing checkpoint, so its new traffic was never counted toward the data quota. Real ingestion throughout.
+//  1. THE QUOTA HOLE. A session whose samples were all purged (idle past raw_retention_days) restarted its sample_seq at 1, below the
+//     crossing checkpoint, so its new traffic was never counted toward the data quota. Real ingestion throughout.
+//
 // ---------------------------------------------------------------------------------------------------------
 func TestIntegration_AccountingIntegrity_AnIdleSessionPastTheRetentionStillCrossesItsQuota(t *testing.T) {
 	p := pool(t)
@@ -56,8 +57,8 @@ func TestIntegration_AccountingIntegrity_AnIdleSessionPastTheRetentionStillCross
 	ent, sess := grant(t, p, f, nil, at)
 	m := onBridge(t, p, sess, "br-g-ai1")
 	submit(t, p, f, m, 1, 0, 0, at)
-	submit(t, p, f, m, 1, 1_500_000, 1_500_000, at.Add(time.Hour))     // +3 MB
-	submit(t, p, f, m, 1, 3_000_000, 3_000_000, at.Add(2*time.Hour))   // +3 MB = 6 MB, under the 10 MB quota
+	submit(t, p, f, m, 1, 1_500_000, 1_500_000, at.Add(time.Hour))   // +3 MB
+	submit(t, p, f, m, 1, 3_000_000, 3_000_000, at.Add(2*time.Hour)) // +3 MB = 6 MB, under the 10 MB quota
 	if due, err := New(p).EnforceExpiries(ctx, f.tenant, f.site); err != nil || len(due) != 0 {
 		t.Fatalf("under the quota: %v %v", due, err)
 	}

@@ -1,0 +1,13 @@
+# RESERVED MIGRATION NUMBERS -- the single machine-readable declaration.
+#
+# One range per line:   FIRST-LAST   reason          (four-digit numbers, inclusive; a hash starts a comment)
+#
+# A number listed here is HELD OUT OF THE SEQUENCE ON PURPOSE. It was never used and must never be: no file
+# named NNNN_*.up.sql / .down.sql with a number in a reserved range may exist in this directory.
+#   * tools/validate-migration-location.py refuses such a file in CI, and does not count the reserved numbers as
+#     a gap in the sequence.
+#   * scripts/edge-migrate.sh and deploy/scripts/apply-pending-migrations.sh read this same file and refuse to
+#     apply (or even plan) such a file on an appliance.
+# To reserve a range, add ONE line here. Never edit a range to "use" a number: take the next free number instead.
+0182-0189   held out while the closure-round work ran in parallel; 0190 was the first migration after the block (applied on the test appliance, so it cannot be renumbered)
+0194-0197   held out while the final-mission work ran in parallel; 0198 and 0199 (outage continuity) are the first migrations after the block

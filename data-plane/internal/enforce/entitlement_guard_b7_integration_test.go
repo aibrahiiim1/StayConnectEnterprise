@@ -262,13 +262,13 @@ func TestIntegration_B7_RuntimeRolesHoldOnlyWhatTheirCodeUses(t *testing.T) {
 		wantRefused(t, r+" writing PMS reconciliation settings", err, "permission denied")
 	}
 
-	// svc_edged: the transfer's one session column, nothing else.
-	if err := asRole(t, p, "svc_edged", func(tx pgx.Tx) error {
+	// svc_edged holds NO session column any more (migration 0201): a Cross-PMS Transfer re-points sessions inside the definer
+	// function iam_v2.cross_pms_transfer, which the role may only execute.
+	err = asRole(t, p, "svc_edged", func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE iam_v2.sessions SET entitlement_id=entitlement_id WHERE id=$1`, sess)
 		return err
-	}); err != nil {
-		t.Fatalf("svc_edged re-pointing a session (internal/transfer): %v", err)
-	}
+	})
+	wantRefused(t, "svc_edged re-pointing a session by raw write", err, "permission denied")
 	err = asRole(t, p, "svc_edged", func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE iam_v2.sessions SET state='ended', ended=now() WHERE id=$1`, sess)
 		return err

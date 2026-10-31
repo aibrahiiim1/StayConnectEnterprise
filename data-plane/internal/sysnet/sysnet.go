@@ -154,8 +154,12 @@ func ValidateFull(wan WANConfig, lan LANConfig) ValidationResult {
 		}
 	}
 
-	if lan.PrefixLen < 1 || lan.PrefixLen > 30 {
-		res.add("lan.prefix_len", "invalid_prefix", "LAN prefix length must be 1–30")
+	// The LAN base address is the address of the client network on the LAN port, so it follows the same size rule as any client network:
+	// /19 (8190 addresses) at the widest, /30 at the narrowest.
+	lanPrefixOK := lan.PrefixLen >= netcfg.MinSubnetPrefix && lan.PrefixLen <= netcfg.MaxSubnetPrefix
+	if !lanPrefixOK {
+		res.add("lan.prefix_len", "invalid_prefix", fmt.Sprintf("LAN prefix length must be %d-%d (a client network is at most /%d, %d addresses)",
+			netcfg.MinSubnetPrefix, netcfg.MaxSubnetPrefix, netcfg.MinSubnetPrefix, netcfg.SubnetHosts(netcfg.MinSubnetPrefix)))
 	}
 	lip := net.ParseIP(lan.IP)
 	var lanNet *net.IPNet
@@ -163,7 +167,7 @@ func ValidateFull(wan WANConfig, lan LANConfig) ValidationResult {
 		res.add("lan.ip", "invalid_ip", "LAN gateway IP is not a valid IPv4 address")
 	} else if why := unusableHost(lip); why != "" {
 		res.add("lan.ip", "unusable_address", "LAN gateway IP is "+why)
-	} else if lan.PrefixLen >= 1 && lan.PrefixLen <= 30 {
+	} else if lanPrefixOK {
 		_, lanNet, _ = net.ParseCIDR(fmt.Sprintf("%s/%d", lan.IP, lan.PrefixLen))
 		if lanNet != nil {
 			if isNetworkAddr(lip, lanNet) {
@@ -190,8 +194,10 @@ func ValidateFull(wan WANConfig, lan LANConfig) ValidationResult {
 		res.add("lan.physical_interface", "member_is_bridge", "LAN physical interface cannot equal the bridge")
 	}
 
-	if wanNet != nil && lanNet != nil && wanNet.String() == lanNet.String() {
-		res.add("lan.ip", "subnet_overlap", "WAN and LAN cannot use the same subnet")
+	// Overlap, not only equality: a wide LAN (up to /19) that contains the WAN/management subnet, or the reverse, would route the
+	// client addresses into the uplink and take the management address with it.
+	if wanNet != nil && lanNet != nil && (wanNet.Contains(lanNet.IP) || lanNet.Contains(wanNet.IP)) {
+		res.add("lan.ip", "subnet_overlap", "WAN and LAN cannot use the same or overlapping subnets")
 	}
 	if wan.IP != "" && wan.IP == lan.IP {
 		res.add("lan.ip", "duplicate_ip", "WAN IP and LAN IP must be different")

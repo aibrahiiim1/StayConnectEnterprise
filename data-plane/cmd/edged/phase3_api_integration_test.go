@@ -204,6 +204,7 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 			// A no-op until a test gives the server a read recorder.
 			r.Use(s.recordGuestDataReads)
 			mountResource(r, s, "checkout-grace", s.checkoutGraceConfigRoutes)
+			mountResource(r, s, "after-checkout-access", s.afterCheckoutAccessRoutes)
 			mountResource(r, s, "operational-alerts", s.operationalAlertsRoutes)
 			mountResource(r, s, "pms-stays", s.pmsStaysRoutes)
 			mountResource(r, s, "pms-events", s.pmsEventsRoutes)
@@ -248,6 +249,10 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 			r.Route("/accounting-retention", func(r chi.Router) {
 				r.Use(s.resourcePermission("backups"))
 				r.Mount("/", s.accountingRetentionRoutes())
+			})
+			r.Route("/accounting-integrity", func(r chi.Router) {
+				r.Use(s.resourcePermission("reports"))
+				r.Mount("/", s.accountingIntegrityRoutes())
 			})
 			r.Route("/data-retention", func(r chi.Router) {
 				r.Use(s.resourcePermission("backups"))

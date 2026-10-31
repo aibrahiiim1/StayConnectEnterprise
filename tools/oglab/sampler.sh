@@ -3,8 +3,10 @@
 # usage: sampler.sh <outfile> [interval=5] [licence_limit=2500]
 OUT="${1:-/root/sample.csv}"; INT="${2:-5}"; LIMIT="${3:-2500}"
 PGX='docker exec -i stayconnect-pg psql -X -At -U stayconnect -d stayconnect_site -F ,'
-echo "ts,cpu_usec,mem_cur,mem_peak,load1,rss_scd,rss_edged,rss_netd,rss_portald,rss_acctd,rss_pg_all,pg_total,pg_scd,pg_acctd,pg_edged,pg_netd,pg_idle_in_tx,pg_waiting_lock,pg_waiting_other,locks_notgranted,acct_raw,acct_minute,acct_hour,sess_active,sess_pending,sess_ended,dup_live_dev,online_count,lic_limit,auth_set,tc_classes,ct_count" > "$OUT"
+echo "ts,cpu_usec,mem_cur,mem_peak,load1,rss_scd,rss_edged,rss_netd,rss_portald,rss_acctd,rss_pg_all,pg_total,pg_scd,pg_acctd,pg_edged,pg_netd,pg_idle_in_tx,pg_waiting_lock,pg_waiting_other,locks_notgranted,acct_raw,acct_minute,acct_hour,sess_active,sess_pending,sess_ended,dup_live_dev,online_count,lic_limit,auth_set,tc_classes,ct_count,psi_cpu_some10,psi_io_some10,psi_mem_some10" > "$OUT"
 CG=/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup | sed -E 's#(/docker/[0-9a-f]+).*#\1#')
+[ -d /sys/fs/cgroup/system.slice ] && CG=/sys/fs/cgroup  # private cgroup namespace: the exec'd shell sits in /init.scope, the container is the namespace root
+psi() { awk '/^some/{for(i=1;i<=NF;i++) if($i ~ /^avg10=/){sub("avg10=","",$i); print $i}}' $CG/$1.pressure 2>/dev/null; }
 rss() { ps -eo rss,comm | awk -v p="$1" '$2 ~ p {s+=$1} END{print s+0}'; }
 while true; do
   TS=$(date +%s)
@@ -30,6 +32,6 @@ while true; do
   AS=$(nft list set inet stayconnect phase3_auth_ipv4 2>/dev/null | grep -o 'br-g[^ ]* \. [0-9.]*' | wc -l)
   CT=$(cat /proc/sys/net/netfilter/nf_conntrack_count 2>/dev/null)
   IFS=, read -r f_total f_scd f_acct f_edged f_netd f_idle f_wl f_wo f_ng f_raw f_min f_hour f_act f_pend f_end f_dup f_online <<< "$PG"
-  echo "$TS,$CPU,$MC,$MP,$L1,$(rss '^scd$'),$(rss '^edged$'),$(rss '^netd$'),$(rss '^portald$'),$(rss '^acctd$'),$(rss '^postgres$'),$f_total,$f_scd,$f_acct,$f_edged,$f_netd,$f_idle,$f_wl,$f_wo,$f_ng,$f_raw,$f_min,$f_hour,$f_act,$f_pend,$f_end,$f_dup,$f_online,$LIMIT,$AS,$TCC,$CT" >> "$OUT"
+  echo "$TS,$CPU,$MC,$MP,$L1,$(rss '^scd$'),$(rss '^edged$'),$(rss '^netd$'),$(rss '^portald$'),$(rss '^acctd$'),$(rss '^postgres$'),$f_total,$f_scd,$f_acct,$f_edged,$f_netd,$f_idle,$f_wl,$f_wo,$f_ng,$f_raw,$f_min,$f_hour,$f_act,$f_pend,$f_end,$f_dup,$f_online,$LIMIT,$AS,$TCC,$CT,$(psi cpu),$(psi io),$(psi memory)" >> "$OUT"
   sleep "$INT"
 done

@@ -46,7 +46,7 @@ license.
 | **Email** | Email address → **Send code**, then the 6-digit code → **Verify** | Needs a sender under **Email & SMS**. *Try a different email* starts again. |
 | **Phone** | Phone number with country code → **Send code**, then the 6-digit code → **Verify** | Needs a text-message sender under **Email & SMS**. |
 | **Social** | **Continue with Google / Apple / Facebook** | Leaves for the provider and comes back. Providers are set up under **Social login**. |
-| **Post-stay** | Post-stay PIN given at checkout → **Reconnect** → choose a package when the site offers more than one free post-stay package (one is connected at once) | Lets a departed guest reconnect for a limited time (see **Hotel → Post-stay access**). Only free post-stay packages are offered; the device is online when the page moves to the success screen. |
+| **Post-stay** | Room number + reservation number → **Reconnect** (no surname, no package choice) | Lets a device that was on the stay reconnect after the verified check-out, within the time and shared data quota set on **Hotel → After Check-out Access**. New devices are refused; the device is online when the page moves to the success screen. |
 
 ## Messages clients can see
 
@@ -147,4 +147,4 @@ room number. The on/off switch for room sign-in stays under Sign-in methods.
 The other **Client Portal** pages supply what the methods need: **Allowed sites** (addresses reachable before
 sign-in), **Social login** (provider apps) and **Email & SMS** (code senders). Client accounts, vouchers and
 internet packages are managed under **Clients** and **Internet offering**; room sign-in, the PMS
-connection, the Grace Period and post-stay access are under **Hotel**.
+connection, After Check-out Access is under **Hotel**.

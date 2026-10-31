@@ -56,7 +56,7 @@ const OUTCOMES: Record<string, { label: string; meaning: string; fix?: string; t
   NOT_IN_HOUSE: {
     label: "Not checked in",
     meaning: "The room and name matched a stay that is not currently in house.",
-    fix: "A guest trying to sign in before check-in or after check-out. The Grace Period and post-stay access cover the intended cases.",
+    fix: "A guest trying to sign in before check-in or after check-out. After Check-out Access covers the intended cases.",
     tone: "warn",
   },
   STALE_OCCUPANCY: {

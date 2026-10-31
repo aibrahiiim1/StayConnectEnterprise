@@ -45,7 +45,8 @@ type Manager struct {
 	ready    bool
 
 	// kick cuts the bootstrap backoff short (Check now, a freshly adopted assignment); onAttempt observes every
-	// bootstrap attempt's outcome, which is how scd knows Central is answering while the appliance waits.
+	// bootstrap attempt that actually consulted Central (never a certificate merely loaded from disk), which is how
+	// scd knows Central is answering while the appliance waits.
 	kick      chan struct{}
 	onAttempt func(error)
 }
@@ -191,13 +192,21 @@ var (
 
 // Loads an existing local certificate, or makes ONE bootstrap attempt if none is present, without blocking for issuance (see EnsureUntilInstalled).
 func (m *Manager) Ensure(ctx context.Context) error {
+	_, err := m.ensure(ctx)
+	return err
+}
+
+// ensure is Ensure that also says whether Central was consulted. Loading a certificate that is already on disk is
+// NOT an exchange with Central: it must never be reported as one (it used to be, so after every restart the
+// "last contact with Central" jumped to the restart time while the network was cut).
+func (m *Manager) ensure(ctx context.Context) (contactedCentral bool, err error) {
 	if err := m.ensureMTLSKey(); err != nil {
-		return err
+		return false, err
 	}
 	if err := m.loadLocal(); err == nil {
-		return nil
+		return false, nil
 	}
-	return m.bootstrapOnce(ctx)
+	return true, m.bootstrapOnce(ctx)
 }
 
 // EnsureUntilInstalled keeps trying until the certificate is installed, the service is shutting down, or Central reports something genuinely terminal.
@@ -212,8 +221,8 @@ func (m *Manager) EnsureUntilInstalled(ctx context.Context) error {
 	attempt := 0
 	for {
 		attempt++
-		err := m.Ensure(ctx)
-		if m.onAttempt != nil {
+		contacted, err := m.ensure(ctx)
+		if m.onAttempt != nil && contacted {
 			m.onAttempt(err)
 		}
 		if err == nil {

@@ -1,0 +1,199 @@
+{
+ "name": "s3",
+ "window_min": 60,
+ "T0": 1793393325.3097525,
+ "Tr": 1793394525.7605093,
+ "results": {
+  "long_present_at_T0": 1689,
+  "long_last_seen_rel_deadline_s": {
+   "min": -2399.549243211746,
+   "p50": -2399.549243211746,
+   "max": -2399.549243211746
+  },
+  "long_left_before_deadline_minus_5s": 1689,
+  "long_left_after_deadline_plus_15s": 0,
+  "authset_min_during_window": 1705,
+  "authset_max_during_window": 1785,
+  "authset_at_T0": 1785,
+  "set_first_<=5_elements_rel_deadline_s": null,
+  "clients_that_became_online_during_outage": 0,
+  "new_online_idx_sample": [],
+  "q200": {
+   "1700": {
+    "last_seen_rel_T0_s": 313.7,
+    "bytes_rx": 121634816
+   },
+   "1701": {
+    "last_seen_rel_T0_s": 313.7,
+    "bytes_rx": 121634816
+   },
+   "1702": {
+    "last_seen_rel_T0_s": 313.7,
+    "bytes_rx": 121634816
+   },
+   "1703": {
+    "last_seen_rel_T0_s": 308.7,
+    "bytes_rx": 121634816
+   },
+   "1704": {
+    "last_seen_rel_T0_s": 313.7,
+    "bytes_rx": 121634816
+   },
+   "1705": {
+    "last_seen_rel_T0_s": 304.7,
+    "bytes_rx": 120637775
+   },
+   "1706": {
+    "last_seen_rel_T0_s": 313.7,
+    "bytes_rx": 121634816
+   },
+   "1707": {
+    "last_seen_rel_T0_s": 313.7,
+    "bytes_rx": 121634816
+   },
+   "1708": {
+    "last_seen_rel_T0_s": 313.7,
+    "bytes_rx": 121634816
+   },
+   "1709": {
+    "last_seen_rel_T0_s": 313.7,
+    "bytes_rx": 121634816
+   },
+   "1710": {
+    "last_seen_rel_T0_s": 313.7,
+    "bytes_rx": 121634816
+   },
+   "1711": {
+    "last_seen_rel_T0_s": 313.7,
+    "bytes_rx": 121634816
+   },
+   "1712": {
+    "last_seen_rel_T0_s": 313.7,
+    "bytes_rx": 121634816
+   },
+   "1713": {
+    "last_seen_rel_T0_s": 313.7,
+    "bytes_rx": 121634816
+   },
+   "1714": {
+    "last_seen_rel_T0_s": 313.7,
+    "bytes_rx": 121634816
+   },
+   "1715": {
+    "last_seen_rel_T0_s": 304.7,
+    "bytes_rx": 120249711
+   },
+   "1716": {
+    "last_seen_rel_T0_s": 304.7,
+    "bytes_rx": 120852079
+   },
+   "1717": {
+    "last_seen_rel_T0_s": 313.7,
+    "bytes_rx": 121634816
+   },
+   "1718": {
+    "last_seen_rel_T0_s": 304.7,
+    "bytes_rx": 120445191
+   },
+   "1719": {
+    "last_seen_rel_T0_s": 313.7,
+    "bytes_rx": 121634816
+   }
+  },
+  "q50": {
+   "1720": {
+    "last_seen_rel_T0_s": 69.7,
+    "bytes_rx": null
+   },
+   "1721": {
+    "last_seen_rel_T0_s": 71.7,
+    "bytes_rx": null
+   },
+   "1722": {
+    "last_seen_rel_T0_s": 71.7,
+    "bytes_rx": null
+   },
+   "1723": {
+    "last_seen_rel_T0_s": 71.7,
+    "bytes_rx": null
+   },
+   "1724": {
+    "last_seen_rel_T0_s": 71.7,
+    "bytes_rx": null
+   },
+   "1725": {
+    "last_seen_rel_T0_s": 71.7,
+    "bytes_rx": null
+   },
+   "1726": {
+    "last_seen_rel_T0_s": 71.7,
+    "bytes_rx": null
+   },
+   "1727": {
+    "last_seen_rel_T0_s": 71.7,
+    "bytes_rx": null
+   },
+   "1728": {
+    "last_seen_rel_T0_s": 71.7,
+    "bytes_rx": null
+   },
+   "1729": {
+    "last_seen_rel_T0_s": 69.7,
+    "bytes_rx": null
+   }
+  },
+  "w5_last_seen_minus_expiry_s": {
+   "n": 50,
+   "min": -1.0,
+   "max": 8.0
+  },
+  "journalled_revocations_max": 0,
+  "renewals_max": 56518,
+  "governor_active_first_t_rel_T0": 61.690247535705566,
+  "probe_ok_fraction_in_outage": 1.0,
+  "probe_failures_max": 0,
+  "dropped_reasons_last_snapshot": {
+   "t_rel_T0": 1188.6902475357056,
+   "reasons": {
+    "continuity window or hard end reached": 50,
+    "data allowance spent during the outage": 20
+   }
+  },
+  "budget_used_limit_last_snapshot": {
+   "used": 20,
+   "sample": [
+    [
+     "0e319187-4f54-494f-9c6b-e68f3b031dfe",
+     0
+    ],
+    [
+     "160cfea1-b582-4c79-81a1-47f60c006d3f",
+     0
+    ],
+    [
+     "28eec0af-f33e-43df-8fb3-57cebe544f22",
+     0
+    ]
+   ]
+  },
+  "recovery_to_50_percent_of_pre_s": 1.2394907474517822,
+  "recovery_to_90_percent_of_pre_s": 1.2394907474517822,
+  "recovery_to_99_percent_of_pre_s": null,
+  "authset_final": 1735,
+  "record_rewrite_gap_s": {
+   "n": 50,
+   "min": 0.8,
+   "p50": 16.0,
+   "max": 891.0
+  },
+  "cgroup_cpu_percent_of_2vcpu": {
+   "healthy_before_T0": 3.3,
+   "during_window": 3.1,
+   "mem_cur_max_mb": 409
+  },
+  "netd_rss_kb": {
+   "min": 31960,
+   "max": 47356
+  }
+ }
+}

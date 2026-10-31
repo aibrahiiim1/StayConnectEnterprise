@@ -1,0 +1,13 @@
+27 docker-07a0239ed0833222cdba5a4056d6439f031ffb2b113bba44d364ec29718916dc.scope
+16 stayconnect-netd.service
+3 stayconnect-acctd.service
+1 kea-dhcp4-server.service
+0 unbound.service
+0 systemd-logind.service
+0 systemd-journald.service
+0 stayconnect-scd.service
+0 stayconnect-portald.service
+0 stayconnect-hotel-admin.service
+0 stayconnect-edged.service
+0 stayconnect-caddy.service
+TOTAL 50% of one cpu (200% = both)

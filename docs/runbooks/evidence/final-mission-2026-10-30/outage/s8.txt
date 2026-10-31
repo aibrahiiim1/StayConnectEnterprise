@@ -1,0 +1,142 @@
+== before 08:23:17
+set=4585 {"s":4555,"a":false,"r":null} boot_id=cbd1caaa-ae95-46a7-b9b1-f8855364d2af
+br-g-9252e124 10.60.0.1/20 classes=1035 flower=1036
+br-g102 10.61.0.1/20 classes=700 flower=701
+br-g119 10.66.0.1/19 classes=700 flower=701
+br-g121-1e33 10.68.0.1/19 classes=2150 flower=104
+kea version/pid ok; subnets: [('10.60.0.0/20', ['10.60.0.10-10.60.15.250']), ('10.68.0.0/19', ['10.68.0.10-10.68.31.250']), ('10.66.0.0/19', ['10.66.0.10-10.66.31.250']), ('10.61.0.0/20', ['10.61.0.10-10.61.15.250'])]
+netd-render-fp=06b64fe22f97b982f060c3b2ec3adc44
+2638e179a856cbe7
+== docker restart fm-appl at 08:23:23
+container restart returned after 27 s
+plumbing restored after 28 s
++28s pg=down svc=act/act/ina/ina/ina/act/ set=0 classes=0,0,0,0, cont=
++40s pg=up svc=act/act/act/act/act/act/ set=0 classes=0,0,0,0, cont={"s":4555,"a":false,"r":null}
++46s pg=up svc=act/act/act/act/act/act/ set=32 classes=96,0,0,0, cont=
++53s pg=up svc=act/act/act/act/act/act/ set=288 classes=384,0,0,0, cont=
++61s pg=up svc=act/act/act/act/act/act/ set=544 classes=512,32,32,32, cont=
++69s pg=up svc=act/act/act/act/act/act/ set=608 classes=512,32,32,32, cont={"s":608,"a":false,"r":null}
++75s pg=up svc=act/act/act/act/act/act/ set=608 classes=576,32,32,32, cont=
++83s pg=up svc=act/act/act/act/act/act/ set=864 classes=832,32,32,32, cont=
++91s pg=up svc=act/act/act/act/act/act/ set=1056 classes=928,64,64,64, cont=
++99s pg=up svc=act/act/act/act/act/act/ set=1120 classes=928,64,64,64, cont={"s":1120,"a":false,"r":null}
++105s pg=up svc=act/act/act/act/act/act/ set=1120 classes=928,64,64,64, cont={"s":1120,"a":false,"r":null}
++111s pg=up svc=act/act/act/act/act/act/ set=1227 classes=1035,128,64,64, cont=
++118s pg=up svc=act/act/act/act/act/act/ set=1515 classes=1035,448,64,64, cont=
++126s pg=up svc=act/act/act/act/act/act/ set=1675 classes=1035,448,96,96, cont={"s":1645,"a":false,"r":null}
++132s pg=up svc=act/act/act/act/act/act/ set=1675 classes=1035,448,96,96, cont={"s":1645,"a":false,"r":null}
++138s pg=up svc=act/act/act/act/act/act/ set=1707 classes=1035,576,96,96, cont=
++146s pg=up svc=act/act/act/act/act/act/ set=1991 classes=1035,700,256,96, cont=
++154s pg=up svc=act/act/act/act/act/act/ set=2247 classes=1035,700,384,128, cont={"s":2217,"a":false,"r":null}
++160s pg=up svc=act/act/act/act/act/act/ set=2247 classes=1035,700,384,128, cont={"s":2217,"a":false,"r":null}
++166s pg=up svc=act/act/act/act/act/act/ set=2247 classes=1035,700,384,128, cont={"s":2217,"a":false,"r":null}
++172s pg=up svc=act/act/act/act/act/act/ set=2343 classes=1035,700,576,128, cont=
++180s pg=up svc=act/act/act/act/act/act/ set=2563 classes=1035,700,700,192, cont=
++188s pg=up svc=act/act/act/act/act/act/ set=2627 classes=1035,700,700,192, cont={"s":2597,"a":false,"r":null}
++194s pg=up svc=act/act/act/act/act/act/ set=2627 classes=1035,700,700,192, cont={"s":2597,"a":false,"r":null}
++200s pg=up svc=act/act/act/act/act/act/ set=2627 classes=1035,700,700,256, cont=
++208s pg=up svc=act/act/act/act/act/act/ set=2819 classes=1035,700,700,448, cont=
++216s pg=up svc=act/act/act/act/act/act/ set=2979 classes=1035,700,700,544, cont={"s":2949,"a":false,"r":null}
++223s pg=up svc=act/act/act/act/act/act/ set=2979 classes=1035,700,700,544, cont={"s":2949,"a":false,"r":null}
++229s pg=up svc=act/act/act/act/act/act/ set=2979 classes=1035,700,700,576, cont=
++238s pg=up svc=act/act/act/act/act/act/ set=3107 classes=1035,700,700,736, cont=
++246s pg=up svc=act/act/act/act/act/act/ set=3267 classes=1035,700,700,832, cont={"s":3237,"a":false,"r":null}
++254s pg=up svc=act/act/act/act/act/act/ set=3267 classes=1035,700,700,832, cont={"s":3237,"a":false,"r":null}
++260s pg=up svc=act/act/act/act/act/act/ set=3267 classes=1035,700,700,832, cont={"s":3237,"a":false,"r":null}
++266s pg=up svc=act/act/act/act/act/act/ set=3363 classes=1035,700,700,992, cont=
++274s pg=up svc=act/act/act/act/act/act/ set=3491 classes=1035,700,700,1120, cont=
++282s pg=up svc=act/act/act/act/act/act/ set=3555 classes=1035,700,700,1120, cont={"s":3525,"a":false,"r":null}
++288s pg=up svc=act/act/act/act/act/act/ set=3555 classes=1035,700,700,1120, cont={"s":3525,"a":false,"r":null}
++293s pg=up svc=act/act/act/act/act/act/ set=3555 classes=1035,700,700,1184, cont=
++301s pg=up svc=act/act/act/act/act/act/ set=3747 classes=1035,700,700,1376, cont=
++310s pg=up svc=act/act/act/act/act/act/ set=3875 classes=1035,700,700,1440, cont={"s":3845,"a":false,"r":null}
++317s pg=up svc=act/act/act/act/act/act/ set=3875 classes=1035,700,700,1440, cont={"s":3845,"a":false,"r":null}
++323s pg=up svc=act/act/act/act/act/act/ set=3875 classes=1035,700,700,1472, cont=
++331s pg=up svc=act/act/act/act/act/act/ set=4067 classes=1035,700,700,1696, cont=
++339s pg=up svc=act/act/act/act/act/act/ set=4227 classes=1035,700,700,1792, cont=
++348s pg=up svc=act/act/act/act/act/act/ set=4227 classes=1035,700,700,1792, cont={"s":4197,"a":false,"r":null}
++354s pg=up svc=act/act/act/act/act/act/ set=4227 classes=1035,700,700,1792, cont={"s":4197,"a":false,"r":null}
++360s pg=up svc=act/act/act/act/act/act/ set=4259 classes=1035,700,700,1920, cont=
++368s pg=up svc=act/act/act/act/act/act/ set=4483 classes=1035,700,700,2112, cont=
++376s pg=up svc=act/act/act/act/act/act/ set=4547 classes=1035,700,700,2112, cont={"s":4517,"a":false,"r":null}
++382s pg=up svc=act/act/act/act/act/act/ set=4547 classes=1035,700,700,2112, cont={"s":4517,"a":false,"r":null}
++388s pg=up svc=act/act/act/act/act/act/ set=4547 classes=1035,700,700,2112, cont=
++396s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont={"s":4555,"a":false,"r":null}
++402s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont={"s":4555,"a":false,"r":null}
++408s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont={"s":4555,"a":false,"r":null}
++414s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont={"s":4555,"a":false,"r":null}
++420s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont=
++428s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont={"s":4555,"a":false,"r":null}
++435s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont={"s":4555,"a":false,"r":null}
++441s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont={"s":4555,"a":false,"r":null}
++447s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont={"s":4555,"a":false,"r":null}
++453s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont={"s":4555,"a":false,"r":null}
++459s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont=
++467s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont={"s":4555,"a":false,"r":null}
++473s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont={"s":4555,"a":false,"r":null}
++479s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont={"s":4555,"a":false,"r":null}
++485s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont=
++493s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont={"s":4555,"a":false,"r":null}
++500s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont={"s":4555,"a":false,"r":null}
++505s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont={"s":4555,"a":false,"r":null}
++511s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont={"s":4555,"a":false,"r":null}
++517s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont={"s":4555,"a":false,"r":null}
++523s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont={"s":4555,"a":false,"r":null}
++529s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont={"s":4555,"a":false,"r":null}
++535s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont={"s":4555,"a":false,"r":null}
++541s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont={"s":4555,"a":false,"r":null}
++548s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont={"s":4555,"a":false,"r":null}
++554s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont=
++562s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont={"s":4555,"a":false,"r":null}
++568s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont={"s":4555,"a":false,"r":null}
++574s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont={"s":4555,"a":false,"r":null}
++580s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont={"s":4555,"a":false,"r":null}
++587s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont={"s":4555,"a":false,"r":null}
++594s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont={"s":4555,"a":false,"r":null}
++600s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont={"s":4555,"a":false,"r":null}
++606s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont={"s":4555,"a":false,"r":null}
++612s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont={"s":4555,"a":false,"r":null}
++618s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont={"s":4555,"a":false,"r":null}
++626s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont={"s":4555,"a":false,"r":null}
++632s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont={"s":4555,"a":false,"r":null}
++638s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,700,2150, cont={"s":4555,"a":false,"r":null}
++644s pg=up svc=act/act/act/act/act/act/ set=4585 classes=1035,700,636,2150, cont=
++652s pg=up svc=act/act/act/act/act/act/ set=4521 classes=1035,700,636,2150, cont={"s":4491,"a":false,"r":null}
++660s pg=up svc=act/act/act/act/act/act/ set=4521 classes=1035,700,636,2150, cont={"s":4491,"a":false,"r":null}
++666s pg=up svc=act/act/act/act/act/act/ set=4521 classes=1035,700,636,2150, cont={"s":4491,"a":false,"r":null}
++672s pg=up svc=act/act/act/act/act/act/ set=4521 classes=1035,700,636,2150, cont={"s":4491,"a":false,"r":null}
++678s pg=up svc=act/act/act/act/act/act/ set=4521 classes=1035,700,636,2150, cont={"s":4491,"a":false,"r":null}
++684s pg=up svc=act/act/act/act/act/act/ set=4521 classes=1035,700,636,2150, cont=
++692s pg=up svc=act/act/act/act/act/act/ set=4393 classes=1035,700,508,2150, cont={"s":4363,"a":false,"r":null}
++699s pg=up svc=act/act/act/act/act/act/ set=4393 classes=1035,700,508,2150, cont={"s":4363,"a":false,"r":null}
++705s pg=up svc=act/act/act/act/act/act/ set=4393 classes=1035,700,508,2150, cont={"s":4363,"a":false,"r":null}
++711s pg=up svc=act/act/act/act/act/act/ set=4393 classes=1035,700,508,2150, cont={"s":4363,"a":false,"r":null}
++718s pg=up svc=act/act/act/act/act/act/ set=4393 classes=1035,700,508,2150, cont={"s":4363,"a":false,"r":null}
++724s pg=up svc=act/act/act/act/act/act/ set=4393 classes=1035,700,508,2150, cont={"s":4363,"a":false,"r":null}
++730s pg=up svc=act/act/act/act/act/act/ set=4393 classes=1035,700,508,2150, cont=
++738s pg=up svc=act/act/act/act/act/act/ set=4265 classes=1035,700,380,2150, cont={"s":4235,"a":false,"r":null}
++745s pg=up svc=act/act/act/act/act/act/ set=4265 classes=1035,700,380,2150, cont={"s":4235,"a":false,"r":null}
++751s pg=up svc=act/act/act/act/act/act/ set=4265 classes=1035,700,380,2150, cont={"s":4235,"a":false,"r":null}
++757s pg=up svc=act/act/act/act/act/act/ set=4265 classes=1035,700,380,2150, cont={"s":4235,"a":false,"r":null}
++763s pg=up svc=act/act/act/act/act/act/ set=4265 classes=1035,700,380,2150, cont={"s":4235,"a":false,"r":null}
++769s pg=up svc=act/act/act/act/act/act/ set=4265 classes=1035,700,284,2150, cont=
++777s pg=up svc=act/act/act/act/act/act/ set=4169 classes=1035,700,252,2150, cont={"s":4107,"a":false,"r":null}
++784s pg=up svc=act/act/act/act/act/act/ set=4137 classes=1035,700,252,2150, cont={"s":4107,"a":false,"r":null}
++790s pg=up svc=act/act/act/act/act/act/ set=4137 classes=1035,700,252,2150, cont={"s":4107,"a":false,"r":null}
++796s pg=up svc=act/act/act/act/act/act/ set=4137 classes=1035,700,252,2150, cont={"s":4107,"a":false,"r":null}
++802s pg=up svc=act/act/act/act/act/act/ set=4137 classes=1035,700,252,2150, cont={"s":4107,"a":false,"r":null}
++808s pg=up svc=act/act/act/act/act/act/ set=4137 classes=1035,700,252,2150, cont={"s":4107,"a":false,"r":null}
++814s pg=up svc=act/act/act/act/act/act/ set=4137 classes=1035,700,252,2150, cont=
++822s pg=up svc=act/act/act/act/act/act/ set=4035 classes=1035,700,124,2150, cont={"s":3979,"a":false,"r":null}
++828s pg=up svc=act/act/act/act/act/act/ set=4009 classes=1035,700,124,2150, cont={"s":3979,"a":false,"r":null}
++834s pg=up svc=act/act/act/act/act/act/ set=4009 classes=1035,700,124,2150, cont={"s":3979,"a":false,"r":null}
+== after 08:37:23
+set=4009 {"s":3979,"a":false,"r":null} boot_id=cbd1caaa-ae95-46a7-b9b1-f8855364d2af
+br-g-9252e124 10.60.0.1/20 classes=1035 flower=1036
+br-g102 10.61.0.1/20 classes=700 flower=701
+br-g119 10.66.0.1/19 classes=124 flower=125
+br-g121-1e33 10.68.0.1/19 classes=2150 flower=2151
+kea version/pid ok; subnets: [('10.60.0.0/20', ['10.60.0.10-10.60.15.250']), ('10.68.0.0/19', ['10.68.0.10-10.68.31.250']), ('10.66.0.0/19', ['10.66.0.10-10.66.31.250']), ('10.61.0.0/20', ['10.61.0.10-10.61.15.250'])]
+netd-render-fp=06b64fe22f97b982f060c3b2ec3adc44
+eth0@if6049      UP             be:a7:11:a7:41:7d <BROADCAST,MULTICAST,UP,LOWER_UP> 
+S8_DONE

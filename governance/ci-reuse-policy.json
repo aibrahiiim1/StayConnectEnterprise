@@ -483,6 +483,11 @@
           "why": "it reads only the NAMES and LOCATIONS of files in the tree: which directory each NNNN_*.{up,down}.sql sits in, whether both halves are present, whether a number is used twice, and whether the sequence has a gap. No git history, no clock, no network, no database, and it produces no artifact. An identical tree has the identical answer."
         },
         {
+          "name": "Migration location — reserved numbers, pinned identities and the negative cases are proven",
+          "reuse": "tree-pure",
+          "why": "it reads only the tree: RESERVED_NUMBERS and IDENTITIES, the names and sha256 of the shipped migration files, and the validator's own negative cases run on temporary copies. No git history, no clock, no network, no database. An identical tree has the identical answer."
+        },
+        {
           "name": "Standing records — retired hosts, onboarding milestones, Central scope, stated master head",
           "reuse": "tree-pure",
           "why": "every rule reads tracked file CONTENT and compares it against facts in governance/project-state.json, which is also tracked. The one external call is `git rev-parse master`, and it only WIDENS the set of accepted master heads (the recorded delivery base is always accepted), so it can never turn a pass into a fail on an unchanged tree. No clock, no network, no database, no artifact."

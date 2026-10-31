@@ -82,7 +82,7 @@ export function useCapabilities(): Capabilities | null {
  */
 export const MODULE_SURFACES: readonly string[] = [
   "pms-stays", "pms-events", "pms-event-decisions", "pms-resolutions", "guest-signin-attempts", "guest-signin-credentials",
-  "guest-signin-protection", "guest-signin-restrictions", "checkout-grace", "operational-alerts",
+  "guest-signin-protection", "guest-signin-restrictions", "checkout-grace", "after-checkout-access", "operational-alerts",
   "pms-interfaces", "pms-routing", "pms-source-conflicts", "pms-reconciliation", "pms-roster-reconciliation",
   "post-stay-profiles", "stay-transfers", "pms-financial-onboarding", "payment-providers",
   "financial-review", "financial-ops",

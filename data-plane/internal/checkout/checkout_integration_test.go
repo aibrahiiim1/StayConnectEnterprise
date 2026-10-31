@@ -100,6 +100,10 @@ type seedOpts struct {
 	systemGracePackage   bool   // grace package is is_system + current revision + plan matching typed policy
 	mismatchField        string // when set, the plan revision differs from the typed policy in this one field
 	bootstrapEmergency   bool   // pre-provision the canonical Emergency-Grace catalog
+	// Overrides of the default policy (3600 s, 4000/1500 kbps, 500 MiB, 2 devices) and of the boundary (2 h ago); zero keeps the default.
+	durSec, down, up, devLim int
+	quota                    int64
+	boundaryAgo              time.Duration
 }
 
 func mv(o seedOpts, field string, def int) int {
@@ -115,26 +119,41 @@ func seedBase(t *testing.T, p *pgxpool.Pool, o seedOpts) fixture {
 	t.Helper()
 	ctx := context.Background()
 	var f fixture
-	f.boundary = time.Now().Add(-2 * time.Hour).Truncate(time.Microsecond)
+	ago := 2 * time.Hour
+	if o.boundaryAgo > 0 {
+		ago = o.boundaryAgo
+	}
+	f.boundary = time.Now().Add(-ago).Truncate(time.Microsecond)
 	sys := "true"
 	if !o.systemGracePackage {
 		sys = "false"
 	}
-	down := mv(o, "down", 4000)
-	up := mv(o, "up", 1500)
-	quota := int64(524288000)
+	pick := func(v, def int) int {
+		if v > 0 {
+			return v
+		}
+		return def
+	}
+	pDown, pUp, pDev, pDur := pick(o.down, 4000), pick(o.up, 1500), pick(o.devLim, 2), pick(o.durSec, 3600)
+	pQuota := int64(524288000)
+	if o.quota > 0 {
+		pQuota = o.quota
+	}
+	down := mv(o, "down", pDown)
+	up := mv(o, "up", pUp)
+	quota := pQuota
 	if o.mismatchField == "quota" {
 		quota += 1024
 	}
-	devLim := mv(o, "devlim", 2)
+	devLim := mv(o, "devlim", pDev)
 	devPol := "REJECT_NEW_DEVICE"
 	tam := "VALIDITY_WINDOW"
 	if o.mismatchField == "tam" {
 		tam = "AGGREGATE_ONLINE_TIME"
 	}
-	dur := 3600
+	dur := pDur
 	if o.mismatchField == "duration" {
-		dur = 7200
+		dur = pDur + 3600
 	}
 	durPolicy := fmt.Sprintf(`{"end_mode":"GRACE_AFTER_CHECKOUT","grace_duration_seconds":%d,"policy_version":"CHECKOUT_GRACE_V1"}`, dur)
 
@@ -177,7 +196,7 @@ func seedBase(t *testing.T, p *pgxpool.Pool, o seedOpts) fixture {
 	if o.configureTypedPolicy {
 		if err := asOwnerExec(p, `INSERT INTO iam_v2.site_checkout_grace_config
 			(tenant_id,site_id,grace_package_revision_id,grace_duration_seconds,grace_down_kbps,grace_up_kbps,grace_data_quota_bytes,grace_device_limit,grace_device_limit_policy)
-			VALUES ($1,$2,`+pkg+`,3600,4000,1500,524288000,2,'REJECT_NEW_DEVICE')`, args...); err != nil {
+			VALUES ($1,$2,`+pkg+`,`+fmt.Sprintf("%d,%d,%d,%d,%d", pDur, pDown, pUp, pQuota, pDev)+`,'REJECT_NEW_DEVICE')`, args...); err != nil {
 			t.Fatalf("seed grace config: %v", err)
 		}
 	} else {

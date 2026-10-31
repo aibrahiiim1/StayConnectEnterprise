@@ -1,0 +1,21 @@
+== (d) direct removal during an outage
+03:48:43 outage +75 s: {"s":1705,"a":true,"w":3600,"r":null} set=488
+1
+deleted 10.60.3.3
+03:49:03 removed element present=0  set=487
+03:49:23 removed element present=1  set=488
+03:49:43 removed element present=1  set=488
+03:50:03 removed element present=1  set=488
+03:50:23 removed element present=1  set=488
+03:50:43 removed element present=1  set=488
+03:51:04 removed element present=1  set=488
+03:51:24 removed element present=1  set=488
+03:51:44 removed element present=1  set=488
+03:52:04 removed element present=1  set=488
+03:52:24 removed element present=1  set=488
+03:52:44 removed element present=1  set=488
+03:53:04 removed element present=1  set=488
+03:53:24 removed element present=1  set=488
+03:53:44 removed element present=1  set=488
+03:54:04 removed element present=1  set=488
+03:54:34 acctd back: {"s":1705,"a":false,"w":3600,"r":null} set=1735 present=1

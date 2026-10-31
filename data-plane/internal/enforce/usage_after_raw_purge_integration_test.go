@@ -774,7 +774,7 @@ func TestIntegration_UsageAfterRawPurge_AccumulatorOutlivesAnActiveEntitlement(t
 	live, sess := grant(t, p, f, nil, base)
 	var ts []time.Time
 	var up, down []int64
-	for at := base.Add(time.Minute); at.Before(now.Add(-2*time.Hour)); at = at.Add(3 * time.Hour) {
+	for at := base.Add(time.Minute); at.Before(now.Add(-2 * time.Hour)); at = at.Add(3 * time.Hour) {
 		ts = append(ts, at)
 		up = append(up, 10)
 		down = append(down, 90)

@@ -349,10 +349,10 @@ func (s *server) listBackupArtifacts(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		a := backupArtifact{
-			Name:         e.Name(),
-			Kind:         artifactKind(e.Name(), e.IsDir()),
-			SizeBytes:    fi.Size(),
-			ModTime:      fi.ModTime().UTC().Format(time.RFC3339),
+			Name:      e.Name(),
+			Kind:      artifactKind(e.Name(), e.IsDir()),
+			SizeBytes: fi.Size(),
+			ModTime:   fi.ModTime().UTC().Format(time.RFC3339),
 		}
 		a.Downloadable, a.Encrypted, a.DownloadRefusal = downloadPolicy(e.Name(), e.IsDir())
 		if rec, ok := readVerification(base, e.Name()); ok {

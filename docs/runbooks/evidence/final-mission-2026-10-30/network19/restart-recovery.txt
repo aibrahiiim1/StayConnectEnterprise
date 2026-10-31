@@ -1,0 +1,18 @@
+=== stayconnect-netd stop/reset-failed/start --no-block  08:01:04
+  classes: br-g-9252e124=1035 br-g102=700 br-g119=700 br-g121-1e33=0 
+  set=2435 render_fp=netd-render-fp=06b64fe22f97b982f060c3b2ec3adc44 kea_leases=12727
+  classes: br-g-9252e124=1035 br-g102=700 br-g119=700 br-g121-1e33=0 
+  set=2435 render_fp=netd-render-fp=06b64fe22f97b982f060c3b2ec3adc44 kea_leases=12727
+  netd class-change/stray lines since: 2
+=== stayconnect-acctd stop/reset-failed/start --no-block  08:01:50
+  classes: br-g-9252e124=1035 br-g102=700 br-g119=700 br-g121-1e33=0 
+  set=2435 render_fp=netd-render-fp=06b64fe22f97b982f060c3b2ec3adc44 kea_leases=12727
+  classes: br-g-9252e124=1035 br-g102=700 br-g119=700 br-g121-1e33=0 
+  set=2435 render_fp=netd-render-fp=06b64fe22f97b982f060c3b2ec3adc44 kea_leases=12727
+  netd class-change/stray lines since: 1
+=== kea-dhcp4-server stop/reset-failed/start --no-block  08:02:37
+  classes: br-g-9252e124=1035 br-g102=700 br-g119=700 br-g121-1e33=0 
+  set=2435 render_fp=netd-render-fp=06b64fe22f97b982f060c3b2ec3adc44 kea_leases=12727
+  classes: br-g-9252e124=1035 br-g102=700 br-g119=700 br-g121-1e33=0 
+  set=2435 render_fp=netd-render-fp=06b64fe22f97b982f060c3b2ec3adc44 kea_leases=12727
+  netd class-change/stray lines since: 2

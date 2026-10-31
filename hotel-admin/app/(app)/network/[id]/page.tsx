@@ -21,6 +21,7 @@ import { useToast } from "@/components/ui/toast";
 import { ArrowLeft, Plus, Save, X, Pin, Shuffle } from "lucide-react";
 import { HelpList, HelpSection } from "@/components/help";
 import { errMsg } from "@/lib/utils";
+import { SUBNET_SIZE_HINT, subnetSizeProblem } from "@/lib/network-subnet";
 import { ReplaceTopologyDialog, type ReplaceResult } from "@/components/network/replace-topology-dialog";
 import { DiagnosticsPanel } from "@/components/network/status";
 import { SignInCard } from "@/components/network/signin-card";
@@ -291,7 +292,8 @@ export default function EditGuestNetworkPage() {
 
             <SectionCard title="Addressing" bodyClassName="space-y-4">
               <FieldGrid cols={2}>
-                <Field label="Subnet (CIDR)" required>
+                <Field label="Subnet (CIDR)" required error={subnetSizeProblem(subnetCidr) ?? undefined}
+                  hint={`${SUBNET_SIZE_HINT} A network that is switched on cannot be made wider in place: create a new network with the wider subnet instead.`}>
                   <Input value={subnetCidr} onChange={(e) => setSubnetCidr(e.target.value)} disabled={ro} className="font-mono" />
                 </Field>
                 <Field label="Gateway IP" required>

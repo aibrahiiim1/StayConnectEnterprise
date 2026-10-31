@@ -37,6 +37,10 @@ var identityLookingFields = []struct {
 	{"reservation_number", `{"room":"101","reservation":"R1","reservation_number":"RES-77"}`},
 	{"pin", `{"room":"101","reservation":"R1","pin":"K7M4RTQX"}`},
 	{"device", `{"room":"101","reservation":"R1","device":{"ip":"10.0.0.9","mac":"02:00:00:00:00:09"}}`},
+	// After Check-out Access: no surname is asked for or accepted, and a guest never supplies the context or a package.
+	{"last_name", `{"room":"101","reservation":"R1","last_name":"Smith"}`},
+	{"auth_context_id", `{"auth_context_id":"ctx-1"}`},
+	{"package_revision_id", `{"room":"101","reservation":"R1","package_revision_id":"pkg-1"}`},
 }
 
 func TestPostStayRefusesAGuestSuppliedIdentity(t *testing.T) {
@@ -99,12 +103,13 @@ func TestPostStayMalformedBodyIsTheSameAnswer(t *testing.T) {
 }
 
 func TestPostStayAcceptsTheFieldsItActuallyDefines(t *testing.T) {
-	stub := &scdStub{grant: map[string]any{"outcome": "VERIFIED", "auth_context_id": "ctx-1",
-		"offers": []map[string]any{{"package_revision_id": "pkg-1", "code": "A"}, {"package_revision_id": "pkg-2", "code": "B"}}}}
+	stub := &scdStub{grant: map[string]any{"outcome": "GRANTED", "auth_context_id": "ctx-1", "session_id": "sess-1", "entitlement_id": "ent-1"}}
 	h := stubHandler(t, stub)
 	_, out := postStayPost(t, h, "/auth/post-stay", `{"room":"101","reservation":"R1"}`)
-	if !out.OK || out.AuthContextID != "ctx-1" || !out.NeedsChoice {
-		t.Fatalf("a well-formed submission was refused: %+v", out)
+	// scdStub answers every hop with the same body, so the verify hop (outcome GRANTED) is not VERIFIED: the uniform
+	// non-success. The real two-hop flow is covered in phase5_poststay_flow_test.go.
+	if out.OK {
+		t.Fatalf("an unexpected outcome from the verify hop was treated as success: %+v", out)
 	}
 	if len(stub.bodies) != 1 {
 		t.Fatalf("expected exactly one scd hop, got %d", len(stub.bodies))
@@ -113,12 +118,7 @@ func TestPostStayAcceptsTheFieldsItActuallyDefines(t *testing.T) {
 	if dev["mac"] != "02:00:00:aa:00:01" {
 		t.Fatalf("scd was given a device the portal did not derive: %v", dev)
 	}
-
-	stub2 := &scdStub{grant: map[string]any{"outcome": "GRANTED", "session_id": "sess-1", "entitlement_id": "ent-1"}}
-	h2 := stubHandler(t, stub2)
-	_, out2 := postStayPost(t, h2, "/auth/post-stay",
-		`{"auth_context_id":"ctx-1","package_revision_id":"pkg-1"}`)
-	if !out2.OK || out2.SessionID != "sess-1" {
-		t.Fatalf("the conversion call was refused: %+v", out2)
+	if _, has := stub.bodies[0]["last_name"]; has {
+		t.Fatalf("a surname was forwarded to scd: %v", stub.bodies[0])
 	}
 }

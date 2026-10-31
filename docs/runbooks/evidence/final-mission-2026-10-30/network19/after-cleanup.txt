@@ -1,0 +1,11 @@
+eth0@if6049      UP             172.30.10.20/24 
+br-g-9252e124    UNKNOWN        10.60.0.1/20 
+br-g102          UNKNOWN        10.61.0.1/20 
+br-g119          UNKNOWN        10.66.0.1/19 
+br-g121-1e33     UNKNOWN        10.68.0.1/19 
+br-g-9252e124 classes=1035
+br-g102 classes=700
+br-g119 classes=0
+br-g121-1e33 classes=2150
+nft /19 refs: 0; kea: 10.60.0.0/20 10.61.0.0/20 
+default via 172.30.10.1 dev eth0 

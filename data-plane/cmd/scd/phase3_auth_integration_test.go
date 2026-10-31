@@ -10,15 +10,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	mrand "math/rand/v2"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -41,50 +44,92 @@ type authFixture struct {
 
 // Each fixture gets its own subnet and MAC: the appliance resolves a network by which enabled subnet contains
 // the address, so a shared subnet could resolve into another test's tenant.
-var fixtureSeq atomic.Int64
-
+//
+// THE ALLOCATOR IS THE DATABASE, NOT A COUNTER. The first version numbered fixtures from a process-wide counter over 200
+// subnets (10.77.N.0/24) and never released one: every fixture left an enabled network behind. A second package, a second run, or
+// one more test than the pool held then reused a subnet still enabled in another tenant, and a sign-in resolved into the wrong
+// tenant ("no pending session to activate"); a later run on the same database found "no free 10.77.x fixture subnet remains".
+// Now a fixture claims a /24 out of 8,192 (10.192.0.0/11, clear of every fixed fixture subnet in the other suites) under a
+// session-level advisory lock held on its own connection for the life of the test, so concurrent PROCESSES cannot claim the same
+// one, a crashed process releases its claim by itself, and an enabled network on the subnet also counts as taken. When the test
+// ends its networks are disabled (a disabled network resolves no device) and the claim is released, so the pool recycles and a
+// database can be shared by any number of runs and packages.
 type fixtureNet struct {
 	subnet, gateway, guestIP, otherIP, mac string
+	index                                  int
 }
 
-func nextFixtureNet() fixtureNet {
-	n := fixtureSeq.Add(1)
-	third := int(n % 200)
+const (
+	fixtureNetSecondOctet = 192        // the pool is 10.192.0.0 .. 10.223.255.255
+	fixtureNetPool        = 32 * 256   // /24 subnets in it
+	fixtureNetLockBase    = 0x5CD0F000 // advisory-lock keys fixtureNetLockBase .. +fixtureNetPool-1
+)
+
+func fixtureNetAt(i int) fixtureNet {
+	second, third := fixtureNetSecondOctet+i/256, i%256
 	return fixtureNet{
-		subnet:  fmt.Sprintf("10.77.%d.0/24", third),
-		gateway: fmt.Sprintf("10.77.%d.1", third),
-		guestIP: fmt.Sprintf("10.77.%d.25", third),
-		otherIP: fmt.Sprintf("10.77.%d.99", third),
-		mac:     fmt.Sprintf("02:00:00:aa:%02x:%02x", (n>>8)&0xff, n&0xff),
+		subnet:  fmt.Sprintf("10.%d.%d.0/24", second, third),
+		gateway: fmt.Sprintf("10.%d.%d.1", second, third),
+		guestIP: fmt.Sprintf("10.%d.%d.25", second, third),
+		otherIP: fmt.Sprintf("10.%d.%d.99", second, third),
+		mac:     fmt.Sprintf("02:00:00:aa:%02x:%02x", (i>>8)&0xff, i&0xff),
+		index:   i,
 	}
 }
 
-// claimFreeFixtureOctet points the fixture generator at a guest subnet not already in this database; a reused
-// database would otherwise hold the same subnet twice and resolve into another run's tenant.
-func claimFreeFixtureOctet(t *testing.T, p *pgxpool.Pool) {
+// host is the n-th address of the fixture's /24.
+func (n fixtureNet) host(h int) string {
+	return strings.TrimSuffix(n.subnet, ".0/24") + "." + strconv.Itoa(h)
+}
+
+// claimFixtureNet reserves a client-network /24 for one test and returns its addresses. See fixtureNet.
+func claimFixtureNet(t *testing.T, p *pgxpool.Pool) fixtureNet {
 	t.Helper()
+	dsn := os.Getenv("PHASE3_TEST_DSN")
+	if dsn == "" {
+		t.Fatal("PHASE3_TEST_DSN not set")
+	}
 	ctx := context.Background()
-	rows, err := p.Query(ctx,
-		`SELECT DISTINCT split_part(host(network(subnet_cidr)), '.', 3)::int
-		   FROM public.guest_networks WHERE subnet_cidr <<= '10.77.0.0/16'`)
+	conn, err := pgx.Connect(ctx, dsn)
 	if err != nil {
-		return
+		t.Fatalf("fixture subnet claim: connect: %v", err)
 	}
-	defer rows.Close()
-	used := map[int]bool{}
-	for rows.Next() {
-		var n int
-		if err := rows.Scan(&n); err == nil {
-			used[n] = true
+	start := mrand.IntN(fixtureNetPool)
+	for k := 0; k < fixtureNetPool; k++ {
+		i := (start + k) % fixtureNetPool
+		n := fixtureNetAt(i)
+		var locked bool
+		if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, int64(fixtureNetLockBase+i)).Scan(&locked); err != nil {
+			_ = conn.Close(ctx)
+			t.Fatalf("fixture subnet claim: lock: %v", err)
 		}
-	}
-	for n := 1; n < 200; n++ {
-		if !used[n] {
-			fixtureSeq.Store(int64(n - 1))
-			return
+		if !locked {
+			continue
 		}
+		var taken bool
+		if err := conn.QueryRow(ctx,
+			`SELECT EXISTS (SELECT 1 FROM public.guest_networks WHERE enabled AND subnet_cidr && $1::cidr)`, n.subnet).Scan(&taken); err != nil {
+			_ = conn.Close(ctx)
+			t.Fatalf("fixture subnet claim: read: %v", err)
+		}
+		if taken {
+			_, _ = conn.Exec(ctx, `SELECT pg_advisory_unlock($1)`, int64(fixtureNetLockBase+i))
+			continue
+		}
+		t.Cleanup(func() {
+			// Free the subnet for the next test: nothing resolves a device into a disabled network.
+			if _, err := p.Exec(context.Background(),
+				`UPDATE public.guest_networks SET enabled = false WHERE enabled AND subnet_cidr && $1::cidr`, n.subnet); err != nil {
+				t.Logf("fixture subnet %s was not released (its networks stay enabled): %v", n.subnet, err)
+			}
+			_, _ = conn.Exec(context.Background(), `SELECT pg_advisory_unlock($1)`, int64(fixtureNetLockBase+i))
+			_ = conn.Close(context.Background())
+		})
+		return n
 	}
-	t.Skip("no free 10.77.x fixture subnet remains in this database")
+	_ = conn.Close(ctx)
+	t.Fatalf("no free fixture subnet among %d: something holds every one of them enabled", fixtureNetPool)
+	return fixtureNet{}
 }
 
 func newAuthFixture(t *testing.T) *authFixture {
@@ -100,8 +145,7 @@ func newAuthFixture(t *testing.T) *authFixture {
 	}
 	t.Cleanup(p.Close)
 
-	claimFreeFixtureOctet(t, p)
-	f := &authFixture{pool: p, net: nextFixtureNet()}
+	f := &authFixture{pool: p, net: claimFixtureNet(t, p)}
 	// The stay family is writable only inside a controlled operation, so the whole seed runs in one transaction
 	// that opens it. Parent interface and bridge derive from the site id (both are unique in production).
 	tx, err := p.Begin(ctx)

@@ -1073,7 +1073,10 @@ func main() {
 				slog.Warn("appliancecert: certificate bootstrap stopped", "err", err)
 				return
 			}
-			if out, err := certMgr.MTLSHello(rootCtx); err != nil {
+			// The hello is a real authenticated exchange with Central: it, not the certificate load, is what proves the link after a restart.
+			helloOut, helloErr := certMgr.MTLSHello(rootCtx)
+			central.record(helloErr, time.Now())
+			if out, err := helloOut, helloErr; err != nil {
 				slog.Warn("appliancecert: mTLS hello failed", "err", err)
 			} else {
 				slog.Info("appliancecert: mTLS transport verified", "server_appliance_id", out["appliance_id"], "transport", out["transport"])

@@ -258,6 +258,9 @@ func (s *server) topologyConflict(ctx context.Context, netType, parent string, v
 			return fmt.Sprintf("VLAN %d is already used on %s by %q. Each VLAN id is unique on a port.", *vlan, parent, name)
 		}
 	}
+	if bad := s.clientSubnetRefusal(ctx, subnet); bad != nil {
+		return bad.msg
+	}
 	if strings.TrimSpace(subnet) != "" {
 		var name string
 		err := s.db.QueryRow(ctx, `SELECT name FROM guest_networks

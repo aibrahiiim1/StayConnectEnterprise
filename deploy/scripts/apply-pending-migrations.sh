@@ -53,6 +53,36 @@ if [ -z "$top" ]; then
   fi
 fi
 [ -n "$top" ] || refuse "the ledger is empty and $MARKER does not say which baseline built this database"
+
+# THE RELEASE MUST BE THE SAME HISTORY THIS DATABASE RAN, checked before anything is planned or applied:
+#   1. no file in a number range the release holds out of the sequence (data-plane/migrations/RESERVED_NUMBERS, the file
+#      tools/validate-migration-location.py enforces in CI);
+#   2. every migration the release pins (IDENTITIES) is byte-identical to its pin;
+#   3. every migration the ledger holds exists in the release under the SAME name (a release that renames, replaces or
+#      lacks an applied number is a different history, or a downgrade, and is refused).
+# The hole 0182-0189 is harmless to the runner by construction: its gap check walks migration FILES below the one it
+# applies, never numbers, so a number with no file is never "missing".
+bad_release=0
+if ! reserved_list="$(reserved_number_list "$MIG")"; then refuse "$MIG/RESERVED_NUMBERS is unreadable"; fi
+for f in "$MIG"/[0-9][0-9][0-9][0-9]_*.sql; do
+  [ -f "$f" ] || continue
+  b="$(basename "$f")"
+  if printf '%s\n' "$reserved_list" | grep -qx "${b:0:4}"; then
+    echo "[migrate] release problem: $b uses a number held out of the sequence (RESERVED_NUMBERS)" >&2; bad_release=1
+  fi
+done
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  echo "[migrate] release problem: $line" >&2; bad_release=1
+done < <(release_identity_problems "$MIG")
+if ! applied_names="$(q "SELECT version FROM public.schema_migrations WHERE version ~ '^[0-9]{4}_' ORDER BY version")"; then refuse "cannot read the applied migration names"; fi
+while IFS= read -r v; do
+  [ -n "$v" ] || continue
+  if [ ! -f "$MIG/$v.up.sql" ]; then
+    echo "[migrate] release problem: the ledger holds $v but this release has no file of that name" >&2; bad_release=1
+  fi
+done <<< "$applied_names"
+[ "$bad_release" = 0 ] || refuse "this release is not the history the database ran (see the release problems above); nothing was applied"
 mapfile -t PENDING < <(migrations_after "$MIG" "$top")
 say "database is at $top (from $src); this release ships up to $(latest_migration "$MIG"); pending: ${#PENDING[@]}"
 for v in "${PENDING[@]}"; do say "  $v"; done

@@ -1,0 +1,5 @@
+{"ip": "10.60.0.130", "action": "disconnect", "t": 1793389455.1150503, "t_done": 1793389455.5498204, "status": 200, "body": "{'session_id': '3a7aa812-104e-4c0c-80c0-fec7a23f4d83', 'status': 'disconnected'}"}
+{"ip": "10.60.0.129", "action": "disconnect", "t": 1793389455.6582358, "t_done": 1793389456.0500865, "status": 200, "body": "{'session_id': '2ec775e6-bce7-497b-8cfa-12f3a62e2860', 'status': 'disconnected'}"}
+{"ip": "10.60.0.133", "action": "disconnect", "t": 1793389456.1641073, "t_done": 1793389456.5503566, "status": 200, "body": "{'session_id': 'b360acfa-7509-4a04-8783-ed6de1a65765', 'status': 'disconnected'}"}
+{"ip": "10.60.0.132", "action": "disconnect", "t": 1793389456.6567836, "t_done": 1793389457.0515769, "status": 200, "body": "{'session_id': '4b6e9a37-898a-4035-9145-2ba0a1b24e69', 'status': 'disconnected'}"}
+{"ip": "10.60.0.134", "action": "disconnect", "t": 1793389457.161838, "t_done": 1793389457.5536342, "status": 200, "body": "{'session_id': '47970f0c-dfa8-470d-8fe1-2ddc2ff21cba', 'status': 'disconnected'}"}

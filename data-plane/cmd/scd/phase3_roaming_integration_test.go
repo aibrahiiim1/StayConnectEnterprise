@@ -18,7 +18,7 @@ import (
 func (f *authFixture) addNetwork(t *testing.T, mapped bool) (fixtureNet, string, string) {
 	t.Helper()
 	ctx := context.Background()
-	n := nextFixtureNet()
+	n := claimFixtureNet(t, f.pool)
 	var id, bridge string
 	if err := f.pool.QueryRow(ctx, `
 		INSERT INTO public.guest_networks

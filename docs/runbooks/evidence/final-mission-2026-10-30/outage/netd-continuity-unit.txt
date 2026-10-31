@@ -1,0 +1,24 @@
+      1 ok  	github.com/stayconnect/enterprise/data-plane/cmd/netd	1.401s
+      1 PASS
+      1 --- SKIP: TestContinuityRealKernel
+      1 --- PASS: TestContinuity_WithdrawingTheBlockEndsContinuityAtOnce
+      1 --- PASS: TestContinuity_WallClockJumpsDoNotStretchTheWindow
+      1 --- PASS: TestContinuity_UnreadableCountersMeanBudgetedSessionsAreNotRenewed
+      1 --- PASS: TestContinuity_StrictModeIsTheNinetySecondLease
+      1 --- PASS: TestContinuity_StaffDisconnectDuringTheOutageIsImmediateAndDurable
+      1 --- PASS: TestContinuity_QuotaSpentDuringTheOutageRemovesOnlyThatEntitlement
+      1 --- PASS: TestContinuity_PlansReturningEndTheOutage
+      1 --- PASS: TestContinuity_PersistedRecordIsRefusedWhenAlteredFromAnotherBootOrOtherScope
+      1 --- PASS: TestContinuity_NeverRecreatesAnAbsentAuthorization
+      1 --- PASS: TestContinuity_NetdRestartDuringTheOutageKeepsTheOriginalDeadline
+      1 --- PASS: TestContinuity_HardEndEarlierThanTheWindowWins
+      1 --- PASS: TestContinuity_DatabaseRevocationIsFoundByTheProbe
+      1 --- PASS: TestContinuity_DatabaseDownKeepsSessionsToTheBoundAndReportsIt
+      1 --- PASS: TestContinuity_BudgetWithoutABaselineGivesNoContinuity
+      1 --- PASS: TestContinuity_BadBlocksAreRefusedAndTheGuestIsHeldStrictly
+      1 --- PASS: TestContinuity_AddressReassignedOrUnprovenIsNotRenewed
+      1 --- PASS: TestContinuity_AcctdGone_StaysAuthorizedUntilTheWindowAndNoLonger
+      1 --- PASS: TestContinuity_ABrokenMonotonicClockExtendsNothing
+      1 --- PASS: TestContinuity_ABlocklessPlanKeepsWhatIsHeldAndExtendsNothing
+      1 --- PASS: TestContinuityRevokeRoute_ValidatesJournalsAndDropsTheSession
+      1 --- PASS: TestContinuityRevokeRoute_AnUnwritableJournalIsAnErrorNotASilentSuccess

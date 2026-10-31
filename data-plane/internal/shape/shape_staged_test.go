@@ -82,7 +82,7 @@ func TestActivateAddsForwardingFilters(t *testing.T) {
 		t.Fatal(err)
 	}
 	cid := ClassidForIP(testIP)
-	if !rr.has("filter add dev br-guest protocol ip parent 1: pref 1 handle 0x1005 flower dst_ip "+testIP.String()+"/32 classid "+cid) {
+	if !rr.has("filter add dev br-guest protocol ip parent 1: pref 1 handle 0x1005 flower dst_ip " + testIP.String() + "/32 classid " + cid) {
 		t.Fatal("the download forwarding filter was not installed on activation")
 	}
 	if !rr.has("filter add dev ifb-guest protocol ip parent 1: pref 1 handle 0x1005 flower src_ip " + testIP.String() + "/32 classid " + cid) {

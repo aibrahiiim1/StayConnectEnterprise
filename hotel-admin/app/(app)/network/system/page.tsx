@@ -393,7 +393,9 @@ export default function NetworkSettingsPage() {
               </legend>
               <FieldGrid cols={2}>
                 <Field label="Base gateway IP"><Input value={lanIp} onChange={(e) => setLanIp(e.target.value)} className="font-mono" /></Field>
-                <Field label="Prefix length"><Input type="number" value={lanPrefix} onChange={(e) => setLanPrefix(Number(e.target.value))} /></Field>
+                <Field label="Prefix length" hint="19 to 30. /19 (8,190 addresses) is the widest a client network can be.">
+                  <Input type="number" min={19} max={30} value={lanPrefix} onChange={(e) => setLanPrefix(Number(e.target.value))} />
+                </Field>
               </FieldGrid>
               <p className="text-caption text-muted-foreground">
                 DHCP is not edited here; see{" "}

@@ -1,0 +1,15 @@
+disable b19 200 delete 200
+create f20 201 {"bridge_name": "br-g121", "id": "85e95c16-d739-4438-90e4-a38b2c82fec6", "portal_url": "http://10.68.0.1:8380/"}
+apply 200 took 8.9s {"state": "pending_confirmation", "revision_id": "37b4bb72-96d9-4cdc-9cf7-809a44363306", "message": "applied; confirm within 2m0s or it rolls back automatically", "health": [["mgmt_reachable", true, "eth0"], ["gateway_up", true, null], ["kea_running", true, null], ["portal_listen
+confirm 200 {"state": "active"}
+old /20 before: 10.68.0.0/20 enabled True bridge br-g121
+replace 201 {"affected": [{"network_id": "85e95c16-d739-4438-90e4-a38b2c82fec6", "name": "Lab /20 to replace", "enabled": true, "active_clients": 0, "active_sessions": 0, "live_room_entitlements": 0, "room_sign_in": {"policy": "", "state": "NOT_SET", "summary": "No PMS connection is in service, so there is nothing to route room sign-in to.", "interfaces": []}, "sign_in_methods_switched_off": [], "packages_lim
+apply 200 took 11.1s {"state": "pending_confirmation", "revision_id": "523a0aca-e3bc-45f4-beda-17fd863e8299", "message": "applied; confirm within 2m0s or it rolls back automatically", "health": [["mgmt_reachable", true, "eth0"], ["gateway_up", true, null], ["kea_running", true, null], ["portal_listen", true, "8380"], ["portal_address", true, null]], "error": null}
+confirm 200 {"replacements": [{"packages_not_republished": [], "packages_republished": null, "replaced": "85e95c16-d739-4438-90e4-a38b2c82fec6", "replacement_id": "b160d55c-220d-420b-9a77-f5fb22398f55", "state":
+{"name": "Lab clients A", "cidr": "10.60.0.0/20", "enabled": true, "archived": false, "bridge": "br-g-9252e124"}
+{"name": "Lab clients B", "cidr": "10.61.0.0/20", "enabled": true, "archived": false, "bridge": "br-g102"}
+{"name": "Lab /19", "cidr": "10.66.0.0/19", "enabled": true, "archived": false, "bridge": "br-g119"}
+{"name": "Lab /19 (replaced the /20)", "cidr": "10.68.0.0/19", "enabled": true, "archived": false, "bridge": "br-g121-1e33"}
+{"name": "Lab /20 to replace", "cidr": "10.68.0.0/20", "enabled": false, "archived": false, "bridge": "br-g121"}
+br-g-9252e124 br-g102 br-g119 br-g121-1e33 
+10.60.0.0/20 10.68.0.0/19 10.66.0.0/19 10.61.0.0/20 

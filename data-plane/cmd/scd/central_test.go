@@ -46,7 +46,7 @@ func TestComputeCentralStatus(t *testing.T) {
 		central    string
 		daysLeft   *int
 	}{
-		{"factory clean", centralInputs{Now: now0, CentralConfigured: true}, activationNotRegistered, licNone, centralUnreachable, nil},
+		{"factory clean", centralInputs{Now: now0, CentralConfigured: true}, activationNotRegistered, licNone, centralIdentityNotLoaded, nil},
 		{"registered, nothing assigned", connected(func() centralInputs { i := base(); i.Asg.Outcome = assignment.OutcomeAbsent; return i }()),
 			activationWaiting, licNone, centralConnected, nil},
 		{"refused assignment is waiting, not activated", connected(func() centralInputs {

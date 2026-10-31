@@ -63,7 +63,7 @@ type kernelFake struct {
 	// noFlower simulates a kernel without cls_flower.
 	noFlower bool
 	failTC   func(args []string) error
-	failNFT func(op string) error
+	failNFT  func(op string) error
 	// perExec is a simulated fork cost, applied to wall time only when set.
 	perExec time.Duration
 	// opLog is every committed nft element operation in order: "add|del set key".

@@ -549,6 +549,10 @@ func (s *server) planTrunk(ctx context.Context, port *portInfo, vlans []vlanRequ
 			plan.Conflicts = append(plan.Conflicts, fmt.Sprintf("%q is not an IPv4 subnet.", subnet))
 			continue
 		}
+		if iss := netcfg.CheckClientSubnetMask(ipn); len(iss) > 0 {
+			plan.Conflicts = append(plan.Conflicts, fmt.Sprintf("VLAN %d: %s", v.VLANID, iss[0].Message))
+			continue
+		}
 		base := ipn.IP.To4()
 		if gw == "" {
 			gw = net.IPv4(base[0], base[1], base[2], base[3]+1).String()

@@ -1,9 +1,11 @@
 package poststay
 
-// The guest-facing post-stay flow never accepts a Stay, profile or PMS interface from the client. It derives the
-// candidate stays from the server-resolved device (the stays it was authorised on) and compares what the guest typed
-// with those stays' own records. A device that was never on a stay finds nothing, unless it also gives the last name
-// on that stay, in which case the stay is looked up by room, reservation and name together and must be unique.
+// The guest-facing After Check-out sign-in never accepts a Stay, profile or PMS interface from the client. It derives the
+// candidate stays from the server-resolved device: the stays whose live After Check-out entitlement this device holds a
+// place on, i.e. that the checkout carried the device over to because it was authorised on the stay before check-out
+// (online or not at the time). The typed room and reservation are compared with those stays' own records. A device
+// with no such stay finds nothing, whatever it types, and a surname does not change that: room and reservation numbers are
+// printed on paper, and a device that was never authorised on the stay is not entitled to it (Product Owner, 2026-10-30).
 
 import (
 	"context"
@@ -23,16 +25,13 @@ var ErrNoLineage = errors.New("poststay: no authenticated lineage for this devic
 // maxTypedLen bounds every typed value; a longer one cannot be a room, a reservation or a name.
 const maxTypedLen = 64
 
-// VerifyRequest is a guest's attempt. Nothing in it names a stay, a profile or an interface. Room and Reservation are
-// always required; LastName is required only from a device with no stay of its own (it is ignored otherwise).
+// VerifyRequest is a guest's attempt. Nothing in it names a stay, a profile or an interface. Room and Reservation are the
+// only things a guest types; no surname, first name or code is asked for or accepted.
 type VerifyRequest struct {
 	Tenant, Site string
 	// Device is the device id scd resolved; IP is the source address. Both are throttle dimensions (hashed by the store).
-	Device, IP                  string
-	Room, Reservation, LastName string
-	// WindowDays is how long after check-out a stay can still be signed in to (the site's post_stay_signin_days setting,
-	// migration 0179). Zero or less means DefaultWindowDays: an unset window never means "for ever".
-	WindowDays int
+	Device, IP        string
+	Room, Reservation string
 	// Limits are the site's brute-force settings (migration 0190); the zero value means the defaults.
 	Limits Limits
 }
@@ -42,22 +41,34 @@ type candidate struct {
 	version                 int
 }
 
-// candidateStays lists the stays this device was authorised on that are in a state post-stay sign-in can use. Bounded to
-// cap the work of one attempt. The room and reservation come from the stay's own record.
-func (s *Store) candidateStays(ctx context.Context, tenant, site, device string, windowDays int) ([]candidate, error) {
+// candidateStays lists the stays whose LIVE After Check-out entitlement this device holds an open place on. That place exists
+// only if the checkout conversion carried the device over (it was authorised on the same Stay, with the same interface and
+// episode, at the verified checkout boundary -- online or offline) and no one removed it since; the database refuses any
+// other way onto that entitlement (iam_v2.after_checkout_device_guard). It is scoped by tenant, site and device, and the
+// stay row it leads to carries the interface and the episode, so a room number reused by the next occupant, or the same
+// number on another PMS interface, is a different stay with a different lineage. A stay checked out before the unification
+// whose earlier post-stay entitlement is still running is honoured the same way until it ends. Bounded to cap the work of
+// one attempt. The room and reservation come from the stay's own record.
+func (s *Store) candidateStays(ctx context.Context, tenant, site, device string) ([]candidate, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT st.id::text, st.lifecycle_version, COALESCE(st.normalized_room_number,''), COALESCE(st.external_reservation_id,'')
-		  FROM (SELECT DISTINCT ON (e.stay_id) e.stay_id, eda.authorized_at
-		          FROM iam_v2.entitlement_device_authorizations eda
+		  FROM (SELECT DISTINCT ON (e.stay_id) e.stay_id, ed.last_authorized
+		          FROM iam_v2.entitlement_devices ed
+		          JOIN iam_v2.entitlement_device_authorizations a
+		            ON a.entitlement_id=ed.entitlement_id AND a.device_id=ed.device_id AND a.deauthorized_at IS NULL
 		          JOIN iam_v2.entitlements e
-		            ON e.tenant_id=eda.tenant_id AND e.site_id=eda.site_id AND e.id=eda.entitlement_id
-		         WHERE eda.tenant_id=$1 AND eda.site_id=$2 AND eda.device_id=$3 AND e.stay_id IS NOT NULL
-		         ORDER BY e.stay_id, eda.authorized_at DESC) lineage
+		            ON e.tenant_id=ed.tenant_id AND e.site_id=ed.site_id AND e.id=ed.entitlement_id
+		          LEFT JOIN iam_v2.purchases pu
+		            ON pu.tenant_id=e.tenant_id AND pu.site_id=e.site_id AND pu.id=e.purchase_id
+		         WHERE ed.tenant_id=$1 AND ed.site_id=$2 AND ed.device_id=$3 AND ed.status='AUTHORIZED'
+		           AND e.stay_id IS NOT NULL
+		           AND e.status='ACTIVE' AND (e.window_ends_at IS NULL OR e.window_ends_at > now())
+		           AND (e.end_mode='GRACE_AFTER_CHECKOUT' OR pu.trigger='POST_STAY_CONVERSION')
+		         ORDER BY e.stay_id, ed.last_authorized DESC) lineage
 		  JOIN iam_v2.stays st ON st.tenant_id=$1 AND st.site_id=$2 AND st.id=lineage.stay_id
 		 WHERE st.status IN ('CHECKED_OUT','POST_STAY_ACTIVE')
-		   AND st.effective_checkout_at > now() - make_interval(days => $4)
-		 ORDER BY lineage.authorized_at DESC
-		 LIMIT 5`, tenant, site, device, windowDays)
+		 ORDER BY lineage.last_authorized DESC
+		 LIMIT 5`, tenant, site, device)
 	if err != nil {
 		return nil, err
 	}
@@ -177,11 +188,7 @@ func (s *Store) Verify(ctx context.Context, req VerifyRequest) (string, error) {
 
 // verify returns a profile, or a Refusal, or (for a fault of the appliance rather than an answer) an error.
 func (s *Store) verify(ctx context.Context, req VerifyRequest) (string, *Refusal, error) {
-	windowDays := req.WindowDays
-	if windowDays <= 0 {
-		windowDays = DefaultWindowDays
-	}
-	cands, err := s.candidateStays(ctx, req.Tenant, req.Site, req.Device, windowDays)
+	cands, err := s.candidateStays(ctx, req.Tenant, req.Site, req.Device)
 	if err != nil {
 		return "", nil, err
 	}
@@ -189,13 +196,13 @@ func (s *Store) verify(ctx context.Context, req VerifyRequest) (string, *Refusal
 	if len(cands) == 0 {
 		route = RouteNewDevice
 	}
-	room, reservation, last := namenorm.Room(req.Room), namenorm.Reservation(req.Reservation), namenorm.Name(req.LastName)
+	room, reservation := namenorm.Room(req.Room), namenorm.Reservation(req.Reservation)
 	if s.thr != nil {
 		if d, err := s.chargeThrottle(ctx, req, cands, room, reservation); err != nil {
 			return "", &Refusal{Err: ErrThrottled, Route: route, Candidates: len(cands), Scope: string(d.Reason)}, nil
 		}
 	}
-	if len(room) > maxTypedLen || len(reservation) > maxTypedLen || len(last) > maxTypedLen {
+	if len(room) > maxTypedLen || len(reservation) > maxTypedLen {
 		return "", &Refusal{Err: ErrNotAuthenticable, Route: route, Candidates: len(cands)}, nil
 	}
 
@@ -209,50 +216,18 @@ func (s *Store) verify(ctx context.Context, req VerifyRequest) (string, *Refusal
 		}
 	}
 	if len(cands) == 0 {
-		// A new device: the stay is found by all three facts together, and only if exactly one stay has them.
-		var ids []string
-		if room != "" && reservation != "" && last != "" {
-			rows, err := s.pool.Query(ctx, `
-				SELECT st.id::text
-				  FROM iam_v2.stays st
-				 WHERE st.tenant_id=$1 AND st.site_id=$2 AND st.status IN ('CHECKED_OUT','POST_STAY_ACTIVE')
-				   AND st.effective_checkout_at > now() - make_interval(days => $6)
-				   AND st.normalized_room_number=$3 AND st.external_reservation_id=$4
-				   AND EXISTS (SELECT 1 FROM iam_v2.stay_guests g
-				                WHERE g.tenant_id=st.tenant_id AND g.site_id=st.site_id AND g.stay_id=st.id
-				                  AND g.last_name_norm=$5)
-				 LIMIT 2`, req.Tenant, req.Site, room, reservation, last, windowDays)
-			if err != nil {
-				return "", nil, err
-			}
-			for rows.Next() {
-				var id string
-				if err := rows.Scan(&id); err != nil {
-					rows.Close()
-					return "", nil, err
-				}
-				ids = append(ids, id)
-			}
+		// A device with no lineage: there is nothing to find, whatever it types. The same query's cost is spent anyway, so a
+		// refusal here takes as long as a wrong answer from a device that has a stay.
+		rows, err := s.pool.Query(ctx, `SELECT st.id::text FROM iam_v2.stays st
+			WHERE st.tenant_id=$1 AND st.site_id=$2 AND st.normalized_room_number=$3 AND false LIMIT 2`, req.Tenant, req.Site, room)
+		if err == nil {
 			rows.Close()
-			if err := rows.Err(); err != nil {
-				return "", nil, err
-			}
-		} else {
-			// The same query's cost, with a value that matches nothing.
-			rows, err := s.pool.Query(ctx, `SELECT st.id::text FROM iam_v2.stays st
-				WHERE st.tenant_id=$1 AND st.site_id=$2 AND st.normalized_room_number=$3 AND false LIMIT 2`, req.Tenant, req.Site, room)
-			if err == nil {
-				rows.Close()
-			}
-		}
-		if len(ids) == 1 {
-			matchedStay = ids[0]
 		}
 	}
 	if matchedStay == "" {
 		return "", &Refusal{Err: ErrNotAuthenticable, Route: route, Candidates: len(cands)}, nil
 	}
-	profile, err := s.ensureProfile(ctx, req.Tenant, req.Site, matchedStay, windowDays)
+	profile, err := s.ensureProfile(ctx, req.Tenant, req.Site, matchedStay)
 	if err != nil {
 		if errors.Is(err, ErrNotAuthenticable) {
 			return "", &Refusal{Err: ErrNotAuthenticable, Route: route, Candidates: len(cands)}, nil

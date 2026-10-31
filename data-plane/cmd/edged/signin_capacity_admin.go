@@ -39,7 +39,8 @@ var signinCapacityFields = []struct {
 	{"device_retention_days", signinCapacityBound{7, 3650, 90, "days", "Devices not seen for this long, and not part of any session or package, are removed."}},
 	{"portal_image_max_edge_px", signinCapacityBound{640, 4096, 2560, "pixels", "Uploaded portal background and logo images are scaled down so their longest side is at most this."}},
 	{"portal_image_quality", signinCapacityBound{50, 95, 82, "percent", "Compression quality for uploaded portal images."}},
-	{"post_stay_signin_days", signinCapacityBound{1, 30, 7, "days", "How long after check-out a guest can still sign in with their room number and reservation number. After this the stay no longer opens post-stay access."}},
+	// post_stay_signin_days (0179) is RETIRED by migration 0193: how long a guest can come back is the duration of the one
+	// After Check-out Access policy (/after-checkout-access), not a second setting. The column stays as history.
 	{"post_stay_device_attempts_per_minute", signinCapacityBound{3, 60, 10, "attempts per minute", "Post-stay sign-in: attempts one device may make a minute, right or wrong. More than this locks the device out."}},
 	{"post_stay_ip_attempts_per_minute", signinCapacityBound{5, 200, 20, "attempts per minute", "Post-stay sign-in: attempts one network address may make a minute, whatever devices it uses. Guests behind one shared address count together."}},
 	{"post_stay_wrong_answers_before_lockout", signinCapacityBound{3, 20, 5, "attempts per minute", "Post-stay sign-in: answers a device may give a minute for one stay (or, from a device with no stay of its own, in all) before it is locked out."}},
@@ -88,6 +89,7 @@ func (s *server) getSigninCapacity(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "the sign-in limits could not be read")
 		return
 	}
+	delete(vals, "post_stay_signin_days") // retired (0193): the window is the After Check-out Access duration
 	bounds := map[string]any{}
 	for _, f := range signinCapacityFields {
 		bounds[f.Name] = f.signinCapacityBound

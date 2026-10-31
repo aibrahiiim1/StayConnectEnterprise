@@ -459,7 +459,7 @@ RENDER="$ROOT/data-plane/internal/netcfg/render_nft.go"
 
 # (a) boot reconciliation must not replay a stored bundle's nft file.
 if [ -f "$BOOT" ]; then
-  boot_fn="$(awk '/^func \(a \*applier\) ReconcileActiveOnBoot/,/^}/' "$BOOT")"
+  boot_fn="$(awk '/^func \(a \*applier\) (ReconcileActiveOnBoot|reconcileConfirmed)\(/,/^}/' "$BOOT")"
   if printf '%s' "$boot_fn" | grep -q 'stayconnect.nft'; then
     # writing the artifact back for the record is fine; EXECUTING it is the defect.
     if printf '%s' "$boot_fn" | grep -qE '"nft", *"-f"'; then
@@ -549,7 +549,7 @@ fi
 #     record, no health check, no confirmation and no watchdog — and would resurrect a change that was rolled
 #     back precisely because it broke connectivity.
 if [ -f "$BOOT" ]; then
-  boot_fn2="$(awk '/^func \(a \*applier\) ReconcileActiveOnBoot/,/^}/' "$BOOT")"
+  boot_fn2="$(awk '/^func \(a \*applier\) (ReconcileActiveOnBoot|reconcileConfirmed)\(/,/^}/' "$BOOT")"
   if printf '%s' "$boot_fn2" | grep -q 'LoadIntent'; then
     no "boot reconciliation still reads the mutable guest_networks intent (an unapplied draft could become the runtime)"
   else

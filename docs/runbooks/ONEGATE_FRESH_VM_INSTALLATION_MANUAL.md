@@ -363,6 +363,7 @@ Open *Network → Client networks* (`/network`). A fresh appliance offers one **
 | DHCP pool | `10.20.0.10` – `10.20.15.254`, lease 3600 s (renew 900, rebind 7200) |
 | Domain | `guest.local` |
 | Captive portal, Internet, NAT, isolation | on |
+| Size limit | A client network may be anything from `/30` up to **`/19`** (8,190 usable addresses). `/19` is the largest: it is the address capacity of one network, not the number of devices served at once. A wider subnet is refused with the message *subnet is larger than /19*; split the site into several client networks. The prepared `/20` is not changed by this, and a client network that is switched on is never widened in place (create a new network instead). |
 
 **Option 1 — activate the prepared network (untagged):** map your AP/SSID to the VLAN that reaches NIC 2 untagged; *Activate* (a staged ENABLE) → **Apply** (password) → verify → **Confirm within 120 s**.
 
@@ -688,6 +689,11 @@ and never migrated since, `/etc/stayconnect/schema-baseline`; each pending migra
 (`gatep-reconcile.sh --expect-commit <release commit>`, hash-guarded against the installed release's `RELEASE.json` + `SHA256SUMS`, one
 transaction) → install the binaries with `install(1)`, keeping each old one as `<bin>.bak-<stamp>` → install units → restart in dependency order
 (`netd`, `scd`, `acctd`, `portald`, `edged`, and `pmsd` if enabled) → install the Admin Console → record the release → `check-appliance-units.sh`.
+
+**Migration numbers are checked before anything is planned** (`data-plane/migrations/README.md`). `apply-pending-migrations.sh` refuses, applying nothing and exiting 1, a release that
+(a) holds a migration file whose number is in `data-plane/migrations/RESERVED_NUMBERS` (today `0182-0189`, held out on purpose; the hole is harmless to the runner, whose gap check walks files, not numbers),
+(b) holds a migration whose sha256 differs from its pin in `data-plane/migrations/IDENTITIES`, or
+(c) lacks, or names differently, a migration the database ledger already holds (a downgrade or a renamed history). `edge-migrate.sh` repeats (a), (b) and the name check for the one migration it applies, and `central-migrate.sh` refuses (a), a changed applied migration (its ledger keeps a checksum) and a different name for an applied number. Proven by `scripts/ci/apply-pending-migrations-selftest.sh` and `deploy/scripts/central-migrate-selftest.sh` (a file in the reserved range and a renamed applied migration are each refused) and, without a database, by `tools/validate-migration-location-selftest.py`.
 **If a migration or the reconcile fails, the binaries are not replaced.** Before step 8 it prints the exact binary-rollback command — copy it into your log.
 
 Measured: an upgrade with no pending migration took ~25 s; a signed-in Client stayed online across it; identity, certificate and `.dsn` were
@@ -1138,4 +1144,10 @@ upgrade in order, and the production baseline is regenerated through 0192. `depl
 installed by `--upgrade`, and the acctd unit gains `WatchdogSec=30`. Checks after the upgrade: `grep -E 'WatchdogSec|NotifyAccess' /etc/systemd/system/stayconnect-acctd.service`;
 `tc filter show dev <client bridge> parent 1:` lists `flower` filters (rollback to the earlier classifier: set `NETD_SHAPE_CLASSIFIER=u32`, then `tc filter del dev <bridge> parent 1: pref 1`);
 `sysctl net.ipv4.neigh.default.gc_thresh3`. Evidence: [`CAPACITY_AND_OFFLINE_ACCEPTANCE.md`](CAPACITY_AND_OFFLINE_ACCEPTANCE.md) sections 6 and 7.
+
+### A3.13 The final-mission release (2026-10-31)
+
+Migrations **0193** (After Check-out Access), **0198** and **0199** (outage continuity), **0200** (class-origin check for /17 to /19 client networks) and **0201** (Cross-PMS Transfer as one definer function) are applied by the upgrade in order; **0182 to 0189 and 0194 to 0197 are reserved and never used** (`data-plane/migrations/RESERVED_NUMBERS`, `IDENTITIES`); the baseline is regenerated through 0201 and the Gate-P grants for the new functions are re-applied after the migrations.
+Checks after the upgrade: `psql -c "SELECT outage_continuity_minutes FROM public.enforcement_policy"` (60); the Admin Console shows **After Check-out Access** (the old Checkout Grace and Post-stay pages redirect to it); a client network may be created up to `/19` (an existing /20 is never widened in place); netd reports its continuity block (`journalctl -u stayconnect-netd | grep continuity`).
+Rollback: `binary-rollback.sh` for the binaries; each new migration has a `.down.sql` that states what it costs. Do not widen any network to /19 before 0200 is applied: the upper half of that network could not be enforced without it.
 

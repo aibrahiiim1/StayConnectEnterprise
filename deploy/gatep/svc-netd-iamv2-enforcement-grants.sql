@@ -67,3 +67,12 @@ REVOKE EXECUTE ON FUNCTION iam_v2.publish_checkout_grace_config(uuid, uuid, uuid
 
 -- NOT granted: INSERT/UPDATE/DELETE on any iam_v2 table. netd's authority is exercised entirely through the
 -- controlled-writer functions above, so a bug in netd cannot move session or entitlement state directly.
+
+-- Outage continuity (migration 0199): a read-only question, "which of these sessions is no longer entitled", asked while acctd is
+-- away. SECURITY DEFINER; returns only the ids it was given.
+DO $g0199$
+BEGIN
+  IF to_regprocedure('iam_v2.continuity_not_entitled(uuid,uuid,uuid[])') IS NOT NULL THEN
+    GRANT EXECUTE ON FUNCTION iam_v2.continuity_not_entitled(uuid, uuid, uuid[]) TO svc_netd;
+  END IF;
+END $g0199$;

@@ -393,6 +393,11 @@ func main() {
 				r.Use(s.resourcePermission("backups"))
 				r.Mount("/", s.accountingRetentionRoutes())
 			})
+			// Read-only: where the accounting counted an upper bound instead of an exact figure (0181). Counts and bytes only.
+			r.Route("/accounting-integrity", func(r chi.Router) {
+				r.Use(s.resourcePermission("reports"))
+				r.Mount("/", s.accountingIntegrityRoutes())
+			})
 			// Shortening a period anonymises history on the next run, hence the same "backups" key.
 			r.Route("/data-retention", func(r chi.Router) {
 				r.Use(s.resourcePermission("backups"))
@@ -440,6 +445,7 @@ func main() {
 				mountResource(r, s, "guest-signin-protection", s.signInProtectionRoutes)
 				mountResource(r, s, "guest-signin-restrictions", s.signInRestrictionsRoutes)
 				mountResource(r, s, "checkout-grace", s.checkoutGraceConfigRoutes)
+				mountResource(r, s, "after-checkout-access", s.afterCheckoutAccessRoutes)
 				mountResource(r, s, "operational-alerts", s.operationalAlertsRoutes)
 				mountResource(r, s, "pms-interfaces", s.pmsInterfacesRoutes)
 				r.With(s.resourcePermission("pms-interfaces")).Get("/pms-providers", s.listPMSProviders)
