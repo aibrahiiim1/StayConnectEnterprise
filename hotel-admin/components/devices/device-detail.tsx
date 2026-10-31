@@ -10,6 +10,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogBody,
 } from "@/components/ui/dialog";
 import { Table, TBody, THead, TR, TH, TD } from "@/components/ui/table";
+import { PackageControls } from "@/components/package-controls";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Field, Textarea } from "@/components/ui/input";
@@ -213,6 +214,11 @@ export function DeviceDetailDialog({ deviceId, mayWrite, onClose, onChanged }: {
                     )}
                   </div>
                 ))}
+              </section>
+
+              <section className="space-y-2">
+                <h3 className="text-sm font-medium">End or reset the package</h3>
+                <PackageControls subject={{ kind: "device", id: deviceId }} onChanged={onChanged} />
               </section>
 
               <section className="space-y-2">

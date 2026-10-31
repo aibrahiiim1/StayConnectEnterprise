@@ -25,6 +25,7 @@ import { Checkbox, Select } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { DetailsDrawer, DetailsSection } from "@/components/ui/details-drawer";
+import { PackageControls } from "@/components/package-controls";
 import { Explain } from "@/components/ui/tooltip";
 import { SkeletonRows } from "@/components/ui/misc";
 import { DescriptionList, MetricStrip, Pagination, ResultsCount, SearchInput } from "@/components/ui/data";
@@ -464,6 +465,10 @@ export default function StaysPage() {
               ) : (
                 <p className="text-sm text-muted-foreground">No internet package has been given to this stay yet.</p>
               )}
+            </DetailsSection>
+
+            <DetailsSection title="Packages of this stay">
+              <PackageControls subject={{ kind: "stay", id: detail.id }} onChanged={() => void open(detail.id)} />
             </DetailsSection>
 
             <DetailsSection title="Stay">

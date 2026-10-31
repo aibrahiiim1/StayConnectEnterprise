@@ -74,6 +74,9 @@ var guestDataReads = map[string]guestRead{
 	"/edge/v1/code-requests":                            {targetType: "code_requests"},
 	"/edge/v1/vouchers":                                 {targetType: "vouchers"},
 	"/edge/v1/sessions/aggregate-time":                  {targetType: "session_time_aggregate"},
+	// Staff End/Reset Package (0202): the preview names the stay, its room and dates; the list is one subject's packages.
+	"/edge/v1/package-controls":      {targetType: "packages"},
+	"/edge/v1/package-controls/{id}": {targetType: "entitlement", idParams: []string{"id"}},
 }
 
 // listFilterKeys are the query parameters that narrow a list by a setting or a date and never carry what someone typed. They are

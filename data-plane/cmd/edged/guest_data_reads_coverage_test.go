@@ -50,6 +50,7 @@ func TestEveryGuestDataRouteIsRecordedOrClassified(t *testing.T) {
 		"/edge/v1/post-stay-profiles":        s.postStayProfilesRoutes,
 		"/edge/v1/stay-transfers":            s.stayTransfersRoutes,
 		"/edge/v1/code-requests":             s.codeRequestsRoutes,
+		"/edge/v1/package-controls":          s.packageControlsRoutes,
 	}
 	var unclassified []string
 	seen := map[string]bool{}

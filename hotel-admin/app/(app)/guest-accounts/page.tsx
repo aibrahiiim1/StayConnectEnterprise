@@ -19,6 +19,7 @@ import { Input, Field } from "@/components/ui/input";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
+import { PackageControls } from "@/components/package-controls";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogBody,
   ConfirmDialog,
@@ -614,6 +615,12 @@ export default function GuestAccountsPage() {
             <ErrorBanner err={formErr} />
             {editing && (
               <AccountForm account={editing} onSubmit={onSaveEdit} busy={busy} onCancel={() => setEditing(null)} />
+            )}
+            {editing && (
+              <section className="mt-4 space-y-2 border-t border-border pt-4">
+                <h3 className="text-sm font-semibold">Packages of this account</h3>
+                <PackageControls subject={{ kind: "account", id: editing.id }} />
+              </section>
             )}
           </DialogBody>
         </DialogContent>

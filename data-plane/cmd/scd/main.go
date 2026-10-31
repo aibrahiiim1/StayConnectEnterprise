@@ -375,11 +375,17 @@ func (s *server) revoke(w http.ResponseWriter, r *http.Request) {
 // authorization set and its shaping class goes. Both steps are best effort; netd also converges from iam_v2.sessions.
 // Order: legacy set, then netd (authorization revoked, open flows ended), then, only for an address netd does not manage,
 // the legacy tc class. Deleting a class while the address is still authorized leaves an open flow unshaped and uncounted.
-func (s *server) denyAtGate(ctx context.Context, ip net.IP) {
+func (s *server) denyAtGate(ctx context.Context, ip net.IP) { _ = s.denyAtGateChecked(ctx, ip) }
+
+// denyAtGateChecked is denyAtGate that also returns the first kernel step that failed, for a caller that must not report a
+// withdrawal it did not make (End Package). The steps and their order are the same.
+func (s *server) denyAtGateChecked(ctx context.Context, ip net.IP) error {
+	var first error
 	nc := s.resolveNetwork(ctx, ip)
 	if s.nft != nil && s.nft.client != nil {
 		if err := s.nft.Deny(ctx, nc.Bridge, ip); err != nil {
 			slog.Error("nft deny", "err", err)
+			first = err
 		}
 	}
 	managed := false
@@ -389,16 +395,20 @@ func (s *server) denyAtGate(ctx context.Context, ip net.IP) {
 		if err != nil {
 			// netd also converges from iam_v2.sessions on its next pass; what is lost here is the immediacy.
 			slog.Error("netd could not end the address's flows", "ip", ip.String(), "err", err)
+			if first == nil {
+				first = err
+			}
 		}
 	}
 	if managed {
-		return // the class is netd's; its reconciliation removes it once nothing can reach it
+		return first // the class is netd's; its reconciliation removes it once nothing can reach it
 	}
 	if s.shp != nil {
 		if err := s.shp.DeleteSession(ctx, nc.Bridge, ip); err != nil {
 			slog.Warn("shape delete", "err", err)
 		}
 	}
+	return first
 }
 
 func (s *server) status(w http.ResponseWriter, r *http.Request) {
@@ -787,6 +797,8 @@ func main() {
 	r.Post("/v1/sessions/authorize-otp", s.authorizeOTP)
 	r.Post("/v1/sessions/authorize-credentials", s.authorizeGuestAccount)
 	r.Post("/v1/sessions/revoke", s.revoke)
+	// Staff End Package: the kernel withdrawal of the sessions the database already ended (package_withdraw.go). Administrative.
+	r.Post("/v1/admin/sessions/withdraw", s.withdrawEndedSessions)
 	r.Get("/v1/sessions/status", s.status)
 	r.Post("/v1/auth/otp/issue", s.otpIssue)
 	// Email accounts: guest routes portald calls, plus the operator's resend that edged proxies. Registered here, not in a helper, so admin_surface_test.go classifies every one.

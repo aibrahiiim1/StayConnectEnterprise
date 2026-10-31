@@ -130,6 +130,7 @@ func TestGuestDataReadRoutesExist(t *testing.T) {
 			"pms-roster-reconciliation": s.rosterReconciliationRoutes,
 			"stay-transfers":            s.stayTransfersRoutes,
 			"code-requests":             s.codeRequestsRoutes,
+			"package-controls":          s.packageControlsRoutes,
 		} {
 			mountResource(r, s, name, routes)
 		}
