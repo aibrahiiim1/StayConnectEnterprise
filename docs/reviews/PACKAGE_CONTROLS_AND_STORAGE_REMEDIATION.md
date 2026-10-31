@@ -134,37 +134,42 @@ No FTP, and no TLS or SSH verification bypass. Nothing goes to OneGate Central.
 
 **Erasure stays fail-closed.** Backups never need the secondary storage. An irreversible erasure still needs a verified independent copy.
 
-## 4. Tests prepared (not run)
+## 4. Tests
 
 - `cmd/edged/package_controls_integration_test.go`:
   - End: whole package only, idempotent, ALREADY_ENDED, request id reuse refused, audit;
   - Reset: free, linked, original untouched, device moved, no settlement or posting, a second reset refused, two concurrent resets with exactly one winner, one live entitlement;
   - After Check-out cohort, with a new device refused and no `CHECKOUT_GRACE` purchase;
   - refusals: checked out, role, reason;
+  - no automatic re-acquisition after an End: free acquisitions refused, a priced one and a staff grant not, scoped to the stay, lifted by Reset, readable as `svc_scd`;
+  - an erasure of the stay removes the staff reason; outside the scrub the record is append-only;
   - the whole journey as `svc_edged`.
+- `cmd/scd/package_withdraw_integration_test.go` (as `svc_scd`): an ended session's address is withdrawn; a live session, an address another live session holds and another site's session are not.
+- `cmd/scd/ledger_sftp_integration_test.go`: Save, Test, a read-only folder and Remove through scd's real handler against OpenSSH in a chroot (see 7).
+- `cmd/scd/privileges_integration_test.go`: column-owned sequences are left to their table; the replay works when the table's owner is not its creator.
+- `internal/ledger/realservers_integration_test.go`: SFTP relative folder in a chroot, the server's resolved path, a 3 MiB file streamed and read back by SHA-256, a read-only folder refused with no temporary file left, `..` refused; an S3 5 MiB streamed upload signed with its SHA-256 and read back, a wrong secret refused.
 - `cmd/scd/backup_mirror_test.go`: copy verified by read-back, follows rotation, foreign files untouched, a failure never touches local and is never shown copied, off by default, a replaced storage gets every set.
 - `cmd/scd/backups_test.go` (three plus two policy; the only good set is never removed; no orphans) and `backup_settings_test.go` (five-set cap; old seven-plus-three files resolve to it).
 - `cmd/netd/phase3_continuity_test.go`: a recently admitted session is covered, metered from zero, and still ended by its allowance.
-- `hotel-admin/test/ledger-card.test.tsx`: updated labels; connectivity wording; saved-but-not-in-step shown as a warning; prefill with a kept credential; removal with typed confirmation.
-- Golden-lab scenarios `tools/oglab/golden/scenarios/` (each at most 300 s): `continuity-1min`, `reboot-db-down`, `package-end-reset`, `ledger-sftp` (chrooted SFTP, relative folder, server-side SHA-256), `backup-five-sets`.
-
-**Known to need attention when testing is authorized:**
-
-- The console role matrix JSON was edited by hand. The generator test (`TestConsoleRolePermissionsAreGeneratedFromTheServerTable`) must agree.
-- Existing console tests that assert exact dialog text may need the new lines.
-- The continuity test's newcomer case assumes the plan walk proves a newly created class renewable in the same submission.
+- `hotel-admin/test/ledger-card.test.tsx` and `hotel-admin/test/package-controls.test.tsx`:
+  - storage labels and connectivity wording;
+  - saved but not in step shown as a warning;
+  - prefill with a kept credential;
+  - removal with typed confirmation;
+  - End and Reset need a reason and the password, and send one request id;
+  - Reset says it is free;
+  - a refused reset is shown, not sent;
+  - a read-only role sees no action.
+- Golden-lab scenarios `tools/oglab/golden/scenarios/`: **not executed**. No golden lab exists (nothing was ever frozen) and the fresh build was not made in this delivery (section 7).
 
 ## 5. Not verified
 
-Nothing in this branch has run. In particular, none of the following is claimed:
-- an End or Reset on a real appliance;
-- an SFTP server other than the prepared lab container;
-- an S3 streaming upload;
-- the backup copy on real storage;
-- 60- or 120-minute real outages;
-- the F5 cause;
-- licence interaction under load;
-- the role-path proofs.
+- an End or Reset on a real appliance, and End's withdrawal in a real kernel. The selection of what to withdraw is tested; the kernel steps are the existing `denyAtGate` sequence;
+- the five golden-lab scenarios;
+- SFTP server software other than OpenSSH, and S3 services other than the SigV4-checking test server;
+- the backup copy to a real NAS or bucket over a real network;
+- 60- or 120-minute real outages, and the F5 cause;
+- licence interaction under load.
 
 ## 6. Decisions
 
