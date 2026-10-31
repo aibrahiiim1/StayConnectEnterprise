@@ -344,7 +344,7 @@
   "next_authorized_action": "Work normal missions under the PRODUCT-OWNER-LED DELIVERY model D42 (2026-09-26): implement, target-test, deploy routine software to the test appliance 172.21.96.97 under its standing deployment authorization (current_state_facts.standing_test_appliance_deployment_authorization) (the production Central only when a mission names it), stop at READY FOR PRODUCT OWNER TESTING, and merge only after explicit Product Owner acceptance (po-merge-approved). The comprehensive validation runs only on 'FULL CHECK THE WHOLE CODE'. Retired hosts (current_state_facts.retired_hosts) are never contacted.",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase7-Plan.md",
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
-  "latest_accepted_po_decision": "D82",
+  "latest_accepted_po_decision": "D85",
   "current_state_facts": {
     "_note": "MACHINE-READABLE CURRENT STATE. Every current-state surface in this repository is validated against these fields by tools/validate-current-state-parity.py, which runs in the Project Governance gate. They exist because prose alone let a contradiction survive a green gate: current_maturity still said an authorization was awaited and iam_v2 was 49/0 while this file already recorded 63 tables and an executed Live Increment 9. A fact that is only asserted in sentences cannot be diffed; a fact recorded here can be.",
     "phase": "7",
@@ -1860,7 +1860,7 @@
   "current_delivery": {
     "kind": "FINAL_MISSION_DEPLOYMENT",
     "decision": "D85 (Product-Owner final mission of 2026-10-30: unified After Check-out Access, configurable outage continuity, client networks up to /19, and the remaining engineering corrections).",
-    "decision_note": "Deployment record: the test appliance runs the final mission release (11a5bfb4c007); Central is unchanged (5ac9cc5c9851); evidence in docs/runbooks/evidence/final-mission-2026-10-30/ and docs/AUDIT_DECISION_DISPOSITIONS.md section 15.",
+    "decision_note": "Deployment record: the final mission release is installed on the test appliance (onegate-appliance-11a5bfb4c007); Central is unchanged (5ac9cc5c9851); evidence in docs/runbooks/evidence/final-mission-2026-10-30/ and docs/AUDIT_DECISION_DISPOSITIONS.md section 15.",
     "manifest": "docs/manifests/FinalMission-change-manifest.md",
     "base": "11a5bfb4c0074c03292bb21a0c40543db492ba48",
     "base_note": "Master after the merge of PR #278.",

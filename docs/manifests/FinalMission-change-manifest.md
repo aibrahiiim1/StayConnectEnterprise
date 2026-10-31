@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `11a5bfb4c0074c03292bb21a0c40543db492ba48`
-- **HEAD commit:** `db444ca02a0b26ec83d4e3025a66e1b73d433993`
-- **Provenance (generation HEAD = inventory_head):** `7cdeee8e80339c6d758e77b0aa848b10a582d493`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `2ba52a3d197e931e17443bfae765f5573ca7da8d`
+- **Provenance (generation HEAD = inventory_head):** `2ddbb55ff1870bebb427e5a8d104afdcb17d7731`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `governance/final-mission`
 - **Remote branch:** `origin/governance/final-mission`
 - **Changed files:** 14
@@ -13,16 +13,16 @@
 | Path | Classification | Git status | Domain | Workstream | Rollback | Purpose (last commit subject in range) |
 |---|---|---|---|---|---|---|
 | `docs/AUDIT_DECISION_DISPOSITIONS.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0276 final mission deployment receipt, D85, state render and dispositions |
-| `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0276 final mission deployment receipt, D85, state render and dispositions |
-| `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0276 final mission deployment receipt, D85, state render and dispositions |
-| `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0276 final mission deployment receipt, D85, state render and dispositions |
-| `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0276 final mission deployment receipt, D85, state render and dispositions |
-| `docs/manifests/FinalMission-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Gate stability: the integration packages that share one database and one ledger chain run with -p 1 |
-| `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0276 final mission deployment receipt, D85, state render and dispositions |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: the Project Pack MANIFEST carries the checksums of the two regenerated entry files |
-| `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0276 final mission deployment receipt, D85, state render and dispositions |
+| `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: the latest accepted decision is D85; the deployment note no longer reads as the appliance 'running' a head |
+| `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: the latest accepted decision is D85; the deployment note no longer reads as the appliance 'running' a head |
+| `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: the latest accepted decision is D85; the deployment note no longer reads as the appliance 'running' a head |
+| `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: the latest accepted decision is D85; the deployment note no longer reads as the appliance 'running' a head |
+| `docs/manifests/FinalMission-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Governance: the Project Pack MANIFEST carries the checksums of the two regenerated entry files |
+| `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: the latest accepted decision is D85; the deployment note no longer reads as the appliance 'running' a head |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: the latest accepted decision is D85; the deployment note no longer reads as the appliance 'running' a head |
+| `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: the latest accepted decision is D85; the deployment note no longer reads as the appliance 'running' a head |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: T0276 final mission deployment receipt, D85, state render and dispositions |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: T0276 final mission deployment receipt, D85, state render and dispositions |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: the latest accepted decision is D85; the deployment note no longer reads as the appliance 'running' a head |
 | `governance/transitions/T0274.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: T0274 timestamp corrected to precede the commit that introduces it |
 | `governance/transitions/T0276.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: T0276 final mission deployment receipt, D85, state render and dispositions |
 | `scripts/pmsd-pg-integration.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Gate stability: the integration packages that share one database and one ledger chain run with -p 1 |
@@ -30,20 +30,20 @@
 ## Total diff statistics (`git diff --stat`)
 ```text
  docs/AUDIT_DECISION_DISPOSITIONS.md                |  2 +
- .../StayConnect-IAM-Phase0-Contract.md             |  2 +-
- docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |  2 +-
- docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |  2 +-
- docs/context/StayConnect-IAM-Handoff.md            |  2 +-
- docs/manifests/FinalMission-change-manifest.md     | 57 ++++++++++++++++++++++
- .../chatgpt/stayconnectenterprise/00-START-HERE.md |  2 +-
+ .../StayConnect-IAM-Phase0-Contract.md             |  4 +-
+ docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |  4 +-
+ docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |  4 +-
+ docs/context/StayConnect-IAM-Handoff.md            |  4 +-
+ docs/manifests/FinalMission-change-manifest.md     | 60 ++++++++++++++++++++++
+ .../chatgpt/stayconnectenterprise/00-START-HERE.md |  4 +-
  exports/chatgpt/stayconnectenterprise/MANIFEST.md  |  4 +-
- .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |  2 +-
+ .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |  4 +-
  governance/decision-register.json                  | 12 +++++
- governance/project-state.json                      | 24 ++++-----
+ governance/project-state.json                      | 26 +++++-----
  governance/transitions/T0274.json                  |  4 +-
- governance/transitions/T0276.json                  | 34 +++++++++++++
+ governance/transitions/T0276.json                  | 34 ++++++++++++
  scripts/pmsd-pg-integration.sh                     |  4 +-
- 14 files changed, 130 insertions(+), 23 deletions(-)
+ 14 files changed, 140 insertions(+), 30 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -53,7 +53,8 @@
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
-HISTORICAL: 7cdeee8e Governance: the Project Pack MANIFEST carries the checksums of the two regenerated entry files
+HISTORICAL: 2ddbb55f Governance: the latest accepted decision is D85; the deployment note no longer reads as the appliance 'running' a head
+HISTORICAL: 2ba52a3d Governance: the Project Pack MANIFEST carries the checksums of the two regenerated entry files
 HISTORICAL: db444ca0 Gate stability: the integration packages that share one database and one ledger chain run with -p 1
 HISTORICAL: 4a7912e5 Governance: T0274 timestamp corrected to precede the commit that introduces it
 HISTORICAL: 07be3556 Governance: T0276 final mission deployment receipt, D85, state render and dispositions
