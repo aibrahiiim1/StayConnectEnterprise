@@ -350,6 +350,8 @@ GRANT EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) TO svc_acctd;
 \ir svc-signin-capacity-grants.sql
 -- After Check-out Access: the enable switch (0193).
 \ir svc-after-checkout-grants.sql
+-- The Cross-PMS Transfer is one definer function (0201).
+\ir svc-stay-transfer-grants.sql
 
 -- EXECUTE on the CANONICAL audited, versioned publication boundary. This is the only function the product
 -- calls to change checkout grace policy: it requires an active operator as actor, a bounded machine reason
@@ -571,8 +573,7 @@ BEGIN
      AND has_column_privilege(r.rolname, c.oid, a.attnum, 'UPDATE')
      AND (r.rolname::text, c.relname::text, a.attname::text) NOT IN (
            ('svc_scd','entitlements','status'), ('svc_pmsd','entitlements','status'),
-           ('svc_pmsd','sessions','state'), ('svc_pmsd','sessions','ended'), ('svc_pmsd','sessions','end_reason'),
-           ('svc_edged','sessions','entitlement_id'));
+           ('svc_pmsd','sessions','state'), ('svc_pmsd','sessions','ended'), ('svc_pmsd','sessions','end_reason'));
   IF bad IS NOT NULL THEN
     RAISE EXCEPTION 'GATE-P BLOCKER (B-7): column UPDATE beyond purpose: %', bad;
   END IF;
