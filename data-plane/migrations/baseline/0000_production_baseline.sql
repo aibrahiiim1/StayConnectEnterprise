@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0199, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0200, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -6163,13 +6163,32 @@ END $$;
 --
 
 CREATE FUNCTION iam_v2.p3_expected_class_minor(p_ip inet) RETURNS integer
-    LANGUAGE sql IMMUTABLE
-    SET search_path TO 'iam_v2', 'pg_temp'
+    LANGUAGE plpgsql STABLE
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
     AS $$
-  SELECT CASE
-    WHEN p_ip IS NULL OR family(p_ip) <> 4 THEN NULL
-    ELSE 4096 + (((split_part(host(p_ip), '.', 3)::int & 15) << 8) | split_part(host(p_ip), '.', 4)::int)
-  END;
+DECLARE
+  v_net inet;
+  v_idx bigint;
+BEGIN
+  IF p_ip IS NULL OR family(p_ip) <> 4 THEN
+    RETURN NULL;
+  END IF;
+  SELECT n.subnet_cidr::inet INTO v_net
+    FROM public.guest_networks n
+   WHERE n.enabled AND n.subnet_cidr IS NOT NULL
+     AND masklen(n.subnet_cidr::inet) BETWEEN 17 AND 19
+     AND n.subnet_cidr::inet >>= p_ip
+   ORDER BY masklen(n.subnet_cidr::inet) DESC
+   LIMIT 1;
+  IF v_net IS NULL THEN
+    RETURN 4096 + (((split_part(host(p_ip), '.', 3)::int & 15) << 8) | split_part(host(p_ip), '.', 4)::int);
+  END IF;
+  v_idx := p_ip - network(v_net);
+  IF v_idx < 4096 THEN
+    RETURN 4096 + v_idx::int;
+  END IF;
+  RETURN 12288 + (v_idx - 4096)::int;
+END;
 $$;
 
 
@@ -36215,7 +36234,7 @@ GRANT SELECT ON TABLE public.enforcement_policy_changes TO svc_edged;
 -- Name: TABLE guest_networks; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT REFERENCES ON TABLE public.guest_networks TO iam_v2_owner;
+GRANT SELECT,REFERENCES ON TABLE public.guest_networks TO iam_v2_owner;
 GRANT SELECT,UPDATE ON TABLE public.guest_networks TO svc_scd;
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.guest_networks TO svc_edged;
 GRANT SELECT ON TABLE public.guest_networks TO svc_netd;
