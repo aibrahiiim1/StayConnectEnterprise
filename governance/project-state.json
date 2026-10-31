@@ -1339,7 +1339,7 @@
       "_note": "The current test appliance (Product-Owner record, 2026-10-28, D78/T0264). Activated on the production Central, in its trust universe.",
       "host": "172.21.96.97",
       "central": "central.onegate.getsemantics.com (41.128.240.133)",
-      "release": "onegate-appliance-bcb5330cf914 (2026-10-30, source commit bcb5330cf9141d413293b48555831fea5640d7d6 read back from RELEASE.json and all eight installed binaries via DEPLOYED_BINARIES.sha256; installation manual A3.11)",
+      "release": "onegate-appliance-11a5bfb4c007 (2026-10-31, source commit 11a5bfb4c0074c03292bb21a0c40543db492ba48 read back from RELEASE.json and all eight installed binaries via DEPLOYED_BINARIES.sha256; installation manual A3.13)",
       "status": "TEST. Go-Live not authorised. Routine software deployments are covered by the standing authorization D79.",
       "deployed_note": "The closure round of the audit-decision mission (T0270 to T0272) is deployed and verified on this appliance (T0273): migrations through 0179, units active, licence Active over mutual TLS, appliance Root CA pinned against its fingerprint, client journey 12/12, 500 simultaneous sign-in attempts answered with no busy answer. The earlier release (T0269) had stopped safely once at migration 0162 and was fixed by PR #266."
     },
@@ -1362,7 +1362,7 @@
       "dispositions": "docs/AUDIT_DECISION_DISPOSITIONS.md"
     }
   },
-  "latest_transition_id": "T0275",
+  "latest_transition_id": "T0276",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1858,16 +1858,16 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "CLOSURE_ROUND_2_DEPLOYMENT",
-    "decision": "D84 (Product-Owner continuation of 2026-10-30: resolve the remaining engineering defects of the AD-1 to AD-68 mission).",
-    "decision_note": "Deployment record: the test appliance runs the second closure round (bcb5330cf914); Central is unchanged (5ac9cc5c9851); evidence in docs/runbooks/CAPACITY_AND_OFFLINE_ACCEPTANCE.md sections 6 and 7.",
-    "manifest": "docs/manifests/ClosureRound2-change-manifest.md",
-    "base": "bcb5330cf9141d413293b48555831fea5640d7d6",
-    "base_note": "Master after the merge of PR #275.",
-    "transition": "T0275",
-    "previous_delivery": "T0274",
-    "branch": "governance/closure-round-2",
-    "note": "T0275. Go-Live not authorised."
+    "kind": "FINAL_MISSION_DEPLOYMENT",
+    "decision": "D85 (Product-Owner final mission of 2026-10-30: unified After Check-out Access, configurable outage continuity, client networks up to /19, and the remaining engineering corrections).",
+    "decision_note": "Deployment record: the test appliance runs the final mission release (11a5bfb4c007); Central is unchanged (5ac9cc5c9851); evidence in docs/runbooks/evidence/final-mission-2026-10-30/ and docs/AUDIT_DECISION_DISPOSITIONS.md section 15.",
+    "manifest": "docs/manifests/FinalMission-change-manifest.md",
+    "base": "11a5bfb4c0074c03292bb21a0c40543db492ba48",
+    "base_note": "Master after the merge of PR #278.",
+    "transition": "T0276",
+    "previous_delivery": "T0275",
+    "branch": "governance/final-mission",
+    "note": "T0276. Go-Live not authorised."
   },
   "onboarding_reconciliation": {
     "decision": "D37",

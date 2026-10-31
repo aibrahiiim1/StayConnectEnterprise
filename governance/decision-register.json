@@ -1251,6 +1251,18 @@
       "title": "SECOND CLOSURE ROUND (2026-10-30): sustained sign-in capacity (300 enforced a minute for an hour in the isolated 2 vCPU / 4 GB lab, met twice), shaping beyond 2,047 sessions per bridge (flower classifier), accounting integrity (migration 0181), AD-36 closure (migration 0190), acctd watchdog with the 90 s lease unchanged, capacity migrations 0191/0192. Simulated acceptance only; hardware and real-device acceptance remain outstanding.",
       "authorization_evidence": "The Product Owner's continuation of 2026-10-30 (GOAL: resolve all remaining engineering defects and acceptance failures of the AD-1 to AD-68 mission from master 4924d509; deployment to the test appliance 172.21.96.97 authorized).",
       "does_not_authorize": "Go-Live, real PMS traffic, financial operations, Root CA changes, retired hosts, deployment to the production Central (its code did not change), widening client networks beyond /20, any authentication or licensing semantics change."
+    },
+    {
+      "id": "D85",
+      "decided_on": "2026-10-30",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-10-30",
+      "status": "ACTIVE",
+      "title": "FINAL END-TO-END ENGINEERING MISSION (2026-10-30/31): the Product Owner's three product decisions are implemented and delivered to the test appliance. (1) One Hotel After Check-out Access feature replaces the separate Checkout Grace and Post-Stay mechanisms: one versioned policy and package snapshot, one entitlement per eligible Stay episode shared by all eligible devices, eligibility only for devices previously authorized against the same Stay, reconnection with room number and reservation number only (migration 0193). (2) Configurable continuity during internal failures, default 60 minutes and at most 120, held by a bounded netd governor that meters bytes itself and still ends access for disconnects, expiry and quota exhaustion; the 90 second lease is unchanged (0198, 0199). (3) Client networks up to /19, including the class-origin check for the upper half (0200). Also: the Cross-PMS Transfer runs as one definer function the Admin Console role may execute (0201), reserved migration numbers 0182-0189 and 0194-0197 with pinned migration identities, isolated integration fixtures, corrected Central link diagnostics. Lab-accepted in the isolated container lab; field acceptance remains outstanding.",
+      "authorization_evidence": "The Product Owner's final mission of 2026-10-30 (GOAL: continue from master 53f0b990, implement the three final product decisions, resolve the remaining engineering defects, merge through protected pull requests, deploy to the test appliance 172.21.96.97, verify and clean up).",
+      "does_not_authorize": "Go-Live, real PMS configuration or traffic, any change to the production Central 41.128.240.133 (no Central code changed), Root CA or trust changes, payment systems, a destructive migration, any enablement of an unlisted appliance-to-Central message, rotated-MAC remembered lineage, ending a whole After Check-out entitlement by staff, or widening the active test network to /19."
     }
   ]
 }
