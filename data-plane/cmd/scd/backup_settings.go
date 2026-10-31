@@ -25,6 +25,10 @@ const (
 // retentionConf is the file Hotel Admin writes the backup and retention settings to; a var so tests can use a temporary one.
 var retentionConf = "/etc/stayconnect/backup-retention.conf"
 
+// maxBackupSets is the most completed backup sets kept at rest (regular + protective). A new protective set may exist next to
+// them for the moment between its verification and the rotation that follows it; nothing is removed to make room for it first.
+const maxBackupSets = 5
+
 type retentionSetting struct {
 	Key      string `json:"key"`
 	Label    string `json:"label"`
@@ -49,10 +53,13 @@ var retentionSchema = []retentionSetting{
 		Explains: "The scheduled backup is taken at or after this hour (the appliance's own clock)."},
 	{Key: "BACKUP_EVERY_DAYS", Label: "Scheduled backups: every", Unit: "days", Default: 1, Min: 1, Max: 7,
 		Explains: "How many days between scheduled backups. A backup taken by hand counts: the next scheduled one comes this many days after the newest."},
-	{Key: "BACKUP_KEEP", Label: "Backups kept", Unit: "backups", Default: 7, Min: 1, Max: 30,
-		Explains: "How many scheduled and manual backups to keep. The newest is always kept; older ones go only after a newer one has been verified. With a schedule of N days, the oldest backup is about (this number x N) days old, and an erased guest can be in it for that long."},
-	{Key: "SAFETY_BACKUP_KEEP", Label: "Safety backups kept", Unit: "backups", Default: 3, Min: 2, Max: 20,
-		Explains: "The backups taken automatically before a restore, a migration or a deployment: how many of the newest to keep."},
+	// At most maxBackupSets completed sets in all (PO policy 2026-10-31): BACKUP_KEEP + SAFETY_BACKUP_KEEP <= maxBackupSets, checked on save.
+	{Key: "BACKUP_KEEP", Label: "Backups kept", Unit: "backups", Default: 3, Min: 1, Max: 3,
+		Explains: "How many scheduled and manual backups to keep (at most five backups are kept in all, with the safety backups). The newest is always kept; older ones go only after a newer one has been verified. With a schedule of N days, the oldest backup is about (this number x N) days old, and an erased guest can be in it for that long."},
+	{Key: "SAFETY_BACKUP_KEEP", Label: "Safety backups kept", Unit: "backups", Default: 2, Min: 2, Max: 4,
+		Explains: "The backups taken automatically before a restore, a migration or a deployment: how many of the newest to keep. Never fewer than two, so the backup protecting a change is not the only one; with the backups kept above, at most five in all."},
+	{Key: "BACKUP_REPLICATE", Label: "Copy backups to the secondary storage", Unit: "0 = local only, 1 = local and secondary", Default: 0, Min: 0, Max: 1,
+		Explains: "Off: backups are kept on the appliance only, which is all a backup needs. On: each retained backup set is also copied to the secondary storage set up for the erasure ledger, read back and verified there. A failed copy never removes or blocks a local backup."},
 	// A restore keeps the database it replaced so it can be undone; that copy still holds guests erased since, so it is removed after this many days.
 	{Key: "SET_ASIDE_DAYS", Label: "Database kept aside by a restore: keep for", Unit: "days", Default: 14, Min: 1, Max: 90,
 		Explains: "A restore keeps the database it replaced so it can be undone. That copy still holds data erased or anonymised since, so it is removed after this many days."},
@@ -82,7 +89,7 @@ func readRetention() []retentionSetting {
 	}
 	b, err := os.ReadFile(retentionConf)
 	if err != nil {
-		return out
+		return clampRetention(out)
 	}
 	for _, line := range strings.Split(string(b), "\n") {
 		m := reConfLine.FindStringSubmatch(line)
@@ -98,6 +105,27 @@ func readRetention() []retentionSetting {
 				out[i].Value = v
 			}
 		}
+	}
+	return clampRetention(out)
+}
+
+// clampRetention resolves what is in force: a value outside its bounds (an older file said BACKUP_KEEP=7) is its default, and the
+// two backup pools together never exceed maxBackupSets (the regular pool gives way; the safety pool keeps its minimum of two).
+func clampRetention(out []retentionSetting) []retentionSetting {
+	var keep, safety *retentionSetting
+	for i := range out {
+		if out[i].Value < out[i].Min || out[i].Value > out[i].Max {
+			out[i].Value = out[i].Default
+		}
+		switch out[i].Key {
+		case "BACKUP_KEEP":
+			keep = &out[i]
+		case "SAFETY_BACKUP_KEEP":
+			safety = &out[i]
+		}
+	}
+	if keep != nil && safety != nil && keep.Value+safety.Value > maxBackupSets {
+		keep.Value = max(keep.Min, maxBackupSets-safety.Value)
 	}
 	return out
 }
@@ -156,6 +184,12 @@ func (s *server) backupSettingsSet(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		set.Value = v
+	}
+	if total := byKey["BACKUP_KEEP"].Value + byKey["SAFETY_BACKUP_KEEP"].Value; total > maxBackupSets {
+		httpErr(w, http.StatusBadRequest, fmt.Sprintf(
+			"at most %d backups are kept in all: backups kept (%d) and safety backups kept (%d) add up to %d",
+			maxBackupSets, byKey["BACKUP_KEEP"].Value, byKey["SAFETY_BACKUP_KEEP"].Value, total))
+		return
 	}
 	// A critical threshold at or below the warning threshold is a broken policy.
 	if byKey["DISK_CRIT"].Value <= byKey["DISK_WARN"].Value {

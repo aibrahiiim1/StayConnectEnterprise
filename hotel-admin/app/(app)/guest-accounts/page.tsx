@@ -692,6 +692,7 @@ export default function GuestAccountsPage() {
                 ...(removal !== "delete"
                   ? ["Its packages, usage and sign-in history are kept, and its devices' places on those packages are freed. The email address or username is free to use again: the client registers once more with “Create an account” — signing in with it no longer works."]
                   : []),
+                "This is not a data-protection erasure and is not recorded in the erasure ledger. To erase a client’s personal data, use Guest data → Erase.",
                 "This cannot be undone.",
                 "If you only want to stop it being used for now, Disable it instead — that can be reversed.",
               ]

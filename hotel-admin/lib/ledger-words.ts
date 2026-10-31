@@ -9,8 +9,25 @@ export type LedgerStatus = {
   secondary: {
     configured: boolean; kind?: string; describe?: string; reachable: boolean; in_sync: boolean; entries: number;
     encrypted: boolean; last_ok?: string; error?: string;
+    /** The entry the copy was last read back at: the proof behind "in step". */
+    head?: { ledger: string; seq: number; hash: string; object: string };
+    /** The saved settings (never a credential) and which credentials are saved. */
+    settings?: Partial<Record<"kind" | "path" | "host" | "user" | "dir" | "fingerprint" | "endpoint" | "region" | "bucket" | "prefix" | "access_key", string>> & { port?: number };
+    secrets?: { password?: boolean; private_key?: boolean; secret_key?: boolean };
+    location?: StorageLocation;
+    history?: { at: string; action: "SET" | "REPLACED" | "REMOVED"; kind?: string; by: string }[];
   };
 };
+
+export type StorageLocation = {
+  where: string; medium?: string; filesystem?: string; source?: string; free_bytes?: number; total_bytes?: number;
+};
+
+const MEDIUM_LABELS: Record<string, string> = {
+  external_disk: "External disk (USB/SATA)", nas_smb: "NAS share (SMB/CIFS)", nas_nfs: "NAS share (NFS)",
+  network_share: "Network share", sftp: "SFTP server", s3: "S3-compatible bucket",
+};
+export const mediumLabel = (m?: string) => MEDIUM_LABELS[m ?? ""] ?? "";
 
 export type BackupKind = "scheduled" | "manual" | "pre-change" | "pre-restore";
 
@@ -28,6 +45,16 @@ export type BackupStatus = {
     count: number; size_bytes: number; unencrypted: number; oldest: string | null;
     sets: { name: string; kind: string; taken: string; size_bytes: number; encrypted: boolean; restorable_here: boolean }[];
   };
+  /** Optional copy of the retained backup sets to the secondary storage. */
+  mirror?: {
+    mode: "local_only" | "local_and_secondary";
+    state: "off" | "ok" | "pending" | "attention" | "no_destination";
+    message: string;
+    last_ok?: string | null;
+    last_error?: string | null;
+    sets: { name: string; state: "copied" | "pending" | "failed"; verified_at?: string | null; error?: string | null }[];
+  };
+  retention?: { max_total: number; regular: number; protective: number; held: number };
 };
 
 export const BACKUP_KIND_LABELS: Record<string, string> = {
@@ -39,12 +66,15 @@ export const BACKUP_KIND_LABELS: Record<string, string> = {
 };
 export const backupKindLabel = (k?: string) => BACKUP_KIND_LABELS[k ?? ""] ?? "Backup";
 
-export const SCHEDULE_SETTING_KEYS = ["BACKUP_ENABLED", "BACKUP_HOUR", "BACKUP_EVERY_DAYS", "BACKUP_KEEP", "SAFETY_BACKUP_KEEP"] as const;
+export const SCHEDULE_SETTING_KEYS = ["BACKUP_ENABLED", "BACKUP_HOUR", "BACKUP_EVERY_DAYS", "BACKUP_KEEP", "SAFETY_BACKUP_KEEP", "BACKUP_REPLICATE"] as const;
+
+/** At most this many completed backup sets are kept (regular + protective), the PO policy of 2026-10-31. */
+export const MAX_BACKUP_SETS = 5;
 
 export const STORAGE_KINDS: { value: "dir" | "sftp" | "s3"; label: string; hint: string }[] = [
-  { value: "dir", label: "External disk or network share", hint: "A folder on a USB or SATA disk, or on a network share (NAS) that is mounted on the appliance. It must not be on the appliance’s own disk." },
-  { value: "sftp", label: "SFTP server", hint: "A NAS or server that offers SFTP. The server’s identity is confirmed once and then checked on every connection." },
-  { value: "s3", label: "Cloud storage (S3-compatible)", hint: "A bucket the site owns: Amazon S3, Backblaze B2, Wasabi, MinIO or a NAS that speaks S3. Turn on versioning for it if you can." },
+  { value: "dir", label: "External disk or mounted NAS share", hint: "A folder on a USB or SATA disk, or on a NAS share mounted on the appliance by SMB/CIFS or NFS (for example /mnt/nas/onegate). It must not be on the appliance’s own disk; the appliance checks which disk the folder is really on." },
+  { value: "sftp", label: "SFTP server (password or SSH key)", hint: "A NAS or server that offers SFTP. The folder may be absolute (/backups/onegate) or relative to the account’s login folder (onegate). The server’s identity is confirmed once and then checked on every connection." },
+  { value: "s3", label: "S3-compatible bucket (cloud or self-hosted)", hint: "A bucket the site owns: Amazon S3, Backblaze B2, Wasabi, or a self-hosted MinIO, Ceph or NAS that speaks S3 over https. Turn on versioning for it if you can." },
 ];
 
 export function kindLabel(kind?: string): string {

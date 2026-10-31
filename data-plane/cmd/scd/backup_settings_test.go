@@ -11,7 +11,7 @@ func TestRetentionDefaultsMatchTheSweepsOwn(t *testing.T) {
 	want := map[string]int{
 		"KEEP_BINARIES": 5, "KEEP_RELEASES": 5, "KEEP_CONFIG": 3, "DISK_WARN": 80, "DISK_CRIT": 90,
 		"RESTORE_TEST_MONTHS": 6, "SET_ASIDE_DAYS": 14, "BACKUP_ENABLED": 0, "BACKUP_HOUR": 2, "BACKUP_EVERY_DAYS": 1,
-		"BACKUP_KEEP": 7, "SAFETY_BACKUP_KEEP": 3,
+		"BACKUP_KEEP": 3, "SAFETY_BACKUP_KEEP": 2, "BACKUP_REPLICATE": 0,
 	}
 	for _, s := range retentionSchema {
 		if want[s.Key] != s.Default {
@@ -55,16 +55,43 @@ func TestScheduledBackupsAreOffByDefaultAndRetentionIsOneCount(t *testing.T) {
 	if byKey["BACKUP_ENABLED"].Default != 0 {
 		t.Fatal("scheduled backups are on by default")
 	}
-	if byKey["BACKUP_KEEP"].Default != 7 || byKey["BACKUP_KEEP"].Max > 60 {
-		t.Errorf("backups kept: default %d, ceiling %d (want 7 and a safe ceiling)", byKey["BACKUP_KEEP"].Default, byKey["BACKUP_KEEP"].Max)
+	if byKey["BACKUP_KEEP"].Default != 3 || byKey["BACKUP_KEEP"].Max > maxBackupSets {
+		t.Errorf("backups kept: default %d, ceiling %d (want 3 and at most the five-set ceiling)", byKey["BACKUP_KEEP"].Default, byKey["BACKUP_KEEP"].Max)
 	}
 	for _, retired := range []string{"KEEP_DB", "DB_BACKUP_DAYS", "SITE_BACKUP_DAYS", "SITE_BACKUP_KEEP", "DAILY_BACKUP_HOUR"} {
 		if _, ok := byKey[retired]; ok {
 			t.Errorf("%s still exists beside the one retention policy", retired)
 		}
 	}
-	if got := readBackupSettings(); got.Enabled || got.Keep != 7 || got.SafetyKeep != 3 || got.EveryDays != 1 || got.Hour != 2 {
+	if got := readBackupSettings(); got.Enabled || got.Keep != 3 || got.SafetyKeep != 2 || got.Replicate || got.EveryDays != 1 || got.Hour != 2 {
 		t.Errorf("settings with no file = %+v", got)
+	}
+}
+
+func TestAtMostFiveBackupSetsAreKeptInAll(t *testing.T) {
+	byKey := map[string]retentionSetting{}
+	for _, s := range retentionSchema {
+		byKey[s.Key] = s
+	}
+	if d := byKey["BACKUP_KEEP"].Default + byKey["SAFETY_BACKUP_KEEP"].Default; d != maxBackupSets {
+		t.Errorf("the defaults keep %d sets, want %d (three regular, two protective)", d, maxBackupSets)
+	}
+	if byKey["BACKUP_KEEP"].Max+byKey["SAFETY_BACKUP_KEEP"].Min > maxBackupSets {
+		t.Error("the regular pool's ceiling with the safety floor exceeds five sets")
+	}
+	// An older file (the previous default was seven plus three) resolves to what is in force: a value out of bounds is its
+	// default, and the two pools together never exceed five.
+	useRetentionConf(t, "BACKUP_KEEP=7\nSAFETY_BACKUP_KEEP=3\nBACKUP_REPLICATE=1\n")
+	got := readBackupSettings()
+	if got.Keep+got.SafetyKeep > maxBackupSets || got.SafetyKeep < 2 || got.Keep < 1 {
+		t.Errorf("an old seven-plus-three file resolved to %d + %d", got.Keep, got.SafetyKeep)
+	}
+	if !got.Replicate {
+		t.Error("BACKUP_REPLICATE=1 was not read")
+	}
+	useRetentionConf(t, "BACKUP_KEEP=3\nSAFETY_BACKUP_KEEP=4\n")
+	if got := readBackupSettings(); got.Keep != 1 || got.SafetyKeep != 4 {
+		t.Errorf("three plus four resolved to %d + %d, want 1 + 4", got.Keep, got.SafetyKeep)
 	}
 }
 

@@ -101,7 +101,7 @@ func seedBackup(t *testing.T, kind string, taken time.Time) backupMeta {
 	return m
 }
 
-func TestRotationKeepsTheNewestSevenRegularAndThreeProtectiveAndNothingElse(t *testing.T) {
+func TestRotationKeepsTheNewestThreeRegularAndTwoProtectiveAndNothingElse(t *testing.T) {
 	restore := scdBackupDirForTest(t, t.TempDir())
 	defer restore()
 	useRetentionConf(t, "")
@@ -126,8 +126,9 @@ func TestRotationKeepsTheNewestSevenRegularAndThreeProtectiveAndNothingElse(t *t
 		t.Fatal(err)
 	}
 	s := &server{}
-	if n := s.rotateBackups(); n != 3+2 {
-		t.Fatalf("removed %d sets, want 5", n)
+	// Defaults: three regular and two protective, five sets in all.
+	if n := s.rotateBackups(); n != 7+3 {
+		t.Fatalf("removed %d sets, want 10", n)
 	}
 	check := func(label string, all []backupMeta, keepFrom int) {
 		for i, m := range all {
@@ -143,8 +144,11 @@ func TestRotationKeepsTheNewestSevenRegularAndThreeProtectiveAndNothingElse(t *t
 			}
 		}
 	}
-	check("regular", regular, 3)
-	check("protective", protective, 2)
+	check("regular", regular, 7)
+	check("protective", protective, 3)
+	if len(listBackupMetas()) > maxBackupSets {
+		t.Errorf("%d sets kept, more than %d", len(listBackupMetas()), maxBackupSets)
+	}
 	if _, err := os.Stat(earlier); err != nil {
 		t.Errorf("an earlier backup was removed by rotation")
 	}
@@ -160,6 +164,37 @@ func TestRotationKeepsTheNewestSevenRegularAndThreeProtectiveAndNothingElse(t *t
 	}
 	if nreg != 1 || nprot != 2 {
 		t.Fatalf("after tightening: %d regular, %d protective", nreg, nprot)
+	}
+}
+
+// The only usable recovery point of a pool is never rotated away: when every newer set is broken (its file changed, its marker
+// gone), the newest good older one stays until a newer good one exists.
+func TestRotationNeverRemovesTheOnlyGoodBackupOfItsPool(t *testing.T) {
+	restore := scdBackupDirForTest(t, t.TempDir())
+	defer restore()
+	useRetentionConf(t, "BACKUP_KEEP=1\nSAFETY_BACKUP_KEEP=2\n")
+	base := time.Date(2026, 10, 1, 2, 0, 0, 0, time.UTC)
+	good := seedBackup(t, kindScheduled, base)
+	bad := seedBackup(t, kindManual, base.Add(24*time.Hour))
+	if err := os.Remove(verifiedMarker(bad.Name)); err != nil {
+		t.Fatal(err)
+	}
+	(&server{}).rotateBackups()
+	if _, err := os.Stat(filepath.Join(scdBackupDir, good.Name)); err != nil {
+		t.Fatal("the only good regular backup was removed because a newer, unverified one existed")
+	}
+	newer := seedBackup(t, kindManual, base.Add(48*time.Hour))
+	(&server{}).rotateBackups()
+	if _, err := os.Stat(filepath.Join(scdBackupDir, newer.Name)); err != nil {
+		t.Fatal("the newest good backup was removed")
+	}
+	if _, err := os.Stat(filepath.Join(scdBackupDir, good.Name)); err == nil {
+		t.Error("the older good backup was kept although a newer good one now exists")
+	}
+	for _, f := range []string{good.Name, good.EtcName, good.Name + ".verified", filepath.Base(metaPathFor(good.Name))} {
+		if _, err := os.Stat(filepath.Join(scdBackupDir, f)); err == nil {
+			t.Errorf("rotation left %s of a removed set behind (an orphan)", f)
+		}
 	}
 }
 
