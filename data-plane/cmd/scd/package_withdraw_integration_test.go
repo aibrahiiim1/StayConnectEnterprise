@@ -5,6 +5,8 @@ package main
 import (
 	"context"
 	"testing"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // The kernel half of staff End Package, as svc_scd: an ended session's address is withdrawn; a session still live, an address
@@ -12,9 +14,17 @@ import (
 func TestIntegration_PackageWithdrawTouchesOnlyTheEndedPackagesOwnAddresses(t *testing.T) {
 	f := newSSFixture(t)
 	ctx := context.Background()
+	// The database half of End has already run when scd is asked; here the sessions are ended as the owner (seeding only, as
+	// session_end_integration_test.go does).
 	end := func(ent string) {
 		t.Helper()
-		if _, err := f.owner.Exec(ctx, `SELECT iam_v2.p4_end_access_funded_by($1::uuid, 'ADMIN')`, ent); err != nil {
+		if err := pgx.BeginFunc(ctx, f.owner, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(ctx, `SET LOCAL session_replication_role = replica`); err != nil {
+				return err
+			}
+			_, err := tx.Exec(ctx, `UPDATE iam_v2.sessions SET state='ended', ended=now(), end_reason='ADMIN' WHERE entitlement_id=$1::uuid`, ent)
+			return err
+		}); err != nil {
 			t.Fatalf("end: %v", err)
 		}
 	}
