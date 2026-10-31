@@ -30,6 +30,10 @@ func TestIntegration_ClassMinorAgreesWithNetdOnASlash19(t *testing.T) {
 		        '10.77.0.1/19'::inet,'10.77.0.1'::inet,'10.77.0.0/19'::cidr,true)`, f.tenant, f.site); err != nil {
 		t.Fatalf("wide network: %v", err)
 	}
+	// The function runs as the owner of the accounting functions in production; under the production grants that role must be able to read the network.
+	if _, err := tx.Exec(ctx, `SET LOCAL ROLE iam_v2_owner`); err != nil {
+		t.Fatalf("become the function owner: %v", err)
+	}
 	_, n, _ := net.ParseCIDR("10.77.0.0/19")
 	for _, ip := range []string{"10.77.0.2", "10.77.15.254", "10.77.16.0", "10.77.16.1", "10.77.20.100", "10.77.31.250"} {
 		want, ok := netdshape.MinorInNet(net.ParseIP(ip), n)
