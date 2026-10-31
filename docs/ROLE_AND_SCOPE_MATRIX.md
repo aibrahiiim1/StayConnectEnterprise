@@ -47,6 +47,7 @@ the keys are unchanged, [PRODUCT_TERMINOLOGY.md](PRODUCT_TERMINOLOGY.md)). Legen
 | voucher-code-settings | W | **W** | R | R | R | – | R |
 | account-password-settings | W | **W** | R | R | R | – | R |
 | sessions (incl. disconnect) | W | W | **W** | **W** | – | R | R |
+| package-controls (End / Reset Package; step-up + reason; never a payment) | W | W | **W** | **W** | – | – | R |
 | usage | W | R | **R** | **R** | – | **R** | R |
 | commercial-packages | W | **W** | – | – | – | **R** | R |
 | guests | W | W | **W** | **W** | – | R | R |

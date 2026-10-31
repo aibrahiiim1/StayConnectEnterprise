@@ -1,8 +1,37 @@
 # OneGate outage continuity: keeping guests online when OneGate itself fails (2026-10-30)
 
-Status: implemented on branch `worktree-agent-a3cd7839ef7506d34` (workstream B of the final closure mission); **not deployed, not merged**, lab long-duration proof still to be run
-([`runbooks/OUTAGE_CONTINUITY_LAB_PLAN.md`](../runbooks/OUTAGE_CONTINUITY_LAB_PLAN.md)). Supersedes the "not built" paragraph of
+Status (2026-10-31): merged to master in PR #277 and deployed to the test appliance (the lab results of that mission are in
+[`AUDIT_DECISION_DISPOSITIONS.md`](../AUDIT_DECISION_DISPOSITIONS.md)). The Product Owner's final decisions are in section 1a; the corrections made
+after the lab (F2 coverage of recently admitted sessions, F5 evidence) are on branch `delivery/package-controls-backup-remediation`,
+**implemented, not yet tested or deployed**. Supersedes the "not built" paragraph of
 [`reviews/AVAILABILITY_DURING_ACCTD_INTERRUPTION.md`](../reviews/AVAILABILITY_DURING_ACCTD_INTERRUPTION.md) section 4, whose analysis (section 1) it takes as its starting point.
+
+## 1a. Final Product Owner decisions (2026-10-31)
+
+| # | Decision | Where it holds |
+|---|---|---|
+| 1 | A rotated MAC without authenticated pre-checkout lineage stays ineligible for After Check-out Access. | `after_checkout_device_guard` (0193, 0202): only devices the checkout carried over (or a staff reset carried from that cohort) |
+| 2 | Staff may end the whole After Check-out entitlement. | End Package (0202); the kernel withdrawal is immediate (scd `/v1/admin/sessions/withdraw`) |
+| 3 | An appliance reboot while PostgreSQL is down **fails closed**: no unmetered or unverified access is restored. | The governor never creates an element; a record from another boot is refused (D-1 accepted as recommended) |
+| 4 | Database-down exposure is accepted within the configured window (default 60, 0 to 120 minutes). | D-2 accepted; `outage_continuity_minutes` |
+| 5 | Inside that window, authorized sessions continue only within their hard expiry, quota and continuity bounds. | Section 3 |
+| 6 | No false success for an operator revocation or a PMS checkout that cannot be processed. | Section 6: what needs the database is refused or reported, never shown done |
+| 7 | The temporary idle-timeout limitation during an outage is accepted within those bounds. | D-3 accepted (R3) |
+
+The 90-second kernel lease and the fail-closed boundaries are unchanged.
+
+**Corrections on the branch (not yet tested):**
+
+* **F2.** A session admitted after the last 30-second counter sample used to get no continuity. It is now covered: each sample records which classes existed, and a class created after the sample is metered from zero. That can only overcount, never grant extra.
+* What remains of F2 is inherent: a session admitted inside the last plan interval (5 s) before plans stop is not in the record.
+* **F5.** The governor now reports, per reason, which held sessions it did not renew. The reasons are:
+  - element absent;
+  - DHCP ownership unproven;
+  - counters unreadable;
+  - gate unreadable;
+  - deadline reached.
+
+  They appear in `GET /v1/phase3/continuity` (`not_renewed`) and in the log. The next run that shows fewer elements than the record therefore says which step skipped them. **The cause of F5 is still not established.**
 
 ## 1. Decision summary
 
@@ -156,8 +185,10 @@ R3. **Idle timeout and plan "disconnect oldest device" style controls are not ap
 
 R4. **Licence teardown does not exist today** (section 7); nothing to preserve or block.
 
-R5. **A budgeted session is excluded from continuity if there is no counter sample at or before the block's AsOf** (first minute after netd starts) and **an entitlement with a small quota and unrated sessions gets none**
-(the 60 s margin at 1 Gbit/s exceeds the quota). Conservative; guests in those cases fall back to the 90 s lease.
+R5. **A budgeted session is excluded from continuity if there is no counter sample at or before the block's AsOf** (the first minute after netd starts, or a
+class that existed but could not be read) and **an entitlement with a small quota and unrated sessions gets none** (the 60 s margin at 1 Gbit/s exceeds the quota).
+Conservative; guests in those cases fall back to the 90 s lease. A session whose class was created after the sample is no longer excluded: it is metered from zero
+(section 1a, F2).
 
 R6. **Overshoot of a spent budget is about 7 s of traffic at the rate ceiling per session.** Stated in 3.1. The budget has the uncertainty margin already subtracted.
 
