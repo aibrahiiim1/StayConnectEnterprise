@@ -152,8 +152,10 @@ func TestKernel_SteadyStateConvergeIssuesNothing(t *testing.T) {
 	}
 }
 
-// A July-shaped table with a live permanent legacy authorization converges to an empty Phase-3 set without the
-// guest losing access.
+// A July-shaped table with a live permanent legacy authorization converges to an empty Phase-3 set. The legacy
+// element is still CARRIED (the drain sweeper and the tenant-transition flush read the set), but since AD-23 (b) no
+// forward rule accepts on auth_ipv4: the carried element must authorize nothing, so the guest is offline until netd
+// re-authorizes them in the Phase-3 set. The pre-upgrade table still admits the guest (its accept rule is the July one).
 func TestKernel_UpgradeFromPrePhase3TableKeepsTheGuestOnline(t *testing.T) {
 	e := newEngine(t)
 	nets := convergeIntent()
@@ -188,8 +190,14 @@ func TestKernel_UpgradeFromPrePhase3TableKeepsTheGuestOnline(t *testing.T) {
 	if strings.Contains(out, "elements = {") {
 		t.Fatalf("phase3_auth_ipv4 is not empty while Phase 3 is dark: %s", out)
 	}
+	if reaches(t) {
+		t.Fatal("a retired legacy auth_ipv4 element authorized the guest after the upgrade; AD-23 (b) removed that accept")
+	}
+	// netd's re-authorization (a Phase-3 element) must bring the guest back through the converged ruleset.
+	run(t, nftWrapper, "add", "element", "inet", "stayconnect", "phase3_auth_ipv4",
+		`{ "`+guestIface+`" . `+guestIP+` }`)
 	if !reaches(t) {
-		t.Fatal("the upgrade deauthorized a live legacy guest")
+		t.Fatal("a Phase-3 authorization does not admit the guest on the converged ruleset")
 	}
 }
 
@@ -229,7 +237,7 @@ func TestKernel_CarryOverPreservesATimedAuthorization(t *testing.T) {
 	if _, err := e.Ensure(c, nets, "install"); err != nil {
 		t.Fatalf("install: %v", err)
 	}
-	run(t, nftWrapper, "add", "element", "inet", "stayconnect", "auth_ipv4",
+	run(t, nftWrapper, "add", "element", "inet", "stayconnect", "phase3_auth_ipv4",
 		`{ "`+guestIface+`" . `+guestIP+` timeout 600s }`)
 	if !reaches(t) {
 		t.Fatal("precondition: the timed-authorized guest cannot reach the WAN")
@@ -252,7 +260,7 @@ func TestKernel_CarryOverPreservesATimedAuthorization(t *testing.T) {
 	if !reaches(t) {
 		t.Fatal("a timed authorization did not survive the structural replace")
 	}
-	if out := run(t, nftWrapper, "list", "set", "inet", "stayconnect", "auth_ipv4"); !strings.Contains(out, "expires") {
+	if out := run(t, nftWrapper, "list", "set", "inet", "stayconnect", "phase3_auth_ipv4"); !strings.Contains(out, "expires") {
 		t.Fatalf("the carried element lost its lease: %s", out)
 	}
 }
@@ -267,7 +275,7 @@ func TestKernel_AnUnreadableSetAbortsWithoutTouchingTheRuleset(t *testing.T) {
 	if _, err := e.Ensure(c, nets, "install"); err != nil {
 		t.Fatalf("install: %v", err)
 	}
-	run(t, nftWrapper, "add", "element", "inet", "stayconnect", "auth_ipv4",
+	run(t, nftWrapper, "add", "element", "inet", "stayconnect", "phase3_auth_ipv4",
 		`{ "`+guestIface+`" . `+guestIP+` timeout 600s }`)
 	if !reaches(t) {
 		t.Fatal("precondition: the authorized guest cannot reach the WAN")
