@@ -100,13 +100,13 @@ GRANT UPDATE, DELETE ON iam_v2.guest_access_accounts TO svc_edged;
 --
 -- ONE COLUMN of sessions, not the table (audit B-7, migration 0124). Disconnect no
 -- longer writes the row -- it asks scd (POST /v1/sessions/revoke), which withdraws
--- enforcement and ends the session through end_session_enforcement. The only
--- session write left in edged is the cross-PMS transfer (internal/transfer), which
--- moves a live session onto the destination entitlement: `SET entitlement_id`.
+-- enforcement and ends the session through end_session_enforcement. Edged
+-- no longer writes a session at all (the cross-PMS transfer is a definer function since 0201).
 -- A table-wide UPDATE let edged rewrite a session's state, addressing and usage
 -- totals as well.
 GRANT SELECT                   ON iam_v2.sessions     TO svc_edged;
-GRANT UPDATE (entitlement_id)  ON iam_v2.sessions     TO svc_edged; -- transfer re-points a live session
+-- (The column UPDATE of sessions.entitlement_id edged held for the cross-PMS transfer is withdrawn: migration 0201 moved the whole
+-- transfer into iam_v2.cross_pms_transfer, which svc_edged EXECUTEs; see svc-stay-transfer-grants.sql.)
 GRANT SELECT                   ON iam_v2.entitlements TO svc_edged;
 
 -- ---------------------------------------------------------------------------

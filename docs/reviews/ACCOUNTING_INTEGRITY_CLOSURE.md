@@ -127,8 +127,10 @@ Accounting charges a sample to the entitlement the session was *bound* to at the
 own data limit was never charged for what the guest then used (and the terminated source kept accruing). The transfer now moves each
 live session (active and pending enforcement) through `rebind_session_entitlement`, which closes the source interval and opens the
 destination's at the instant the devices move. Tests: `TestIntegration_F9_TransferMovesTheSessionBindingSoUsageIsChargedToTheDestination`
-and `..._TransferAlsoMovesAPendingSession`. **Not fixed, and reported:** with the production grants (Gate-P) the role edged connects as
-(`svc_edged`) holds neither `EXECUTE` on `apply_entitlement_transition` nor `INSERT` on `purchases`, `entitlements`
-or `entitlement_transfers`, so the transfer cannot complete on a real appliance (it fails closed: one transaction, nothing is
-applied). The integration tests run as the database owner and cannot see it. Running it needs a decision on *which service performs the
-transfer* (the entitlement state writers belong to scd and pmsd), which is an authority-boundary change and not made here.
+and `..._TransferAlsoMovesAPendingSession`. **The privilege defect found with it, fixed afterwards (migration 0201):** with the production grants the role edged connects as
+(`svc_edged`) held neither `EXECUTE` on `apply_entitlement_transition` nor `INSERT` on `purchases`, `entitlements`, `entitlement_devices`,
+`entitlement_device_authorizations`, `entitlement_transfers` or `stay_links`, so the transfer could not complete on a real appliance (it failed
+closed). The whole operation is now one `SECURITY DEFINER` function, `iam_v2.cross_pms_transfer`, owned by `iam_v2_owner`, with the same preconditions,
+lock order, landing-package choice, lineage and session rebinding; `svc_edged` may only EXECUTE it (`deploy/gatep/svc-stay-transfer-grants.sql`), no table
+privilege was added, and the column `UPDATE` of `sessions.entitlement_id` it held for the old code is withdrawn. Tests run the transfer as `svc_edged` under the
+Gate-P grants and prove the role still cannot write those tables directly.
