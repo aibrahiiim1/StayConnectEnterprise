@@ -164,6 +164,10 @@ func (p *phase3Auth) offersFor(ctx context.Context, stayID, interfaceID, guestNe
 		                                         AND e.stay_id = $3::uuid
 		                                         AND e.status = 'ACTIVE'
 		                                         AND (e.window_ends_at IS NULL OR e.window_ends_at > now())))
+		   -- A free package staff ended for this stay (End Package, 0202) is not offered again during the stay; the
+		   -- entitlement guard refuses it in any case. A priced package can still be bought.
+		   AND NOT (ipr.price_minor = 0
+		            AND iam_v2.package_ended_by_staff($1::uuid, $2::uuid, ipr.id, $3::uuid, NULL, NULL, NULL, NULL))
 		 ORDER BY ip.code`, p.srv.tenID, p.srv.siteID, stayID)
 	if err != nil {
 		return nil, err

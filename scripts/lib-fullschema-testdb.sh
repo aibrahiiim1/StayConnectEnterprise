@@ -93,9 +93,10 @@ fullschema_build() {
   for m in $(fullschema_post_baseline "$root"); do
     # FULLSCHEMA_APPLY_ROLE=iam_v2_owner applies each migration the way a live upgrade does (edge-migrate.sh --apply-role, a
     # SET ROLE before the file), which is what finds a statement only a superuser or the table's owner may run.
-    # A file marked `-- edge-migrate: platform` is applied as the superuser, as the installer does (platform migration).
+    # A file marked `-- edge-migrate: platform` is applied as the platform role, the appliance's cluster superuser, as the installer
+    # does (platform migration), so what it creates is owned as on an appliance (not by this container's `postgres`).
     local role="${FULLSCHEMA_APPLY_ROLE:-}"
-    if head -n 20 "$root/data-plane/migrations/$m.up.sql" | grep -qE '^--[[:space:]]*edge-migrate:[[:space:]]*platform[[:space:]]*$'; then role=""; fi
+    if head -n 20 "$root/data-plane/migrations/$m.up.sql" | grep -qE '^--[[:space:]]*edge-migrate:[[:space:]]*platform[[:space:]]*$'; then role="stayconnect"; fi
     if ! { [ -n "$role" ] && printf 'SET ROLE %s;\n' "$role"; cat "$root/data-plane/migrations/$m.up.sql"; } | fullschema_psql "$c" "$db" -q >"$log/$m.log" 2>&1; then
 if [ -n "${FULLSCHEMA_APPLY_ROLE:-}" ] && [ "${FULLSCHEMA_APPLY_ROLE_REPORT:-0}" = 1 ]; then
         # Survey mode: say which migrations the apply role cannot run, then apply them as the superuser to go on.

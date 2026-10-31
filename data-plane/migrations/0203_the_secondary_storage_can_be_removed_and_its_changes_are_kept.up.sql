@@ -1,4 +1,5 @@
 -- 0203 -- THE SECONDARY STORAGE CAN BE REMOVED, AND ITS CHANGES ARE KEPT (Product Owner mission, 2026-10-31).
+-- edge-migrate: platform
 --
 -- The erasure ledger's secondary storage (0148) could be set but never removed, and nothing recorded what it had been before a
 -- change. This adds:

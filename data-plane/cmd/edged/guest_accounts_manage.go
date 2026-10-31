@@ -149,6 +149,11 @@ func (s *server) getGuestAccountManage(w http.ResponseWriter, r *http.Request) {
 
 // deleteGuestAccountIAMv2 deletes an unused account and removes one with history. Removal is irreversible, so it
 // requires the password step-up.
+//
+// NEITHER IS A PERSONAL-DATA ERASURE. Deleting or removing an account ends its use; it writes no Erasure Ledger entry, so a
+// restore of an earlier backup can bring the account back. A data-protection erasure is the Guest data -> Erase flow
+// (guest_data_rights), which needs the ledger and its verified secondary copy and stays fail-closed. Every answer and audit
+// entry here says erasure=false so the two are never confused.
 func (s *server) deleteGuestAccountIAMv2(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var in struct {
@@ -172,7 +177,8 @@ func (s *server) deleteGuestAccountIAMv2(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if !enabled && isRemovedUsername(username) {
-		writeJSON(w, http.StatusOK, map[string]any{"status": "removed", "history_kept": true, "disconnected_sessions": 0})
+		writeJSON(w, http.StatusOK, map[string]any{"status": "removed", "history_kept": true, "disconnected_sessions": 0,
+			"erasure": false})
 		return
 	}
 	var ents int
@@ -187,8 +193,8 @@ func (s *server) deleteGuestAccountIAMv2(w http.ResponseWriter, r *http.Request)
 		     WHERE id=$1 AND tenant_id=$2 AND site_id=$3`, id, s.tenantID, s.siteID)
 		if err == nil && tag.RowsAffected() == 1 {
 			s.audit(r, "guest_account.deleted", "guest_account", id,
-				map[string]any{"username": username, "authority": "iam_v2"})
-			writeJSON(w, http.StatusOK, map[string]any{"status": "deleted"})
+				map[string]any{"username": username, "authority": "iam_v2", "erasure": false})
+			writeJSON(w, http.StatusOK, map[string]any{"status": "deleted", "erasure": false})
 			return
 		}
 		if err != nil && !isFKViolation(err) {
@@ -219,11 +225,11 @@ func (s *server) deleteGuestAccountIAMv2(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	s.audit(r, "guest_account.removed", "guest_account", id, map[string]any{
-		"username": username, "authority": "iam_v2", "history_kept": true,
+		"username": username, "authority": "iam_v2", "history_kept": true, "erasure": false,
 		"disconnected_sessions": res.Ended, "failed_sessions": res.Failed, "places_released": released,
 	})
 	out := map[string]any{"status": "removed", "history_kept": true, "disconnected_sessions": res.Ended,
-		"places_released": released}
+		"places_released": released, "erasure": false}
 	if res.Failed > 0 {
 		out["disconnect_failures"] = res.Failed
 	}

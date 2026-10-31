@@ -218,7 +218,7 @@ export function DeviceDetailDialog({ deviceId, mayWrite, onClose, onChanged }: {
 
               <section className="space-y-2">
                 <h3 className="text-sm font-medium">End or reset the package</h3>
-                <PackageControls subject={{ kind: "device", id: deviceId }} onChanged={onChanged} />
+                {deviceId && <PackageControls subject={{ kind: "device", id: deviceId }} onChanged={onChanged} />}
               </section>
 
               <section className="space-y-2">

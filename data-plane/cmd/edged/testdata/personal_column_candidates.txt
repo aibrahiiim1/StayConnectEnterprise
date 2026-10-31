@@ -66,6 +66,8 @@ iam_v2.guest_signin_restrictions.last_submitted_room
 iam_v2.guest_signin_restrictions.reason
 iam_v2.guest_signin_restrictions.release_reason
 iam_v2.otp_device_bindings.device_mac
+iam_v2.package_admin_actions.actor
+iam_v2.package_admin_actions.reason
 iam_v2.payment_account_conversion_changes.change_reason
 iam_v2.payment_provider_account_changes.change_reason
 iam_v2.payment_provider_accounts.display_name

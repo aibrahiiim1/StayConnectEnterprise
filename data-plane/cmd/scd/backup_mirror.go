@@ -32,17 +32,17 @@ type backupCopyFile struct {
 
 type backupCopySet struct {
 	Files      map[string]backupCopyFile `json:"files"`
-	Complete   bool                  `json:"complete"`
-	VerifiedAt *time.Time            `json:"verified_at,omitempty"`
-	Error      string                `json:"error,omitempty"`
+	Complete   bool                      `json:"complete"`
+	VerifiedAt *time.Time                `json:"verified_at,omitempty"`
+	Error      string                    `json:"error,omitempty"`
 }
 
 type backupCopyState struct {
-	Destination string               `json:"destination"`
+	Destination string                   `json:"destination"`
 	Sets        map[string]backupCopySet `json:"sets"`
-	LastOK      *time.Time           `json:"last_ok,omitempty"`
-	LastError   string               `json:"last_error,omitempty"`
-	LastTry     *time.Time           `json:"last_try,omitempty"`
+	LastOK      *time.Time               `json:"last_ok,omitempty"`
+	LastError   string                   `json:"last_error,omitempty"`
+	LastTry     *time.Time               `json:"last_try,omitempty"`
 }
 
 var mirrorMu sync.Mutex

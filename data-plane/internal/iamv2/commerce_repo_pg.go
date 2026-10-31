@@ -360,6 +360,16 @@ func (t *pgCommerceTx) HasPriorPurchase(ctx context.Context, tenantID, siteID st
 	return exists, err
 }
 
+// EndedByStaff asks iam_v2.package_ended_by_staff (0202), the same rule the entitlement guard enforces, so an offer
+// is never shown that the grant then refuses.
+func (t *pgCommerceTx) EndedByStaff(ctx context.Context, tenantID, siteID, packageRevisionID string, subj CommerceSubject) (bool, error) {
+	v, a, p := subjectCols(subj)
+	var ended bool
+	err := t.tx.QueryRow(ctx, `SELECT iam_v2.package_ended_by_staff($1::uuid,$2::uuid,$3::uuid,NULL::uuid,$4::uuid,$5::uuid,$6::uuid,$7::uuid)`,
+		tenantID, siteID, packageRevisionID, a, v, p, nullable(subj.DeviceID)).Scan(&ended)
+	return ended, err
+}
+
 func nullable(s string) *string {
 	if s == "" {
 		return nil

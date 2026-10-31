@@ -187,6 +187,15 @@ func (e *CommerceEngine) evalPackageForSubject(ctx context.Context, tx CommerceT
 	if ok, why := EvaluatePackageEligible(rules, subj); !ok {
 		return GrantSnapshot{}, nil, false, why, nil
 	}
+	if pkg.PriceMinor == 0 {
+		ended, err := tx.EndedByStaff(ctx, req.TenantID, req.SiteID, pkg.ID, ac.Subject)
+		if err != nil {
+			return GrantSnapshot{}, nil, false, "", err
+		}
+		if ended {
+			return GrantSnapshot{}, nil, false, "ended_by_staff", nil
+		}
+	}
 	tiers, err := tx.LoadGrantTiers(ctx, pkg.ID)
 	if err != nil {
 		return GrantSnapshot{}, nil, false, "", err

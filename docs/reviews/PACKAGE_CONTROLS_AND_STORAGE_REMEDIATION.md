@@ -1,10 +1,9 @@
 # Package controls, backup and storage remediation, continuity corrections (2026-10-31)
 
-Branch `delivery/package-controls-backup-remediation` from master `f059af95`. **Status: IMPLEMENTED — VERIFICATION PENDING.**
+Branch `delivery/package-controls-backup-remediation` from master `f059af95`.
 
-Test execution was suspended by the Product Owner for this mission. No test, lab, gate, governance validator, build of a release or
-deployment was run. The touched Go packages were formatted (`gofmt`) and vetted (`go vet`, Linux target, with and without the `integration`
-tag). Vetting compiles them; it executes nothing. Everything below marked *prepared* has been written but never run.
+Implemented on 2026-10-31 with test execution suspended. On 2026-11-01 the Product Owner authorised completion, verification and the
+protected merge (no deployment). Section 7 records what was run and what testing found; section 6 the decisions taken.
 
 ## 1. Staff End Package / Reset Package
 
@@ -45,6 +44,25 @@ tag). Vetting compiles them; it executes nothing. Everything below marked *prepa
 - A repeated request returns the recorded outcome. A request id reused for another action is refused.
 - The request id takes an advisory lock, then the stay and the entitlement are locked, in the order every writer uses.
 - The partial unique indexes guarantee one live entitlement per subject.
+
+**No automatic re-acquisition after an End** (Product Owner, 2026-11-01). `iam_v2.package_ended_by_staff` is the one rule:
+
+- the same package (any revision) and the same subject; an anonymous subject is matched by the devices the ended package had;
+- for a room package, for the rest of that Stay. A later, independent Stay is not affected;
+- for any other subject, until the moment the ended package would have ended anyway. One without an end stays ended until staff reset it;
+- it covers free self-service and automatic acquisitions only (`GUEST_SELECTION`, `ACCOUNT_AUTO_GRANT`, `OTP_SOCIAL_DEFAULT`,
+  `VOUCHER_REDEMPTION` at price 0). A priced purchase, a staff grant, After Check-out, a transfer, a conversion and a renewal are never
+  blocked;
+- a staff Reset of the ended package lifts it.
+
+It is enforced by the entitlement guard `staff_ended_benefit_guard`. The room-offer list (scd) and the account, Client and voucher
+offer list and quote (commerce engine) read the same rule, so a guest is never offered what the grant would refuse. `svc_scd` holds
+EXECUTE on it through Gate-P; `svc_edged` does not.
+
+**The staff reason is a staff note.** `package_admin_actions.reason` is registered in the 0147 scrub registry: the staff-notes period
+removes it, and the three erasure functions (`anonymise_stay`, `anonymise_guest_account`, `anonymise_guest_principal`, re-declared from
+their exact 0147 text with one statement added) remove it with the guest's other staff notes. Outside the scrub the table stays
+append-only.
 
 **After Check-out**
 - A reset carries only the devices the checkout carried over (grandfathered rows), and none that left by a deliberate act.
@@ -101,7 +119,9 @@ The 90-second lease and every fail-closed boundary are unchanged.
 | B1 | **Retention 7 + 3.** | At most five at rest: 3 regular plus 2 protective by default, validated together. Older files resolve to the cap. The console shows the cap and the earlier backups it does not remove. |
 | B2 | **Rotation could remove the only good backup.** A newer broken or unverified set counted as kept. | A good set (files, marker, no checksum problem) is removed only while a newer good set of its pool is kept. Sets are always removed whole. |
 | B3 | **No off-device backup copy.** | Optional `BACKUP_REPLICATE` (off by default) copies every retained set to the secondary storage. It streams (S3 signs with a precomputed SHA-256, never unsigned), reads every file back in full and compares SHA-256. Copies are marked complete only when all files verified. It removes only copies it made, of sets rotated locally, after every retained set is copied, and never touches a local backup. A replaced storage receives every retained set. |
-| B4 | **Client account Delete/Remove looked like an erasure** but never wrote the ledger. | The console says it is not an erasure and points to Guest data → Erase. |
+| B4 | **Client account Delete/Remove looked like an erasure** but never wrote the ledger. | The console says it is not an erasure and points to Guest data → Erase; the API answer and the audit entry carry `erasure: false`. Actual erasure keeps the mandatory ledger. |
+| B5 | **Every restore failed once 0203 was applied** (found by the restore drill). The restore replays the ownership it captured, including `ALTER SEQUENCE … OWNER` for a sequence owned by a column, which PostgreSQL refuses whenever that owner differs from the restoring role. The restore rolled back safely each time. | Column-owned (serial, identity) sequences are no longer re-owned on their own; their table's `ALTER TABLE … OWNER` carries them. The test harness now applies a platform migration as the platform role, as the appliance does. |
+| M1 | **Migration 0203 could not be applied by a live upgrade**: it creates a table in `public`, and the upgrade's least-privilege role has no CREATE there (found by building the schema the way an upgrade applies it). | Marked `-- edge-migrate: platform`, like 0198. |
 
 **Storage destinations.** One abstraction (`ledger.Destination`, plus the new `Locator` and `FileDest`) serves:
 
@@ -146,9 +166,16 @@ Nothing in this branch has run. In particular, none of the following is claimed:
 - licence interaction under load;
 - the role-path proofs.
 
-## 6. Decisions for the Product Owner
+## 6. Decisions
+
+Taken by the Product Owner on 2026-11-01:
+
+- **Free packages after End:** they are not acquired again automatically (section 1).
+- **Client Account removal and erasure:** they are distinct; removal is not an erasure, and actual erasure keeps the mandatory ledger
+  (section 3, B4).
+
+Still open:
 
 1. **Erasure with only a local copy.** Not implemented. On the appliance alone no record exists that is as independent as the secondary copy: a restore can replace every local disk the appliance controls. Allowing it would weaken the anti-resurrection guarantee. It needs an explicit security decision; the recommendation is to keep it fail-closed.
 2. **Earlier backups above the five-set cap.** Rotation never deletes them. They are removed only by the existing confirmed "Remove the earlier backups" action, which requires a verified new backup. The number at rest is shown on the console. An absolute physical maximum of five needs that action, taken by the hotel or explicitly authorized for the test appliance.
-3. **Hard deletion of an unused Client Account** removes a row without a ledger entry, so an old restore would bring the account back. Routing it through the ledger is a new ledger semantics, and the PO's choice.
-4. **Free automatic packages after End.** A subject whose rules grant a free package at sign-in can acquire a new one after an End. The console states this; a "block re-acquisition" switch would be new product semantics.
+3. **Hard deletion of an unused Client Account** removes a row without a ledger entry, so an old restore would bring the account back. Under the decision above this is account removal, not an erasure, and it is labelled so everywhere; an erasure of that person is Guest data → Erase.

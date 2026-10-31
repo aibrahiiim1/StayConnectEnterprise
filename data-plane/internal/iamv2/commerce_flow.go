@@ -147,6 +147,17 @@ func (e *CommerceEngine) CreateQuote(ctx context.Context, req QuoteRequest) (Quo
 			res = quoteDeny("ineligible:" + why)
 			return nil
 		}
+		// A free package staff ended is not taken again automatically (0202); a priced one may still be bought.
+		if pkg.PriceMinor == 0 {
+			ended, err := tx.EndedByStaff(ctx, req.TenantID, req.SiteID, pkg.ID, ac.Subject)
+			if err != nil {
+				return err
+			}
+			if ended {
+				res = quoteDeny("ineligible:ended_by_staff")
+				return nil
+			}
+		}
 
 		tiers, err := tx.LoadGrantTiers(ctx, pkg.ID)
 		if err != nil {

@@ -76,6 +76,9 @@ type CommerceTx interface {
 	GuestNetworkAncestors(ctx context.Context, tenantID, siteID, guestNetworkID string) ([]string, error)
 	// Keyed on the package (any revision) so a republish never resets a free allowance.
 	HasPriorPurchase(ctx context.Context, tenantID, siteID string, q PriorPurchaseQuery) (bool, error)
+	// A free package of this subject (an anonymous one: this device) that staff ended with End Package (0202) and that
+	// has not been reset since. It is not acquired again automatically; a priced purchase is unaffected.
+	EndedByStaff(ctx context.Context, tenantID, siteID, packageRevisionID string, subj CommerceSubject) (bool, error)
 	InsertOfferQuote(ctx context.Context, q OfferQuoteSpec) (string, error)
 
 	LockOfferQuoteForUpdate(ctx context.Context, tenantID, siteID, quoteID string) (OfferQuoteRow, error)

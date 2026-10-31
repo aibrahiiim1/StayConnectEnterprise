@@ -2,13 +2,13 @@
 
 package main
 
-// Staff End Package / Reset Package (migration 0202) against the real router, RBAC middleware and database. Prepared on
-// 2026-10-31 and NOT YET RUN (test execution was suspended by the Product Owner for that mission).
+// Staff End Package / Reset Package (migration 0202) against the real router, RBAC middleware and database.
 //
 // What it proves: End ends the whole entitlement and only it, idempotently; Reset is a new, linked, zero-price ADMIN_GRANT cycle
 // that leaves the original's usage and purchase untouched, is refused twice, and moves no money; After Check-out keeps its fixed
 // cohort; and, when EDGED_ROLE_TEST_DSN is set, every call works as the Admin Console's own role (svc_edged), which the
-// superuser integration database would otherwise hide (the 0200 lesson).
+// superuser integration database would otherwise hide (the 0200 lesson). Request ids are random so a second run on the same
+// database (scripts/db-integration-combined.sh) is a new request, not a replay.
 
 import (
 	"context"
@@ -76,7 +76,7 @@ func seedPackage(t *testing.T, f *apiFixture, endMode string) pkgFx {
 	         VALUES (gen_random_uuid(),$1,$2,'PC-PAID',false,true) RETURNING id),
 	  ipr AS (INSERT INTO iam_v2.internet_package_revisions(id,tenant_id,site_id,package_id,revision_no,service_plan_revision_id,
 	            package_type,price_minor,currency,currency_exponent,settlement_methods)
-	          SELECT gen_random_uuid(),$1,$2,ip.id,1,spr.id,'GENERAL',500,'EUR',2,ARRAY['CARD']::text[] FROM ip, spr RETURNING id)
+	          SELECT gen_random_uuid(),$1,$2,ip.id,1,spr.id,'GENERAL',500,'EUR',2,ARRAY['ONLINE_PAYMENT']::text[] FROM ip, spr RETURNING id)
 	SELECT (SELECT id FROM sa)::text, (SELECT id FROM so)::text, (SELECT id FROM ipr)::text`,
 			f.tenant, f.site, stayStatus).Scan(&x.stay, &other, &x.pkgRev)
 	}); err != nil {
@@ -86,7 +86,7 @@ func seedPackage(t *testing.T, f *apiFixture, endMode string) pkgFx {
 		WHERE id=(SELECT package_id FROM iam_v2.internet_package_revisions WHERE id=$1)`, x.pkgRev); err != nil {
 		t.Fatalf("current revision: %v", err)
 	}
-	grant := func(stay string, grandfathered bool) (string, string) {
+	grant := func(stay, mode string, grandfathered bool) (string, string) {
 		tx, err := f.pool.Begin(ctx)
 		if err != nil {
 			t.Fatalf("begin: %v", err)
@@ -107,7 +107,7 @@ func seedPackage(t *testing.T, f *apiFixture, endMode string) pkgFx {
 			service_plan_revision_id,package_revision_id,time_accounting_mode,end_mode,window_ends_at,status,consumed_data_bytes)
 			SELECT $1,$2,$3,$4,'{}'::jsonb,ipr.service_plan_revision_id,$5,'VALIDITY_WINDOW',$6,now()+interval '4 hours','PENDING',123456
 			  FROM iam_v2.internet_package_revisions ipr WHERE ipr.id=$5 RETURNING id::text`,
-			f.tenant, f.site, stay, purchase, x.pkgRev, endMode).Scan(&ent); err != nil {
+			f.tenant, f.site, stay, purchase, x.pkgRev, mode).Scan(&ent); err != nil {
 			t.Fatalf("entitlement: %v", err)
 		}
 		// Activated four hours ago would put the window in the past; an hour ago keeps a 5-hour original duration.
@@ -115,7 +115,8 @@ func seedPackage(t *testing.T, f *apiFixture, endMode string) pkgFx {
 			t.Fatalf("activate: %v", err)
 		}
 		if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.devices (tenant_id,site_id,appliance_id,mac)
-			VALUES ($1,$2,gen_random_uuid(),'02:00:00:00:'||lpad(to_hex((random()*255)::int),2,'0')||':01') RETURNING id::text`,
+			VALUES ($1,$2,gen_random_uuid(),('02:'||(SELECT string_agg(lpad(to_hex((random()*255)::int),2,'0'),':') FROM generate_series(1,5)))::macaddr)
+			RETURNING id::text`,
 			f.tenant, f.site).Scan(&dev); err != nil {
 			t.Fatalf("device: %v", err)
 		}
@@ -132,8 +133,8 @@ func seedPackage(t *testing.T, f *apiFixture, endMode string) pkgFx {
 		}
 		return ent, dev
 	}
-	x.ent, x.device = grant(x.stay, endMode == "GRACE_AFTER_CHECKOUT")
-	x.otherEnt, _ = grant(other, false)
+	x.ent, x.device = grant(x.stay, endMode, endMode == "GRACE_AFTER_CHECKOUT")
+	x.otherEnt, _ = grant(other, "VALIDITY_WINDOW", false)
 	return x
 }
 
@@ -159,7 +160,7 @@ func status(t *testing.T, f *apiFixture, ent string) (string, string) {
 func TestIntegration_PackageControls_EndEndsTheWholePackageOnceAndNothingElse(t *testing.T) {
 	f := newPackageControlsAPI(t)
 	x := seedPackage(t, f, "VALIDITY_WINDOW")
-	req := "11111111-1111-4111-8111-111111111111"
+	req := newUUID()
 	code, body := pkgAction(t, f, x.ent, "end", req)
 	if code != http.StatusOK || body["outcome"] != "ENDED" {
 		t.Fatalf("end: %d %v", code, body)
@@ -182,7 +183,7 @@ func TestIntegration_PackageControls_EndEndsTheWholePackageOnceAndNothingElse(t 
 		t.Fatalf("a repeated request was not idempotent: %d %v", code2, body2)
 	}
 	// Another request on an ended package: ALREADY_ENDED.
-	if _, b := pkgAction(t, f, x.ent, "end", "22222222-2222-4222-8222-222222222222"); b["outcome"] != "ALREADY_ENDED" {
+	if _, b := pkgAction(t, f, x.ent, "end", newUUID()); b["outcome"] != "ALREADY_ENDED" {
 		t.Fatalf("a second end of an ended package: %v", b)
 	}
 	// The request id cannot be reused for a different action.
@@ -190,7 +191,7 @@ func TestIntegration_PackageControls_EndEndsTheWholePackageOnceAndNothingElse(t 
 		t.Fatalf("a request id reused for another action: %d %v", c, b)
 	}
 	var action string
-	if err := f.pool.QueryRow(context.Background(), `SELECT action FROM public.audit_log WHERE target_id=$1 ORDER BY id DESC LIMIT 1`, x.ent).Scan(&action); err != nil || action != "package.ended" {
+	if err := f.pool.QueryRow(context.Background(), `SELECT action FROM public.audit_log WHERE target_id=$1 ORDER BY ts DESC LIMIT 1`, x.ent).Scan(&action); err != nil || action != "package.ended" {
 		t.Fatalf("audit: %q %v", action, err)
 	}
 }
@@ -203,7 +204,7 @@ func TestIntegration_PackageControls_ResetIsANewFreeLinkedCycleAndMovesNoMoney(t
 	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM iam_v2.settlements WHERE tenant_id=$1`, f.tenant).Scan(&settlementsBefore)
 	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM iam_v2.posting_outbox WHERE tenant_id=$1`, f.tenant).Scan(&postingsBefore)
 
-	code, body := pkgAction(t, f, x.ent, "reset", "33333333-3333-4333-8333-333333333333")
+	code, body := pkgAction(t, f, x.ent, "reset", newUUID())
 	if code != http.StatusOK {
 		t.Fatalf("reset: %d %v", code, body)
 	}
@@ -244,7 +245,7 @@ func TestIntegration_PackageControls_ResetIsANewFreeLinkedCycleAndMovesNoMoney(t
 		t.Fatal("a reset created a settlement or a PMS posting")
 	}
 	// The original cannot be reset again: the current package is the one to reset.
-	if c, b := pkgAction(t, f, x.ent, "reset", "44444444-4444-4444-8444-444444444444"); c != http.StatusConflict || b["error"] != "superseded" {
+	if c, b := pkgAction(t, f, x.ent, "reset", newUUID()); c != http.StatusConflict || b["error"] != "superseded" {
 		t.Fatalf("a second reset of the same original: %d %v", c, b)
 	}
 	// Two concurrent resets of the new cycle: exactly one wins.
@@ -253,7 +254,7 @@ func TestIntegration_PackageControls_ResetIsANewFreeLinkedCycleAndMovesNoMoney(t
 		body map[string]any
 	}
 	out := make(chan res, 2)
-	for _, id := range []string{"55555555-5555-4555-8555-555555555555", "66666666-6666-4666-8666-666666666666"} {
+	for _, id := range []string{newUUID(), newUUID()} {
 		go func(id string) { c, b := pkgAction(t, f, newEnt, "reset", id); out <- res{c, b} }(id)
 	}
 	ok := 0
@@ -276,10 +277,10 @@ func TestIntegration_PackageControls_AfterCheckoutResetKeepsTheFixedCohort(t *te
 	f := newPackageControlsAPI(t)
 	x := seedPackage(t, f, "GRACE_AFTER_CHECKOUT")
 	ctx := context.Background()
-	if c, b := pkgAction(t, f, x.ent, "end", "77777777-7777-4777-8777-777777777777"); c != http.StatusOK {
+	if c, b := pkgAction(t, f, x.ent, "end", newUUID()); c != http.StatusOK {
 		t.Fatalf("end: %d %v", c, b)
 	}
-	code, body := pkgAction(t, f, x.ent, "reset", "88888888-8888-4888-8888-888888888888")
+	code, body := pkgAction(t, f, x.ent, "reset", newUUID())
 	if code != http.StatusOK {
 		t.Fatalf("reset After Check-out: %d %v", code, body)
 	}
@@ -294,7 +295,7 @@ func TestIntegration_PackageControls_AfterCheckoutResetKeepsTheFixedCohort(t *te
 		t.Fatalf("the cohort device could not return: %v", err)
 	}
 	var stranger string
-	_ = f.pool.QueryRow(ctx, `INSERT INTO iam_v2.devices (tenant_id,site_id,appliance_id,mac) VALUES ($1,$2,gen_random_uuid(),'02:00:00:00:fe:fe') RETURNING id::text`,
+	_ = f.pool.QueryRow(ctx, `INSERT INTO iam_v2.devices (tenant_id,site_id,appliance_id,mac) VALUES ($1,$2,gen_random_uuid(),'02:00:00:00:fe:fe'::macaddr) RETURNING id::text`,
 		f.tenant, f.site).Scan(&stranger)
 	if _, err := f.pool.Exec(ctx, `SELECT iam_v2.authorize_entitlement_device($1,$2,now())`, newEnt, stranger); err == nil ||
 		!strings.Contains(err.Error(), "AFTER_CHECKOUT_NEW_DEVICE_REJECTED") {
@@ -314,22 +315,22 @@ func TestIntegration_PackageControls_RefusesWhatItMustNotOverride(t *testing.T) 
 	ctx := context.Background()
 	// Checked out: a room package is not reset after the PMS boundary.
 	if err := controlled(ctx, f.pool, []string{"stay"}, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `UPDATE iam_v2.stays SET status='CHECKED_OUT', effective_checkout_at=now() WHERE id=$1`, x.stay)
+		_, err := tx.Exec(ctx, `UPDATE iam_v2.stays SET status='CHECKED_OUT', posting_allowed=false, effective_checkout_at=now() WHERE id=$1`, x.stay)
 		return err
 	}); err != nil {
 		t.Fatalf("checkout: %v", err)
 	}
-	if c, b := pkgAction(t, f, x.ent, "reset", "99999999-9999-4999-8999-999999999999"); c != http.StatusConflict || b["error"] != "stay_not_in_house" {
+	if c, b := pkgAction(t, f, x.ent, "reset", newUUID()); c != http.StatusConflict || b["error"] != "stay_not_in_house" {
 		t.Fatalf("a checked-out room package was reset: %d %v", c, b)
 	}
 	// A role without the write key is refused by the middleware.
 	g := newPackageControlsAPI(t, "site_viewer")
-	if c, _ := pkgAction(t, g, x.otherEnt, "end", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"); c != http.StatusForbidden {
+	if c, _ := pkgAction(t, g, x.otherEnt, "end", newUUID()); c != http.StatusForbidden {
 		t.Fatalf("site_viewer ended a package: %d", c)
 	}
 	// No reason, no action.
 	if c, _ := f.do(t, http.MethodPost, "/package-controls/"+x.otherEnt+"/end",
-		map[string]any{"password": f.password, "reason": "", "request_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"}); c != http.StatusBadRequest {
+		map[string]any{"password": f.password, "reason": "", "request_id": newUUID()}); c != http.StatusBadRequest {
 		t.Fatalf("an end without a reason: %d", c)
 	}
 }
@@ -356,10 +357,108 @@ func TestIntegration_PackageControls_RunAsTheAdminConsoleRole(t *testing.T) {
 	if c, b := f.do(t, http.MethodGet, "/package-controls/"+x.ent, nil); c != http.StatusOK {
 		t.Fatalf("preview as svc_edged: %d %v", c, b)
 	}
-	if c, b := pkgAction(t, f, x.ent, "reset", "cccccccc-cccc-4ccc-8ccc-cccccccccccc"); c != http.StatusOK {
+	if c, b := pkgAction(t, f, x.ent, "reset", newUUID()); c != http.StatusOK {
 		t.Fatalf("reset as svc_edged: %d %v", c, b)
 	}
-	if c, b := pkgAction(t, f, x.otherEnt, "end", "dddddddd-dddd-4ddd-8ddd-dddddddddddd"); c != http.StatusOK {
+	if c, b := pkgAction(t, f, x.otherEnt, "end", newUUID()); c != http.StatusOK {
 		t.Fatalf("end as svc_edged: %d %v", c, b)
+	}
+}
+
+// After an End, the same free benefit is not acquired again automatically for that stay (Product Owner, 2026-11-01). A priced
+// purchase is not blocked, an unrelated stay is not affected, and a staff Reset lifts the block.
+func TestIntegration_PackageControls_AnEndedFreeBenefitIsNotTakenAgainAutomatically(t *testing.T) {
+	f := newPackageControlsAPI(t)
+	x := seedPackage(t, f, "VALIDITY_WINDOW")
+	ctx := context.Background()
+	if c, b := pkgAction(t, f, x.ent, "end", newUUID()); c != http.StatusOK || b["outcome"] != "ENDED" {
+		t.Fatalf("end: %d %v", c, b)
+	}
+	// acquire tries a self-service acquisition of the same package for the stay, then rolls it back.
+	acquire := func(trigger string, amount int64) error {
+		tx, err := f.pool.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation('commerce_intent')`); err != nil {
+			t.Fatalf("controlled operation: %v", err)
+		}
+		var purchase string
+		if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.purchases (tenant_id,site_id,package_revision_id,stay_id,trigger,amount_minor,state)
+			VALUES ($1,$2,$3,$4,$5,$6,'GRANTED') RETURNING id::text`, f.tenant, f.site, x.pkgRev, x.stay, trigger, amount).Scan(&purchase); err != nil {
+			t.Fatalf("purchase: %v", err)
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO iam_v2.entitlements (tenant_id,site_id,stay_id,purchase_id,policy_snapshot,
+			service_plan_revision_id,package_revision_id,time_accounting_mode,end_mode,status)
+			SELECT $1,$2,$3,$4,'{}'::jsonb,ipr.service_plan_revision_id,$5,'VALIDITY_WINDOW','VALIDITY_WINDOW','PENDING'
+			  FROM iam_v2.internet_package_revisions ipr WHERE ipr.id=$5`, f.tenant, f.site, x.stay, purchase, x.pkgRev)
+		return err
+	}
+	for _, trig := range []string{"ACCOUNT_AUTO_GRANT", "OTP_SOCIAL_DEFAULT"} {
+		if err := acquire(trig, 0); err == nil || !strings.Contains(err.Error(), "PKG_ENDED_BY_STAFF") {
+			t.Fatalf("the ended free package was taken again automatically (%s): %v", trig, err)
+		}
+	}
+	if err := acquire("ACCOUNT_AUTO_GRANT", 500); err != nil {
+		t.Fatalf("a priced purchase of the package was blocked after an End: %v", err)
+	}
+	if err := acquire("ADMIN_GRANT", 0); err != nil {
+		t.Fatalf("a staff grant was blocked after an End: %v", err)
+	}
+	ended := func(stay string) bool {
+		var b bool
+		if err := f.pool.QueryRow(ctx, `SELECT iam_v2.package_ended_by_staff($1,$2,$3,$4,NULL,NULL,NULL,NULL)`,
+			f.tenant, f.site, x.pkgRev, stay).Scan(&b); err != nil {
+			t.Fatalf("package_ended_by_staff: %v", err)
+		}
+		return b
+	}
+	var otherStay string
+	_ = f.pool.QueryRow(ctx, `SELECT stay_id::text FROM iam_v2.entitlements WHERE id=$1`, x.otherEnt).Scan(&otherStay)
+	if !ended(x.stay) || ended(otherStay) {
+		t.Fatalf("the rule is not scoped to the stay: this stay %v, another stay %v", ended(x.stay), ended(otherStay))
+	}
+	// The scd login (offer list and quote) can read the rule with Gate-P's grants alone.
+	if dsn := os.Getenv("SCD_ROLE_TEST_DSN"); dsn != "" {
+		rp, err := pgxpool.New(ctx, dsn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rp.Close()
+		var b bool
+		if err := rp.QueryRow(ctx, `SELECT iam_v2.package_ended_by_staff($1,$2,$3,$4,NULL,NULL,NULL,NULL)`,
+			f.tenant, f.site, x.pkgRev, x.stay).Scan(&b); err != nil || !b {
+			t.Fatalf("svc_scd cannot read the rule: %v %v", b, err)
+		}
+	}
+	// A staff Reset is the deliberate way back.
+	if c, b := pkgAction(t, f, x.ent, "reset", newUUID()); c != http.StatusOK {
+		t.Fatalf("reset after end: %d %v", c, b)
+	}
+	if ended(x.stay) {
+		t.Fatal("the block stayed after a staff Reset")
+	}
+}
+
+// The staff reason is a registered staff note (0147): an erasure of the guest removes it, and outside that scrub the record stays
+// append-only.
+func TestIntegration_PackageControls_AnErasureRemovesTheStaffReason(t *testing.T) {
+	f := newPackageControlsAPI(t)
+	x := seedPackage(t, f, "VALIDITY_WINDOW")
+	ctx := context.Background()
+	if c, b := pkgAction(t, f, x.ent, "end", newUUID()); c != http.StatusOK {
+		t.Fatalf("end: %d %v", c, b)
+	}
+	if _, err := f.pool.Exec(ctx, `UPDATE iam_v2.package_admin_actions SET reason = 'edited later' WHERE entitlement_id = $1`, x.ent); err == nil {
+		t.Fatal("a staff action record was edited outside the scrub")
+	}
+	if _, err := f.pool.Exec(ctx, `SELECT iam_v2.anonymise_stay($1)`, x.stay); err != nil {
+		t.Fatalf("anonymise the stay: %v", err)
+	}
+	var reason string
+	if err := f.pool.QueryRow(ctx, `SELECT reason FROM iam_v2.package_admin_actions WHERE entitlement_id = $1`, x.ent).Scan(&reason); err != nil ||
+		reason != "Removed after the staff-notes period" {
+		t.Fatalf("the staff reason survived the erasure: %q %v", reason, err)
 	}
 }

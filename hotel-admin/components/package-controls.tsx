@@ -86,7 +86,7 @@ export function PackageControls({ subject, onChanged }: { subject: PackageSubjec
     } catch (e) { setErr(errMsg(e)); }
   }
 
-  async function confirm({ reason, password }: { reason: string; password: string }) {
+  async function submitAction({ reason, password }: { reason: string; password: string }) {
     if (!action) return;
     const rule = action.kind === "end" ? action.preview.end : action.preview.reset;
     if (!rule.allowed) { setActionErr(words(rule.reason) || "This package cannot be changed that way."); return; }
@@ -128,6 +128,7 @@ export function PackageControls({ subject, onChanged }: { subject: PackageSubjec
       return [
         `The whole package ends now, for every device on it (${p.devices_online} online, ${p.sessions_live} live session${p.sessions_live === 1 ? "" : "s"}).`,
         "Its usage, purchase and payment records are kept unchanged. Nothing is refunded or charged.",
+        "A free package is not taken again automatically by this guest (for a room, for the rest of this stay). A paid package can still be bought, and Reset restores this one.",
         "No other guest, stay or PMS connection is affected.",
       ];
     }
@@ -191,7 +192,7 @@ export function PackageControls({ subject, onChanged }: { subject: PackageSubjec
         reasonMaxLength={500}
         requirePassword
         consequences={impact}
-        onConfirm={confirm}
+        onConfirm={submitAction}
       >
         {p && (
           <dl className="grid grid-cols-[auto,1fr] gap-x-3 gap-y-1 text-sm">

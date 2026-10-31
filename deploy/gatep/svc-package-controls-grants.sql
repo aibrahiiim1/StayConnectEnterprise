@@ -20,4 +20,9 @@ BEGIN
     GRANT EXECUTE ON FUNCTION iam_v2.admin_end_package(uuid,uuid,uuid,uuid,text,uuid) TO svc_edged;
     GRANT EXECUTE ON FUNCTION iam_v2.admin_reset_package(uuid,uuid,uuid,uuid,text,uuid) TO svc_edged;
   END IF;
+  -- The guest offer list and quote (scd) read the no-re-acquisition rule, so they never offer a free package the
+  -- entitlement guard would refuse. Read-only.
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_scd') THEN
+    GRANT EXECUTE ON FUNCTION iam_v2.package_ended_by_staff(uuid,uuid,uuid,uuid,uuid,uuid,uuid,uuid) TO svc_scd;
+  END IF;
 END $g$;
