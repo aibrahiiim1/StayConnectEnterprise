@@ -48,7 +48,7 @@ async function serve(
 }
 
 async function submitStay(page: Page, room: string, secondary: string) {
-  await page.getByLabel("Room Number").fill(room);
+  await page.locator("#pms-room").fill(room);
   await page.locator("#pms-secondary").fill(secondary);
   await page.getByRole("button", { name: "Submit" }).click();
 }

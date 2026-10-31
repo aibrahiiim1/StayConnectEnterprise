@@ -40,7 +40,7 @@ async function serve(page: Page, calls: Call[], answer: AnswerFn, phase3 = true)
 }
 
 async function submitStay(page: Page, room: string, secondary: string) {
-  await page.getByLabel("Room Number").fill(room);
+  await page.locator("#pms-room").fill(room);
   await page.locator("#pms-secondary").fill(secondary);
   await page.getByRole("button", { name: "Submit" }).click();
 }
@@ -122,7 +122,7 @@ test("a double tap sends one request, not two", async ({ page }) => {
   });
 
   await page.goto("http://localhost/portal");
-  await page.getByLabel("Room Number").fill("412");
+  await page.locator("#pms-room").fill("412");
   await page.locator("#pms-secondary").fill("Okonkwo");
   const btn = page.getByRole("button", { name: "Submit" });
   await btn.click();
