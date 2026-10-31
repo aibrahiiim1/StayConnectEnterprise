@@ -56,12 +56,15 @@ type fakeProbe struct {
 	out map[string]bool
 	err error
 	n   int
+	// scopes records the tenant/site every question was asked for.
+	scopes []string
 }
 
-func (f *fakeProbe) NotEntitled(ctx context.Context, ids []string) (map[string]bool, error) {
+func (f *fakeProbe) NotEntitled(ctx context.Context, tenant, site string, ids []string) (map[string]bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.n++
+	f.scopes = append(f.scopes, tenant+"/"+site)
 	if f.err != nil {
 		return nil, f.err
 	}

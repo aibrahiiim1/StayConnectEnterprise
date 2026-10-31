@@ -69,13 +69,18 @@ type contSess struct {
 	// Base is the class counter (down+up) the budget is measured from; HasBase is false for a session with no byte budget.
 	Base    uint64 `json:"base_bytes"`
 	HasBase bool   `json:"has_base"`
+	// LastUsed is the bytes metered for this session since Base at the last metering; it is folded into the entitlement's
+	// Gone when the session is dropped, so a shared allowance remembers what a departed device used.
+	LastUsed uint64 `json:"last_used_bytes"`
 }
 
 type contBudget struct {
 	// Remaining is the producer's figure at the block's AsOf, margin already taken off.
 	Remaining int64 `json:"remaining_bytes"`
 	// Used is what netd has metered since the baselines (refreshed each outage tick; not authoritative on disk).
-	Used      uint64 `json:"used_bytes"`
+	Used uint64 `json:"used_bytes"`
+	// Gone is what sessions that have been dropped (expired, revoked, refused by the database) used before they left. Never decreases.
+	Gone      uint64 `json:"gone_bytes"`
 	Exhausted bool   `json:"exhausted"`
 }
 
@@ -139,7 +144,7 @@ type contCount struct {
 // entitlementProbe asks the database which of these sessions are no longer entitled (ended, entitlement not ACTIVE, window past,
 // or unknown). Read-only. An error means "could not ask", never "entitled".
 type entitlementProbe interface {
-	NotEntitled(ctx context.Context, sessionIDs []string) (map[string]bool, error)
+	NotEntitled(ctx context.Context, tenant, site string, sessionIDs []string) (map[string]bool, error)
 }
 
 // pgEntitlementProbe is the production probe: iam_v2.continuity_not_entitled (migration 0199), a read-only SECURITY DEFINER
@@ -148,14 +153,14 @@ type pgEntitlementProbe struct {
 	pool interface {
 		QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 	}
-	tenant, site string
 }
 
-func (e *pgEntitlementProbe) NotEntitled(ctx context.Context, ids []string) (map[string]bool, error) {
+// NotEntitled asks for the scope the caller names (the CURRENT Phase-3 scope), never one fixed at startup.
+func (e *pgEntitlementProbe) NotEntitled(ctx context.Context, tenant, site string, ids []string) (map[string]bool, error) {
 	var out []string
 	err := e.pool.QueryRow(ctx,
 		`SELECT COALESCE(array_agg(x::text), ARRAY[]::text[]) FROM iam_v2.continuity_not_entitled($1::uuid,$2::uuid,$3::uuid[]) x`,
-		e.tenant, e.site, ids).Scan(&out)
+		tenant, site, ids).Scan(&out)
 	if err != nil {
 		return nil, err
 	}
@@ -185,6 +190,7 @@ type continuity struct {
 	probeOK       bool
 	probeFailures int
 	refused       string
+	scopeLogged   bool
 	renewed       int64
 	dropped       map[string]string // sessionID -> reason, bounded
 }
@@ -283,6 +289,8 @@ func (p *phase3Shaping) contRestore() string {
 	switch {
 	case err != nil || err2 != nil:
 		c.refused = "boot identity or monotonic clock unavailable"
+	case !p.mode.Active:
+		c.refused = "Phase 3 is not active"
 	case st.BootID != boot:
 		c.refused = "continuity record is from another boot (the kernel authorization set did not survive it)"
 	case st.TenantID != p.mode.TenantID || st.SiteID != p.mode.SiteID || st.ApplianceID != p.mode.ApplianceID:
@@ -359,6 +367,7 @@ func (p *phase3Shaping) contRevoke(ctx context.Context, e contRevocation) error 
 	}
 	jerr := c.saveJournal()
 	if c.st != nil {
+		p.contRefreshUsage(ctx) // the revoked session's last bytes stay on the entitlement's account
 		for k, s := range c.st.Sessions {
 			if reason, hit := c.revoked(s); hit {
 				c.drop(k, "revoked: "+reason)
@@ -385,6 +394,11 @@ func (c *continuity) drop(key, reason string) {
 			c.dropped = map[string]string{}
 		}
 		c.dropped[s.SessionID] = reason
+		if s.HasBase {
+			if b := c.st.Budgets[s.EntitlementID]; b != nil {
+				b.Gone += s.LastUsed
+			}
+		}
 		delete(c.st.Sessions, key)
 		c.dirty = true
 	}
@@ -512,8 +526,11 @@ func (p *phase3Shaping) contNotePlan(env shapeplan.Envelope, now time.Time) {
 	// AsOf; a newer AsOf came from the database and supersedes it.
 	if c.st != nil && c.st.AsOf.Equal(asOf) {
 		for id, b := range ns.Budgets {
-			if old := c.st.Budgets[id]; old != nil && old.Exhausted {
-				b.Exhausted = true
+			if old := c.st.Budgets[id]; old != nil {
+				b.Gone = old.Gone
+				if old.Exhausted {
+					b.Exhausted = true
+				}
 			}
 		}
 		for k, s := range ns.Sessions {
@@ -523,6 +540,7 @@ func (p *phase3Shaping) contNotePlan(env shapeplan.Envelope, now time.Time) {
 		}
 	}
 	c.st = ns
+	c.scopeLogged = false
 	c.dirty = true
 	if time.Since(c.lastSaved) >= contSaveEvery {
 		if err := c.saveState(); err != nil {
@@ -586,6 +604,60 @@ func (p *phase3Shaping) managedBridgeSet() map[string]bool {
 	return out
 }
 
+// contScopeOK reports whether the held record still belongs to the Phase-3 scope in force. Caller holds p.mu. When it does not
+// (Phase 3 went inactive, or another tenant, site, appliance or an older assignment was adopted) the record is cleared and nothing
+// is renewed any more: the leases run down, fail closed. Logged once per record.
+func (p *phase3Shaping) contScopeOK() bool {
+	c := p.cont
+	st := c.st
+	if st == nil {
+		return true
+	}
+	if p.mode.Active && st.TenantID == p.mode.TenantID && st.SiteID == p.mode.SiteID &&
+		st.ApplianceID == p.mode.ApplianceID && st.AssignGen >= p.mode.AssignGen {
+		return true
+	}
+	if !c.scopeLogged {
+		c.scopeLogged = true
+		slog.Warn("netd: the Phase-3 scope changed or went inactive; outage continuity is cleared and nothing is renewed",
+			"active", p.mode.Active, "record_tenant", st.TenantID, "tenant", p.mode.TenantID,
+			"record_site", st.SiteID, "site", p.mode.SiteID, "record_assignment_gen", st.AssignGen, "assignment_gen", p.mode.AssignGen)
+	}
+	c.removeStateLocked()
+	c.refused = "the Phase-3 scope changed or went inactive"
+	return false
+}
+
+// contRefreshUsage re-reads the class counters and refreshes every budgeted session's LastUsed. Best effort: a failed read leaves
+// the earlier figures. Caller holds p.mu. It reports whether the counters were read, and returns them.
+func (p *phase3Shaping) contRefreshUsage(ctx context.Context) (map[string]contCount, bool) {
+	c := p.cont
+	if c == nil || c.st == nil || !hasBudgets(c.st) {
+		return nil, false
+	}
+	cnt, err := p.classCounters(ctx, p.managedBridgeSet())
+	if err != nil {
+		return nil, false
+	}
+	for k, s := range c.st.Sessions {
+		if !s.HasBase {
+			continue
+		}
+		cur, ok := cnt[k]
+		if !ok || cur.epoch != s.Epoch {
+			continue
+		}
+		u := cur.bytes
+		if cur.bytes >= s.Base {
+			u = cur.bytes - s.Base
+		} // a counter that went backwards counts in full
+		if u > s.LastUsed {
+			s.LastUsed = u
+		}
+	}
+	return cnt, true
+}
+
 // contTick is the governor. It is called every phase3RenewEvery. It reports how many authorizations it renewed.
 func (p *phase3Shaping) contTick(ctx context.Context, now time.Time) int {
 	c := p.cont
@@ -600,10 +672,11 @@ func (p *phase3Shaping) contTick(ctx context.Context, now time.Time) int {
 	// Phase 1 (locked): healthy sampling, outage detection, the sessions to probe.
 	p.mu.Lock()
 	c.lastTick = now
-	if c.st == nil {
+	if !p.contScopeOK() || c.st == nil {
 		p.mu.Unlock()
 		return 0
 	}
+	tenant, site := p.mode.TenantID, p.mode.SiteID
 	age := time.Duration(nowBoot-c.st.LastPlanBoot) * time.Millisecond
 	if age < contTakeoverAge {
 		// Plans are arriving. Keep the samples a future budget baseline will be taken from.
@@ -647,7 +720,7 @@ func (p *phase3Shaping) contTick(ctx context.Context, now time.Time) int {
 			if j > len(ids) {
 				j = len(ids)
 			}
-			m, perr := probe.NotEntitled(pctx, ids[i:j])
+			m, perr := probe.NotEntitled(pctx, tenant, site, ids[i:j])
 			if perr != nil {
 				probeOK = false
 				break
@@ -664,8 +737,11 @@ func (p *phase3Shaping) contTick(ctx context.Context, now time.Time) int {
 	// Phase 3 (locked): apply.
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if c.st == nil {
+	if !p.contScopeOK() || c.st == nil {
 		return 0
+	}
+	if p.mode.TenantID != tenant || p.mode.SiteID != site {
+		return 0 // the scope moved while the database was being asked: the answer belongs to another scope
 	}
 	// A plan may have arrived while the database was being asked: the plan path is back in charge, and this tick must not overlay it.
 	if nb, berr := p.bootNow(); berr != nil || time.Duration(nb-c.st.LastPlanBoot)*time.Millisecond < contTakeoverAge {
@@ -683,8 +759,32 @@ func (p *phase3Shaping) contTick(ctx context.Context, now time.Time) int {
 		defer func() { p.owner = ownerSaved }()
 	}
 
-	// 3a. who is out: deadline, revocation, the database's word.
+	// 3-pre. meter first, so that every session dropped below leaves its final usage behind in the entitlement's account.
+	meterOK := true
+	var counters map[string]contCount
+	if hasBudgets(c.st) {
+		cnt, ok := p.contRefreshUsage(ctx)
+		if !ok {
+			meterOK = false
+			slog.Warn("netd: continuity cannot read the class counters; budgeted sessions are not renewed")
+		} else {
+			counters = cnt
+		}
+	}
 	var deny []contSess
+	if meterOK && counters != nil {
+		for k, s := range c.st.Sessions {
+			if !s.HasBase {
+				continue
+			}
+			if cur, ok := counters[k]; !ok || cur.epoch != s.Epoch {
+				c.drop(k, "the traffic class is gone or restarted; it can no longer be metered")
+				deny = append(deny, *s)
+			}
+		}
+	}
+
+	// 3a. who is out: deadline, revocation, the database's word.
 	for k, s := range c.st.Sessions {
 		switch {
 		case nowBoot >= s.DeadlineBoot:
@@ -701,42 +801,22 @@ func (p *phase3Shaping) contTick(ctx context.Context, now time.Time) int {
 		}
 	}
 
-	// 3b. meter. A budgeted session that cannot be metered is not renewed (its lease runs down).
-	meterOK := true
-	var counters map[string]contCount
-	if hasBudgets(c.st) {
-		cnt, merr := p.classCounters(ctx, p.managedBridgeSet())
-		if merr != nil {
-			meterOK = false
-			slog.Warn("netd: continuity cannot read the class counters; budgeted sessions are not renewed", "err", merr)
-		} else {
-			counters = cnt
-		}
-	}
+	// 3b. budgets: what the live sessions used plus what departed sessions used. Never decreases.
 	if meterOK {
-		used := map[string]uint64{}
-		for k, s := range c.st.Sessions {
-			if !s.HasBase {
-				continue
-			}
-			cur, ok := counters[k]
-			if !ok || cur.epoch != s.Epoch {
-				c.drop(k, "the traffic class is gone or restarted; it can no longer be metered")
-				deny = append(deny, *s)
-				continue
-			}
-			if cur.bytes >= s.Base {
-				used[s.EntitlementID] += cur.bytes - s.Base
-			} else {
-				used[s.EntitlementID] += cur.bytes // the counter went backwards: count it all, never less
-			}
-		}
 		for id, b := range c.st.Budgets {
-			b.Used = used[id]
-			if !b.Exhausted && (b.Remaining <= 0 || used[id] >= uint64(b.Remaining)) {
+			total := b.Gone
+			for _, s := range c.st.Sessions {
+				if s.HasBase && s.EntitlementID == id {
+					total += s.LastUsed
+				}
+			}
+			if total > b.Used {
+				b.Used = total
+			}
+			if !b.Exhausted && (b.Remaining <= 0 || b.Used >= uint64(b.Remaining)) {
 				b.Exhausted = true
 				slog.Warn("netd: an entitlement's byte budget is spent during the outage; its sessions are being removed", "entitlement", id,
-					"used_bytes", used[id], "budget_bytes", b.Remaining)
+					"used_bytes", b.Used, "budget_bytes", b.Remaining)
 			}
 			if b.Exhausted {
 				for k, s := range c.st.Sessions {
@@ -783,6 +863,11 @@ func (p *phase3Shaping) contTick(ctx context.Context, now time.Time) int {
 				continue
 			case addressUnknown:
 				continue // no evidence, no renewal
+			}
+			// Ownership is proven: restore the gate's MAC binding from the record. After a netd-only restart the gate's map is empty, and a
+			// renewal would otherwise refresh the IP element alone and let the MAC-bound element expire.
+			if mb, ok := p.gate.(macBinder); ok {
+				mb.BindMAC(s.Bridge, ip, s.MAC)
 			}
 			if !ev.Until.IsZero() {
 				if left := ev.Until.Sub(now); left < want {
