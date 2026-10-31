@@ -372,6 +372,38 @@ func TestContinuity_BudgetWithoutABaselineGivesNoContinuity(t *testing.T) {
 	}
 }
 
+// A guest admitted after the last counter sample was left out of continuity until the next sample (up to 30 s): its class did not
+// exist when the sample was taken. It is now measured from zero (a new class starts at 0 bytes), which can only overcount, and its
+// allowance still ends it.
+func TestContinuity_ARecentlyAdmittedSessionIsCoveredAndMeteredFromZero(t *testing.T) {
+	h := newContH(t)
+	a := h.guest("c-1", "10.0.0.11", "96:48:f9:7a:9b:11", "ent-a")
+	h.healthy(60, func() *shapeplan.Continuity {
+		return block(time.Hour, []shapeplan.Session{a}, map[string]int64{"ent-a": 1 << 30}, nil)
+	}, a)
+	// The newcomer's class is created by this plan, after the latest sample.
+	b := h.guest("c-2", "10.0.0.12", "96:48:f9:7a:9b:12", "ent-b")
+	h.el += time.Second
+	h.clk.ms += 1000
+	h.submit(block(time.Hour, []shapeplan.Session{a, b}, map[string]int64{"ent-a": 1 << 30, "ent-b": 5 << 20}, nil), a, b)
+	cs := h.p.cont.st.Sessions[classKey("br-guest", "c-2")]
+	if cs == nil || !cs.HasBase || cs.Base != 0 {
+		t.Fatalf("a session admitted after the last sample must be covered with a zero baseline, got %+v", cs)
+	}
+	h.run(70*time.Second, nil) // the outage begins
+	if !h.authorized(b.IP) {
+		t.Fatal("the recently admitted guest must be kept during the outage")
+	}
+	h.tc.carry("br-guest", b.IP, 6<<20) // more than its 5 MiB allowance
+	h.step(5 * time.Second)
+	if h.authorized(b.IP) {
+		t.Fatal("the recently admitted guest's allowance, measured from zero, must still end it")
+	}
+	if !h.authorized(a.IP) {
+		t.Fatal("another entitlement must be unaffected")
+	}
+}
+
 func TestContinuity_UnreadableCountersMeanBudgetedSessionsAreNotRenewed(t *testing.T) {
 	h := newContH(t)
 	a := h.guest("c-1", "10.0.0.11", "96:48:f9:7a:9b:11", "ent-a")

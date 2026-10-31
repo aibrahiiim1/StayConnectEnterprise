@@ -143,6 +143,10 @@ func (s *server) withdrawKernel(r *http.Request, sessions []string) map[string]a
 	if len(sessions) == 0 {
 		return out
 	}
+	if s.scd == nil {
+		out["summary"] = "not confirmed: the enforcement service is not connected; enforcement withdraws the access from the database on its next pass"
+		return out
+	}
 	code, raw, err := s.scd.call(r.Context(), http.MethodPost, "/v1/admin/sessions/withdraw", map[string]any{"sessions": sessions})
 	if err != nil || code != http.StatusOK {
 		out["summary"] = "not confirmed: the enforcement service could not be reached; enforcement withdraws the access from the database on its next pass"

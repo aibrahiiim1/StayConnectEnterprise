@@ -134,6 +134,9 @@ func (j contJournal) checksum() string {
 type contSample struct {
 	at    time.Time
 	bytes map[string]contCount // classKey -> counter
+	// classes are the managed classes that existed when the sample was taken (classKey -> epoch), read or not. A class absent
+	// from it was created AFTER the sample, so it counts from zero (a new tc class starts at 0 bytes), which can only overcount.
+	classes map[string]int64
 }
 
 type contCount struct {
@@ -193,6 +196,9 @@ type continuity struct {
 	scopeLogged   bool
 	renewed       int64
 	dropped       map[string]string // sessionID -> reason, bounded
+	// notRenewed is why sessions held in the record were not renewed at the last outage tick (reason -> count). It is the evidence
+	// for a record that holds more sessions than the kernel set (lab finding F5): which step skipped them, never a guess.
+	notRenewed map[string]int
 }
 
 func (c *continuity) enabled() bool { return c != nil && c.statePath != "" }
@@ -465,7 +471,7 @@ func (p *phase3Shaping) contNotePlan(env shapeplan.Envelope, now time.Time) {
 	for _, b := range env.Continuity.Budgets {
 		budget[b.EntitlementID] = b.RemainingBytes
 	}
-	base := c.baselineAt(asOf)
+	base, sampled := c.baselineAt(asOf)
 	window := time.Duration(env.Continuity.WindowSeconds) * time.Second
 
 	ns := &contState{Version: contStateVersion, TenantID: env.TenantID, SiteID: env.SiteID, ApplianceID: env.ApplianceID,
@@ -509,8 +515,13 @@ func (p *phase3Shaping) contNotePlan(env shapeplan.Envelope, now time.Time) {
 		if rb, budgeted := budget[s.EntitlementID]; budgeted {
 			b, have := base[key]
 			if !have {
-				// No sample at or before AsOf: bytes since AsOf could not be counted. No continuity for a budgeted session.
-				continue
+				// A session admitted after the baseline sample: its class did not exist when the sample was taken, so it is
+				// measured from zero (everything it ever carried counts, some of it twice: never under). A class that existed but
+				// could not be read, or no sample at all, still gets no continuity.
+				if _, existed := sampled[key]; sampled == nil || existed {
+					continue
+				}
+				b = contCount{epoch: mc.Epoch}
 			}
 			if b.epoch != mc.Epoch {
 				b.bytes = 0 // a class created after the sample counts from zero
@@ -553,8 +564,9 @@ func (p *phase3Shaping) contNotePlan(env shapeplan.Envelope, now time.Time) {
 
 func (c *continuity) removeStateLocked() { c.removeState(); c.outageSince = time.Time{} }
 
-// baselineAt returns, per class, the counter of the latest sample taken at or before asOf (plus a small slack).
-func (c *continuity) baselineAt(asOf time.Time) map[string]contCount {
+// baselineAt returns, per class, the counter of the latest sample taken at or before asOf (plus a small slack), and the classes
+// that existed when it was taken (nil when there is no such sample, or it predates the record of existing classes).
+func (c *continuity) baselineAt(asOf time.Time) (map[string]contCount, map[string]int64) {
 	var pick *contSample
 	for i := range c.samples {
 		if !c.samples[i].at.After(asOf.Add(contBaselineSlack)) {
@@ -562,9 +574,9 @@ func (c *continuity) baselineAt(asOf time.Time) map[string]contCount {
 		}
 	}
 	if pick == nil {
-		return map[string]contCount{}
+		return map[string]contCount{}, nil
 	}
-	return pick.bytes
+	return pick.bytes, pick.classes
 }
 
 // ---- sampling and the outage tick ---------------------------------------------------------------------------------------
@@ -682,7 +694,11 @@ func (p *phase3Shaping) contTick(ctx context.Context, now time.Time) int {
 		// Plans are arriving. Keep the samples a future budget baseline will be taken from.
 		if now.Sub(c.lastSample) >= contSampleEvery && p.hasConverged {
 			if cnt, err := p.classCounters(ctx, p.managedBridgeSet()); err == nil {
-				c.samples = append(c.samples, contSample{at: now, bytes: cnt})
+				known := make(map[string]int64, len(p.classes))
+				for k, mc := range p.classes {
+					known[k] = mc.Epoch
+				}
+				c.samples = append(c.samples, contSample{at: now, bytes: cnt, classes: known})
 				if len(c.samples) > contSampleKeep {
 					c.samples = c.samples[len(c.samples)-contSampleKeep:]
 				}
@@ -841,6 +857,7 @@ func (p *phase3Shaping) contTick(ctx context.Context, now time.Time) int {
 	// 3d. renew what is left, only where the element is present, ownership is proven, and the session is metered if budgeted.
 	view := p.snapshotGate(ctx)
 	var reqs []gateLease
+	skipped := map[string]int{}
 	for k, s := range c.st.Sessions {
 		ip := net.ParseIP(s.IP)
 		if ip == nil {
@@ -848,6 +865,7 @@ func (p *phase3Shaping) contTick(ctx context.Context, now time.Time) int {
 			continue
 		}
 		if s.HasBase && !meterOK {
+			skipped["counters_unreadable"]++
 			continue
 		}
 		want := time.Duration(s.DeadlineBoot-nowBoot) * time.Millisecond
@@ -862,6 +880,7 @@ func (p *phase3Shaping) contTick(ctx context.Context, now time.Time) int {
 				_ = p.denyAccess(ctx, s.Bridge, ip)
 				continue
 			case addressUnknown:
+				skipped["dhcp_ownership_unproven"]++
 				continue // no evidence, no renewal
 			}
 			// Ownership is proven: restore the gate's MAC binding from the record. After a netd-only restart the gate's map is empty, and a
@@ -877,10 +896,16 @@ func (p *phase3Shaping) contTick(ctx context.Context, now time.Time) int {
 		}
 		want = want.Truncate(time.Second)
 		if want < time.Second {
+			skipped["deadline_reached"]++
 			continue
 		}
 		el, present, known := view.lookup(s.Bridge, ip)
-		if !known || !present {
+		if !known {
+			skipped["gate_unreadable"]++
+			continue
+		}
+		if !present {
+			skipped["element_absent"]++
 			continue // never create an authorization; an absent one was removed on purpose or by a reboot
 		}
 		if !needsRenewal(el.Expires, want) {
@@ -897,10 +922,27 @@ func (p *phase3Shaping) contTick(ctx context.Context, now time.Time) int {
 		renewed++
 	}
 	c.renewed += int64(renewed)
+	if len(skipped) > 0 && !sameCounts(skipped, c.notRenewed) {
+		slog.Warn("netd: continuity holds sessions it did not renew this tick", "by_reason", skipped,
+			"held", len(c.st.Sessions), "renewed_now", renewed)
+	}
+	c.notRenewed = skipped
 	if c.dirty {
 		_ = c.saveState()
 	}
 	return renewed
+}
+
+func sameCounts(a, b map[string]int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+	return true
 }
 
 func hasBudgets(st *contState) bool {
@@ -928,6 +970,8 @@ type contStatus struct {
 	Budgets      map[string]uint64 `json:"budget_used_bytes,omitempty"`
 	BudgetsLimit map[string]int64  `json:"budget_limit_bytes,omitempty"`
 	Dropped      map[string]string `json:"dropped,omitempty"`
+	// NotRenewed: sessions held but not renewed at the last outage tick, by reason (element_absent, dhcp_ownership_unproven, ...).
+	NotRenewed map[string]int `json:"not_renewed,omitempty"`
 }
 
 func (p *phase3Shaping) contStatus() contStatus {
@@ -941,6 +985,12 @@ func (p *phase3Shaping) contStatus() contStatus {
 		Revocations: len(c.journal), Refused: c.refused, Dropped: map[string]string{}}
 	for k, v := range c.dropped {
 		out.Dropped[k] = v
+	}
+	if len(c.notRenewed) > 0 {
+		out.NotRenewed = map[string]int{}
+		for k, v := range c.notRenewed {
+			out.NotRenewed[k] = v
+		}
 	}
 	if c.st != nil {
 		out.WindowSec, out.Sessions = c.st.WindowSec, len(c.st.Sessions)
