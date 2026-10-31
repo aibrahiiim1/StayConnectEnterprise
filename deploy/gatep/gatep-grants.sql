@@ -384,6 +384,10 @@ BEGIN
     EXECUTE 'GRANT SELECT ON public.operators TO iam_v2_owner';
     -- The per-profile privacy-notice stamp (0152, iam_v2.profile_privacy_notice_stamp, SECURITY DEFINER as iam_v2_owner) records the notice a profile network showed.
     EXECUTE 'GRANT SELECT, INSERT ON public.privacy_notice_versions TO iam_v2_owner';
+    -- iam_v2.p3_expected_class_minor (0200) runs as the caller, the owner of the accounting functions, and reads the enabled client network that
+    -- contains a session's address to name its shaping class (a /17../19 network has a second band). Without this every new session stays
+    -- PENDING_ENFORCEMENT: 'class origin not registered ... permission denied for table guest_networks'.
+    EXECUTE 'GRANT SELECT ON public.guest_networks TO iam_v2_owner';
     -- REFERENCES on public.operators is granted in gatep-iam-roles.sql, NOT here, and the difference
     -- matters: this file runs AFTER the numbered migrations, and the privilege is needed BY one of them.
     -- Granting it here would be granting it too late to be used.
