@@ -146,6 +146,4 @@ internal/stayengine/sharers.go	aa97b2d01e02	UPDATE iam_v2.stay_guests SET first_
 internal/staygrant/staygrant.go	2a7180055882	SELECT id::text FROM iam_v2.entitlements WHERE stay_id=$1 AND status='ACTIVE' AND (window_
 internal/staygrant/staygrant.go	7576a8bc1902	SELECT COALESCE(time_accounting_mode,'VALIDITY_WINDOW') FROM iam_v2.service_plan_revisions
 internal/staygrant/staygrant.go	803833fe1bf9	SELECT count(*) FROM iam_v2.entitlements WHERE stay_id=$1 AND status IN ('PENDING','ACTIVE
-internal/transfer/transfer.go	2eb72ed2d27b	WITH closed AS ( UPDATE iam_v2.entitlement_device_authorizations a SET deauthorized_at = G
 internal/transfer/transfer.go	aaed691c38f3	SELECT (SELECT count(*) FROM iam_v2.entitlement_devices ed JOIN iam_v2.entitlements e ON e
-internal/transfer/transfer.go	eaf70d00e430	SELECT count(*) FROM iam_v2.entitlement_transfers WHERE from_entitlement_id=$1

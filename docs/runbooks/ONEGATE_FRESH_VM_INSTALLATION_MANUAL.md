@@ -1145,3 +1145,9 @@ installed by `--upgrade`, and the acctd unit gains `WatchdogSec=30`. Checks afte
 `tc filter show dev <client bridge> parent 1:` lists `flower` filters (rollback to the earlier classifier: set `NETD_SHAPE_CLASSIFIER=u32`, then `tc filter del dev <bridge> parent 1: pref 1`);
 `sysctl net.ipv4.neigh.default.gc_thresh3`. Evidence: [`CAPACITY_AND_OFFLINE_ACCEPTANCE.md`](CAPACITY_AND_OFFLINE_ACCEPTANCE.md) sections 6 and 7.
 
+### A3.13 The final-mission release (2026-10-31)
+
+Migrations **0193** (After Check-out Access), **0198** and **0199** (outage continuity), **0200** (class-origin check for /17 to /19 client networks) and **0201** (Cross-PMS Transfer as one definer function) are applied by the upgrade in order; **0182 to 0189 and 0194 to 0197 are reserved and never used** (`data-plane/migrations/RESERVED_NUMBERS`, `IDENTITIES`); the baseline is regenerated through 0201 and the Gate-P grants for the new functions are re-applied after the migrations.
+Checks after the upgrade: `psql -c "SELECT outage_continuity_minutes FROM public.enforcement_policy"` (60); the Admin Console shows **After Check-out Access** (the old Checkout Grace and Post-stay pages redirect to it); a client network may be created up to `/19` (an existing /20 is never widened in place); netd reports its continuity block (`journalctl -u stayconnect-netd | grep continuity`).
+Rollback: `binary-rollback.sh` for the binaries; each new migration has a `.down.sql` that states what it costs. Do not widen any network to /19 before 0200 is applied: the upper half of that network could not be enforced without it.
+
