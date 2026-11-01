@@ -495,13 +495,14 @@ func deriveAttention(in attentionInput) []attentionItem {
 	if in.PMSReviewCases > 0 {
 		add(attentionItem{ID: "pms-review", Severity: "warn",
 			Title:  plural(in.PMSReviewCases, "PMS message is", "PMS messages are") + " waiting for a decision",
-			Detail: "They could not be applied automatically.",
+			Detail: "The PMS sent departures or changes OneGate could not match safely to a guest stay, and no later full room list has settled them. Guests are not blocked by this; open each message, check it against the PMS, and acknowledge or link it. Messages already settled by a later full room list are not counted.",
 			Href:   "/stay-events", Action: "Review messages"})
 	}
 	if in.PostingsReviewOpen > 0 {
 		add(attentionItem{ID: "postings-review", Severity: "warn",
-			Title: plural(in.PostingsReviewOpen, "room charge is", "room charges are") + " waiting for a manual decision",
-			Href:  "/financial-review", Action: "Open charge review"})
+			Title:  plural(in.PostingsReviewOpen, "room charge is", "room charges are") + " waiting for a manual decision",
+			Detail: "OneGate did not post these to the PMS because the guest or room could not be confirmed; no money moved. Open the charge review and post or cancel each one.",
+			Href:   "/financial-review", Action: "Open charge review"})
 	}
 	for _, s := range in.Services {
 		if !s.Critical {

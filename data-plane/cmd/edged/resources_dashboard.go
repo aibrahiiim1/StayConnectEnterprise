@@ -348,7 +348,7 @@ func (s *server) dashPMS(ctx context.Context) dashPms {
 		SELECT count(*) FROM iam_v2.pms_reconciliation_cases c
 		 WHERE c.tenant_id = $1 AND c.site_id = $2
 		   AND EXISTS (SELECT 1 FROM iam_v2.pms_unanswered_review_events e
-		                WHERE e.id = c.latest_event_id)
+		                WHERE e.id = c.latest_event_id AND NOT `+pmsSupersededByRoster+`)
 	`, s.tenantID, s.siteID).Scan(&p.EventsReview); err != nil {
 		// The view does not exist yet; fall back to the row count rather than a reassuring zero.
 		_ = s.db.QueryRow(ctx, `
@@ -361,7 +361,7 @@ func (s *server) dashPMS(ctx context.Context) dashPms {
 	_ = s.db.QueryRow(ctx, `
 		SELECT count(*) FROM iam_v2.pms_unanswered_review_events e
 		 WHERE e.tenant_id = $1 AND e.site_id = $2
-		   AND e.event_type = 'GO' AND e.admission_kind = 'LIVE' 
+		   AND e.event_type = 'GO' AND e.admission_kind = 'LIVE' AND NOT `+pmsSupersededByRoster+`
 	`, s.tenantID, s.siteID).Scan(&p.HistoricalExceptions)
 
 	// EventsReview must mean operational work only, or the two numbers overlap.

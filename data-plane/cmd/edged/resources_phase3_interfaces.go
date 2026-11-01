@@ -957,7 +957,7 @@ func (s *server) interfaceHealthRow(ctx context.Context, id string) (interfaceHe
 	if err == nil {
 		var outstanding int
 		if e2 := s.db.QueryRow(ctx,
-			`SELECT count(*) FROM iam_v2.pms_unanswered_review_events WHERE pms_interface_id=$1::uuid`,
+			`SELECT count(*) FROM iam_v2.pms_unanswered_review_events e WHERE e.pms_interface_id=$1::uuid AND NOT `+pmsSupersededByRoster,
 			id).Scan(&outstanding); e2 == nil {
 			h.ReviewEvents = outstanding
 		}
