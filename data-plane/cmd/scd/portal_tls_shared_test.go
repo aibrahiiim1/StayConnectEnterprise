@@ -5,6 +5,7 @@ package main
 import (
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"sort"
 	"strings"
 	"testing"
@@ -133,5 +134,30 @@ func TestTheSharedNameIsPreferredOverAHotelDomain(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("the hotel domain is still served (and redirected to the canonical name): %v", st.Hostnames)
+	}
+}
+
+// Review finding (PR #283): Central unreachable AND the certificate rows unreadable in one cycle must not delete
+// the shared name's files or stop serving it.
+func TestUnreadableRecordsAndNoCentralKeepTheSharedName(t *testing.T) {
+	f := newAgentFixture(t)
+	offerShared(f, true)
+	f.cycle(t, false)
+	if st := f.cycle(t, false); st.Canonical != sharedHost {
+		t.Fatalf("precondition: %+v", st)
+	}
+	f.central.unreachable = true
+	f.repo.certsErr = errors.New("connection reset")
+	st := f.cycle(t, false)
+	if _, err := f.store.Inspect(sharedHost); err != nil {
+		t.Fatalf("the shared name's certificate must survive: %v", err)
+	}
+	if !st.HTTPSActive || st.Canonical != sharedHost || st.SharedHostname != sharedHost {
+		t.Fatalf("it is still served: %+v", st)
+	}
+	f.repo.certsErr = nil
+	f.central.unreachable = false
+	if st = f.cycle(t, false); st.Canonical != sharedHost {
+		t.Fatalf("and stays canonical once both recover: %+v", st)
 	}
 }

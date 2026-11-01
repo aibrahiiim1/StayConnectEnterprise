@@ -437,8 +437,15 @@ func (a *portalTLSAgent) cycle(ctx context.Context, forceRenew bool) error {
 				sharedHost, sharedReady = h, sp.Ready
 			}
 		}
-	} else if rowsErr == nil {
-		sharedHost = ptSharedFromRows(rows, st.OneGateHostname)
+	} else {
+		if rowsErr == nil {
+			sharedHost = ptSharedFromRows(rows, st.OneGateHostname)
+		}
+		// Rows unreadable as well: the last canonical name, persisted in portal_tls_state, recovers the shared name
+		// for this cycle (with readable rows the rows decide, so a just-removed hotel domain is never mistaken for it).
+		if c := prev.Canonical; rowsErr != nil && c != "" && c != st.OneGateHostname && c != set.CustomDomain && portaltls.ValidHostname(c) {
+			sharedHost = c
+		}
 	}
 	if sharedHost != "" && st.OneGateHostname != "" {
 		targets[sharedHost] = ptKindOneGate
@@ -502,7 +509,9 @@ func (a *portalTLSAgent) cycle(ctx context.Context, forceRenew bool) error {
 			slog.Info("portal-tls: stopped serving a hostname", "host", host)
 		}
 	}
-	if hosts, err := a.store.Hosts(); err == nil {
+	// Files are removed only when the records could be read: without them this cycle may not know every name in
+	// use, and a certificate removed by mistake cannot be replaced while Central is unreachable.
+	if hosts, err := a.store.Hosts(); err == nil && rowsErr == nil {
 		for _, host := range hosts {
 			if !keep[host] {
 				_ = a.store.Remove(host)
