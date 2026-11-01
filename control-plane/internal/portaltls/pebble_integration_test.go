@@ -162,8 +162,11 @@ func TestPebbleEndToEnd(t *testing.T) {
 	}
 	svc.Tick(ctx)
 	o1 := mustIssued(t, ctx, svc, appA, acc.OrderID, hostA, &keyA1.PublicKey, env)
-	if o1.RenewAfter == nil || !o1.RenewAfter.After(time.Now()) || !o1.RenewAfter.Before(*o1.NotAfter) {
-		t.Fatalf("renew_after must lie inside the validity: %v", o1.RenewAfter)
+	// ARI lets the CA open the renewal window already at issuance (Pebble does so on some runs, which put renew_after a
+	// day before "now" in about half of them); a past renew_after then means "renew at once", which is correct. The
+	// invariant is that it exists and ends before the certificate does.
+	if o1.RenewAfter == nil || !o1.RenewAfter.Before(*o1.NotAfter) {
+		t.Fatalf("renew_after must exist and precede not_after: renew_after=%v not_after=%v now=%v", o1.RenewAfter, o1.NotAfter, time.Now())
 	}
 	var countsNew bool
 	var dir string
