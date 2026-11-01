@@ -63,6 +63,9 @@ type portalTLSState struct {
 	// SharedHostname is the fleet's shared Client Portal name while this appliance uses it: the OneGate-kind
 	// certificate that is not the appliance's own hostname (scd keeps that row exactly while the name is in use).
 	SharedHostname string `json:"shared_hostname"`
+	// SiteDomainUsable: the Site's own portal domain is verified and its certificate is installed and valid for at
+	// least five more minutes. Google sign-in is offered on that domain only (provider rule in socialOffered).
+	SiteDomainUsable bool `json:"site_domain_usable"`
 }
 
 type portalCertificate struct {
@@ -242,6 +245,14 @@ func (s *server) loadPortalTLSState(ctx context.Context) (portalTLSState, error)
 	if err := s.db.QueryRow(ctx, `SELECT hostname FROM public.portal_certificates
 	        WHERE kind = 'ONEGATE' AND hostname <> $1 ORDER BY hostname LIMIT 1`, st.OneGateHostname).Scan(&shared); err == nil && shared != nil {
 		st.SharedHostname = strings.ToLower(*shared)
+	}
+	if st.CustomDomain != "" && st.CustomDomainStatus == "VERIFIED" {
+		var usable bool
+		if err := s.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM public.portal_certificates
+		        WHERE hostname = $1 AND not_before <= now() AND not_after > now() + interval '5 minutes')`,
+			strings.ToLower(st.CustomDomain)).Scan(&usable); err == nil {
+			st.SiteDomainUsable = usable
+		}
 	}
 	return st, nil
 }

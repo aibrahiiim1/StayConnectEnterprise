@@ -603,7 +603,7 @@ type edgeSocialProvider struct {
 	CallbackURLs  []portalCallbackURL `json:"callback_urls"`
 	SecretSet     bool                `json:"secret_set"`
 	// Offered is whether the portal shows this provider to clients right now; OfferedReason says why not:
-	// disabled | http_fallback | needs_hotel_domain | callback_not_registered.
+	// disabled | http_fallback | needs_hotel_domain (the Site needs its own portal domain) | callback_not_registered.
 	Offered       bool       `json:"offered"`
 	OfferedReason string     `json:"offered_reason,omitempty"`
 	LastSuccessAt *time.Time `json:"last_success_at,omitempty"`
@@ -611,6 +611,9 @@ type edgeSocialProvider struct {
 	LastErrorAt   *time.Time `json:"last_error_at,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at"`
+	// Setup is the provider's setup checklist (Google only today): what this appliance verified, what is still to do,
+	// and what only the provider can confirm.
+	Setup []socialSetupStep `json:"setup,omitempty"`
 }
 
 const socialCols = `id, provider, enabled, COALESCE(display_name,''),
@@ -671,6 +674,9 @@ func applySocialSwitch(p *edgeSocialProvider, switches map[string]bool, ok bool)
 func decorateSocial(p *edgeSocialProvider, st portalTLSState) {
 	p.CallbackURLs = portalHostnames(st)
 	p.Offered, p.OfferedReason = socialOffered(p.Provider, p.Enabled, p.CallbackHosts, st)
+	if p.Provider == "google" {
+		p.Setup = googleSetupSteps(*p, st)
+	}
 }
 
 // socialOffered is the contract's rule (§5), with the reason an administrator can act on when it is false.
@@ -682,15 +688,19 @@ func socialOffered(provider string, enabled bool, callbackHosts []string, st por
 	if !st.HTTPSActive || canonical == "" {
 		return false, "http_fallback"
 	}
-	// Google accepts only callback domains the app owner verified in Search Console, which neither a OneGate
-	// hostname nor the shared Client Portal name (owned by OneGate) can be for a hotel's own Google app: Google
-	// needs the hotel portal domain to be the canonical hostname.
-	if provider == "google" && (canonical == strings.ToLower(st.OneGateHostname) ||
-		(st.SharedHostname != "" && canonical == strings.ToLower(st.SharedHostname))) {
-		return false, "needs_hotel_domain"
+	// Google accepts only callback domains the owner of the Site's own Google project verified in Search Console, which
+	// no OneGate name (a technical hostname, the shared Client Portal name) can be. Google is therefore offered on the
+	// Site's own portal domain, whatever the canonical name is; the shared name stays canonical for everything else.
+	// The reason code keeps its old spelling: API codes are stable (docs/PRODUCT_TERMINOLOGY.md).
+	callback := canonical
+	if provider == "google" {
+		if !st.SiteDomainUsable || strings.TrimSpace(st.CustomDomain) == "" {
+			return false, "needs_hotel_domain"
+		}
+		callback = strings.ToLower(strings.TrimSpace(st.CustomDomain))
 	}
 	for _, h := range callbackHosts {
-		if strings.ToLower(h) == canonical {
+		if strings.ToLower(h) == callback {
 			return true, ""
 		}
 	}

@@ -5,7 +5,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { api, ListResp, SocialOAuthProvider } from "@/lib/api";
+import { api, ListResp, SocialOAuthProvider, SocialSetupStep } from "@/lib/api";
 import { PROVIDER_CONSOLE_HELP, PROVIDER_LABELS, PortalCallbackURL, keepAvailable, offeredWords } from "@/lib/portal-https";
 import { DEFAULT_SCOPES, extraScopes } from "@/lib/social-scopes";
 import { PageShell, PageHeader } from "@/components/ui/page";
@@ -64,6 +64,42 @@ function providerExtras(f: FormState): Record<string, string> {
   if (f.provider === "microsoft") return { tenant: f.tenant.trim() };
   if (f.provider === "apple") return { team_id: f.team_id.trim(), key_id: f.key_id.trim() };
   return {};
+}
+
+const STEP_STATE: Record<SocialSetupStep["state"], { mark: string; label: string; className: string }> = {
+  ok: { mark: "✓", label: "Done", className: "text-success" },
+  todo: { mark: "!", label: "To do", className: "text-warning" },
+  manual: { mark: "?", label: "Only Google can confirm this", className: "text-muted-foreground" },
+};
+
+/** Google needs the Site's own project, domain and certificate. This says which parts this appliance verified. */
+function GoogleSetupChecklist({ steps }: { steps: SocialSetupStep[] }) {
+  return (
+    <fieldset className="space-y-2" aria-label="Google setup checklist">
+      <legend className="text-label">Google setup</legend>
+      <p className="text-xs text-muted-foreground">
+        Your Site owns its Google Cloud project, its OAuth client and its portal domain; this appliance signs your clients in
+        itself and nothing about them goes through OneGate Central. Items marked “?” cannot be checked from here.
+      </p>
+      <ul className="space-y-2">
+        {steps.map((s) => {
+          const st = STEP_STATE[s.state];
+          return (
+            <li key={s.id} className="flex gap-2 rounded-md border border-border px-3 py-2 text-sm">
+              <span className={`mt-0.5 w-4 shrink-0 text-center font-semibold ${st.className}`} aria-label={st.label} title={st.label}>{st.mark}</span>
+              <div className="min-w-0">
+                <div className="font-medium">{s.title}</div>
+                {s.detail && <div className="break-words text-xs text-muted-foreground">{s.detail}</div>}
+                {s.href && s.state === "todo" && (
+                  <Link className="text-xs underline" href={s.href}>Open Portal HTTPS</Link>
+                )}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </fieldset>
+  );
 }
 
 export default function SocialProvidersPage() {
@@ -344,6 +380,8 @@ export default function SocialProvidersPage() {
             </>
           )}
         </div>
+
+        {f.provider === "google" && editing?.setup && editing.setup.length > 0 && <GoogleSetupChecklist steps={editing.setup} />}
 
         <fieldset className="space-y-2">
           <legend className="text-label">Callback URLs</legend>

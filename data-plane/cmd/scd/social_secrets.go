@@ -42,7 +42,42 @@ const (
 	reasonCallbackNotRegd    = "social_callback_not_registered"
 	reasonProviderNotReady   = "social_provider_not_configured"
 	reasonProviderNotEnabled = "social_provider_not_enabled"
+	// Google only: the Site has no portal domain of its own that is verified and has a certificate installed.
+	reasonNeedsSiteDomain = "social_needs_site_domain"
 )
+
+// requiresSiteDomain reports whether a provider's redirect address must be on a domain the SITE owns. Google accepts a
+// redirect address only on a domain that the owner of the Google Cloud project verified in Search Console, and each Site
+// owns its own project, so OneGate's names (the shared Client Portal name, an appliance's technical hostname) can never
+// qualify. The Client's browser reaches the Site's domain on this appliance (its local DNS answers it, its certificate
+// is served by name), so no other system is in the path.
+func requiresSiteDomain(provider string) bool { return provider == "google" }
+
+// siteDomainProvider is implemented by the portal-TLS agent: the Site's own portal domain while it is verified and its
+// certificate is installed and valid ("" otherwise).
+type siteDomainProvider interface{ SiteDomain() string }
+
+func (a *portalTLSAgent) SiteDomain() string {
+	st := a.State()
+	if st.CustomDomain == "" || st.CustomDomainStatus != "VERIFIED" {
+		return ""
+	}
+	for _, h := range st.Hostnames {
+		if h == st.CustomDomain {
+			return st.CustomDomain
+		}
+	}
+	return ""
+}
+
+// siteDomain is the Site's own usable portal domain. A portal view that does not know the notion (test doubles) treats
+// its canonical name as the Site's domain, which is how those tests were written; the real agent always answers.
+func (s *server) siteDomain(canonical string) string {
+	if p, ok := s.socialPortal.(siteDomainProvider); ok {
+		return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(p.SiteDomain())), ".")
+	}
+	return canonical
+}
 
 // The portal HTTPS state (active, canonical hostname) from the portal-TLS subsystem; the default reports not active, which hides every real provider (the HTTP fallback).
 type portalHosts interface {
@@ -321,9 +356,19 @@ func (s *server) offerSocial(provider, devRedirect string) socialOffer {
 	if !active {
 		return socialOffer{reason: reasonHTTPFallback}
 	}
+	// The host the provider sends the browser back to: the portal's canonical name, except for a provider that needs a
+	// domain the Site owns, which uses the Site's own portal domain whatever the canonical name is (the shared Client
+	// Portal name stays canonical for everything else). The callback needs no cookie, so it may arrive on that host.
+	host := canonical
+	if requiresSiteDomain(provider) {
+		host = s.siteDomain(canonical)
+		if host == "" {
+			return socialOffer{reason: reasonNeedsSiteDomain}
+		}
+	}
 	registered := false
 	for _, h := range set.hosts[provider] {
-		if h == canonical {
+		if h == host {
 			registered = true
 			break
 		}
@@ -331,7 +376,7 @@ func (s *server) offerSocial(provider, devRedirect string) socialOffer {
 	if !registered {
 		return socialOffer{reason: reasonCallbackNotRegd}
 	}
-	return socialOffer{ok: true, provider: p, redirectURI: "https://" + canonical + socialCallbackPath}
+	return socialOffer{ok: true, provider: p, redirectURI: "https://" + host + socialCallbackPath}
 }
 
 const maxSocialSecretBytes = 64 << 10 // an Apple .p8 key is ~250 bytes; anything this large is not a secret

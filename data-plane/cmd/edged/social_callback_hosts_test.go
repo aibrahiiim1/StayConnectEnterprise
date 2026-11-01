@@ -11,7 +11,7 @@ import (
 
 var twoHostnames = portalTLSState{
 	OneGateHostname: "abcd1234.gw.onegate.getsemantics.com", CustomDomain: "wifi.nilehotel.com", CustomDomainStatus: "VERIFIED",
-	HTTPSActive: true, CanonicalHostname: "wifi.nilehotel.com",
+	HTTPSActive: true, CanonicalHostname: "wifi.nilehotel.com", SiteDomainUsable: true,
 }
 
 func TestValidateCallbackHosts(t *testing.T) {
@@ -40,6 +40,13 @@ func TestSocialOffered(t *testing.T) {
 		CanonicalHostname: "abcd1234.gw.onegate.getsemantics.com"}
 	fallback := portalTLSState{OneGateHostname: "abcd1234.gw.onegate.getsemantics.com", FallbackReason: "NO_CERTIFICATE"}
 	both := []string{"abcd1234.gw.onegate.getsemantics.com", "wifi.nilehotel.com"}
+	shared := "portal.onegate.getsemantics.com"
+	sharedCanonical := portalTLSState{OneGateHostname: "abcd1234.gw.onegate.getsemantics.com", SharedHostname: shared, HTTPSActive: true,
+		CanonicalHostname: shared, CustomDomain: "wifi.nilehotel.com", CustomDomainStatus: "VERIFIED", SiteDomainUsable: true}
+	sharedNoCert := sharedCanonical
+	sharedNoCert.SiteDomainUsable = false
+	sharedOnly := portalTLSState{OneGateHostname: "abcd1234.gw.onegate.getsemantics.com", SharedHostname: shared, HTTPSActive: true,
+		CanonicalHostname: shared}
 	for _, tc := range []struct {
 		name, provider string
 		enabled        bool
@@ -50,8 +57,14 @@ func TestSocialOffered(t *testing.T) {
 	}{
 		{"facebook on the OneGate hostname", "facebook", true, []string{"abcd1234.gw.onegate.getsemantics.com"}, onegateCanonical, true, ""},
 		{"apple on the hotel domain", "apple", true, both, twoHostnames, true, ""},
-		{"google on the hotel domain", "google", true, []string{"wifi.nilehotel.com"}, twoHostnames, true, ""},
-		{"google needs the hotel domain", "google", true, both, onegateCanonical, false, "needs_hotel_domain"},
+		{"google on the Site's own portal domain", "google", true, []string{"wifi.nilehotel.com"}, twoHostnames, true, ""},
+		{"google needs the Site's own portal domain", "google", true, both, onegateCanonical, false, "needs_hotel_domain"},
+		// The shared Client Portal name stays canonical; Google is still offered on the Site's own verified domain.
+		{"google on the Site's domain while the shared name is canonical", "google", true, []string{"wifi.nilehotel.com"}, sharedCanonical, true, ""},
+		{"google: the shared name ticked is not enough", "google", true, []string{"portal.onegate.getsemantics.com"}, sharedCanonical, false, "callback_not_registered"},
+		{"google: the Site's domain verified but its certificate not usable yet", "google", true, []string{"wifi.nilehotel.com"}, sharedNoCert, false, "needs_hotel_domain"},
+		{"google: no portal domain at all", "google", true, []string{"portal.onegate.getsemantics.com"}, sharedOnly, false, "needs_hotel_domain"},
+		{"facebook keeps using the shared canonical name", "facebook", true, []string{"portal.onegate.getsemantics.com"}, sharedCanonical, true, ""},
 		{"disabled", "microsoft", false, both, twoHostnames, false, "disabled"},
 		{"http fallback hides every provider", "facebook", true, both, fallback, false, "http_fallback"},
 		{"canonical not registered", "microsoft", true, []string{"abcd1234.gw.onegate.getsemantics.com"}, twoHostnames, false, "callback_not_registered"},

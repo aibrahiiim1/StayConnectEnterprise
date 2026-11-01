@@ -5,7 +5,7 @@ It records the Product-Owner decisions this delivery implements and the technica
 authorisation. Where this document and code disagree, the code is wrong.
 
 > **Terminology (D71, 2026-10-24).** OneGate serves hotels, offices and campuses, so where this contract says
-> *hotel domain* or *hotel portal domain* the screens say **portal domain** (appliance) and **custom domain**
+> *portal domain* or *portal domain* the screens say **portal domain** (appliance) and **custom domain**
 > (Central), and the examples on `nilehotel.com` are illustrations only. The identifiers `custom_domain` and
 > `needs_hotel_domain` are unchanged. Nothing else in this contract changes.
 
@@ -16,9 +16,9 @@ authorisation. Where this document and code disagree, the code is wrong.
 2. Every appliance has its **own hostname, its own publicly trusted certificate and its own private key**,
    generated on the appliance and never leaving it.
 3. Client Portal authentication, sessions, entitlements and guest traffic stay **local to the appliance**.
-4. Each hotel **owns** its Google, Apple, Microsoft and Facebook applications (registration, payment, secrets).
+4. Each Site **owns** its Google, Apple, Microsoft and Facebook applications (registration, payment, secrets).
    OneGate never owns or operates them.
-5. The Admin Console gives the hotel **self-service** configuration of provider credentials, callback URLs and
+5. The Admin Console gives the Site **self-service** configuration of provider credentials, callback URLs and
    enable/disable.
 6. **HTTP fallback**: when HTTPS is unavailable the existing HTTP portal keeps manual code entry working; emails
    then carry the **code only** (no link); administrators are alerted; HTTPS recovers automatically.
@@ -31,10 +31,10 @@ authorisation. Where this document and code disagree, the code is wrong.
 | Appliance hostname | `<label>.gw.onegate.getsemantics.com`, label = 8 chars `[a-z][a-z0-9]{7}`, random, permanent, never reused | Central |
 | Its public A record | `<label>.gw.onegate.getsemantics.com A <portal address>` (TTL 300, DNS-only, never proxied, no AAAA) | Central |
 | ACME challenge (OneGate name) | `_acme-challenge.<label>.gw.onegate.getsemantics.com TXT` (temporary) | Central |
-| ACME challenge delegate (hotel domain) | `<challenge_label>.acme.onegate.getsemantics.com TXT` (temporary), challenge_label = 16 `[a-z0-9]` | Central |
+| ACME challenge delegate (portal domain) | `<challenge_label>.acme.onegate.getsemantics.com TXT` (temporary), challenge_label = 16 `[a-z0-9]` | Central |
 | CAA | `onegate.getsemantics.com CAA 0 issue "letsencrypt.org; accounturi=<OneGate ACME account URL>"`, `0 issuewild ";"` -- on the base, never on the `getsemantics.com` apex | Central (explicit action) |
 | Write boundary | Central writes and deletes records **only under the base**; any other name in the zone is refused by the DNS provider code | Central |
-| Hotel portal domain | e.g. `wifi.nilehotel.com` (a subdomain of a domain the hotel owns; never under the base, never an apex) | Hotel |
+| Site portal domain | e.g. `wifi.nilehotel.com` (a subdomain of a domain the Site owns; never under the base, never an apex) | Site |
 | **Shared Client Portal name** (since 2026-11-01, §16) | `portal.onegate.getsemantics.com`, one name for every appliance | OneGate (Product Owner publishes its two records once) |
 | Its public A record | `portal.onegate.getsemantics.com A 10.255.255.1` (the fleet-wide portal address, DNS-only, never proxied, no AAAA) | Product Owner |
 | Its ACME challenge | `_acme-challenge.portal.onegate.getsemantics.com TXT` (temporary), written directly by Central: the name lies under the base, so no delegation exists | Central |
@@ -57,7 +57,7 @@ RFC 5737 §4 says the documentation blocks "are not for local use". The portal t
   present on the appliance (including Docker bridges).
 
 Why one fixed address and not each network's gateway: the hostname must resolve identically from public DNS
-(guests' own resolvers, Private DNS, the hotel's DNS in external-DNS mode), and public DNS gives one answer.
+(guests' own resolvers, Private DNS, the Site's DNS in external-DNS mode), and public DNS gives one answer.
 
 ## 3. Certificate lifecycle
 
@@ -82,10 +82,10 @@ appliance (scd)                                  Central (ctrlapi)              
 * **Limits**: Central allows at most one open order per (appliance, hostname), 10 orders per appliance per day,
   and at most `weekly_new_limit` (default 45 < Let's Encrypt's 50) *new* `gw.onegate.getsemantics.com` certificates per
   rolling 7 days; further new orders wait QUEUED. A renewal (same hostname previously issued) is not new.
-  Hotel-domain certificates count against the hotel's own registered domain, not `getsemantics.com`.
+  Portal-domain certificates count against the Site's own registered domain, not `getsemantics.com`.
 * **Validation by Central before ordering**: the CSR is a valid P-256 or RSA≥2048 CSR, self-signed, naming
-  exactly one DNS name, which is the appliance's own OneGate hostname or its VERIFIED hotel domain.
-* **Revocation**: on appliance decommission/revoke/delete (the central lifecycle path), on hotel-domain removal,
+  exactly one DNS name, which is the appliance's own OneGate hostname or its VERIFIED portal domain.
+* **Revocation**: on appliance decommission/revoke/delete (the central lifecycle path), on portal-domain removal,
   and by a platform operator from the Central console. Revocation also deletes the DNS A record when the
   appliance is retired.
 * **Secrets on Central**: `/etc/stayconnect/portal-tls/acme-account.key` (created on first use) and
@@ -94,9 +94,9 @@ appliance (scd)                                  Central (ctrlapi)              
 * **Staging first**: `portal_tls_settings.acme_directory` starts at `staging`; a platform operator switches to
   `production` from the console after a staging issuance has been proven.
 
-### 3.1 Hotel portal domain (delegated issuance)
+### 3.1 Site portal domain (delegated issuance)
 
-The hotel enters `wifi.nilehotel.com` in the Admin Console. Central returns three records the hotel publishes:
+The Site enters `wifi.nilehotel.com` in the Admin Console. Central returns three records the Site publishes:
 
 | Record | Purpose |
 |---|---|
@@ -114,7 +114,7 @@ daily; a broken delegation marks the domain FAILED, stops renewals and alerts. R
 scd computes, every cycle:
 
 * `canonical` = the shared Client Portal name (§16) if this appliance uses it and its certificate is installed and
-  valid; else the hotel domain if VERIFIED and its certificate is installed and valid; else the OneGate hostname if
+  valid; else the portal domain if VERIFIED and its certificate is installed and valid; else the OneGate hostname if
   its certificate is installed and valid; else none.
 * `https_active` = canonical exists, the portal address is up on `ogportal0`, and the canonical certificate is
   valid for at least 5 more minutes.
@@ -137,15 +137,32 @@ Requests over TLS for a portal hostname that is not canonical are redirected to 
 captive API (answered on every portal hostname: API clients need not follow redirects) and
 `/auth/social/callback` (the attempt's stored redirect URI decides, see §5).
 
-## 5. Social sign-in (customer-owned applications)
+## 5. Social sign-in (Site-owned applications)
+
+**Every Site owns its provider applications** (its Google Cloud project, OAuth client and portal domain). The appliance
+authenticates its own Clients: the redirect, the code exchange, the ID-token check, the Client identity, the session and
+the Entitlement all happen on the appliance. OneGate Central never proxies the sign-in, never receives an ID token, a
+code or a Client's data, and never holds a Site's OAuth credentials (it has no social sign-in code at all; two source
+guards enforce that, `cmd/scd/social_isolation_test.go`). Central's only part is the one it already had, obtaining the
+HTTPS certificate of the Site's own portal domain through its DNS-delegated issuance (section 3.1), which carries
+no Client data and is not in the sign-in path.
 
 * **Callback URL**: `https://<portal hostname>/auth/social/callback`. The Admin Console shows it for the
-  OneGate hostname and, when one exists, the hotel domain; the hotel ticks which ones it registered in its app
+  OneGate hostname and, when one exists, the portal domain; the Site ticks which ones it registered in its app
   (`social_oauth_providers.callback_hosts`). A provider is **offered only while HTTPS is active and the
   canonical hostname is in its callback_hosts**.
-* **Google** accepts only callback domains whose top private domain the app owner verified in Search Console,
-  so Google requires the hotel portal domain. Apple (no domain file needed — Apple's own documentation),
-  Microsoft and Facebook work on the OneGate hostname.
+* **Google** accepts only callback domains whose top private domain the owner of the Google project verified in Search
+  Console (Google's documentation: brand and domain verification, authorized domains, redirect URIs must be HTTPS and not
+  a raw IP). Each Site owns its project, so no OneGate name can ever qualify. **Google therefore always returns to the
+  Site's own portal domain** (a verified portal domain whose certificate is installed), *whatever the canonical name is*:
+  the shared Client Portal name stays canonical for everything else, and the Google sign-in starts on it and comes back
+  on the Site's domain (the callback needs no cookie, section "Attempt binding"). A Site without a portal domain of its
+  own does not offer Google (`needs_hotel_domain`, shown as "Google needs your portal domain"). Apple (no domain file
+  needed — Apple's own documentation), Microsoft and Facebook work on the canonical name.
+* **Setup checklist** (Admin Console, Sign-in, Social providers, Google): what the appliance verified itself
+  (portal domain verified with a certificate, HTTPS active, Client ID shape, secret stored, callback marked registered)
+  and what only Google can confirm (redirect URI added, domain verified in Search Console, consent screen published).
+  The latter are shown as unchecked, never as done. Operator guide: `docs/runbooks/GOOGLE_SIGN_IN_SITE_SETUP.md`.
 * **Secrets** are write-only, sealed by scd (AES-256-GCM under `social_dek.key`, AAD = tenant, provider,
   generation) into `iam_v2.social_provider_secret_generations`; the plaintext column is cleared. scd reloads
   providers when edged signals a change and every 60 s.
@@ -157,9 +174,11 @@ captive API (answered on every portal hostname: API clients need not follow redi
   nonce, expiry, signature against Google's JWKS) and requires `email_verified`.
 * **No cookies are needed** for the flow (Apple returns with a cross-site form POST; captive browsers drop
   cookies).
-* **Embedded browsers**: Google and Facebook refuse sign-in inside an Android WebView (the old captive login
-  window, user agent containing `; wv)`). There the portal sends those two providers to an "open in your
-  browser" page with the portal address; other methods stay available. The captive API advertises
+* **Embedded browsers**: Google and Facebook refuse sign-in inside an app-controlled view (`disallowed_useragent`):
+  an Android WebView (user agent containing `; wv)`) and, on iPhone and iPad, any WebKit view that is not Safari or
+  a browser app, which is the captive-network sheet iOS opens by itself (no `Safari/` token) or an app's in-app browser.
+  There the portal sends those two providers to an "open in your browser" page with the portal address;
+  other methods stay available. The captive API advertises
   `x-android-use-custom-tabs` so Android 12+ (Captive Portal Login module ≥ 361335020, January 2026) opens the
   portal in a real Chrome Custom Tab, where Google sign-in is allowed.
 * **Pre-sign-in reachability**: each enabled provider's fixed sign-in domains are allowed (TCP 443 only) in the
@@ -183,7 +202,7 @@ while HTTPS is active (§4). A device whose TLS check of the API fails falls bac
 
 * `POST /v1/appliance/portal-tls/sync` — body `{"portal_ip":"10.255.255.1","custom_domain":"wifi.nilehotel.com"|null}`.
   Idempotent: allocates the hostname if none, upserts the A record when the address changed, registers /
-  re-checks / removes the hotel domain to match `custom_domain`. Response:
+  re-checks / removes the portal domain to match `custom_domain`. Response:
   `{"available":bool,"hostname":"…","dns_state":"PENDING|SYNCED|ERROR","custom_domain":{"fqdn","status","records":[{"type","name","value"}],"error"}|null,"certificates":[{"hostname","kind","order_id","status","serial","not_after","renew_after","revoked","error"}]}`.
   `available=false` means Central has no DNS/ACME configuration yet (the appliance reports `NOT_CONFIGURED`).
 * `POST /v1/appliance/portal-tls/orders` — `{"hostname","csr_pem"}` → `202 {"order_id","status"}`; 409 when an
@@ -196,13 +215,13 @@ they carry hostnames, the portal address, CSRs and certificate status — no gue
 ## 8. Admin Console and Central console
 
 * Appliance Admin Console, **Network → Portal HTTPS**: hostname(s), HTTPS state and reason, certificates
-  (expiry, renew-after), portal address (edit → network apply), hotel domain (enter → records to publish with
+  (expiry, renew-after), portal address (edit → network apply), portal domain (enter → records to publish with
   copy buttons → Check now → status; Remove), Renew now. Permissions `portal_https.read` / `portal_https.manage`
   (manage requires step-up).
 * **Sign-in → Social providers**: per provider, the callback URLs for each available hostname with copy buttons
   and the "registered in my app" ticks; secret fields write-only; status line (offered / why not).
 * Central console, **Portal certificates**: settings (ACME directory, contact, zone, weekly limit), DNS token
-  (write-only), Test DNS access, Apply CAA, fleet table (appliance, hostname, address, DNS state, hotel domain,
+  (write-only), Test DNS access, Apply CAA, fleet table (appliance, hostname, address, DNS state, portal domain,
   certificate expiry, renew-after, last error), Revoke.
 
 ## 9. Security properties
@@ -218,13 +237,12 @@ they carry hostnames, the portal address, CSRs and certificate status — no gue
 ## 10. Known limitations (documented, accepted)
 
 * Android older than 7.1.1 does not trust ISRG Root X1 and shows a certificate warning on the HTTPS portal.
-* Google sign-in needs a hotel portal domain as the canonical name; Facebook and Google are unavailable inside Android
-  WebView login windows. **While the shared Client Portal name is canonical (§16) Google sign-in is not offered**: a
-  hotel cannot verify OneGate's domain in its own Google app. Making a verified hotel domain win over the shared name
-  for hotels that need Google is a Product Owner decision.
-* A site whose own DNS server applies DNS-rebinding protection must allow `onegate.getsemantics.com` (and its hotel
+* Google sign-in needs the Site's own portal domain (section 5); Facebook and Google are unavailable inside app-controlled
+  browser views (Android WebView, the iOS captive-network sheet) and are reached through the system browser. Verified
+  against Google's documentation only; a real Google round trip with a Site-owned project has **not** been run.
+* A Site whose own DNS server applies DNS-rebinding protection must allow `onegate.getsemantics.com` (and its Site's portal
   domain) to resolve to a private address.
-* With external DHCP, the hotel's DHCP server must hand out option 114 itself if wanted; probes still work.
+* With external DHCP, the Site's DHCP server must hand out option 114 itself if wanted; probes still work.
 * **On the HTTP fallback option 114 is not emitted at all.** Until 2026-11-01 it carried `http://<gateway>:8380/`. A
   capture on the test appliance (VLAN 90) showed an iPhone and an Android 11 phone each request option 114, receive that
   plain-HTTP value and then send no captive request of any kind: no API fetch (RFC 8908 requires HTTPS, so the value is
@@ -354,14 +372,14 @@ still reported.
 ## 16. One shared Client Portal name for every appliance (Product Owner decision, 2026-11-01)
 
 **Decision.** Every appliance's guests use one permanent public name, `portal.onegate.getsemantics.com`.
-`central.onegate.getsemantics.com` stays Central's alone. Each guest reaches its own hotel's appliance, with complete
+`central.onegate.getsemantics.com` stays Central's alone. Each Client reaches its own Site's appliance, with complete
 site isolation, and no guest traffic passes through Central.
 
 **How a guest reaches its own appliance.** The name resolves, in public DNS and in each appliance's own resolver, to
 the fleet-wide portal address `10.255.255.1` (§2.1). That address exists only on each appliance's `ogportal0` and is
-never routed: a guest's packets for it go to the guest's default gateway, which is that hotel's appliance, and are
+never routed: a guest's packets for it go to the guest's default gateway, which is that Site's appliance, and are
 answered there (TCP 443 → portald :8343, TCP 80 → :8380). The same public answer therefore lands on a different, local
-appliance at every hotel. The appliance answers the name locally as well, so a resolver that drops private answers
+appliance at every Site. The appliance answers the name locally as well, so a resolver that drops private answers
 (DNS-rebinding protection) is not in the path for guests using the appliance's DNS. The two-NIC architecture is
 unchanged: the address is answered on client networks only, never on the WAN/management interface.
 
@@ -369,14 +387,14 @@ unchanged: the address is answered on client networks only, never on the WAN/man
 certificate naming exactly two names: the shared name and its permanent `<label>.gw.onegate.getsemantics.com`. Central refuses any
 other name set (`ParseAndCheckSharedCSR`). Consequences:
 
-* No private key is ever shared between hotels or held by Central; one appliance's certificate is revoked alone
+* No private key is ever shared between Sites or held by Central; one appliance's certificate is revoked alone
   (retirement, operator revocation) and the others keep theirs.
 * Every appliance's identifier set is unique, so Let's Encrypt's limit of 5 certificates per exact set of names per
   week never couples two appliances; ARI renewals are exempt from the CA's limits; new certificates count against
   Central's weekly cap (§3), counted per appliance (`counts_new` is now decided per appliance).
 * Renewal is automatic and identical to the OneGate hostname's (ARI `renew_after`, a new key every time).
 * What a shared name cannot prevent, and is accepted: any appliance holds a valid certificate for the name, so a rogue
-  device that is itself a hotel's gateway could present it. It could do so only to guests already routed through it.
+  device that is itself a Site's gateway could present it. It could do so only to Clients already routed through it.
 
 **Challenge.** The shared name lies under Central's name base, so Central answers its DNS-01 challenge directly at
 `_acme-challenge.portal.onegate.getsemantics.com` with the `getsemantics.com` token (several appliances' values may
@@ -393,7 +411,7 @@ not reach any other. Such an appliance keeps its own hostname, as before.
 
 **Appliance behaviour (scd).** The shared name is targeted while Central offers it (sync answer `shared_portal`); it is
 ordered only once the OneGate hostname is known and public DNS is ready; it becomes canonical as soon as its
-certificate is installed (preferred over a hotel domain and the OneGate hostname); a hotel domain and the OneGate
+certificate is installed (preferred over a portal domain and the OneGate hostname); a portal domain and the OneGate
 hostname stay served and redirect to it. An unreachable Central never takes it down; Central withdrawing it (address
 changed, feature switched off) removes it. Option 114 becomes `https://portal.onegate.getsemantics.com/captive-portal/api`
 and the probes redirect to it automatically, because both already follow the canonical name.
@@ -401,7 +419,7 @@ and the probes redirect to it automatically, because both already follow the can
 **Configuration.** `CTRLAPI_PORTAL_SHARED_HOSTNAME` (default `portal.onegate.getsemantics.com`; `off` switches the
 feature off) and `CTRLAPI_PORTAL_SHARED_ADDRESS` (default `10.255.255.1`, RFC 1918 only). No migration on either side:
 the shared certificate is a OneGate-kind row whose hostname is the shared name. The shared name can never be
-registered as a hotel's own domain.
+registered as a Site's own domain.
 
 **Record the Product Owner publishes once** (zone `getsemantics.com`, DNS-only; done 2026-11-01):
 

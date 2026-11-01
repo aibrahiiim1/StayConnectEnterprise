@@ -694,6 +694,14 @@ export type Payment = {
   completed_at?: string;
 };
 
+export type SocialSetupStep = {
+  id: string;
+  state: "ok" | "todo" | "manual";
+  title: string;
+  detail?: string;
+  href?: string;
+};
+
 export type SocialOAuthProvider = {
   id: string;
   tenant_id: string;
@@ -707,6 +715,8 @@ export type SocialOAuthProvider = {
   secret_set: boolean;
   offered: boolean;
   offered_reason?: string;
+  /** Google only: what this appliance verified, what is still to do, and what only Google can confirm. */
+  setup?: SocialSetupStep[];
   tenant?: string;   // Microsoft: directory (tenant) ID, or common / organizations / consumers
   team_id?: string;  // Apple: Team ID
   key_id?: string;   // Apple: Key ID of the .p8 key

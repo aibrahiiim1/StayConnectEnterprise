@@ -150,7 +150,7 @@ export function offeredWords(reason: string | null | undefined, provider: string
 
 export const PROVIDER_CONSOLE_HELP: Record<string, string> = {
   google:
-    "Google Cloud console: verify your portal domain in Google Search Console, add that domain as an authorized domain on the OAuth consent screen, and add the callback URL of the portal domain as an authorized redirect URI. Google does not accept the OneGate hostname.",
+    "Google Cloud console: in your own project, create an OAuth client of type Web application, verify your portal domain in Google Search Console, add that domain as an authorized domain under Google Auth Platform, Branding, and add the callback URL of your portal domain as an authorized redirect URI. Google does not accept OneGate's own names.",
   apple:
     "Apple Developer: create a Services ID with Sign in with Apple, add the portal hostname under Domains and Subdomains and the callback URL under Return URLs, and create a Sign in with Apple key (.p8).",
   microsoft:

@@ -170,7 +170,7 @@ function OverviewTab({
     return (
       <Callout tone="neutral" title="Never configured — not connected to any PMS">
         This connection was added but has no live configuration, so the appliance does not contact any PMS through
-        it. Configure it on Configuration, put the configuration live, then activate it from Actions.
+        it. Configure it on Configuration, put the configuration live, then activate it from Actions. (A connection added with Add connection is put live and activated in one step.)
       </Callout>
     );
   }
