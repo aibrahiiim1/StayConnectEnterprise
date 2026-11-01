@@ -181,6 +181,28 @@ func TestCheckSharedInsideTheBase(t *testing.T) {
 	}
 }
 
+// Review finding (PR #284): a request queued before its appliance's hostname moved no longer names what is ordered.
+func TestCSRNamesExactly(t *testing.T) {
+	k, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	der := func(names ...string) []byte {
+		raw, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{DNSNames: names}, k)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	newName := "lr01ehm0.gw.onegate.getsemantics.com"
+	if !csrNamesExactly(der(DefaultSharedHostname, newName), []string{newName, DefaultSharedHostname}) {
+		t.Fatal("the same names in any order match")
+	}
+	if csrNamesExactly(der(DefaultSharedHostname, "lr01ehm0.gw.onegate.work"), []string{DefaultSharedHostname, newName}) {
+		t.Fatal("a request naming the moved hostname's old name must not match")
+	}
+	if csrNamesExactly([]byte("junk"), []string{newName}) {
+		t.Fatal("an unreadable request never matches")
+	}
+}
+
 func TestSameNames(t *testing.T) {
 	if !sameNames([]string{"a.example.com", "b.example.com"}, []string{"b.example.com", "a.example.com"}) {
 		t.Fatal("order does not matter")

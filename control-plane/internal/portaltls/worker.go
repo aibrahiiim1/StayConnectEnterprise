@@ -2,6 +2,7 @@ package portaltls
 
 import (
 	"context"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -296,6 +297,12 @@ func (s *Service) runOrder(ctx context.Context, st *Settings, prov DNSProvider, 
 			return nil, true, errors.New("the custom domain is no longer verified for this appliance")
 		}
 		challengeLabel = d.ChallengeLabel
+	}
+	// The request must still name exactly what would be ordered: an order queued before the appliance's hostname
+	// moved (migration 0064) names the old one and could only fail at finalize. Fail it now; the appliance then
+	// orders again with its current names.
+	if !csrNamesExactly(csrDER, identifiers) {
+		return nil, true, fmt.Errorf("the request does not name %v (its names changed after it was queued); a new order is needed", identifiers)
 	}
 	if err := s.acquireACME(ctx); err != nil {
 		return nil, false, err
@@ -603,4 +610,13 @@ func (s *Service) FinalizeRelease(ctx context.Context, applianceID string) error
 	}
 	defer s.releaseACME()
 	return s.processRevocations(ctx, &st, applianceID)
+}
+
+// csrNamesExactly reports whether the stored request names exactly these DNS names.
+func csrNamesExactly(csrDER []byte, names []string) bool {
+	csr, err := x509.ParseCertificateRequest(csrDER)
+	if err != nil {
+		return false
+	}
+	return sameNames(csr.DNSNames, names)
 }
