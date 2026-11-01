@@ -19,6 +19,7 @@ import { Input, Field } from "@/components/ui/input";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
+import { PackageControls } from "@/components/package-controls";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogBody,
   ConfirmDialog,
@@ -615,6 +616,12 @@ export default function GuestAccountsPage() {
             {editing && (
               <AccountForm account={editing} onSubmit={onSaveEdit} busy={busy} onCancel={() => setEditing(null)} />
             )}
+            {editing && (
+              <section className="mt-4 space-y-2 border-t border-border pt-4">
+                <h3 className="text-sm font-semibold">Packages of this account</h3>
+                <PackageControls subject={{ kind: "account", id: editing.id }} />
+              </section>
+            )}
           </DialogBody>
         </DialogContent>
       </Dialog>
@@ -685,6 +692,7 @@ export default function GuestAccountsPage() {
                 ...(removal !== "delete"
                   ? ["Its packages, usage and sign-in history are kept, and its devices' places on those packages are freed. The email address or username is free to use again: the client registers once more with “Create an account” — signing in with it no longer works."]
                   : []),
+                "This is not a data-protection erasure and is not recorded in the erasure ledger. To erase a client’s personal data, use Guest data → Erase.",
                 "This cannot be undone.",
                 "If you only want to stop it being used for now, Disable it instead — that can be reversed.",
               ]

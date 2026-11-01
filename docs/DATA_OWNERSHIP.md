@@ -248,6 +248,15 @@ restored data **before it is served**: guests are erased again, answered request
 given exists again. Procedure and checks: [BACKUP_AND_RESTORE.md](BACKUP_AND_RESTORE.md); storage failures and replacing an appliance:
 [runbooks/ERASURE_LEDGER_RECOVERY.md](runbooks/ERASURE_LEDGER_RECOVERY.md).
 
+**Removing a Client Account is not an erasure.** Admin Console → Client accounts → Remove (or Delete, for an account never used) stops
+the account being used: its devices are disconnected and it can no longer sign in. It writes **no** erasure-ledger entry, the API answer
+and the audit entry say `erasure: false`, and a restore of an earlier backup can bring the account back. To erase a person's data, use
+Guest data → Erase, which needs the ledger and its verified secondary copy and stays fail-closed (2026-11-01).
+
+**Staff End / Reset Package reasons** (`iam_v2.package_admin_actions.reason`, migration 0202) are staff notes: the staff-notes period
+removes them, and an erasure of the stay, account or Client removes them with the guest's other staff notes. The operator id beside them
+is not a person's text.
+
 **What a restore leaves aside is bounded.** The database a restore replaces is kept so the restore can be undone; it
 still holds the data erased since, so it is removed after `SET_ASIDE_DAYS` (default 14, Admin Console → Backups). An
 interrupted write leaves a `*.partial` file, removed after a day.

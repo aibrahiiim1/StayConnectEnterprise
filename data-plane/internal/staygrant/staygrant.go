@@ -239,6 +239,11 @@ func (s *Store) GrantTx(ctx context.Context, tx pgx.Tx, tenant, site string, r R
 		RETURNING id::text`,
 		tenant, site, res.Stay, res.Interface, res.PurchaseID, r.PackageRevID, svcRev,
 		r.PackageRevID, svcRev, endMode, window, dataQuota).Scan(&res.EntitlementID); err != nil {
+		// staff_ended_benefit_guard (0202): staff ended this free package for the stay; the offer list hides it, so only
+		// a stale offer reaches here.
+		if strings.Contains(err.Error(), "PKG_ENDED_BY_STAFF") {
+			return res, ErrPackageNotGrantable
+		}
 		return res, err
 	}
 	if _, err := tx.Exec(ctx, `SELECT iam_v2.apply_entitlement_transition($1,'ACTIVE',$2,'GRANT')`,

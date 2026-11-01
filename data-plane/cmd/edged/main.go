@@ -373,6 +373,8 @@ func main() {
 			// The generated-password format is a property configuration decision, so its own key rather than guest-accounts write.
 			mountResource(r, s, "account-password-settings", s.accountPasswordSettingsRoutes)
 			mountResource(r, s, "sessions", s.sessionsRoutes)
+			// Ending or resetting a whole package is its own key: disconnecting one device (sessions) is a smaller power.
+			mountResource(r, s, "package-controls", s.packageControlsRoutes)
 			// Client devices share the sessions key (same live-access state); the daily device-change limit is a
 			// configuration decision, so it sits under auth-methods.
 			r.Route("/client-devices", func(r chi.Router) {

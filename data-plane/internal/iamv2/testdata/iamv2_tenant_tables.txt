@@ -79,6 +79,7 @@ online_time_skipped_intervals
 otp_code_escrow
 otp_code_reveals
 otp_device_bindings
+package_admin_actions
 package_eligibility_rules
 package_grant_tiers
 package_settlement_mappings

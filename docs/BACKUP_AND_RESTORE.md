@@ -49,12 +49,26 @@ Erasure Ledger is always kept in two places, and the binary and UI rollback arte
 | `BACKUP_ENABLED` | **0 (off)** | 0–1 | scheduled backups on/off |
 | `BACKUP_HOUR` | 2 | 0–23 | a scheduled backup is taken at or after this hour (appliance clock) |
 | `BACKUP_EVERY_DAYS` | 1 | 1–7 | days between scheduled backups; a manual backup counts |
-| `BACKUP_KEEP` | **7** | 1–30 | scheduled + manual backups kept |
-| `SAFETY_BACKUP_KEEP` | 3 | 2–20 | protective backups kept: before a change, before a restore |
+| `BACKUP_KEEP` | **3** | 1–3 | scheduled + manual backups kept |
+| `SAFETY_BACKUP_KEEP` | **2** | 2–4 | protective backups kept: before a change, before a restore |
+| `BACKUP_REPLICATE` | **0 (local only)** | 0–1 | 1 = also copy each retained set to the secondary storage (below) |
+
+**At most five completed sets at rest** (Product Owner, 2026-10-31): `BACKUP_KEEP + SAFETY_BACKUP_KEEP ≤ 5`, checked on save, and an older
+settings file (the earlier default was 7 + 3) resolves to that cap, the regular pool giving way. A new protective set exists beside the five
+for the moment between its verification and the rotation that follows it; nothing is removed to make room for it first.
 
 Saving needs the password and is audited. **Retention is counts only** -- no age rule beside them to contradict them. Rotation keeps
-the newest of each pool, removes older sets (dump, configuration archive, note, marker) only after a newer backup verified, and **never
-touches a file that has no note**. An erased guest can remain in the oldest backup for about `BACKUP_KEEP × BACKUP_EVERY_DAYS` days;
+the newest of each pool, removes older sets (dump, configuration archive, note, marker: always the whole set) only after a newer backup
+verified, **never removes a pool's only good set** (when every newer set of the pool is broken, the newest good older one stays), and
+**never touches a file that has no note**. Earlier backups made by previous mechanisms are counted on the Backups screen and are never
+removed by rotation; removing them is the separate, confirmed action described below, so they can keep the total above five until then.
+
+**Copy to the secondary storage (optional).** With `BACKUP_REPLICATE=1`, after every verified backup and on every 15-minute pass, each file
+of every retained set is streamed to the secondary storage set up for the erasure ledger, **read back in full and compared by SHA-256**; a
+set is shown "copied" only when every file read back right, the note last. A failed copy (storage away, disk full, permission) never removes
+or blocks a local backup and is retried. Copies of sets that rotation removed locally are removed there, but only copies this appliance
+made, and only once every retained set is copied. Replacing or removing the storage setting deletes nothing there; a new storage receives
+every retained set again. Backups never need the secondary storage: local-only is the default and is complete. An erased guest can remain in the oldest backup for about `BACKUP_KEEP × BACKUP_EVERY_DAYS` days;
 the restore re-applies the ledger so they are erased again ([privacy/ERASURE_LEDGER.md](privacy/ERASURE_LEDGER.md)). Each day every kept
 file is re-checked against the digest in its note; a mismatch is shown on the Backups screen while other backups remain.
 
@@ -219,10 +233,11 @@ dump through `EDGE_PRECHANGE_BACKUP`; the public-schema migrations were applied 
 ### Policy
 
 - Schedule: **the hotel's choice, off by default** (see above). Protective backups are always taken.
-- Retention: counts, in two pools (7 scheduled+manual, 3 protective, by default). No age rule.
-- Off-box copies go to **site-controlled** storage (NAS/SFTP on the site network) -- never to StayConnect cloud storage (PII boundary,
-  [DATA_OWNERSHIP.md](DATA_OWNERSHIP.md)). The Erasure Ledger's secondary storage is mandatory for erasure; backups themselves stay on
-  the appliance until the hotel downloads them (decision D-B).
+- Retention: counts, in two pools (3 scheduled+manual, 2 protective, by default), at most five sets in all. No age rule.
+- Off-box copies go to **site-controlled** storage (a mounted USB/NAS share, SFTP or a site-owned S3-compatible bucket) -- never to OneGate
+  Central (PII boundary, [DATA_OWNERSHIP.md](DATA_OWNERSHIP.md)). The Erasure Ledger's secondary storage is mandatory for erasure; backups
+  stay on the appliance unless the hotel switches on the copy (`BACKUP_REPLICATE`, 2026-10-31, superseding decision D-B's "until the hotel
+  downloads them" for hotels that choose it).
 - ~~HA pairs~~ **NOT APPLICABLE AND NOT IMPLEMENTABLE TODAY.** There is no HA: decision ARCH-04 is ACTIVE.
 
 ### The `public` tables 0048 creates and 0093 drops -- what a restore must know

@@ -59,8 +59,24 @@ export function ScheduledBackupsCard({ writable }: { writable: boolean }) {
     return raw === undefined || raw.trim() === "" ? (byKey[key]?.value ?? 0) : Number(raw);
   };
   const dirty = fields.some((x) => valueOf(x.key) !== x.value);
-  const outOfRange = fields.some((x) => { const v = valueOf(x.key); return !Number.isFinite(v) || v < x.min || v > x.max; });
+  // The two pools together are capped (five sets, PO policy); the cap comes from the appliance, so an older one is not judged by it.
+  const maxTotal = d?.retention?.max_total;
+  const overTotal = Boolean(maxTotal && byKey.BACKUP_KEEP && byKey.SAFETY_BACKUP_KEEP
+    && valueOf("BACKUP_KEEP") + valueOf("SAFETY_BACKUP_KEEP") > maxTotal);
+  const outOfRange = overTotal || fields.some((x) => { const v = valueOf(x.key); return !Number.isFinite(v) || v < x.min || v > x.max; });
   const enabled = valueOf("BACKUP_ENABLED") === 1;
+  const replicate = valueOf("BACKUP_REPLICATE") === 1;
+  const [copying, setCopying] = useState(false);
+  const copyState = new Map((d?.mirror?.sets ?? []).map((s) => [s.name, s]));
+
+  async function copyNow() {
+    setCopying(true); setErr(null);
+    try {
+      // scd starts the copy and answers at once; the table shows each set as it is read back.
+      await api.post("/backups/mirror/run", {});
+      await load();
+    } catch (e) { setErr(e instanceof ApiError ? e.message : errMsg(e)); } finally { setCopying(false); }
+  }
 
   async function save({ password }: { password: string }) {
     setSaveErr(null);
@@ -136,8 +152,25 @@ export function ScheduledBackupsCard({ writable }: { writable: boolean }) {
                 {enabled ? "Scheduled backups are on" : "Scheduled backups are off"}
               </label>
             </div>
+            {byKey.BACKUP_REPLICATE && (
+              <div className="space-y-1">
+                <div className="flex items-center gap-3">
+                  <Switch
+                    id="backup-replicate"
+                    label="Copy backups to the secondary storage"
+                    checked={replicate}
+                    disabled={!writable}
+                    onCheckedChange={(v) => setEdits((m) => ({ ...m, BACKUP_REPLICATE: v ? "1" : "0" }))}
+                  />
+                  <label htmlFor="backup-replicate" className="text-emphasis">
+                    {replicate ? "Local and secondary storage" : "Local only"}
+                  </label>
+                </div>
+                <p className="text-caption text-muted-foreground">{byKey.BACKUP_REPLICATE.explains}</p>
+              </div>
+            )}
             <div className="grid gap-5 sm:grid-cols-2">
-              {fields.filter((x) => x.key !== "BACKUP_ENABLED").map((x) => (
+              {fields.filter((x) => x.key !== "BACKUP_ENABLED" && x.key !== "BACKUP_REPLICATE").map((x) => (
                 <SettingField
                   key={x.key}
                   label={x.label}
@@ -152,6 +185,11 @@ export function ScheduledBackupsCard({ writable }: { writable: boolean }) {
                 />
               ))}
             </div>
+            {overTotal && (
+              <p className="text-sm text-destructive">
+                At most {maxTotal} backups are kept in all: backups kept and safety backups kept add up to {valueOf("BACKUP_KEEP") + valueOf("SAFETY_BACKUP_KEEP")}.
+              </p>
+            )}
             {writable && dirty && (
               <div className="flex flex-wrap gap-2">
                 <Button disabled={outOfRange} onClick={() => { setSaveErr(null); setSaveOpen(true); }}>Save backup settings</Button>
@@ -161,10 +199,34 @@ export function ScheduledBackupsCard({ writable }: { writable: boolean }) {
           </div>
         )}
 
+        {d?.retention && (
+          <p className="text-sm text-muted-foreground">
+            At most {d.retention.max_total} backups are kept: {d.retention.regular} scheduled or manual and {d.retention.protective} taken
+            before a change. A new one is verified before an older one is removed.
+            {d.retention.held > 0 ? ` ${d.retention.held} earlier backup${d.retention.held === 1 ? " is" : "s are"} kept as well: they are never removed automatically (see below).` : ""}
+          </p>
+        )}
+
+        {d?.mirror && d.mirror.mode === "local_and_secondary" && (
+          <Callout
+            tone={d.mirror.state === "ok" ? "success" : d.mirror.state === "pending" ? "info" : "warning"}
+            title={d.mirror.state === "ok" ? "Backups copied to the secondary storage" : "Copy to the secondary storage"}
+          >
+            {d.mirror.message}
+            {d.mirror.last_ok ? ` Last complete copy ${formatDate(d.mirror.last_ok)}.` : ""}
+            {d.mirror.running ? " Copying now: refresh to see each backup as it is read back." : ""}
+            {writable && d.mirror.state !== "ok" && d.mirror.state !== "no_destination" && (
+              <span className="mt-2 block">
+                <Button size="sm" variant="secondary" disabled={copying} onClick={() => void copyNow()}>{copying ? "Copying…" : "Copy now"}</Button>
+              </span>
+            )}
+          </Callout>
+        )}
+
         {d && d.backups.length > 0 && (
           <div className="overflow-hidden rounded-md border border-border">
             <Table label="Backups taken" density="compact">
-              <THead><TR><TH>Taken</TH><TH>Kind</TH><TH numeric>Size</TH><TH>Restorable</TH><TH numeric className="hidden sm:table-cell">Ledger entries</TH></TR></THead>
+              <THead><TR><TH>Taken</TH><TH>Kind</TH><TH numeric>Size</TH><TH>Restorable</TH><TH numeric className="hidden sm:table-cell">Ledger entries</TH>{d.mirror?.mode === "local_and_secondary" && <TH>Copy</TH>}</TR></THead>
               <TBody>
                 {d.backups.map((b) => (
                   <TR key={b.name}>
@@ -176,6 +238,13 @@ export function ScheduledBackupsCard({ writable }: { writable: boolean }) {
                     <TD numeric>{mb(b.size_bytes)}</TD>
                     <TD nowrap><StatusBadge tone={b.restorable ? "ok" : "err"}>{b.restorable ? "Yes" : "No"}</StatusBadge></TD>
                     <TD numeric className="hidden sm:table-cell">{b.ledger_seq}</TD>
+                    {d.mirror?.mode === "local_and_secondary" && (
+                      <TD nowrap title={copyState.get(b.name)?.error ?? undefined}>
+                        <StatusBadge tone={copyState.get(b.name)?.state === "copied" ? "ok" : copyState.get(b.name)?.state === "failed" ? "err" : "warn"}>
+                          {copyState.get(b.name)?.state === "copied" ? "Copied, read back" : copyState.get(b.name)?.state === "failed" ? "Failed" : "Pending"}
+                        </StatusBadge>
+                      </TD>
+                    )}
                   </TR>
                 ))}
               </TBody>

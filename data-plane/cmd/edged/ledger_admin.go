@@ -4,6 +4,7 @@ package main
 // Credentials travel one way (browser to scd) and are never returned or audited.
 
 import (
+	"encoding/json"
 	"net/http"
 	"sync"
 	"time"
@@ -111,10 +112,44 @@ func (s *server) ledgerDestinationSave(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if code == http.StatusOK {
-		s.audit(r, "backup.ledger_storage_changed", "ledger", "", map[string]any{"kind": kind})
-	} else {
+	// scd answers 200 only when the ledger was copied there, read back and confirmed in step; "saved" tells a setting that was
+	// stored but not (yet) confirmed from one that was not stored at all.
+	var res struct {
+		Saved bool `json:"saved"`
+	}
+	_ = json.Unmarshal(raw, &res)
+	switch {
+	case code == http.StatusOK:
+		s.audit(r, "backup.ledger_storage_changed", "ledger", "", map[string]any{"kind": kind, "in_step": true})
+	case res.Saved:
+		s.audit(r, "backup.ledger_storage_changed", "ledger", "", map[string]any{"kind": kind, "in_step": false, "status": code})
+	default:
 		s.audit(r, "backup.ledger_storage_refused", "ledger", "", map[string]any{"kind": kind, "status": code})
+	}
+	writeRaw(w, code, raw)
+}
+
+const ledgerRemoveConfirmation = "remove secondary storage"
+
+// ledgerDestinationRemove removes the secondary storage setting (never what is kept there). Erasure is refused from then on, so it
+// takes the step-up and a typed confirmation, and is audited either way.
+func (s *server) ledgerDestinationRemove(w http.ResponseWriter, r *http.Request) {
+	in, ok := s.readLedgerBody(w, r, true)
+	if !ok {
+		return
+	}
+	if c, _ := in["confirm"].(string); c != ledgerRemoveConfirmation {
+		jsonErr(w, http.StatusBadRequest, "confirm_mismatch", "type \""+ledgerRemoveConfirmation+"\" to confirm")
+		return
+	}
+	code, raw, ok := s.relayJSON(w, r, http.MethodDelete, "/v1/ledger/destination", map[string]any{"by": protectionActor(sessFrom(r.Context()))})
+	if !ok {
+		return
+	}
+	if code == http.StatusOK {
+		s.audit(r, "backup.ledger_storage_removed", "ledger", "", map[string]any{"remote_data_deleted": false})
+	} else {
+		s.audit(r, "backup.ledger_storage_remove_refused", "ledger", "", map[string]any{"status": code})
 	}
 	writeRaw(w, code, raw)
 }
@@ -129,6 +164,17 @@ func (s *server) ledgerRecover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit(r, "backup.ledger_recovered", "ledger", "", map[string]any{"status": code})
+	writeRaw(w, code, raw)
+}
+
+// backupMirrorRun copies the retained backups to the secondary storage now (only when that copy is switched on); no step-up: it
+// adds a verified copy and removes only rotated copies this appliance made.
+func (s *server) backupMirrorRun(w http.ResponseWriter, r *http.Request) {
+	code, raw, ok := s.relayJSON(w, r, http.MethodPost, "/v1/backup/mirror/run", map[string]any{})
+	if !ok {
+		return
+	}
+	s.audit(r, "backup.mirror_run", "backup", "", map[string]any{"status": code})
 	writeRaw(w, code, raw)
 }
 

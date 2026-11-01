@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0201, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0203, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -450,6 +450,215 @@ END $$;
 
 
 --
+-- Name: admin_end_package(uuid, uuid, uuid, uuid, text, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.admin_end_package(p_tenant uuid, p_site uuid, p_ent uuid, p_operator uuid, p_reason text, p_request uuid) RETURNS TABLE(action_id uuid, outcome text, sessions uuid[], devices integer)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE a record; v_status text; v_window timestamptz; v_sessions uuid[]; v_devices int; v_id uuid; v_stay uuid;
+BEGIN
+  IF p_request IS NULL THEN
+    RAISE EXCEPTION 'PKG_NOT_AUTHORIZED: a request id is required' USING ERRCODE = 'P0001';
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtextextended('package-admin:' || p_request::text, 0));
+  SELECT * INTO a FROM iam_v2.package_admin_actions WHERE request_id = p_request;
+  IF FOUND THEN
+    IF a.action <> 'END' OR a.entitlement_id <> p_ent OR a.tenant_id <> p_tenant OR a.site_id <> p_site THEN
+      RAISE EXCEPTION 'PKG_REQUEST_REUSED: this request id was already used for another action' USING ERRCODE = 'P0001';
+    END IF;
+    RETURN QUERY SELECT a.id, a.outcome, a.sessions, a.devices;
+    RETURN;
+  END IF;
+  PERFORM iam_v2.package_admin_check_actor(p_tenant, p_operator, p_reason);
+
+  SELECT e.stay_id INTO v_stay FROM iam_v2.entitlements e WHERE e.id = p_ent AND e.tenant_id = p_tenant AND e.site_id = p_site;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'PKG_NOT_FOUND: the package does not exist on this site' USING ERRCODE = 'P0001';
+  END IF;
+  IF v_stay IS NOT NULL THEN
+    PERFORM 1 FROM iam_v2.stays WHERE id = v_stay FOR UPDATE;
+  END IF;
+  SELECT e.status, e.window_ends_at INTO v_status, v_window FROM iam_v2.entitlements e WHERE e.id = p_ent FOR UPDATE;
+
+  IF v_status = 'TERMINATED' THEN
+    INSERT INTO iam_v2.package_admin_actions (tenant_id, site_id, request_id, action, entitlement_id, outcome, actor, reason)
+    VALUES (p_tenant, p_site, p_request, 'END', p_ent, 'ALREADY_ENDED', p_operator, left(btrim(p_reason), 500))
+    RETURNING id INTO v_id;
+    RETURN QUERY SELECT v_id, 'ALREADY_ENDED'::text, '{}'::uuid[], 0;
+    RETURN;
+  END IF;
+
+  SELECT COALESCE(array_agg(s.id ORDER BY s.id), '{}') INTO v_sessions FROM iam_v2.sessions s
+   WHERE s.entitlement_id = p_ent AND s.ended IS NULL AND s.state IN ('active','PENDING_ENFORCEMENT');
+  SELECT count(*) INTO v_devices FROM iam_v2.entitlement_device_authorizations da
+   WHERE da.entitlement_id = p_ent AND da.deauthorized_at IS NULL;
+
+  PERFORM iam_v2.p4_end_access_funded_by(p_ent, 'ADMIN');
+
+  -- window_ends_at of an END is the window the package had when it was ended: how long the free benefit stays ended for a
+  -- subject that is not a Stay (package_ended_by_staff).
+  INSERT INTO iam_v2.package_admin_actions (tenant_id, site_id, request_id, action, entitlement_id, outcome, actor, reason,
+                                            sessions, devices, window_ends_at)
+  VALUES (p_tenant, p_site, p_request, 'END', p_ent, 'ENDED', p_operator, left(btrim(p_reason), 500), v_sessions, v_devices,
+          v_window)
+  RETURNING id INTO v_id;
+  RETURN QUERY SELECT v_id, 'ENDED'::text, v_sessions, v_devices;
+END $$;
+
+
+--
+-- Name: FUNCTION admin_end_package(p_tenant uuid, p_site uuid, p_ent uuid, p_operator uuid, p_reason text, p_request uuid); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.admin_end_package(p_tenant uuid, p_site uuid, p_ent uuid, p_operator uuid, p_reason text, p_request uuid) IS 'Staff End Package (0202): ends the whole entitlement (reason ADMIN), its devices and sessions; idempotent per request id.';
+
+
+--
+-- Name: admin_reset_package(uuid, uuid, uuid, uuid, text, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.admin_reset_package(p_tenant uuid, p_site uuid, p_ent uuid, p_operator uuid, p_reason text, p_request uuid) RETURNS TABLE(action_id uuid, new_entitlement uuid, purchase uuid, sessions_rebound integer, devices integer, window_ends timestamp with time zone)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE a record; o record; v_refusal text; v_now timestamptz; v_window timestamptz; v_purchase uuid; v_new uuid;
+        v_live boolean; v_devices int := 0; v_cohort int := 0; v_sessions uuid[] := '{}'; v_sid uuid; v_id uuid;
+        v_stay uuid; v_grace boolean;
+BEGIN
+  IF p_request IS NULL THEN
+    RAISE EXCEPTION 'PKG_NOT_AUTHORIZED: a request id is required' USING ERRCODE = 'P0001';
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtextextended('package-admin:' || p_request::text, 0));
+  SELECT * INTO a FROM iam_v2.package_admin_actions WHERE request_id = p_request;
+  IF FOUND THEN
+    IF a.action <> 'RESET' OR a.entitlement_id <> p_ent OR a.tenant_id <> p_tenant OR a.site_id <> p_site THEN
+      RAISE EXCEPTION 'PKG_REQUEST_REUSED: this request id was already used for another action' USING ERRCODE = 'P0001';
+    END IF;
+    RETURN QUERY SELECT a.id, a.new_entitlement_id, a.purchase_id, cardinality(a.sessions), a.devices, a.window_ends_at;
+    RETURN;
+  END IF;
+  PERFORM iam_v2.package_admin_check_actor(p_tenant, p_operator, p_reason);
+
+  -- Lock order: the Stay, then the entitlement (as checkout, transfer and admission do).
+  SELECT e.stay_id INTO v_stay FROM iam_v2.entitlements e WHERE e.id = p_ent AND e.tenant_id = p_tenant AND e.site_id = p_site;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'PKG_NOT_FOUND: the package does not exist on this site' USING ERRCODE = 'P0001';
+  END IF;
+  IF v_stay IS NOT NULL THEN
+    PERFORM 1 FROM iam_v2.stays WHERE id = v_stay FOR UPDATE;
+  END IF;
+  SELECT * INTO o FROM iam_v2.entitlements e WHERE e.id = p_ent FOR UPDATE;
+
+  v_refusal := iam_v2.package_reset_refusal(p_ent);
+  IF v_refusal IS NOT NULL THEN
+    RAISE EXCEPTION 'PKG_%', v_refusal USING ERRCODE = 'P0001';
+  END IF;
+
+  v_now := clock_timestamp();
+  v_window := iam_v2.package_reset_window(p_ent, v_now);
+  v_live := o.status IN ('ACTIVE');
+  v_grace := o.end_mode = 'GRACE_AFTER_CHECKOUT';
+
+  IF v_live THEN
+    PERFORM iam_v2.terminate_entitlement_at_boundary(p_ent, v_now, 'SUPERSEDED');
+  END IF;
+
+  -- The new cycle: a zero-price administrative purchase, never a payment, posting or redemption.
+  PERFORM iam_v2.begin_controlled_operation('commerce_intent');
+  -- The new purchase keeps the original's acquisition lineage (its auth context, so the device that acquired the package), which
+  -- session activation follows to admit the purchasing device and to let others join only on their own sign-in. It is a free
+  -- ADMIN_GRANT with no quote, so no quote pin applies; a room package without an auth context stays without one.
+  INSERT INTO iam_v2.purchases (tenant_id, site_id, package_revision_id, pms_interface_id, stay_id, auth_context_id, trigger,
+                                amount_minor, state)
+  VALUES (p_tenant, p_site, o.package_revision_id, o.pms_interface_id, o.stay_id,
+          (SELECT pu.auth_context_id FROM iam_v2.purchases pu WHERE pu.id = o.purchase_id), 'ADMIN_GRANT', 0, 'GRANTED')
+  RETURNING id INTO v_purchase;
+
+  INSERT INTO iam_v2.entitlements (tenant_id, site_id, stay_id, guest_account_id, voucher_id, guest_principal_id,
+                                   anonymous_subject_id, pms_interface_id, purchase_id, policy_snapshot, snapshot_version,
+                                   service_plan_revision_id, package_revision_id, time_accounting_mode, end_mode,
+                                   window_ends_at, status, renewal_number, supersedes_entitlement_id, is_emergency_grace,
+                                   data_quota_bytes)
+  VALUES (p_tenant, p_site, o.stay_id, o.guest_account_id, o.voucher_id, o.guest_principal_id, o.anonymous_subject_id,
+          o.pms_interface_id, v_purchase,
+          o.policy_snapshot || jsonb_build_object('granted_from', 'ADMIN_RESET', 'reset_of', o.id::text),
+          o.snapshot_version, o.service_plan_revision_id, o.package_revision_id, o.time_accounting_mode, o.end_mode,
+          v_window, 'PENDING', o.renewal_number + 1, o.id, o.is_emergency_grace, o.data_quota_bytes)
+  RETURNING id INTO v_new;
+  PERFORM iam_v2.apply_entitlement_transition(v_new, 'ACTIVE', v_now, 'ADMIN_RESET');
+
+  PERFORM iam_v2.begin_controlled_operation('device_auth');
+  IF v_live THEN
+    -- Devices online on the original move with it (the transfer's interval rule: the old interval closes when the new opens).
+    INSERT INTO iam_v2.entitlement_devices (tenant_id, site_id, entitlement_id, device_id, status, grandfathered,
+                                            first_authorized, last_authorized)
+    SELECT p_tenant, p_site, v_new, ed.device_id, 'AUTHORIZED', ed.grandfathered, ed.first_authorized, v_now
+      FROM iam_v2.entitlement_devices ed
+     WHERE ed.entitlement_id = p_ent AND ed.status = 'AUTHORIZED'
+       AND (NOT v_grace OR ed.grandfathered);
+    GET DIAGNOSTICS v_devices = ROW_COUNT;
+    INSERT INTO iam_v2.entitlement_device_authorizations (tenant_id, site_id, entitlement_id, device_id, seq, authorized_at)
+    SELECT p_tenant, p_site, v_new, ed.device_id, 1, v_now
+      FROM iam_v2.entitlement_devices ed WHERE ed.entitlement_id = v_new AND ed.status = 'AUTHORIZED';
+    WITH closed AS (
+      UPDATE iam_v2.entitlement_device_authorizations da
+         SET deauthorized_at = GREATEST(v_now, da.authorized_at)
+       WHERE da.entitlement_id = p_ent AND da.deauthorized_at IS NULL
+       RETURNING da.entitlement_id, da.device_id)
+    UPDATE iam_v2.entitlement_devices ed
+       SET status = 'DISCONNECTED', disconnected_reason = 'PACKAGE_RESET'
+      FROM closed WHERE ed.entitlement_id = closed.entitlement_id AND ed.device_id = closed.device_id;
+  END IF;
+  IF v_grace THEN
+    -- The fixed cohort: devices the checkout carried over that are not online now may return; nobody else.
+    INSERT INTO iam_v2.entitlement_devices (tenant_id, site_id, entitlement_id, device_id, status, grandfathered,
+                                            disconnected_reason, first_authorized, last_authorized)
+    SELECT p_tenant, p_site, v_new, ed.device_id, 'DISCONNECTED', true, 'PACKAGE_RESET_COHORT', ed.first_authorized,
+           ed.last_authorized
+      FROM iam_v2.entitlement_devices ed
+     WHERE ed.entitlement_id = p_ent AND ed.grandfathered
+       AND COALESCE(ed.disconnected_reason, 'ENTITLEMENT_ENDED')
+           IN ('ENTITLEMENT_ENDED','ENTITLEMENT_SUSPENDED','PACKAGE_RESET','PACKAGE_RESET_COHORT')
+    ON CONFLICT (entitlement_id, device_id) DO NOTHING;
+    GET DIAGNOSTICS v_cohort = ROW_COUNT;
+  END IF;
+
+  IF v_live THEN
+    FOR v_sid IN SELECT s.id FROM iam_v2.sessions s
+                  WHERE s.tenant_id = p_tenant AND s.site_id = p_site AND s.entitlement_id = p_ent AND s.ended IS NULL
+                    AND s.state IN ('active','PENDING_ENFORCEMENT')
+                    AND EXISTS (SELECT 1 FROM iam_v2.entitlement_devices nd
+                                 WHERE nd.entitlement_id = v_new AND nd.device_id = s.device_id AND nd.status = 'AUTHORIZED')
+                  ORDER BY s.id
+    LOOP
+      PERFORM iam_v2.rebind_session_entitlement(v_sid, v_new, v_now);
+      v_sessions := v_sessions || v_sid;
+    END LOOP;
+    -- A session on the original whose device did not move (After Check-out: not in the cohort) ends with the original.
+    UPDATE iam_v2.sessions s
+       SET state = 'ended', ended = GREATEST(v_now, s.started), end_reason = 'ENTITLEMENT_ENDED'
+     WHERE s.entitlement_id = p_ent AND s.ended IS NULL AND s.state IN ('active','PENDING_ENFORCEMENT');
+  END IF;
+
+  INSERT INTO iam_v2.package_admin_actions (tenant_id, site_id, request_id, action, entitlement_id, new_entitlement_id,
+                                            purchase_id, outcome, actor, reason, sessions, devices, window_ends_at)
+  VALUES (p_tenant, p_site, p_request, 'RESET', p_ent, v_new, v_purchase, 'RESET', p_operator, left(btrim(p_reason), 500),
+          v_sessions, v_devices + v_cohort, v_window)
+  RETURNING id INTO v_id;
+  RETURN QUERY SELECT v_id, v_new, v_purchase, cardinality(v_sessions), v_devices + v_cohort, v_window;
+END $$;
+
+
+--
+-- Name: FUNCTION admin_reset_package(p_tenant uuid, p_site uuid, p_ent uuid, p_operator uuid, p_reason text, p_request uuid); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.admin_reset_package(p_tenant uuid, p_site uuid, p_ent uuid, p_operator uuid, p_reason text, p_request uuid) IS 'Staff Reset Package (0202): a new, linked, zero-price ADMIN_GRANT cycle of the same package; idempotent per request id.';
+
+
+--
 -- Name: after_checkout_device_guard(); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -462,8 +671,8 @@ BEGIN
   SELECT e.end_mode INTO v_mode FROM iam_v2.entitlements e WHERE e.id = NEW.entitlement_id;
   IF v_mode IS DISTINCT FROM 'GRACE_AFTER_CHECKOUT' THEN RETURN NEW; END IF;
   IF TG_OP = 'INSERT' THEN
-    -- The checkout conversion marks the devices it carries over as grandfathered. authorize_entitlement_device inserts with
-    -- ON CONFLICT DO UPDATE, so an existing row reaches the UPDATE rule below instead of failing here.
+    -- The checkout conversion (and a reset, from the same cohort) marks the devices it carries over as grandfathered.
+    -- authorize_entitlement_device inserts with ON CONFLICT DO UPDATE, so an existing row reaches the UPDATE rule below.
     IF NEW.grandfathered THEN RETURN NEW; END IF;
     IF EXISTS (SELECT 1 FROM iam_v2.entitlement_devices d
                 WHERE d.entitlement_id = NEW.entitlement_id AND d.device_id = NEW.device_id) THEN
@@ -473,7 +682,7 @@ BEGIN
       USING ERRCODE = 'check_violation';
   END IF;
   IF OLD.status IS DISTINCT FROM 'AUTHORIZED' AND NEW.status = 'AUTHORIZED'
-     AND COALESCE(OLD.disconnected_reason, '') <> 'ENTITLEMENT_SUSPENDED' THEN
+     AND COALESCE(OLD.disconnected_reason, '') NOT IN ('ENTITLEMENT_SUSPENDED', 'PACKAGE_RESET_COHORT') THEN
     RAISE EXCEPTION 'AFTER_CHECKOUT_NEW_DEVICE_REJECTED: a device that left an After Check-out entitlement cannot rejoin it'
       USING ERRCODE = 'check_violation';
   END IF;
@@ -638,6 +847,9 @@ BEGIN
   UPDATE iam_v2.guest_device_actions SET detail = 'Removed after the staff-notes period'
    WHERE entitlement_id IN (SELECT e.id FROM iam_v2.entitlements e WHERE e.guest_account_id = p_account)
      AND detail IS NOT NULL AND detail <> 'Removed after the staff-notes period';
+  -- What staff typed when they ended or reset this guest's package (0202).
+  UPDATE iam_v2.package_admin_actions SET reason = 'Removed after the staff-notes period'
+   WHERE entitlement_id IN (SELECT e.id FROM iam_v2.entitlements e WHERE e.guest_account_id = p_account) AND reason <> 'Removed after the staff-notes period';
   PERFORM set_config('iam_v2.scrub', '', true);
 END $_$;
 
@@ -670,6 +882,9 @@ BEGIN
   UPDATE iam_v2.guest_device_actions SET detail = 'Removed after the staff-notes period'
    WHERE entitlement_id IN (SELECT e.id FROM iam_v2.entitlements e WHERE e.guest_principal_id = p_principal)
      AND detail IS NOT NULL AND detail <> 'Removed after the staff-notes period';
+  -- What staff typed when they ended or reset this guest's package (0202).
+  UPDATE iam_v2.package_admin_actions SET reason = 'Removed after the staff-notes period'
+   WHERE entitlement_id IN (SELECT e.id FROM iam_v2.entitlements e WHERE e.guest_principal_id = p_principal) AND reason <> 'Removed after the staff-notes period';
   PERFORM set_config('iam_v2.scrub', '', true);
 END $$;
 
@@ -718,6 +933,9 @@ BEGIN
   UPDATE iam_v2.post_stay_profiles
      SET pin_hash = '$argon2id$v=19$m=65536,t=1,p=4$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', revoke_reason = CASE WHEN revoke_reason IS NULL THEN NULL ELSE 'Removed after the staff-notes period' END
    WHERE origin_stay_id = p_stay AND (pin_hash <> '$argon2id$v=19$m=65536,t=1,p=4$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' OR (revoke_reason IS NOT NULL AND revoke_reason <> 'Removed after the staff-notes period'));
+  -- What staff typed when they ended or reset this guest's package (0202).
+  UPDATE iam_v2.package_admin_actions SET reason = 'Removed after the staff-notes period'
+   WHERE entitlement_id IN (SELECT e.id FROM iam_v2.entitlements e WHERE e.stay_id = p_stay) AND reason <> 'Removed after the staff-notes period';
   PERFORM set_config('iam_v2.scrub', '', true);
   UPDATE iam_v2.stay_guests
      SET external_guest_id = NULL, first_name_norm = NULL, last_name_norm = NULL, display_name = NULL,
@@ -11485,6 +11703,292 @@ COMMENT ON FUNCTION iam_v2.p6_tick_online_time(p_tenant uuid, p_site uuid, p_now
 
 
 --
+-- Name: package_admin_actions_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.package_admin_actions_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'package admin actions are append-only' USING ERRCODE = 'insufficient_privilege';
+END $$;
+
+
+--
+-- Name: package_admin_check_actor(uuid, uuid, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.package_admin_check_actor(p_tenant uuid, p_operator uuid, p_reason text) RETURNS void
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+BEGIN
+  IF p_operator IS NULL OR p_reason IS NULL OR length(btrim(p_reason)) < 4 OR length(btrim(p_reason)) > 500 THEN
+    RAISE EXCEPTION 'PKG_NOT_AUTHORIZED: an operator and a reason of 4 to 500 characters are required' USING ERRCODE = 'P0001';
+  END IF;
+  PERFORM 1 FROM public.operators o
+    WHERE o.id = p_operator AND o.status = 'active' AND (o.tenant_id IS NULL OR o.tenant_id = p_tenant);
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'PKG_NOT_AUTHORIZED: the operator is not an active operator of this tenant' USING ERRCODE = 'P0001';
+  END IF;
+END $$;
+
+
+--
+-- Name: package_admin_history(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.package_admin_history(p_tenant uuid, p_site uuid, p_ent uuid) RETURNS jsonb
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT COALESCE(jsonb_agg(jsonb_build_object('id', a.id, 'action', a.action, 'outcome', a.outcome,
+                                               'entitlement_id', a.entitlement_id, 'new_entitlement_id', a.new_entitlement_id,
+                                               'actor', a.actor, 'reason', a.reason, 'sessions', cardinality(a.sessions),
+                                               'devices', a.devices, 'window_ends_at', a.window_ends_at, 'at', a.created_at)
+                            ORDER BY a.created_at DESC), '[]'::jsonb)
+    FROM iam_v2.package_admin_actions a
+   WHERE a.tenant_id = p_tenant AND a.site_id = p_site AND (a.entitlement_id = p_ent OR a.new_entitlement_id = p_ent);
+$$;
+
+
+--
+-- Name: package_control_list(uuid, uuid, text, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.package_control_list(p_tenant uuid, p_site uuid, p_kind text, p_id uuid) RETURNS jsonb
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE r record; v_ent uuid;
+BEGIN
+  IF p_kind = 'session' THEN
+    SELECT s.entitlement_id INTO v_ent FROM iam_v2.sessions s WHERE s.id = p_id AND s.tenant_id = p_tenant AND s.site_id = p_site;
+  ELSIF p_kind = 'device' THEN
+    SELECT ed.entitlement_id INTO v_ent FROM iam_v2.entitlement_devices ed
+     WHERE ed.device_id = p_id AND ed.tenant_id = p_tenant AND ed.site_id = p_site
+     ORDER BY ed.last_authorized DESC NULLS LAST LIMIT 1;
+  ELSIF p_kind = 'entitlement' THEN
+    v_ent := p_id;
+  END IF;
+  IF p_kind IN ('session','device','entitlement') THEN
+    SELECT stay_id, guest_account_id, voucher_id, guest_principal_id, anonymous_subject_id INTO r
+      FROM iam_v2.entitlements WHERE id = v_ent AND tenant_id = p_tenant AND site_id = p_site;
+    IF NOT FOUND THEN RETURN '[]'::jsonb; END IF;
+  ELSE
+    SELECT CASE WHEN p_kind = 'stay' THEN p_id END AS stay_id, CASE WHEN p_kind = 'account' THEN p_id END AS guest_account_id,
+           CASE WHEN p_kind = 'voucher' THEN p_id END AS voucher_id, CASE WHEN p_kind = 'principal' THEN p_id END AS guest_principal_id,
+           NULL::uuid AS anonymous_subject_id INTO r;
+  END IF;
+  RETURN COALESCE((
+    SELECT jsonb_agg(jsonb_build_object('entitlement_id', e.id, 'status', e.status, 'terminal_reason', e.terminal_reason,
+                                        'package_name', COALESCE(ipr.display ->> 'name', ip.code), 'end_mode', e.end_mode,
+                                        'activated_at', e.activated_at, 'window_ends_at', e.window_ends_at,
+                                        'terminated_at', e.terminated_at, 'supersedes', e.supersedes_entitlement_id,
+                                        'purchase_trigger', pu."trigger")
+                     ORDER BY (e.status IN ('PENDING','ACTIVE','SUSPENDED')) DESC, COALESCE(e.activated_at, e.terminated_at) DESC NULLS LAST)
+      FROM (SELECT * FROM iam_v2.entitlements en
+             WHERE en.tenant_id = p_tenant AND en.site_id = p_site
+               AND ((r.stay_id IS NOT NULL AND en.stay_id = r.stay_id)
+                 OR (r.guest_account_id IS NOT NULL AND en.guest_account_id = r.guest_account_id)
+                 OR (r.voucher_id IS NOT NULL AND en.voucher_id = r.voucher_id)
+                 OR (r.guest_principal_id IS NOT NULL AND en.guest_principal_id = r.guest_principal_id)
+                 OR (r.anonymous_subject_id IS NOT NULL AND en.anonymous_subject_id = r.anonymous_subject_id))
+             ORDER BY (en.status IN ('PENDING','ACTIVE','SUSPENDED')) DESC, COALESCE(en.activated_at, en.terminated_at) DESC NULLS LAST
+             LIMIT 10) e
+      JOIN iam_v2.internet_package_revisions ipr ON ipr.id = e.package_revision_id
+      JOIN iam_v2.internet_packages ip ON ip.id = ipr.package_id
+      LEFT JOIN iam_v2.purchases pu ON pu.id = e.purchase_id), '[]'::jsonb);
+END $$;
+
+
+--
+-- Name: package_control_preview(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.package_control_preview(p_tenant uuid, p_site uuid, p_ent uuid) RETURNS jsonb
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE e record; v jsonb; u record; v_refusal text; v_window timestamptz; v_successor uuid; v_quota bigint;
+        v_devices int; v_sessions int; v_subject text; v_subject_id uuid;
+BEGIN
+  SELECT en.*, ipr.package_type, COALESCE(ipr.display ->> 'name', ip.code) AS package_name, ip.code AS package_code,
+         spr.name AS plan_name, spr.down_kbps, spr.up_kbps, spr.max_concurrent_devices, spr.data_quota_bytes AS plan_quota,
+         spr.time_quota_seconds, pu."trigger" AS purchase_trigger, pu.amount_minor, pu.currency
+    INTO e
+    FROM iam_v2.entitlements en
+    JOIN iam_v2.internet_package_revisions ipr ON ipr.id = en.package_revision_id
+    JOIN iam_v2.internet_packages ip ON ip.id = ipr.package_id
+    JOIN iam_v2.service_plan_revisions spr ON spr.id = en.service_plan_revision_id
+    LEFT JOIN iam_v2.purchases pu ON pu.id = en.purchase_id
+   WHERE en.id = p_ent AND en.tenant_id = p_tenant AND en.site_id = p_site;
+  IF NOT FOUND THEN
+    RETURN NULL;
+  END IF;
+  SELECT * INTO u FROM iam_v2.entitlement_usage_bytes(p_ent, now());
+  SELECT s.id INTO v_successor FROM iam_v2.entitlements s WHERE s.supersedes_entitlement_id = p_ent LIMIT 1;
+  SELECT count(*) INTO v_devices FROM iam_v2.entitlement_device_authorizations a
+   WHERE a.entitlement_id = p_ent AND a.deauthorized_at IS NULL;
+  SELECT count(*) INTO v_sessions FROM iam_v2.sessions s
+   WHERE s.entitlement_id = p_ent AND s.ended IS NULL AND s.state IN ('active','PENDING_ENFORCEMENT');
+  v_quota := COALESCE(e.data_quota_bytes, e.plan_quota);
+  v_subject := CASE WHEN e.stay_id IS NOT NULL THEN 'STAY' WHEN e.guest_account_id IS NOT NULL THEN 'CLIENT_ACCOUNT'
+                    WHEN e.voucher_id IS NOT NULL THEN 'VOUCHER' WHEN e.guest_principal_id IS NOT NULL THEN 'CLIENT'
+                    ELSE 'ANONYMOUS' END;
+  v_subject_id := COALESCE(e.stay_id, e.guest_account_id, e.voucher_id, e.guest_principal_id, e.anonymous_subject_id);
+  v_refusal := iam_v2.package_reset_refusal(p_ent);
+  v_window := iam_v2.package_reset_window(p_ent, now());
+  v := jsonb_build_object(
+    'entitlement_id', e.id, 'status', e.status, 'terminal_reason', e.terminal_reason,
+    'subject_kind', v_subject, 'subject_id', v_subject_id,
+    'stay_id', e.stay_id, 'pms_interface_id', e.pms_interface_id,
+    'package_revision_id', e.package_revision_id, 'package_name', e.package_name, 'package_code', e.package_code,
+    'package_type', e.package_type, 'plan_name', e.plan_name, 'down_kbps', e.down_kbps, 'up_kbps', e.up_kbps,
+    'max_devices', e.max_concurrent_devices, 'end_mode', e.end_mode, 'time_mode', e.time_accounting_mode,
+    'time_quota_seconds', e.time_quota_seconds, 'online_seconds_used', e.consumed_online_seconds,
+    'data_quota_bytes', v_quota, 'bytes_used', COALESCE(u.bytes_up, 0) + COALESCE(u.bytes_down, 0),
+    'activated_at', e.activated_at, 'window_ends_at', e.window_ends_at, 'terminated_at', e.terminated_at,
+    'devices_online', v_devices, 'sessions_live', v_sessions,
+    'purchase_trigger', e.purchase_trigger, 'paid_minor', e.amount_minor, 'currency', e.currency,
+    'supersedes', e.supersedes_entitlement_id, 'superseded_by', v_successor,
+    'end', jsonb_build_object('allowed', e.status <> 'TERMINATED',
+                              'reason', CASE WHEN e.status = 'TERMINATED' THEN 'ALREADY_ENDED: this package has already ended' END),
+    'reset', jsonb_build_object('allowed', v_refusal IS NULL, 'reason', v_refusal,
+                                'window_ends_at', CASE WHEN v_refusal IS NULL THEN v_window END,
+                                'data_quota_bytes', v_quota, 'price_minor', 0));
+  IF e.stay_id IS NOT NULL THEN
+    v := v || (SELECT jsonb_build_object('stay', jsonb_build_object('status', st.status, 'room', st.normalized_room_number,
+                                          'arrival', st.arrival, 'departure', st.departure,
+                                          'checked_out_at', st.effective_checkout_at,
+                                          'pms_interface', pi.display_label))
+                 FROM iam_v2.stays st LEFT JOIN iam_v2.pms_interfaces pi ON pi.id = st.pms_interface_id
+                WHERE st.id = e.stay_id);
+  END IF;
+  RETURN v;
+END $$;
+
+
+--
+-- Name: package_ended_by_staff(uuid, uuid, uuid, uuid, uuid, uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.package_ended_by_staff(p_tenant uuid, p_site uuid, p_package_revision uuid, p_stay uuid, p_account uuid, p_voucher uuid, p_principal uuid, p_device uuid) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT EXISTS (
+    SELECT 1
+      FROM iam_v2.package_admin_actions a
+      JOIN iam_v2.entitlements x ON x.id = a.entitlement_id
+      JOIN iam_v2.internet_package_revisions rx ON rx.id = x.package_revision_id
+      JOIN iam_v2.internet_package_revisions rn ON rn.id = p_package_revision AND rn.package_id = rx.package_id
+     WHERE a.tenant_id = p_tenant AND a.site_id = p_site AND a.action = 'END' AND a.outcome = 'ENDED'
+       AND (   (p_stay IS NOT NULL AND x.stay_id = p_stay)
+            OR (x.stay_id IS NULL AND (a.window_ends_at IS NULL OR a.window_ends_at > now())
+                AND (   (p_account   IS NOT NULL AND x.guest_account_id   = p_account)
+                     OR (p_voucher   IS NOT NULL AND x.voucher_id         = p_voucher)
+                     OR (p_principal IS NOT NULL AND x.guest_principal_id = p_principal)
+                     OR (p_device IS NOT NULL AND x.anonymous_subject_id IS NOT NULL
+                         AND EXISTS (SELECT 1 FROM iam_v2.entitlement_device_authorizations da
+                                      WHERE da.entitlement_id = x.id AND da.device_id = p_device)))))
+       AND NOT EXISTS (SELECT 1 FROM iam_v2.package_admin_actions r
+                        WHERE r.action = 'RESET' AND r.entitlement_id = a.entitlement_id AND r.created_at >= a.created_at))
+$$;
+
+
+--
+-- Name: FUNCTION package_ended_by_staff(p_tenant uuid, p_site uuid, p_package_revision uuid, p_stay uuid, p_account uuid, p_voucher uuid, p_principal uuid, p_device uuid); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.package_ended_by_staff(p_tenant uuid, p_site uuid, p_package_revision uuid, p_stay uuid, p_account uuid, p_voucher uuid, p_principal uuid, p_device uuid) IS 'Staff End Package (0202): true while a free benefit staff ended may not be acquired again automatically by this subject.';
+
+
+--
+-- Name: package_reset_refusal(uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.package_reset_refusal(p_ent uuid) RETURNS text
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE e record; v_stay text; v_enabled boolean; v_voucher text;
+BEGIN
+  SELECT * INTO e FROM iam_v2.entitlements WHERE id = p_ent;
+  IF NOT FOUND THEN
+    RETURN 'NOT_FOUND: the package does not exist on this site';
+  END IF;
+  IF EXISTS (SELECT 1 FROM iam_v2.entitlements s WHERE s.supersedes_entitlement_id = p_ent) THEN
+    RETURN 'SUPERSEDED: this package was already reset or renewed; reset the current package instead';
+  END IF;
+  IF e.status = 'PENDING' OR e.activated_at IS NULL THEN
+    RETURN 'NOT_STARTED: this package has not started yet, so there is nothing to reset';
+  END IF;
+  IF e.status = 'SUSPENDED' THEN
+    RETURN 'SUSPENDED: this package is suspended for another reason (for example a disabled Client Account); resolve that first';
+  END IF;
+  IF e.status = 'TERMINATED' AND e.terminal_reason NOT IN ('TIME','DATA','HARD_EXPIRY','ADMIN') THEN
+    RETURN 'NOT_RESETTABLE: a package that ended by ' || e.terminal_reason || ' cannot be reset (only one that expired, ran out or was ended by staff)';
+  END IF;
+  IF e.stay_id IS NOT NULL THEN
+    SELECT status INTO v_stay FROM iam_v2.stays WHERE id = e.stay_id;
+    IF e.end_mode = 'GRACE_AFTER_CHECKOUT' THEN
+      IF v_stay IS DISTINCT FROM 'CHECKED_OUT' AND v_stay IS DISTINCT FROM 'POST_STAY_ACTIVE' THEN
+        RETURN 'STAY_NOT_CHECKED_OUT: After Check-out Access can be reset only for a stay that has checked out';
+      END IF;
+    ELSIF v_stay IS DISTINCT FROM 'IN_HOUSE' THEN
+      RETURN 'STAY_NOT_IN_HOUSE: a room package can be reset only while its stay is in house';
+    END IF;
+  END IF;
+  IF e.guest_account_id IS NOT NULL THEN
+    SELECT enabled INTO v_enabled FROM iam_v2.guest_access_accounts WHERE id = e.guest_account_id;
+    IF v_enabled IS DISTINCT FROM true THEN
+      RETURN 'ACCOUNT_DISABLED: the Client Account is disabled or removed';
+    END IF;
+  END IF;
+  IF e.voucher_id IS NOT NULL THEN
+    SELECT state INTO v_voucher FROM iam_v2.vouchers WHERE id = e.voucher_id;
+    IF v_voucher IS DISTINCT FROM 'REDEEMED' THEN
+      RETURN 'VOUCHER_NOT_REDEEMED: the voucher is revoked or no longer valid';
+    END IF;
+  END IF;
+  IF e.end_mode IN ('FIXED_AT','AT_CHECKOUT','EARLIEST_OF_FIXED_AND_CHECKOUT')
+     AND e.window_ends_at IS NOT NULL AND e.window_ends_at <= now() THEN
+    RETURN 'WINDOW_PASSED: this package ends at a fixed time that has already passed';
+  END IF;
+  IF e.status = 'TERMINATED' AND EXISTS (
+       SELECT 1 FROM iam_v2.entitlements o
+        WHERE o.id <> e.id AND o.status IN ('PENDING','ACTIVE','SUSPENDED')
+          AND o.tenant_id = e.tenant_id AND o.site_id = e.site_id
+          AND (o.stay_id = e.stay_id OR o.guest_account_id = e.guest_account_id OR o.voucher_id = e.voucher_id
+               OR (o.guest_principal_id = e.guest_principal_id AND o.site_id = e.site_id)
+               OR o.anonymous_subject_id = e.anonymous_subject_id)) THEN
+    RETURN 'SUBJECT_HAS_LIVE_ACCESS: this guest already holds other live access; end or reset that one';
+  END IF;
+  RETURN NULL;
+END $$;
+
+
+--
+-- Name: package_reset_window(uuid, timestamp with time zone); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.package_reset_window(p_ent uuid, p_at timestamp with time zone) RETURNS timestamp with time zone
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT CASE
+           WHEN e.window_ends_at IS NULL THEN NULL
+           WHEN e.end_mode IN ('VALIDITY_WINDOW','GRACE_AFTER_CHECKOUT','MANUAL_END') AND e.activated_at IS NOT NULL
+             THEN p_at + greatest(e.window_ends_at - e.activated_at, interval '1 minute')
+           ELSE e.window_ends_at
+         END
+    FROM iam_v2.entitlements e WHERE e.id = p_ent;
+$$;
+
+
+--
 -- Name: payment_account_has_open_checkouts(uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -15160,6 +15664,34 @@ $$;
 
 
 --
+-- Name: staff_ended_benefit_guard(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.staff_ended_benefit_guard() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_trigger text; v_amount bigint; v_device uuid;
+BEGIN
+  IF NEW.purchase_id IS NULL THEN RETURN NEW; END IF;
+  SELECT pu.trigger, pu.amount_minor, ac.device_id INTO v_trigger, v_amount, v_device
+    FROM iam_v2.purchases pu LEFT JOIN iam_v2.auth_contexts ac ON ac.id = pu.auth_context_id
+   WHERE pu.id = NEW.purchase_id;
+  IF NOT FOUND OR v_amount <> 0
+     OR v_trigger NOT IN ('GUEST_SELECTION', 'ACCOUNT_AUTO_GRANT', 'OTP_SOCIAL_DEFAULT', 'VOUCHER_REDEMPTION') THEN
+    RETURN NEW;
+  END IF;
+  IF iam_v2.package_ended_by_staff(NEW.tenant_id, NEW.site_id, NEW.package_revision_id, NEW.stay_id, NEW.guest_account_id,
+                                   NEW.voucher_id, NEW.guest_principal_id,
+                                   CASE WHEN NEW.anonymous_subject_id IS NOT NULL THEN v_device END) THEN
+    RAISE EXCEPTION 'PKG_ENDED_BY_STAFF: staff ended this free package; it is not acquired again automatically'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END $$;
+
+
+--
 -- Name: staff_release_device_slot(uuid, uuid, uuid, uuid, uuid, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -17050,6 +17582,39 @@ COMMENT ON FUNCTION public.ledger_apply(p_entries jsonb, p_adopt boolean) IS 'Ap
 
 
 --
+-- Name: ledger_destination_changes_append_only(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.ledger_destination_changes_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'secondary storage changes are append-only' USING ERRCODE = 'insufficient_privilege';
+END $$;
+
+
+--
+-- Name: ledger_destination_clear(text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.ledger_destination_clear(p_by text) RETURNS boolean
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $$
+DECLARE n integer;
+BEGIN
+  IF p_by IS NULL OR length(btrim(p_by)) = 0 THEN
+    RAISE EXCEPTION 'who removed the secondary storage is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  PERFORM set_config('stayconnect.ledger_changed_by', left(btrim(p_by), 200), true);
+  DELETE FROM public.ledger_destination;
+  GET DIAGNOSTICS n = ROW_COUNT;
+  RETURN n > 0;
+END $$;
+
+
+--
 -- Name: ledger_destination_get(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -17058,6 +17623,20 @@ CREATE FUNCTION public.ledger_destination_get() RETURNS jsonb
     SET search_path TO 'pg_catalog', 'public', 'pg_temp'
     AS $$
   SELECT COALESCE((SELECT to_jsonb(d) - 'singleton' - 'secret_ct' - 'secret_nonce' FROM public.ledger_destination d), 'null'::jsonb)
+$$;
+
+
+--
+-- Name: ledger_destination_history(integer); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.ledger_destination_history(p_limit integer) RETURNS jsonb
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $$
+  SELECT COALESCE(jsonb_agg(jsonb_build_object('at', c.at, 'action', c.action, 'kind', c.kind, 'settings', c.describe,
+                                               'by', c.changed_by) ORDER BY c.id DESC), '[]'::jsonb)
+    FROM (SELECT * FROM public.ledger_destination_changes ORDER BY id DESC LIMIT greatest(1, least(COALESCE(p_limit, 20), 200))) c
 $$;
 
 
@@ -17074,6 +17653,30 @@ CREATE FUNCTION public.ledger_destination_note(p_ok boolean, p_error text) RETUR
          last_error = CASE WHEN p_ok THEN NULL ELSE left(p_error, 300) END,
          last_error_at = CASE WHEN p_ok THEN NULL ELSE now() END
 $$;
+
+
+--
+-- Name: ledger_destination_record_change(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.ledger_destination_record_change() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    INSERT INTO public.ledger_destination_changes (action, kind, describe, changed_by)
+    VALUES ('REMOVED', OLD.kind, OLD.config, COALESCE(NULLIF(current_setting('stayconnect.ledger_changed_by', true), ''), 'system'));
+    RETURN OLD;
+  END IF;
+  IF TG_OP = 'UPDATE' AND NEW.kind IS NOT DISTINCT FROM OLD.kind AND NEW.config IS NOT DISTINCT FROM OLD.config
+     AND NEW.secret_ct IS NOT DISTINCT FROM OLD.secret_ct THEN
+    RETURN NEW;  -- a status note (last_ok_at, last_error), not a change of where the copy is kept
+  END IF;
+  INSERT INTO public.ledger_destination_changes (action, kind, describe, changed_by)
+  VALUES (CASE WHEN TG_OP = 'INSERT' THEN 'SET' ELSE 'REPLACED' END, NEW.kind, NEW.config, NEW.configured_by);
+  RETURN NEW;
+END $$;
 
 
 --
@@ -20214,6 +20817,41 @@ CREATE TABLE iam_v2.otp_device_bindings (
 --
 
 COMMENT ON TABLE iam_v2.otp_device_bindings IS 'The device (kernel-resolved MAC) a one-time code was issued to. scd writes a row at issue and refuses a verification from any other device (internal/otp VerifyFrom). Rows are pruned a day after issue; the code itself lives ten minutes. MAC identifies the device only -- never a person.';
+
+
+--
+-- Name: package_admin_actions; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.package_admin_actions (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    request_id uuid NOT NULL,
+    action text NOT NULL,
+    entitlement_id uuid NOT NULL,
+    new_entitlement_id uuid,
+    purchase_id uuid,
+    outcome text NOT NULL,
+    actor uuid NOT NULL,
+    reason text NOT NULL,
+    sessions uuid[] DEFAULT '{}'::uuid[] NOT NULL,
+    devices integer DEFAULT 0 NOT NULL,
+    window_ends_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT package_admin_actions_action_check CHECK ((action = ANY (ARRAY['END'::text, 'RESET'::text]))),
+    CONSTRAINT package_admin_actions_check CHECK (((action = 'RESET'::text) = (new_entitlement_id IS NOT NULL))),
+    CONSTRAINT package_admin_actions_check1 CHECK (((action = 'RESET'::text) = (purchase_id IS NOT NULL))),
+    CONSTRAINT package_admin_actions_outcome_check CHECK ((outcome = ANY (ARRAY['ENDED'::text, 'ALREADY_ENDED'::text, 'RESET'::text]))),
+    CONSTRAINT package_admin_actions_reason_check CHECK (((length(reason) >= 4) AND (length(reason) <= 500)))
+);
+
+
+--
+-- Name: TABLE package_admin_actions; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.package_admin_actions IS 'Staff End Package / Reset Package (0202): one append-only row per request, keyed by the request id (idempotency).';
 
 
 --
@@ -23697,6 +24335,47 @@ COMMENT ON TABLE public.ledger_destination IS 'Where the second copy of the eras
 
 
 --
+-- Name: ledger_destination_changes; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.ledger_destination_changes (
+    id bigint NOT NULL,
+    at timestamp with time zone DEFAULT now() NOT NULL,
+    action text NOT NULL,
+    kind text,
+    describe jsonb,
+    changed_by text NOT NULL,
+    CONSTRAINT ledger_destination_changes_action_check CHECK ((action = ANY (ARRAY['SET'::text, 'REPLACED'::text, 'REMOVED'::text])))
+);
+
+
+--
+-- Name: TABLE ledger_destination_changes; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.ledger_destination_changes IS 'Every change of the erasure ledger''s secondary storage (0203): kind and non-secret settings only. Append-only.';
+
+
+--
+-- Name: ledger_destination_changes_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.ledger_destination_changes_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: ledger_destination_changes_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.ledger_destination_changes_id_seq OWNED BY public.ledger_destination_changes.id;
+
+
+--
 -- Name: network_apply_events; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -24487,6 +25166,13 @@ CREATE TABLE public.walled_garden_rules (
 --
 
 ALTER TABLE ONLY public.enforcement_policy_changes ALTER COLUMN id SET DEFAULT nextval('public.enforcement_policy_changes_id_seq'::regclass);
+
+
+--
+-- Name: ledger_destination_changes id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_destination_changes ALTER COLUMN id SET DEFAULT nextval('public.ledger_destination_changes_id_seq'::regclass);
 
 
 --
@@ -25558,6 +26244,22 @@ ALTER TABLE ONLY iam_v2.otp_code_reveals
 
 ALTER TABLE ONLY iam_v2.otp_device_bindings
     ADD CONSTRAINT otp_device_bindings_pkey PRIMARY KEY (challenge_id);
+
+
+--
+-- Name: package_admin_actions package_admin_actions_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.package_admin_actions
+    ADD CONSTRAINT package_admin_actions_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: package_admin_actions package_admin_actions_request_id_key; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.package_admin_actions
+    ADD CONSTRAINT package_admin_actions_request_id_key UNIQUE (request_id);
 
 
 --
@@ -26945,6 +27647,14 @@ ALTER TABLE ONLY public.guest_networks
 
 
 --
+-- Name: ledger_destination_changes ledger_destination_changes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_destination_changes
+    ADD CONSTRAINT ledger_destination_changes_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: ledger_destination ledger_destination_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -27837,6 +28547,20 @@ COMMENT ON INDEX iam_v2.outbox_one_inflight_per_interface IS 'Contract 10: a PMS
 --
 
 CREATE INDEX outbox_queued_by_lane ON iam_v2.posting_outbox USING btree (pms_interface_id, enqueued_at, id) WHERE (state = 'QUEUED'::text);
+
+
+--
+-- Name: package_admin_actions_entitlement; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX package_admin_actions_entitlement ON iam_v2.package_admin_actions USING btree (entitlement_id);
+
+
+--
+-- Name: package_admin_actions_new_entitlement; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX package_admin_actions_new_entitlement ON iam_v2.package_admin_actions USING btree (new_entitlement_id) WHERE (new_entitlement_id IS NOT NULL);
 
 
 --
@@ -29527,6 +30251,13 @@ CREATE TRIGGER pacc_append_only BEFORE DELETE OR UPDATE ON iam_v2.payment_accoun
 
 
 --
+-- Name: package_admin_actions package_admin_actions_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER package_admin_actions_append_only BEFORE DELETE OR UPDATE ON iam_v2.package_admin_actions FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.package_admin_actions_append_only();
+
+
+--
 -- Name: payment_provider_accounts payment_account_identity_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
@@ -29720,6 +30451,13 @@ CREATE TRIGGER site_usage_rollup_changes_append_only BEFORE DELETE OR UPDATE ON 
 --
 
 CREATE TRIGGER spdc_append_only BEFORE DELETE OR UPDATE ON iam_v2.site_payment_domain_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.p4_append_only_refuse();
+
+
+--
+-- Name: entitlements staff_ended_benefit_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER staff_ended_benefit_guard BEFORE INSERT ON iam_v2.entitlements FOR EACH ROW EXECUTE FUNCTION iam_v2.staff_ended_benefit_guard();
 
 
 --
@@ -29937,6 +30675,13 @@ CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.guest_signin_res
 --
 
 CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.otp_code_reveals FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: package_admin_actions zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.package_admin_actions FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
 
 
 --
@@ -30196,6 +30941,20 @@ CREATE TRIGGER backup_key_holders_no_delete BEFORE DELETE ON public.backup_key_h
 --
 
 CREATE TRIGGER enforcement_policy_changes_append_only BEFORE DELETE OR UPDATE ON public.enforcement_policy_changes FOR EACH ROW EXECUTE FUNCTION public.enforcement_policy_changes_append_only();
+
+
+--
+-- Name: ledger_destination_changes ledger_destination_changes_append_only; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER ledger_destination_changes_append_only BEFORE DELETE OR UPDATE ON public.ledger_destination_changes FOR EACH ROW EXECUTE FUNCTION public.ledger_destination_changes_append_only();
+
+
+--
+-- Name: ledger_destination ledger_destination_record_change; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER ledger_destination_record_change AFTER INSERT OR DELETE OR UPDATE ON public.ledger_destination FOR EACH ROW EXECUTE FUNCTION public.ledger_destination_record_change();
 
 
 --
@@ -31785,6 +32544,22 @@ GRANT ALL ON FUNCTION iam_v2.accounting_retention_set(p_tenant uuid, p_site uuid
 
 REVOKE ALL ON FUNCTION iam_v2.activate_session_enforcement(p_tenant uuid, p_site uuid, p_session uuid, p_bridge text, p_class_minor integer, p_epoch bigint) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.activate_session_enforcement(p_tenant uuid, p_site uuid, p_session uuid, p_bridge text, p_class_minor integer, p_epoch bigint) TO svc_netd;
+
+
+--
+-- Name: FUNCTION admin_end_package(p_tenant uuid, p_site uuid, p_ent uuid, p_operator uuid, p_reason text, p_request uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.admin_end_package(p_tenant uuid, p_site uuid, p_ent uuid, p_operator uuid, p_reason text, p_request uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.admin_end_package(p_tenant uuid, p_site uuid, p_ent uuid, p_operator uuid, p_reason text, p_request uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION admin_reset_package(p_tenant uuid, p_site uuid, p_ent uuid, p_operator uuid, p_reason text, p_request uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.admin_reset_package(p_tenant uuid, p_site uuid, p_ent uuid, p_operator uuid, p_reason text, p_request uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.admin_reset_package(p_tenant uuid, p_site uuid, p_ent uuid, p_operator uuid, p_reason text, p_request uuid) TO svc_edged;
 
 
 --
@@ -33671,6 +34446,59 @@ GRANT ALL ON FUNCTION iam_v2.p6_tick_online_time(p_tenant uuid, p_site uuid, p_n
 
 
 --
+-- Name: FUNCTION package_admin_check_actor(p_tenant uuid, p_operator uuid, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.package_admin_check_actor(p_tenant uuid, p_operator uuid, p_reason text) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION package_admin_history(p_tenant uuid, p_site uuid, p_ent uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.package_admin_history(p_tenant uuid, p_site uuid, p_ent uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.package_admin_history(p_tenant uuid, p_site uuid, p_ent uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION package_control_list(p_tenant uuid, p_site uuid, p_kind text, p_id uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.package_control_list(p_tenant uuid, p_site uuid, p_kind text, p_id uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.package_control_list(p_tenant uuid, p_site uuid, p_kind text, p_id uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION package_control_preview(p_tenant uuid, p_site uuid, p_ent uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.package_control_preview(p_tenant uuid, p_site uuid, p_ent uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.package_control_preview(p_tenant uuid, p_site uuid, p_ent uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION package_ended_by_staff(p_tenant uuid, p_site uuid, p_package_revision uuid, p_stay uuid, p_account uuid, p_voucher uuid, p_principal uuid, p_device uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.package_ended_by_staff(p_tenant uuid, p_site uuid, p_package_revision uuid, p_stay uuid, p_account uuid, p_voucher uuid, p_principal uuid, p_device uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.package_ended_by_staff(p_tenant uuid, p_site uuid, p_package_revision uuid, p_stay uuid, p_account uuid, p_voucher uuid, p_principal uuid, p_device uuid) TO svc_scd;
+
+
+--
+-- Name: FUNCTION package_reset_refusal(p_ent uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.package_reset_refusal(p_ent uuid) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION package_reset_window(p_ent uuid, p_at timestamp with time zone); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.package_reset_window(p_ent uuid, p_at timestamp with time zone) FROM PUBLIC;
+
+
+--
 -- Name: FUNCTION payment_account_has_open_checkouts(p_account uuid); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -34288,6 +35116,13 @@ REVOKE ALL ON FUNCTION iam_v2.site_today(p_site uuid) FROM PUBLIC;
 
 
 --
+-- Name: FUNCTION staff_ended_benefit_guard(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.staff_ended_benefit_guard() FROM PUBLIC;
+
+
+--
 -- Name: FUNCTION staff_release_device_slot(p_tenant uuid, p_site uuid, p_entitlement uuid, p_device uuid, p_operator uuid, p_operator_label text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -34656,6 +35491,21 @@ GRANT ALL ON FUNCTION public.ledger_apply(p_entries jsonb, p_adopt boolean) TO s
 
 
 --
+-- Name: FUNCTION ledger_destination_changes_append_only(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.ledger_destination_changes_append_only() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION ledger_destination_clear(p_by text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.ledger_destination_clear(p_by text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.ledger_destination_clear(p_by text) TO svc_scd;
+
+
+--
 -- Name: FUNCTION ledger_destination_get(); Type: ACL; Schema: public; Owner: -
 --
 
@@ -34664,11 +35514,26 @@ GRANT ALL ON FUNCTION public.ledger_destination_get() TO svc_scd;
 
 
 --
+-- Name: FUNCTION ledger_destination_history(p_limit integer); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.ledger_destination_history(p_limit integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.ledger_destination_history(p_limit integer) TO svc_scd;
+
+
+--
 -- Name: FUNCTION ledger_destination_note(p_ok boolean, p_error text); Type: ACL; Schema: public; Owner: -
 --
 
 REVOKE ALL ON FUNCTION public.ledger_destination_note(p_ok boolean, p_error text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.ledger_destination_note(p_ok boolean, p_error text) TO svc_scd;
+
+
+--
+-- Name: FUNCTION ledger_destination_record_change(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.ledger_destination_record_change() FROM PUBLIC;
 
 
 --
@@ -36863,6 +37728,7 @@ INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, han
 INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.entitlement_transfers', 'operator_reason', 'note', 'created_at', false, NULL) ON CONFLICT DO NOTHING;
 INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.site_card_recheck_setting_changes', 'reason', 'note', 'changed_at', false, NULL) ON CONFLICT DO NOTHING;
 INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.site_card_recheck_setting_changes', 'changed_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.package_admin_actions', 'reason', 'note', 'created_at', false, NULL) ON CONFLICT DO NOTHING;
 
 -- ROWS A NEW APPLIANCE NEEDS FROM ITS FIRST MINUTE, WHICH THE MIGRATIONS INSERT AND A SCHEMA-ONLY BASELINE LOSES.
 -- (Appended to data-plane/migrations/baseline/0000_production_baseline.sql by scripts/generate-production-baseline.sh; the semantic

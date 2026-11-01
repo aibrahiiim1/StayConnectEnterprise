@@ -230,6 +230,8 @@ export type DeviceSettings = { client_device_changes_per_day: number };
 
 export type GuestAccountRemoveResp = {
   status: "deleted" | "removed"; history_kept?: boolean; disconnected_sessions?: number; disconnect_failures?: number;
+  /** Always false: deleting or removing an account is not a personal-data erasure (that is Guest data → Erase). */
+  erasure?: false;
 };
 
 export type SelfServiceSettings = {

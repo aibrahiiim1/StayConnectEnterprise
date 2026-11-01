@@ -22,6 +22,7 @@ import { ErrorBanner } from "@/components/ui/error-banner";
 import { Segmented } from "@/components/ui/tabs";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { DetailsDrawer } from "@/components/ui/details-drawer";
+import { PackageControls } from "@/components/package-controls";
 import { Explain } from "@/components/ui/tooltip";
 import { DList, Meter, MonoId, Metric, SkeletonRows } from "@/components/ui/misc";
 import { Pagination, ResultsCount, SearchInput } from "@/components/ui/data";
@@ -357,7 +358,15 @@ export default function SessionsPage() {
           ) : undefined
         }
       >
-        {detail && <div className="space-y-5"><SessionDetail s={detail} /></div>}
+        {detail && (
+          <div className="space-y-5">
+            <SessionDetail s={detail} />
+            <section className="space-y-2">
+              <h3 className="text-sm font-semibold">The package this device is on</h3>
+              <PackageControls subject={{ kind: "session", id: detail.id }} />
+            </section>
+          </div>
+        )}
       </DetailsDrawer>
 
       <ConfirmDialog

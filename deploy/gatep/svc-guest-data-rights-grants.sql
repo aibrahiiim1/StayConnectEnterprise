@@ -109,6 +109,19 @@ BEGIN
   END IF;
 END $g$;
 
+-- Migration 0203: the secondary storage can be removed (never the copy kept there) and its changes are kept. scd only.
+DO $g$
+BEGIN
+  IF to_regprocedure('public.ledger_destination_clear(text)') IS NULL THEN
+    RAISE NOTICE 'migration 0203 is not applied; secondary storage removal grants skipped';
+    RETURN;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_scd') THEN
+    GRANT EXECUTE ON FUNCTION public.ledger_destination_clear(text) TO svc_scd;
+    GRANT EXECUTE ON FUNCTION public.ledger_destination_history(integer) TO svc_scd;
+  END IF;
+END $g$;
+
 -- Migration 0173 (the erasure ledger is authenticated by a key the external copy never holds, audit AD-3): edged confirms an entry only
 -- with scd's durability receipt; scd reads the key, checks entries, installs the key into a restored database and seals the entries
 -- written before the MAC existed. ledger_confirm(text[]) is NOT granted to edged.

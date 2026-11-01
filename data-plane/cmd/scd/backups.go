@@ -367,10 +367,12 @@ type backupSettings struct {
 	EveryDays  int
 	Keep       int
 	SafetyKeep int
+	// Replicate: also copy each retained set to the secondary storage (backup_mirror.go). Off by default; never needed to back up.
+	Replicate bool
 }
 
 func readBackupSettings() backupSettings {
-	b := backupSettings{Enabled: false, Hour: 2, EveryDays: 1, Keep: 7, SafetyKeep: 3}
+	b := backupSettings{Enabled: false, Hour: 2, EveryDays: 1, Keep: 3, SafetyKeep: 2}
 	for _, r := range readRetention() {
 		v := r.Value
 		if v < r.Min || v > r.Max {
@@ -387,6 +389,8 @@ func readBackupSettings() backupSettings {
 			b.Keep = v
 		case "SAFETY_BACKUP_KEEP":
 			b.SafetyKeep = v
+		case "BACKUP_REPLICATE":
+			b.Replicate = v == 1
 		}
 	}
 	return b
@@ -413,17 +417,47 @@ func validKind(k string) bool {
 	return k == kindScheduled || k == kindManual || k == kindPreChange || k == kindPreRestore
 }
 
-// rotateBackups trims each pool to its count; a pool's newest is never removed and nothing without a note is touched.
+// rotateBackups trims each pool to its count (together at most maxBackupSets); a pool's newest is never removed and nothing without
+// a note is touched. A set that is still a good recovery point (its files present, its verified marker present, its checksum not
+// known to be broken) is removed only while a NEWER good set of the same pool is kept, so the only restorable copy never goes.
+// A set is removed whole: database dump, configuration archive, verified marker and note.
 func (s *server) rotateBackups() int {
 	set := readBackupSettings()
 	keep := map[string]int{"regular": set.Keep, "protective": set.SafetyKeep}
 	count := map[string]int{}
+	keptGood := map[string]int{}
+	broken := map[string]bool{}
+	storedCheck.mu.Lock()
+	for _, p := range storedCheck.probs {
+		broken[p.Name] = true
+	}
+	storedCheck.mu.Unlock()
+	good := func(m backupMeta) bool {
+		if broken[m.Name] || (m.EtcName != "" && broken[m.EtcName]) {
+			return false
+		}
+		for _, f := range []string{m.Name, m.Name + ".verified"} {
+			if _, err := os.Stat(filepath.Join(scdBackupDir, f)); err != nil {
+				return false
+			}
+		}
+		return m.Restorable
+	}
 	removed := 0
 	for _, m := range listBackupMetas() {
 		pool := poolOf(m.Kind)
 		count[pool]++
 		_, statErr := os.Stat(filepath.Join(scdBackupDir, m.Name))
 		if statErr == nil && count[pool] <= max(1, keep[pool]) {
+			if good(m) {
+				keptGood[pool]++
+			}
+			continue
+		}
+		if statErr == nil && good(m) && keptGood[pool] == 0 {
+			// Every newer set of this pool is unusable: this one is kept until a newer good one exists.
+			slog.Warn("backup rotation: kept an older verified backup because no newer one of its kind is usable", "backup", m.Name)
+			keptGood[pool]++
 			continue
 		}
 		for _, f := range []string{m.Name, m.Name + ".verified", m.EtcName, filepath.Base(metaPathFor(m.Name))} {
@@ -656,6 +690,12 @@ func (s *server) runScheduledBackupIfDue(ctx context.Context) {
 	if probs := storedBackupProblems(0); len(probs) > 0 {
 		slog.Error("backups that no longer match their notes", "problems", probs)
 	}
+	if !running && set.Replicate {
+		// A copy that failed (storage away, disk full) is retried here, every pass, until it reads back right.
+		mctx, cancel := context.WithTimeout(ctx, time.Hour)
+		s.mirrorBackups(mctx)
+		cancel()
+	}
 	if running || recent || !scheduledBackupDue(set, time.Now(), newestRegularBackup()) {
 		return
 	}
@@ -679,6 +719,14 @@ func (s *server) runBackupTracked(ctx context.Context, o backupOpts) (*backupMet
 		backupState.lastErr = ""
 	}
 	backupState.mu.Unlock()
+	if err == nil {
+		// The copy to the secondary storage follows the verified local backup and never holds it up.
+		go func() {
+			mctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
+			defer cancel()
+			s.mirrorBackups(mctx)
+		}()
+	}
 	return meta, err
 }
 
@@ -716,10 +764,37 @@ func (s *server) backupStatus(w http.ResponseWriter, r *http.Request) {
 	if !next.IsZero() {
 		nextOut = &next
 	}
+	earlier := earlierBackups()
+	held, _ := earlier["count"].(int)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"state": state, "message": msg, "key_holders": keyHolders, "running": running,
 		"schedule": map[string]any{"enabled": set.Enabled, "hour": set.Hour, "every_days": set.EveryDays, "keep": set.Keep, "safety_keep": set.SafetyKeep, "next": nextOut},
 		"backups":  metas, "problems": probs, "last_error": lastErr, "last_attempt": lastTry,
-		"earlier": earlierBackups(),
+		"earlier": earlier,
+		// The five-set policy as it is in force, and the earlier backups it deliberately does not remove (held).
+		"retention": map[string]any{"max_total": maxBackupSets, "regular": set.Keep, "protective": set.SafetyKeep, "held": held},
+		"mirror":    s.mirrorStatus(set, metas),
 	})
+}
+
+// backupMirrorRun starts the copy of the retained backups to the secondary storage now (the same pass the loop runs) and answers
+// at once with 202: copying and reading back large sets takes far longer than any request may wait (review finding on PR #280,
+// the relay gave up after 15 s while the copy went on). Progress and the outcome are in the backup status (mirror.running and
+// each set's copy state). A pass already running is not started twice.
+func (s *server) backupMirrorRun(w http.ResponseWriter, r *http.Request) {
+	if !readBackupSettings().Replicate {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "mirror_off", "message": errMirrorOff.Error()})
+		return
+	}
+	already := mirrorRunning.Load()
+	if !already {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
+			defer cancel()
+			_ = s.mirrorNow(ctx)
+		}()
+	}
+	out := s.mirrorStatus(readBackupSettings(), listBackupMetas())
+	out["started"], out["already_running"] = !already, already
+	writeJSON(w, http.StatusAccepted, out)
 }

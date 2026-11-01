@@ -47,6 +47,34 @@ separate mounted disk or a network share not served by the appliance, and not a 
 LVM/RAID over it (`internal/ledger/independence.go`). An SFTP or S3 endpoint on the appliance itself is refused. Nothing is ever sent
 to OneGate Central.
 
+**Setting it up, changing it, removing it (2026-10-31).** What the Admin Console says is what was read back:
+
+* **Connectivity test** writes, reads back and removes a probe file. It copies nothing of the ledger and says so; the folder is empty
+  afterwards by design. It shows the folder the destination really writes to: for SFTP, the path the server resolves (a relative folder is
+  relative to the account's login folder; for a chrooted account, inside its chroot), and the free space where the server reports it;
+  for a mounted folder, the mount type (USB/SATA disk, SMB/CIFS or NFS share) and free space.
+* **Save** is a safe handover. The appliance's whole ledger (every existing entry, not only later ones) is written to the NEW storage and
+  read back there (same ledger identity, same last entry, same hash, object checksum matching its note) while the ledger lock is held, and
+  only then is the setting saved and used; the previous storage stays in use until that moment and nothing there is deleted. The answer is
+  "in step" only when the reconciliation that follows confirms it; otherwise it is "saved, not in step" (with the reason), "recovery
+  needed" (the storage holds this appliance's ledger further than the database: it is saved so it can be recovered from, never
+  overwritten), or "not saved". A storage holding another appliance's ledger is refused.
+* **Edit**: the saved settings are shown (never a credential). Leaving a credential empty keeps the saved one only for the same account on
+  the same server or bucket; a new host never inherits a password. Credentials can be rotated, the method changed (password or SSH key),
+  the destination replaced.
+* **Remove** (password and typed confirmation) removes the setting only: the copy kept there is not deleted. Erasure is refused again
+  from that moment, as before one was set up. Every set, replace and removal is recorded append-only
+  (`public.ledger_destination_changes`, migration 0203; kind and non-secret settings only) and in the operator audit.
+* **In step** carries its proof: the entry and hash the copy was last read back at, and when.
+
+**Erasure stays fail-closed without a verified independent copy.** Backups never need the secondary storage, but an irreversible erasure
+does: this is the protection against an old backup bringing an erased guest back, and no setting weakens it. A design that let an erasure
+succeed with only the appliance's own copy would need an equally independent, durable anti-resurrection record; none exists on the
+appliance alone (a restore can replace every local disk the appliance controls), so it is a Product Owner security decision, not a setting.
+
+**Client account Delete/Remove is not an erasure.** Removing a client account keeps its history and does not write the ledger; the
+console says so and points to Guest data → Erase.
+
 ## 4. How an erasure is committed
 
 ```

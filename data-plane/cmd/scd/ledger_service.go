@@ -53,8 +53,12 @@ type ledgerRuntime struct {
 	mu          sync.Mutex
 	status      ledgerStatus
 	destErr     string
-	keyMu       sync.Mutex
-	key2        ledger.MACKey // the database's ledger key (AD-3), cached; nil when the database has none
+	// destCfg and destSec are the saved destination as last opened: the settings shown for editing, and the credentials an edit
+	// keeps when the administrator leaves a credential field empty. destSec never leaves scd.
+	destCfg *ledgerDestConfig
+	destSec ledgerDestSecret
+	keyMu   sync.Mutex
+	key2    ledger.MACKey // the database's ledger key (AD-3), cached; nil when the database has none
 }
 
 type ledgerStatus struct {
@@ -86,7 +90,22 @@ type ledgerStatus struct {
 		Encrypted  bool       `json:"encrypted"`
 		LastOK     *time.Time `json:"last_ok,omitempty"`
 		Error      string     `json:"error,omitempty"`
+		// Head is the entry the secondary copy was last read back at (only when InSync): the proof behind "in step".
+		Head *ledgerHeadProof `json:"head,omitempty"`
+		// Settings are the saved non-secret settings, for editing; Secrets says which credentials are saved, never their values.
+		Settings *ledgerDestConfig `json:"settings,omitempty"`
+		Secrets  map[string]bool   `json:"secrets,omitempty"`
+		Location *ledger.Location  `json:"location,omitempty"`
+		History  json.RawMessage   `json:"history,omitempty"`
 	} `json:"secondary"`
+}
+
+// ledgerHeadProof is what the secondary copy was read back as: the same ledger, entry and hash as the appliance's.
+type ledgerHeadProof struct {
+	Ledger string `json:"ledger"`
+	Seq    int64  `json:"seq"`
+	Hash   string `json:"hash"`
+	Object string `json:"object"`
 }
 
 func (s *server) ledgerInit(secretsDir string) {
@@ -174,6 +193,7 @@ func (s *server) ledgerLoadDestination(ctx context.Context) error {
 	}
 	rt.mu.Lock()
 	rt.destErr = ""
+	rt.destCfg, rt.destSec = nil, ledgerDestSecret{}
 	rt.mu.Unlock()
 	if strings.TrimSpace(doc) == "null" {
 		rt.store.SetDest(nil)
@@ -206,6 +226,10 @@ func (s *server) ledgerLoadDestination(ctx context.Context) error {
 		}
 		_ = json.Unmarshal(plain, &sec)
 	}
+	cfg := row.Config
+	rt.mu.Lock()
+	rt.destCfg, rt.destSec = &cfg, sec
+	rt.mu.Unlock()
 	d, err := buildLedgerDestination(row.Config, sec)
 	if err != nil {
 		rt.store.SetDest(nil)
@@ -216,6 +240,40 @@ func (s *server) ledgerLoadDestination(ctx context.Context) error {
 	}
 	rt.store.SetDest(d)
 	return nil
+}
+
+// secretFlags says which credentials are saved, never what they are.
+func secretFlags(sec ledgerDestSecret) map[string]bool {
+	return map[string]bool{"password": sec.Password != "", "private_key": sec.PrivateKey != "", "secret_key": sec.SecretKey != ""}
+}
+
+// sameDestIdentity reports whether an edit addresses the same account on the same server or bucket as the saved destination, the
+// only case in which a credential left empty may be taken from the saved one (a changed host never inherits a password).
+func sameDestIdentity(a, b ledgerDestConfig) bool {
+	switch a.Kind {
+	case "sftp":
+		return b.Kind == "sftp" && strings.EqualFold(a.Host, b.Host) && a.Port == b.Port && a.User == b.User && a.Fingerprint == b.Fingerprint
+	case "s3":
+		return b.Kind == "s3" && strings.TrimRight(a.Endpoint, "/") == strings.TrimRight(b.Endpoint, "/") && a.AccessKey == b.AccessKey
+	}
+	return false
+}
+
+// mergeSavedSecret fills the credential fields an edit left empty from the saved destination, when the edit is of the same account.
+func (s *server) mergeSavedSecret(in *ledgerDestReq) {
+	rt := &s.ledgerRT
+	rt.mu.Lock()
+	cfg, sec := rt.destCfg, rt.destSec
+	rt.mu.Unlock()
+	if cfg == nil || !in.KeepSecret || !sameDestIdentity(in.ledgerDestConfig, *cfg) {
+		return
+	}
+	if in.Kind == "sftp" && in.Password == "" && in.PrivateKey == "" {
+		in.Password, in.PrivateKey = sec.Password, sec.PrivateKey
+	}
+	if in.Kind == "s3" && in.SecretKey == "" {
+		in.SecretKey = sec.SecretKey
+	}
 }
 
 func parseEntries(doc []byte) ([]ledger.Entry, error) {
@@ -420,6 +478,12 @@ func (s *server) ledgerReconcile(ctx context.Context) ledgerStatus {
 		st.State, st.Message = "not_configured", "set up the secondary storage for the erasure ledger: erasure requests are refused until it is"
 	default:
 		st.External.Configured, st.External.Kind, st.External.Describe = true, dest.Kind(), dest.Describe()
+		rt.mu.Lock()
+		if rt.destCfg != nil {
+			c := *rt.destCfg
+			st.External.Settings, st.External.Secrets = &c, secretFlags(rt.destSec)
+		}
+		rt.mu.Unlock()
 		localBytes, _ := os.ReadFile(rt.store.LocalPath)
 		lseq, lhash := local.Parse.Head()
 		cur, _ := rt.store.CipherFingerprint(ctx)
@@ -440,6 +504,7 @@ func (s *server) ledgerReconcile(ctx context.Context) ledgerStatus {
 			problem("the secondary storage is ahead of the appliance")
 		case inSync:
 			st.External.Reachable, st.External.InSync, st.External.Entries, st.External.Encrypted = true, true, int(info.Seq), info.Encrypted
+			st.External.Head = &ledgerHeadProof{Ledger: info.Ledger, Seq: info.Seq, Hash: info.Hash, Object: info.Object}
 		default:
 			if perr := rt.store.PushExternal(ctx); perr != nil {
 				st.External.Error = perr.Error()
@@ -451,10 +516,21 @@ func (s *server) ledgerReconcile(ctx context.Context) ledgerStatus {
 					st.External.Reachable = true
 				}
 			} else {
-				st.External.Reachable, st.External.InSync, st.External.Entries = true, true, len(le)
-				if i2, _, _, e := rt.store.ReadExternalHead(ctx); e == nil && i2 != nil {
-					st.External.Encrypted = i2.Encrypted
+				// "In step" only from a fresh read-back: the note and the object it names, both matching the appliance's copy.
+				i2, objOK2, found2, e := rt.store.ReadExternalHead(ctx)
+				if e == nil && found2 && objOK2 && i2 != nil && i2.Seq == lseq && i2.Hash == lhash && i2.Ledger == local.Parse.LedgerID() {
+					st.External.Reachable, st.External.InSync, st.External.Entries, st.External.Encrypted = true, true, int(i2.Seq), i2.Encrypted
+					st.External.Head = &ledgerHeadProof{Ledger: i2.Ledger, Seq: i2.Seq, Hash: i2.Hash, Object: i2.Object}
+				} else {
+					st.External.Reachable = e == nil
+					st.External.Error = "the secondary copy was written but did not read back as the appliance's ledger"
+					problem("%s", st.External.Error)
 				}
+			}
+		}
+		if lc, ok := dest.(ledger.Locator); ok && st.External.Reachable {
+			if loc, err := lc.Locate(ctx); err == nil {
+				st.External.Location = &loc
 			}
 		}
 	}
@@ -473,6 +549,10 @@ func (s *server) ledgerReconcile(ctx context.Context) ledgerStatus {
 				st.External.LastOK = &t
 			}
 		}
+	}
+	var hist []byte
+	if err := s.db.QueryRow(ctx, `SELECT public.ledger_destination_history(10)::text`).Scan(&hist); err == nil {
+		st.External.History = hist
 	}
 	if st.State == "" {
 		switch {
@@ -596,8 +676,11 @@ func (s *server) ledgerAbort(w http.ResponseWriter, r *http.Request) {
 type ledgerDestReq struct {
 	ledgerDestConfig
 	ledgerDestSecret
-	TestOnly bool   `json:"test_only"`
-	By       string `json:"by"`
+	TestOnly bool `json:"test_only"`
+	// KeepSecret: an edit of the saved destination that leaves the credential fields empty keeps the saved credentials (only for
+	// the same account on the same server or bucket; see sameDestIdentity).
+	KeepSecret bool   `json:"keep_secret"`
+	By         string `json:"by"`
 }
 
 // ledgerDestinationProbe returns the SFTP server's host key fingerprint for the administrator to confirm before it is saved.
@@ -618,7 +701,11 @@ func (s *server) ledgerDestinationProbe(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]any{"fingerprint": fp})
 }
 
-// ledgerDestinationPut tests a destination and, unless test_only, saves it as the secondary storage and makes the first copy.
+// ledgerDestinationPut tests a destination (test_only: a CONNECTIVITY test, nothing of the ledger is written) or saves it with a
+// safe handover: the appliance's whole ledger is first written to the NEW destination and read back there (same ledger, same
+// entry, same hash), and only then is the setting saved and the new destination used; the previous one stays in use until that
+// moment. A save answers ok only when the reconciliation that follows confirms the copy in step; otherwise it answers what is
+// true (saved but not in step, recovery needed, or not saved at all). Nothing at the previous destination is deleted.
 func (s *server) ledgerDestinationPut(w http.ResponseWriter, r *http.Request) {
 	rt := &s.ledgerRT
 	var in ledgerDestReq
@@ -630,22 +717,29 @@ func (s *server) ledgerDestinationPut(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusServiceUnavailable, "the erasure ledger is not available")
 		return
 	}
+	s.mergeSavedSecret(&in)
 	dest, err := buildLedgerDestination(in.ledgerDestConfig, in.ledgerDestSecret)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid", "message": err.Error()})
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "saved": false, "error": "invalid", "message": err.Error()})
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 3*time.Minute)
 	defer cancel()
 	if err := dest.Check(ctx); err != nil {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "storage_unusable", "message": err.Error()})
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"ok": false, "saved": false, "error": "storage_unusable", "message": err.Error()})
 		return
 	}
+	var loc *ledger.Location
+	if lc, ok := dest.(ledger.Locator); ok {
+		if l, err := lc.Locate(ctx); err == nil {
+			loc = &l
+		}
+	}
 	// Another appliance's ledger in the storage is never overwritten; this appliance's own (a recovery) is kept and recovered from.
-	probe := ledger.NewStore(ledger.Config{LocalPath: filepath.Join(os.TempDir(), "unused-ledger-probe"), Dest: dest})
+	probe := ledger.NewStore(ledger.Config{LocalPath: filepath.Join(os.TempDir(), "unused-ledger-probe"), Dest: dest, MACKey: s.ledgerCachedKey})
 	info, _, found, perr := probe.ReadExternalHead(ctx)
 	if perr != nil {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "storage_unusable", "message": perr.Error()})
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"ok": false, "saved": false, "error": "storage_unusable", "message": perr.Error()})
 		return
 	}
 	var ourID string
@@ -660,7 +754,7 @@ func (s *server) ledgerDestinationPut(w http.ResponseWriter, r *http.Request) {
 		ourID, ourEntries = h.Ledger, h.Seq
 	}
 	if found && info != nil && info.Ledger != ourID && ourEntries > 1 {
-		writeJSON(w, http.StatusConflict, map[string]any{"error": "belongs_to_another",
+		writeJSON(w, http.StatusConflict, map[string]any{"ok": false, "saved": false, "error": "belongs_to_another",
 			"message": "that storage already holds the erasure ledger of a different appliance. Use a folder, bucket or prefix of its own."})
 		return
 	}
@@ -669,11 +763,16 @@ func (s *server) ledgerDestinationPut(w http.ResponseWriter, r *http.Request) {
 		existing = map[string]any{"entries": info.Seq, "same_appliance": info.Ledger == ourID, "encrypted": info.Encrypted, "updated_at": info.UpdatedAt}
 	}
 	if in.TestOnly {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "describe": dest.Describe(), "existing_ledger": existing})
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "test": "connectivity", "replicated": false,
+			"message":  "Connectivity test passed: a test file was written, read back and removed. The erasure ledger has NOT been copied there; it is copied when you save.",
+			"describe": dest.Describe(), "location": loc, "existing_ledger": existing, "ledger_entries": ourEntries})
 		return
 	}
-	cfg := in.ledgerDestConfig
-	cfgJSON, _ := json.Marshal(cfg)
+	// The storage holds this appliance's own ledger further than the database: it is saved so it can be recovered from, never
+	// overwritten (the recovery reads it with a key holder's key).
+	aheadOfUs := found && info != nil && info.Ledger == ourID && info.Seq > ourEntries
+
+	cfgJSON, _ := json.Marshal(in.ledgerDestConfig)
 	secJSON, _ := json.Marshal(in.ledgerDestSecret)
 	var ct, nonce []byte
 	var keyID *string
@@ -694,13 +793,122 @@ func (s *server) ledgerDestinationPut(w http.ResponseWriter, r *http.Request) {
 	if by == "" {
 		by = "operator"
 	}
-	if _, err := s.db.Exec(ctx, `SELECT public.ledger_destination_set($1,$2::jsonb,$3,$4,$5,$6,$7)`, cfg.Kind, string(cfgJSON), ct, nonce, keyID, ver, by); err != nil {
-		httpErr(w, http.StatusInternalServerError, "the secondary storage could not be saved: "+err.Error())
+
+	// The local copy is brought in step with the database first (it may be missing or behind), under the reconciliation lock.
+	_ = s.ledgerReconcile(ctx)
+	rt.reconcileMu.Lock()
+	handover, herr := s.ledgerHandover(ctx, dest, aheadOfUs, func(tx ledgerTx) error {
+		_, err := tx.Exec(ctx, `SELECT public.ledger_destination_set($1,$2::jsonb,$3,$4,$5,$6,$7)`, in.Kind, string(cfgJSON), ct, nonce, keyID, ver, by)
+		return err
+	})
+	rt.reconcileMu.Unlock()
+	if herr != nil {
+		slog.Warn("erasure ledger: the new secondary storage was not taken into use", "err", herr)
+		writeJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "saved": false, "error": "initial_copy_failed",
+			"message":  "The erasure ledger could not be copied to that storage and read back, so it was not saved and the previous setting is unchanged: " + herr.Error(),
+			"location": loc})
 		return
 	}
 	rt.store.SetDest(dest)
 	st := s.ledgerReconcile(ctx)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": st, "existing_ledger": existing})
+	out := map[string]any{"saved": true, "status": st, "existing_ledger": existing, "location": loc, "initial_copy": handover}
+	switch {
+	case st.State == "recovery_needed":
+		out["ok"], out["error"] = false, "recovery_needed"
+		out["message"] = "Saved. That storage holds erasures this appliance does not have: recover the ledger from it before erasing anything."
+		writeJSON(w, http.StatusConflict, out)
+	case st.External.InSync:
+		out["ok"] = true
+		out["message"] = fmt.Sprintf("Saved. The erasure ledger (%d entries) was copied there and read back.", st.External.Entries)
+		writeJSON(w, http.StatusOK, out)
+	default:
+		out["ok"], out["error"] = false, "not_in_step"
+		out["message"] = "Saved, but the copy is not confirmed in step: " + firstNonEmpty(st.External.Error, st.Message)
+		writeJSON(w, http.StatusBadGateway, out)
+	}
+}
+
+// ledgerHandover writes the appliance's ledger to dest and reads it back while holding the ledger lock (no erasure can commit in
+// between), then runs save in the same transaction. A destination ahead of the appliance is saved WITHOUT writing to it, so it can
+// be recovered from. Returns what was written and read back.
+func (s *server) ledgerHandover(ctx context.Context, dest ledger.Destination, aheadOfUs bool, save func(ledgerTx) error) (map[string]any, error) {
+	rt := &s.ledgerRT
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return nil, errors.New("the database could not be reached")
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if _, err := tx.Exec(ctx, ledgerLockSQL); err != nil {
+		return nil, errors.New("the ledger is busy; try again in a moment")
+	}
+	proof := map[string]any{"written": false}
+	if !aheadOfUs {
+		dbE, err := dbEntries(ctx, tx, 0)
+		if err != nil {
+			return nil, fmt.Errorf("the ledger in the database could not be read: %w", err)
+		}
+		local := rt.store.ReadLocal()
+		if !local.Present || local.Parse == nil || local.Parse.Err != nil || len(local.Parse.Entries) != len(dbE) {
+			return nil, errors.New("the ledger on the appliance is not yet in step with the database; try again in a minute")
+		}
+		lseq, lhash := local.Parse.Head()
+		if len(dbE) > 0 && (dbE[len(dbE)-1].Hash != lhash || dbE[len(dbE)-1].Seq != lseq) {
+			return nil, errors.New("the ledger on the appliance and the database disagree; see the ledger status")
+		}
+		// The candidate encrypts exactly as the running store does (its configured cipher), so the copy written at the handover is
+		// the copy every later push writes.
+		cand := ledger.NewStore(ledger.Config{LocalPath: rt.store.LocalPath, Dest: dest, Cipher: rt.store.Cipher, MACKey: s.ledgerCachedKey})
+		if err := cand.PushExternal(ctx); err != nil {
+			return nil, err
+		}
+		info, objOK, found, err := cand.ReadExternalHead(ctx)
+		if err != nil || !found || !objOK || info == nil || info.Seq != lseq || info.Hash != lhash || info.Ledger != local.Parse.LedgerID() {
+			return nil, errors.New("what was written there did not read back as this appliance's ledger")
+		}
+		proof = map[string]any{"written": true, "entries": info.Seq, "head_hash": info.Hash, "object": info.Object,
+			"object_sha256": info.ObjectSHA256, "encrypted": info.Encrypted}
+	}
+	if err := save(tx); err != nil {
+		return nil, fmt.Errorf("the setting could not be saved: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("the setting could not be saved: %w", err)
+	}
+	return proof, nil
+}
+
+// ledgerDestinationDelete removes the secondary storage setting. Nothing kept at the storage is deleted. Erasure is refused again
+// from this moment (an erasure needs two durable copies), exactly as before one was set up.
+func (s *server) ledgerDestinationDelete(w http.ResponseWriter, r *http.Request) {
+	rt := &s.ledgerRT
+	var in struct {
+		By string `json:"by"`
+	}
+	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<12)).Decode(&in)
+	if rt.store == nil || s.db == nil {
+		httpErr(w, http.StatusServiceUnavailable, "the erasure ledger is not available")
+		return
+	}
+	by := strings.TrimSpace(in.By)
+	if by == "" {
+		by = "operator"
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), time.Minute)
+	defer cancel()
+	rt.reconcileMu.Lock()
+	var removed bool
+	err := s.db.QueryRow(ctx, `SELECT public.ledger_destination_clear($1)`, by).Scan(&removed)
+	if err == nil {
+		rt.store.SetDest(nil)
+	}
+	rt.reconcileMu.Unlock()
+	if err != nil {
+		httpErr(w, http.StatusInternalServerError, "the secondary storage setting could not be removed: "+err.Error())
+		return
+	}
+	st := s.ledgerReconcile(ctx)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "removed": removed, "status": st,
+		"message": "The secondary storage setting was removed. Nothing kept there was deleted. Erasure requests are refused until a secondary storage is set up again."})
 }
 
 type ledgerRecoverReq struct {

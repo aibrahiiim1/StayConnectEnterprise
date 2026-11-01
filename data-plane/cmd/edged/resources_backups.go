@@ -53,8 +53,11 @@ func (s *server) backupsRoutes() http.Handler {
 	r.Post("/ledger/destination/probe", s.ledgerDestinationProbe)
 	r.Post("/ledger/destination/test", s.ledgerDestinationTest)
 	r.Put("/ledger/destination", s.ledgerDestinationSave)
+	// Destructive for erasure (refused again until a new one is set): step-up and typed confirmation in the handler.
+	r.Post("/ledger/destination/remove", s.ledgerDestinationRemove)
 	r.Post("/ledger/recover", s.ledgerRecover)
 	r.Get("/status", s.backupStatusGet)
+	r.Post("/mirror/run", s.backupMirrorRun)
 	r.Post("/earlier/remove", s.earlierBackupsRemove)
 	return r
 }

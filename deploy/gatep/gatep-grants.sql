@@ -352,6 +352,8 @@ GRANT EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) TO svc_acctd;
 \ir svc-after-checkout-grants.sql
 -- The Cross-PMS Transfer is one definer function (0201).
 \ir svc-stay-transfer-grants.sql
+-- Staff End Package / Reset Package are definer functions (0202).
+\ir svc-package-controls-grants.sql
 
 -- EXECUTE on the CANONICAL audited, versioned publication boundary. This is the only function the product
 -- calls to change checkout grace policy: it requires an active operator as actor, a bounded machine reason

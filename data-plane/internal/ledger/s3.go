@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
@@ -101,6 +102,13 @@ func (d *S3Dest) request(ctx context.Context, method, name string, body []byte) 
 
 // signed sends one SigV4-signed request; an empty name addresses the bucket itself (used by tests to create one).
 func (d *S3Dest) signed(ctx context.Context, method, name string, body []byte) (*http.Response, error) {
+	sum := sha256.Sum256(body)
+	return d.signedStream(ctx, method, name, bytes.NewReader(body), int64(len(body)), hex.EncodeToString(sum[:]))
+}
+
+// signedStream signs with the body's SHA-256 computed beforehand (never UNSIGNED-PAYLOAD), so a large file is streamed from
+// disk and the bucket still refuses a body that is not the one signed.
+func (d *S3Dest) signedStream(ctx context.Context, method, name string, body io.Reader, size int64, payloadHash string) (*http.Response, error) {
 	u, pathStyle, err := d.base()
 	if err != nil {
 		return nil, err
@@ -117,15 +125,13 @@ func (d *S3Dest) signed(ctx context.Context, method, name string, body []byte) (
 	reqURL.RawPath = ""
 	enc := encodePath(uriPath)
 	full := reqURL.String() + enc
-	req, err := http.NewRequestWithContext(ctx, method, full, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, method, full, body)
 	if err != nil {
 		return nil, err
 	}
 	now := d.now().UTC()
 	amzDate := now.Format("20060102T150405Z")
 	day := now.Format("20060102")
-	sum := sha256.Sum256(body)
-	payloadHash := hex.EncodeToString(sum[:])
 	req.Header.Set("x-amz-date", amzDate)
 	req.Header.Set("x-amz-content-sha256", payloadHash)
 	host := req.URL.Host
@@ -143,9 +149,73 @@ func (d *S3Dest) signed(ctx context.Context, method, name string, body []byte) (
 	sig := hex.EncodeToString(hmacSHA256(signingKey(d.SecretKey, day, d.Region, "s3"), sts))
 	req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential="+d.AccessKey+"/"+scope+", SignedHeaders="+signed+", Signature="+sig)
 	if method == http.MethodPut {
-		req.ContentLength = int64(len(body))
+		req.ContentLength = size
 	}
 	return d.client().Do(req)
+}
+
+// PutFile uploads a file in one signed PUT (S3 accepts up to 5 GiB that way; a backup set is far smaller).
+func (d *S3Dest) PutFile(ctx context.Context, name, localPath string) error {
+	if err := validObjectName(name); err != nil {
+		return err
+	}
+	sum, size, err := FileDigest(localPath)
+	if err != nil {
+		return err
+	}
+	if size > 5<<30 {
+		return errors.New("the file is larger than one upload to the bucket allows (5 GiB)")
+	}
+	f, err := os.Open(localPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	cl := *d.client()
+	cl.Timeout = 0 // a large upload is bounded by ctx, not by the 60 s request timeout
+	dd := *d
+	dd.Client = &cl
+	resp, err := dd.signedStream(ctx, http.MethodPut, name, contextReader{ctx, f}, size, sum)
+	if err != nil {
+		return fmt.Errorf("the bucket cannot be reached: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		return fmt.Errorf("the bucket refused the write: %s", s3Problem(resp))
+	}
+	return nil
+}
+
+// Digest reads the object back in full and hashes it; an ETag is not a content hash for every S3 implementation.
+func (d *S3Dest) Digest(ctx context.Context, name string) (string, int64, error) {
+	if err := validObjectName(name); err != nil {
+		return "", 0, err
+	}
+	cl := *d.client()
+	cl.Timeout = 0
+	dd := *d
+	dd.Client = &cl
+	resp, err := dd.signed(ctx, http.MethodGet, name, nil)
+	if err != nil {
+		return "", 0, fmt.Errorf("the bucket cannot be reached: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return "", 0, ErrNotFound
+	}
+	if resp.StatusCode/100 != 2 {
+		return "", 0, fmt.Errorf("the bucket refused the read: %s", s3Problem(resp))
+	}
+	return digestReader(contextReader{ctx, resp.Body})
+}
+
+// Locate names the endpoint, bucket and prefix the objects are written to; a bucket has no free-space figure.
+func (d *S3Dest) Locate(context.Context) (Location, error) {
+	u, _, err := d.base()
+	if err != nil {
+		return Location{Medium: "s3", Where: d.Describe()}, err
+	}
+	return Location{Medium: "s3", Where: d.Describe(), Source: u.Host}, nil
 }
 
 func signingKey(secret, day, region, service string) []byte {

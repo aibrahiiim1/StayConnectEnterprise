@@ -100,6 +100,21 @@ REVOKE_RE = re.compile(
 
 SERVICE_ROLE_RE = re.compile(r"^svc_[a-z0-9_]+$", re.I)
 
+
+def checked_role(role, obj):
+    """The grantees whose migration grants must be mirrored in deploy/gatep/.
+
+    The service roles, AND the IAM owner (iam_v2_owner) on an object outside iam_v2. The second half is the 2026-10-31 lesson:
+    migration 0200 granted iam_v2_owner SELECT on public.guest_networks inside a DO block. iam_v2 migrations are applied AS
+    iam_v2_owner, which does not own public.guest_networks, so PostgreSQL answered "no privileges were granted" with a warning and
+    the migration succeeded having changed nothing; every new session then stayed PENDING_ENFORCEMENT on the test appliance. Only
+    Gate-P, which runs as the superuser, can make that grant, so it must be named there. Grants to the owner on its own iam_v2
+    objects are implied by ownership and are not checked.
+    """
+    if SERVICE_ROLE_RE.match(role):
+        return True
+    return role.lower() == "iam_v2_owner" and not obj.lower().startswith("iam_v2.")
+
 # THE DEBT THIS LIST HELD IS PAID. IT IS EMPTY, AND THE MECHANISM STAYS.
 #
 # It held forty entries: service-role grants made by migrations that deploy/gatep/ never re-granted, so they
@@ -204,7 +219,7 @@ def collect(paths, record_order=False):
             cols = pcols or ocols
             for role in m.group("roles").split(","):
                 role = role.strip().strip('"')
-                if not SERVICE_ROLE_RE.match(role):
+                if not checked_role(role, obj):
                     continue
                 found.setdefault((role.lower(), kind, obj), []).append((privs, cols, rel))
                 if record_order:
@@ -231,7 +246,7 @@ def collect_revokes(paths):
             kind, obj, _ = normalise_object(m.group("kind"), m.group("object"))
             for role in m.group("roles").split(","):
                 role = role.strip().strip('"')
-                if not SERVICE_ROLE_RE.match(role):
+                if not checked_role(role, obj):
                     continue
                 found.setdefault((role.lower(), kind, obj), []).append((privs, rel))
                 ORDERED_REV.setdefault((role.lower(), kind, obj), []).append(((rel, m.start()), "-" + privs))

@@ -191,6 +191,40 @@ into a Central deployment.
 Deployment (deployed commit / not applicable, smoke result) · PO action (Test now / Approve merge / Decision
 required) · Blocker (NONE / exact). No chronological diaries unless asked.
 
+## 0H. ONE AGENT, TESTS ON REQUEST, FIVE-MINUTE TESTS, VISIBLE TIME (permanent PO rules, 2026-10-31)
+
+Wins over §0B's parallel-agent text and over `docs/FAST_DELIVERY_AND_PARALLEL_AGENT_PROTOCOL.md` where they differ (that file is synced at
+the next governance sync).
+
+1. **No subagents, ever.** One primary agent does all the work in its own context: no subagents, child or task agents, parallel AI agents
+   or delegated AI workers, for investigation, coding, review, documentation or testing. Ordinary shell and non-AI tools are allowed.
+2. **Tests run only when the PO asks.** Without that request do not run unit, integration or browser suites, Docker labs, outage,
+   long-duration, capacity or load tests, the four gates, governance validators, CI rounds or background test processes. Never weaken
+   or remove a test. Prepare tests with the code. Static inspection of the change (formatting, compiling and vetting the touched packages)
+   is not a test run.
+3. **When testing is authorized:**
+   - every accelerated scenario or process targets **at most 300 s of real time**;
+   - simulate time with injected clocks, pre-dated records and the smallest real setting values;
+   - never change production constants, and never ship a test control in a release;
+   - what five minutes cannot prove stays **NOT VERIFIED** and is said so;
+   - use the golden lab (`tools/oglab/golden/`) instead of rebuilding.
+
+   The fresh-install path stays separate.
+4. **The production database role is part of every test of a database writer:**
+   - set `EDGED_ROLE_TEST_DSN` (and its equivalents);
+   - grants that only a migration makes do not survive Gate-P;
+   - a migration applied as `iam_v2_owner` cannot grant on objects it does not own.
+5. **Visible time.**
+   - Give an estimate when work starts and when any run longer than 10 minutes starts.
+   - Report progress at least hourly and at every finding.
+   - Never stay silent while something runs.
+   - An unanswered question does not stop authorized work: continue and say so.
+   - Record real elapsed time and preventable overhead in the final report.
+6. **Branch cleanup after every protected merge.**
+   - Delete the merged source branch locally and remotely, and remove its worktrees and the mission's temporary copies.
+   - Only after verifying: the PR is merged; the merge commit is on master; the branch is not protected; it holds no unique unmerged work; no other owner depends on it; the provenance stays reachable.
+   - Never delete unmerged work, or a branch still needed for pending verification.
+
 ---
 
 ## 1–13. DIRECT EXECUTION RULES

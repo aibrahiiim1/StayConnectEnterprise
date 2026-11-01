@@ -154,8 +154,10 @@ var rolePerms = map[string]map[string]perm{
 		"code-requests": permRead, "code-reveal": permWrite,
 		"guest-accounts": permWrite,
 		"sessions":       permWrite,
-		"usage":          permRead,
-		"auth-methods":   permWrite, "walled-garden": permWrite, "client-groups": permWrite,
+		// End or Reset a whole package (never a payment): password step-up and a reason at the route.
+		"package-controls": permWrite,
+		"usage":            permRead,
+		"auth-methods":     permWrite, "walled-garden": permWrite, "client-groups": permWrite,
 		"portal-branding": permWrite, "portal-assets": permWrite, "notification-providers": permWrite,
 		"social-providers":  permWrite,
 		"payment-providers": permWrite,
@@ -211,7 +213,9 @@ var rolePerms = map[string]map[string]perm{
 		// "twenty" for everybody to help one person.
 		"guest-signin-restrictions": permWrite, "guest-signin-protection": permRead,
 		"guest-accounts": permWrite, "sessions": permWrite,
-		"usage": permRead,
+		// The desk ends or resets the package of the guest in front of it; never a charge or a refund.
+		"package-controls": permWrite,
+		"usage":            permRead,
 		// Reads stays/events and triages alerts, but never edits the grace policy.
 		"pms-stays": permRead, "pms-events": permRead, "operational-alerts": permWrite, "checkout-grace": permRead, "after-checkout-access": permRead,
 		// The desk identifies the guest in front of it by name and reservation.
@@ -236,7 +240,7 @@ var rolePerms = map[string]map[string]perm{
 		"code-requests":         permRead,
 		"guest-signin-attempts": permRead, "guest-signin-credentials": permWrite,
 		"guest-signin-restrictions": permWrite, "guest-signin-protection": permRead,
-		"guest-accounts": permWrite, "sessions": permWrite, "usage": permRead,
+		"guest-accounts": permWrite, "sessions": permWrite, "usage": permRead, "package-controls": permWrite,
 		"pms-stays": permRead, "pms-events": permRead, "operational-alerts": permWrite, "checkout-grace": permRead, "after-checkout-access": permRead,
 		// This role already reads guest-signin-credentials (names included), so hiding names on Stays protects nothing.
 		"pms-stay-identity": permRead,
@@ -277,7 +281,8 @@ var rolePerms = map[string]map[string]perm{
 		"guest-signin-attempts":   permRead,
 		"guest-signin-protection": permRead, "guest-signin-restrictions": permRead,
 		"guest-accounts": permRead, "sessions": permRead, "usage": permRead, "auth-methods": permRead,
-		"walled-garden": permRead, "client-groups": permRead, "portal-branding": permRead, "portal-assets": permRead, "notification-providers": permRead, "social-providers": permRead,
+		"package-controls": permRead,
+		"walled-garden":    permRead, "client-groups": permRead, "portal-branding": permRead, "portal-assets": permRead, "notification-providers": permRead, "social-providers": permRead,
 		"payment-providers": permRead, "modules": permRead, "audit": permRead, "reports": permRead,
 		"backups": permRead, "license": permRead, "network": permRead, "diagnostics": permRead,
 		"portal-https":        permRead,

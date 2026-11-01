@@ -37,6 +37,11 @@ SELECT 1, 'ALTER SEQUENCE ' || quote_ident(n.nspname) || '.' || quote_ident(c.re
           || ' OWNER TO ' || quote_ident(pg_get_userbyid(c.relowner)) || ';'
 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname IN ('public','iam_v2') AND c.relkind = 'S'
+  -- A sequence owned by a column (serial, identity) follows its table's ALTER TABLE ... OWNER, and PostgreSQL refuses to re-own
+  -- it on its own ("cannot change owner of sequence"), which failed every restore once such a sequence's owner differed from the
+  -- restoring role (found by the restore drill, 2026-11-01).
+  AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid
+                     AND d.refclassid = 'pg_class'::regclass AND d.deptype IN ('a','i'))
 UNION ALL
 SELECT 2, 'REVOKE ALL ON FUNCTION ' || quote_ident(n.nspname) || '.' || quote_ident(p.proname)
           || '(' || pg_get_function_identity_arguments(p.oid) || ') FROM PUBLIC;'
