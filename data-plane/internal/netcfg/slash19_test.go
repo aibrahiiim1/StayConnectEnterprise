@@ -234,12 +234,12 @@ func TestKeaConfigForASlash19(t *testing.T) {
 		if o["name"] == "routers" && o["data"] == "10.20.0.1" {
 			routers = true
 		}
-		if c, _ := o["code"].(float64); c == 114 && o["data"] == "http://10.20.0.1:8380/" {
+		if c, _ := o["code"].(float64); c == 114 {
 			opt114 = true
 		}
 	}
-	if !routers || !opt114 {
-		t.Errorf("router/option 114 missing: %+v", s.Options)
+	if !routers || opt114 {
+		t.Errorf("router missing or option 114 present on the HTTP fallback: %+v", s.Options)
 	}
 	// The lease database is the memfile: 8190 leases is a few hundred KB of CSV, handled with the same settings as a /24.
 	if doc.Dhcp4.Lease.Type != "memfile" || !doc.Dhcp4.Lease.Persist || doc.Dhcp4.Lease.LFC != 3600 {

@@ -186,8 +186,8 @@ func TestKeaRenderOption114(t *testing.T) {
 			found = o["data"].(string)
 		}
 	}
-	if found != "http://10.20.0.1:8380/" {
-		t.Fatalf("option 114 wrong: %q", found)
+	if found != "" {
+		t.Fatalf("option 114 on the HTTP fallback = %q; it must be left out (a plain-HTTP value silences the phones' probes)", found)
 	}
 }
 

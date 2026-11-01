@@ -121,7 +121,7 @@ local socket).
 
 | | HTTPS active | Fallback |
 |---|---|---|
-| DHCP option 114 (local DHCP) | `https://<canonical>/captive-portal/api` | today's `http://<gateway>:8380/` |
+| DHCP option 114 (local DHCP) | `https://<canonical>/captive-portal/api` | omitted (since 2026-11-01; a plain-HTTP value made phones skip their probes, see §6) |
 | OS probe on port 80 | 302 → `https://<canonical>/` | today's behaviour |
 | Any other HTTP portal page | 302 → same path on `https://<canonical>` | served over HTTP |
 | Email/SMS code message | code + link `https://<canonical>/connect?...` | **code only** |
@@ -218,6 +218,11 @@ they carry hostnames, the portal address, CSRs and certificate status — no gue
 * A site whose own DNS server applies DNS-rebinding protection must allow `gw.onegate.work` (and its hotel
   domain) to resolve to a private address.
 * With external DHCP, the hotel's DHCP server must hand out option 114 itself if wanted; probes still work.
+* **On the HTTP fallback option 114 is not emitted at all.** Until 2026-11-01 it carried `http://<gateway>:8380/`. A
+  capture on the test appliance (VLAN 90) showed an iPhone and an Android 11 phone each request option 114, receive that
+  plain-HTTP value and then send no captive request of any kind: no API fetch (RFC 8908 requires HTTPS, so the value is
+  discarded) and no legacy probe either, so no sign-in sheet. Without the option the phones run their probes, which the
+  gateway's port-80 redirect answers. The earlier MacBook observation below was the same effect.
 
 ## 11. Implementation decisions taken during delivery (2026-10-13)
 

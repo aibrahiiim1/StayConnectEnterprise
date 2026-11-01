@@ -131,13 +131,19 @@ func captiveAPIURL(topo Topology) (string, bool) {
 	return "https://" + p.CanonicalHostname + "/captive-portal/api", true
 }
 
-// CaptivePortalURL is what DHCP option 114 carries: the captive API on the canonical hostname while HTTPS is active,
-// otherwise the plain-HTTP portal on the network's gateway.
+// CaptivePortalURL is what DHCP option 114 carries: the RFC 8908 captive API on the canonical hostname while HTTPS is
+// active, and nothing otherwise, so the option is left out. Option 114 used to carry the plain-HTTP portal URL on the
+// HTTP fallback, and that stopped devices signing in by themselves: a phone that receives option 114 trusts it instead
+// of its own connectivity probes, RFC 8908 requires HTTPS, so a plain-HTTP URL is discarded and the phone neither opens
+// it nor probes. Captured on the test appliance on 2026-11-01, VLAN 90: an iPhone and an Android 11 phone both asked
+// for option 114, received http://10.90.0.1:8380/ and then sent no captive request of any kind. Without the option they
+// fall back to their probes (captive.apple.com, generate_204, connecttest), which the gateway redirect answers.
 func CaptivePortalURL(gatewayIP string, topo Topology) string {
+	_ = gatewayIP
 	if u, ok := captiveAPIURL(topo); ok {
 		return u
 	}
-	return PortalURLFor(gatewayIP, topo.PortalHTTPPort)
+	return ""
 }
 
 // portalHTTPPort is the HTTP portal port the portal address redirects 80 to.

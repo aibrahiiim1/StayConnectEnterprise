@@ -116,7 +116,8 @@ func hasAny(issues []Issue, code string) bool {
 func TestCaptivePortalURL(t *testing.T) {
 	base := topoT()
 	base.PortalHTTPPort = 8380
-	httpURL := "http://10.20.0.1:8380/"
+	// On the HTTP fallback the option is left out: a plain-HTTP value silenced the phones' own probes (2026-11-01 capture).
+	httpURL := ""
 	active := PortalTLS{HTTPSActive: true, CanonicalHostname: "k3j9x0ab.gw.onegate.work"}
 
 	cases := []struct {
@@ -125,7 +126,7 @@ func TestCaptivePortalURL(t *testing.T) {
 		tls  PortalTLS
 		want string
 	}{
-		{"fallback is today's URL, unchanged", "10.255.255.1", PortalTLS{}, httpURL},
+		{"fallback carries no option 114", "10.255.255.1", PortalTLS{}, httpURL},
 		{"HTTPS active -> the captive API on the canonical name", "10.255.255.1", active,
 			"https://k3j9x0ab.gw.onegate.work/captive-portal/api"},
 		{"the hotel's domain when it is canonical", "10.255.255.1",
@@ -167,8 +168,8 @@ func TestRenderKea_Option114FollowsTheHTTPSState(t *testing.T) {
 	topo.PortalVIP = "10.255.255.1"
 
 	fallback := RenderKeaDhcp4([]GuestNetwork{vlan20()}, topo, "/x", "/y")
-	if got := option114(t, fallback); got != "http://10.20.0.1:8380/" {
-		t.Fatalf("fallback option 114 = %q; it must stay today's per-gateway HTTP URL", got)
+	if got := option114(t, fallback); got != "" {
+		t.Fatalf("fallback option 114 = %q; the HTTP fallback must not carry option 114", got)
 	}
 	topo.PortalTLS = PortalTLS{HTTPSActive: true, CanonicalHostname: "k3j9x0ab.gw.onegate.work"}
 	active := RenderKeaDhcp4([]GuestNetwork{vlan20()}, topo, "/x", "/y")
