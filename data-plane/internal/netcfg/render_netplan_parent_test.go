@@ -108,3 +108,31 @@ func TestDisabledNetworkDeclaresNoParent(t *testing.T) {
 		t.Fatalf("disabled network must not declare its parent:\n%s", got)
 	}
 }
+
+// A tagged network's bridge takes its parent's MAC; an untagged one, an unreadable or an unusable MAC changes nothing.
+func TestRenderNetplanWith_ATaggedBridgeUsesTheParentsMAC(t *testing.T) {
+	nets := []GuestNetwork{
+		{Name: "Untagged", Enabled: true, NetworkType: "untagged", ParentInterface: "ens192", BridgeName: "br-u", GatewayIP: "10.20.0.1", SubnetCIDR: "10.20.0.0/20", PrefixLen: 20},
+		{Name: "Tagged", Enabled: true, NetworkType: "vlan", ParentInterface: "ens192", VLANID: 90, BridgeName: "br-g90", GatewayIP: "10.90.0.1", SubnetCIDR: "10.90.0.0/24", PrefixLen: 24},
+	}
+	plain := string(RenderNetplan(nets))
+	if strings.Contains(plain, "macaddress") {
+		t.Fatalf("the plain render must not set a MAC:\n%s", plain)
+	}
+	with := string(RenderNetplanWith(nets, func(string) string { return "00:0C:29:6F:39:53" }))
+	if strings.Count(with, "macaddress: 00:0c:29:6f:39:53") != 1 {
+		t.Fatalf("exactly the tagged bridge takes the parent's MAC (lower-cased):\n%s", with)
+	}
+	i := strings.Index(with, "br-g90:")
+	if i < 0 || !strings.Contains(with[i:], "macaddress: 00:0c:29:6f:39:53") || strings.Contains(with[:i], "macaddress") {
+		t.Fatalf("the MAC belongs to br-g90, not the untagged bridge:\n%s", with)
+	}
+	for _, bad := range []string{"", "not-a-mac", "00:00:00:00:00:00", "01:00:5e:00:00:fb", "00:0c:29:6f:39"} {
+		if got := string(RenderNetplanWith(nets, func(string) string { return bad })); got != plain {
+			t.Fatalf("an unusable MAC %q changed the output:\n%s", bad, got)
+		}
+	}
+	if string(RenderNetplanWith(nets, nil)) != plain {
+		t.Fatal("a nil lookup must render exactly as before")
+	}
+}

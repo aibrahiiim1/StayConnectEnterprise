@@ -478,7 +478,7 @@ func (a *applier) generate(bundle string, intent []netcfg.GuestNetwork) error {
 	topo := a.renderTopo()
 	files := map[string][]byte{
 		"stayconnect.nft":           netcfg.RenderNftables(intent, topo),
-		"50-stayconnect-guest.yaml": netcfg.RenderNetplan(a.netdManaged(intent)),
+		"50-stayconnect-guest.yaml": netcfg.RenderNetplanWith(a.netdManaged(intent), sysParentMAC),
 		"stayconnect-guest.conf":    netcfg.RenderUnbound(intent),
 		// The portal address this revision is applied with ("" = none). A rollback to this revision, and a
 		// boot reconcile of it, restore exactly this address.
