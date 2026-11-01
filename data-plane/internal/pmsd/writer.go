@@ -23,20 +23,22 @@ type writeReq struct {
 }
 
 // serialWriter is the sole owner of the outbound socket: exactly one goroutine (run) calls g.writeFrame, so
-// frames never overlap. It owns the idle-LA keepalive and, on cancellation, emits LE under a bounded write
+// frames never overlap. It owns the idle keepalive and, on cancellation, emits LE under a bounded write
 // deadline then closes the transport to release a parked reader. The request channel is bounded.
 type serialWriter struct {
 	g        *guardedConn
-	interval time.Duration // idle keepalive period (0 disables the idle LA)
-	reqCh    chan writeReq
-	done     chan struct{}
+	interval time.Duration // idle keepalive period (0 disables the idle keepalive)
+	// keepalive builds the idle keepalive record; nil means a bare LA.
+	keepalive func() string
+	reqCh     chan writeReq
+	done      chan struct{}
 
 	errOnce sync.Once
 	err     error // the write failure that ended ownership (nil on clean cancellation)
 }
 
-func newSerialWriter(g *guardedConn, interval time.Duration) *serialWriter {
-	return &serialWriter{g: g, interval: interval, reqCh: make(chan writeReq, 8), done: make(chan struct{})}
+func newSerialWriter(g *guardedConn, interval time.Duration, keepalive func() string) *serialWriter {
+	return &serialWriter{g: g, interval: interval, keepalive: keepalive, reqCh: make(chan writeReq, 8), done: make(chan struct{})}
 }
 
 // run: any request, including an activity-only ping, resets the idle timer. On cancellation it writes a
@@ -92,7 +94,11 @@ func (w *serialWriter) run(ctx context.Context) {
 				return
 			}
 		case <-idleC:
-			if err := w.g.writeFrame(pms.BuildLA()); err != nil {
+			ka := pms.BuildLA()
+			if w.keepalive != nil {
+				ka = w.keepalive()
+			}
+			if err := w.g.writeFrame(ka); err != nil {
 				w.fail(err)
 				return
 			}

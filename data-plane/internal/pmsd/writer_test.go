@@ -123,12 +123,12 @@ func TestWriter_IdleKeepaliveAndLinkAlive(t *testing.T) {
 	done := make(chan struct{})
 	go func() { _ = adapter.Serve(ctx, &recordingSink{q: NewBoundedQueue(16, time.Second)}); close(done) }()
 
-	// consume the 5 startup frames, then count idle LAs
+	// consume the 5 startup frames, then count idle keepalives: a dated LS, which Protel answers (a bare LA it does not)
 	for i := 0; i < 5; i++ {
 		<-peer.recv
 	}
-	if n := peer.waitFor("LA", 3, 2*time.Second); n < 3 {
-		t.Fatalf("expected >=3 idle keepalive LAs, got %d", n)
+	if n := peer.waitFor("LS", 3, 2*time.Second); n < 3 {
+		t.Fatalf("expected >=3 idle keepalive LS records, got %d", n)
 	}
 	// link must still be alive (Serve has not returned)
 	select {
@@ -193,7 +193,7 @@ func TestWriter_ConcurrentRequestsSerialized(t *testing.T) {
 	client, server := net.Pipe()
 	defer client.Close()
 	defer server.Close()
-	w := newSerialWriter(&guardedConn{c: client, writeTimeout: time.Second}, 0) // idle disabled
+	w := newSerialWriter(&guardedConn{c: client, writeTimeout: time.Second}, 0, nil) // idle disabled
 	ctx, cancel := context.WithCancel(context.Background())
 	go w.run(ctx)
 
@@ -240,4 +240,43 @@ func TestWriter_ConcurrentRequestsSerialized(t *testing.T) {
 	}
 	cancel()
 	<-w.done
+}
+
+// A PMS that, like the real CHR Protel, never answers a bare LA but answers every LS with LA at once: a quiet link must
+// stay up past the read deadline, and each answer is recorded as heartbeat evidence. With the old bare-LA keepalive this
+// peer sent nothing and the link ended at HeartbeatTimeout.
+func TestWriter_AQuietProtelLinkStaysUpOnAnsweredKeepalives(t *testing.T) {
+	adapter, server := newAdapterOverPipe(t)
+	adapter.rev.HeartbeatInterval = 30 * time.Millisecond
+	adapter.rev.HeartbeatTimeout = 120 * time.Millisecond // four keepalive periods, as 30 s / 90 s in production
+	conn := server
+	go func() {
+		br := bufio.NewReader(conn)
+		for {
+			body, err := pms.ReadFramedRecord(br)
+			if err != nil {
+				return
+			}
+			if pms.RecordID(body) == "LS" {
+				// Answered off the read loop: net.Pipe is unbuffered, a TCP socket is not.
+				go func() { _ = pms.WriteFramedRecord(conn, pms.BuildLA()) }()
+			}
+		}
+	}()
+	sink := &recordingSink{q: NewBoundedQueue(16, time.Second)}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- adapter.Serve(ctx, sink) }()
+	select {
+	case err := <-done:
+		t.Fatalf("a quiet link that answers every keepalive ended: %v", err)
+	case <-time.After(10 * adapter.rev.HeartbeatTimeout):
+	}
+	sink.mu.Lock()
+	hb := sink.heartbeats
+	sink.mu.Unlock()
+	if hb < 5 {
+		t.Fatalf("%d heartbeats recorded from the answered keepalives, want at least 5", hb)
+	}
 }

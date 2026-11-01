@@ -153,7 +153,15 @@ func (a *fiasAdapter) serve(ctx context.Context, sink AxisSink) error {
 	// A single serialized writer owns every outbound frame; the read loop only submits requests. wctx cancellation
 	// emits a controlled LE and stops; the deferred drain prevents goroutine leaks.
 	wctx, wcancel := context.WithCancel(ctx)
-	w := newSerialWriter(a.g, a.rev.HeartbeatInterval)
+	// The idle keepalive is a dated LS, which Protel answers at once with LA (measured against the real CHR Protel,
+	// 2026-11-01). A bare LA is never answered: Protel sends its own LA only after 30 s in which it received nothing, and
+	// our 30 s LA kept resetting that timer, so a quiet link carried no inbound frame and the read deadline ended it every
+	// heartbeat_timeout (90 s) with TRANSPORT_TIMEOUT, followed by a reconnect and a full resync. The answer to the LS is
+	// real inbound evidence that the PMS is alive (OnHeartbeat), never our own write.
+	w := newSerialWriter(a.g, a.rev.HeartbeatInterval, func() string {
+		t := a.now()
+		return pms.BuildLS(t.Format("060102"), t.Format("150405"))
+	})
 	go w.run(wctx)
 	defer func() { wcancel(); <-w.done }()
 	defer a.g.st.freeze() // runs before the writer is stopped
