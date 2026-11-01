@@ -235,6 +235,16 @@ export default function PortalHTTPSPage() {
             <SectionCard title="Host names" description="The canonical name is used in links and redirects.">
               <DescriptionList
                 items={[
+                  ...(st!.shared_hostname ? [{
+                    label: "Client Portal address",
+                    value: (
+                      <span className="flex flex-wrap items-center gap-2">
+                        {mono(st!.shared_hostname)}
+                        {st!.https_active && st!.canonical_hostname === st!.shared_hostname && <Badge tone="accent">Canonical</Badge>}
+                      </span>
+                    ),
+                    hint: "Shared by every OneGate appliance; guests always reach this appliance's own portal.",
+                  }] : []),
                   {
                     label: "OneGate host name",
                     value: st!.onegate_hostname ? (

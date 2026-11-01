@@ -355,6 +355,12 @@ Bring-up, all from **System → Portal certificates**:
    appliance hostnames. Portal A records point at private addresses; a hotel resolver with DNS-rebinding
    protection drops such answers, so its own DNS must allow the zone.
 
+**The shared Client Portal name** (`portal.onegate.getsemantics.com`, [contract §16](architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md#16-one-shared-client-portal-name-for-every-appliance-product-owner-decision-2026-11-01))
+needs no further secret: Central answers its challenge at `sharedportal.acme.onegate.work` with the `onegate.work`
+token. Its two public records (`A 10.255.255.1`, `_acme-challenge` CNAME to that delegate) are published once in the
+`getsemantics.com` zone by the Product Owner; the console shows whether they are in place.
+`CTRLAPI_PORTAL_SHARED_HOSTNAME=off` switches the feature off.
+
 **Test chain before a token exists** (TEST-ONLY, never on a production Central): run Pebble and pebble-challtestsrv
 beside ctrlapi and set `CTRLAPI_PORTAL_DNS_PROVIDER=challtestsrv`, `CTRLAPI_PORTAL_CHALLTESTSRV_URL`,
 `CTRLAPI_PORTAL_ACME_DIRECTORY_URL`, `CTRLAPI_PORTAL_ACME_CA_FILE` and `CTRLAPI_PORTAL_DNS_CHECK_SERVERS`

@@ -70,9 +70,9 @@ type issued struct {
 }
 
 // issue runs one ACME order, answering DNS-01 at challengeName. The TXT records are always deleted before it returns.
-func (s *Service) issue(ctx context.Context, c *acme.Client, prov DNSProvider, hostname, challengeName string, csrDER []byte,
-	setOrderURL func(string)) (*issued, error) {
-	order, err := c.AuthorizeOrder(ctx, acme.DomainIDs(hostname))
+func (s *Service) issue(ctx context.Context, c *acme.Client, prov DNSProvider, identifiers []string,
+	challengeNameFor func(identifier string) string, csrDER []byte, setOrderURL func(string)) (*issued, error) {
+	order, err := c.AuthorizeOrder(ctx, acme.DomainIDs(identifiers...))
 	if err != nil {
 		return nil, fmt.Errorf("new order: %w", err)
 	}
@@ -111,6 +111,7 @@ func (s *Service) issue(ctx context.Context, c *acme.Client, prov DNSProvider, h
 		if err != nil {
 			return nil, err
 		}
+		challengeName := challengeNameFor(NormalizeFQDN(authz.Identifier.Value))
 		id, err := prov.SetTXT(ctx, challengeName, value)
 		if err != nil {
 			return nil, fmt.Errorf("publish challenge: %w", err)
@@ -157,7 +158,7 @@ func (s *Service) issue(ctx context.Context, c *acme.Client, prov DNSProvider, h
 			return nil, fmt.Errorf("fetch certificate: %w", err)
 		}
 	}
-	out, err := checkIssuedChain(der, hostname, csrDER)
+	out, err := checkIssuedChain(der, identifiers, csrDER)
 	if err != nil {
 		return nil, err
 	}
@@ -165,8 +166,8 @@ func (s *Service) issue(ctx context.Context, c *acme.Client, prov DNSProvider, h
 	return out, nil
 }
 
-// checkIssuedChain refuses anything but a leaf for exactly hostname carrying the CSR's key; the appliance checks again.
-func checkIssuedChain(der [][]byte, hostname string, csrDER []byte) (*issued, error) {
+// checkIssuedChain refuses anything but a leaf for exactly the ordered names carrying the CSR's key; the appliance checks again.
+func checkIssuedChain(der [][]byte, identifiers []string, csrDER []byte) (*issued, error) {
 	if len(der) == 0 {
 		return nil, errors.New("the CA returned no certificate")
 	}
@@ -182,8 +183,8 @@ func checkIssuedChain(der [][]byte, hostname string, csrDER []byte) (*issued, er
 	if pk, ok := leaf.PublicKey.(pubEq); !ok || !pk.Equal(csr.PublicKey) {
 		return nil, errors.New("the issued certificate does not carry the CSR's key")
 	}
-	if len(leaf.DNSNames) != 1 || leaf.DNSNames[0] != hostname {
-		return nil, fmt.Errorf("the issued certificate names %v, not %s", leaf.DNSNames, hostname)
+	if !sameNames(leaf.DNSNames, identifiers) {
+		return nil, fmt.Errorf("the issued certificate names %v, not %v", leaf.DNSNames, identifiers)
 	}
 	var buf bytes.Buffer
 	for _, d := range der {
@@ -285,4 +286,23 @@ func (s *Service) acmeHTTP() *http.Client {
 		return &http.Client{Timeout: 30 * time.Second}
 	}
 	return hc
+}
+
+// sameNames compares two name sets, ignoring order.
+func sameNames(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := map[string]int{}
+	for _, x := range a {
+		seen[NormalizeFQDN(x)]++
+	}
+	for _, y := range b {
+		k := NormalizeFQDN(y)
+		if seen[k] == 0 {
+			return false
+		}
+		seen[k]--
+	}
+	return true
 }

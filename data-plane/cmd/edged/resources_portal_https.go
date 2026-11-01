@@ -60,6 +60,9 @@ type portalTLSState struct {
 	LastSyncAt          *time.Time        `json:"last_sync_at"`
 	LastSyncError       string            `json:"last_sync_error"`
 	UpdatedAt           *time.Time        `json:"updated_at"`
+	// SharedHostname is the fleet's shared Client Portal name while this appliance uses it: the OneGate-kind
+	// certificate that is not the appliance's own hostname (scd keeps that row exactly while the name is in use).
+	SharedHostname string `json:"shared_hostname"`
 }
 
 type portalCertificate struct {
@@ -230,6 +233,12 @@ func (s *server) loadPortalTLSState(ctx context.Context) (portalTLSState, error)
 	if len(records) > 0 {
 		_ = json.Unmarshal(records, &st.CustomDomainRecords) // unreadable records show as none
 	}
+	// The shared Client Portal name: the OneGate-kind certificate row that is not this appliance's own hostname.
+	var shared *string
+	if err := s.db.QueryRow(ctx, `SELECT hostname FROM public.portal_certificates
+	        WHERE kind = 'ONEGATE' AND hostname <> $1 ORDER BY hostname LIMIT 1`, st.OneGateHostname).Scan(&shared); err == nil && shared != nil {
+		st.SharedHostname = strings.ToLower(*shared)
+	}
 	return st, nil
 }
 
@@ -276,6 +285,10 @@ func (s *server) loadPortalHistory(ctx context.Context) ([]portalSettingsChange,
 // portalHostnames are the hostnames the portal is reachable by: the OneGate hostname and the registered hotel domain.
 func portalHostnames(st portalTLSState) []portalCallbackURL {
 	out := []portalCallbackURL{}
+	if h := strings.ToLower(strings.TrimSpace(st.SharedHostname)); h != "" {
+		out = append(out, portalCallbackURL{Hostname: h, Kind: "SHARED", URL: socialCallbackURL(h),
+			Canonical: st.HTTPSActive && h == st.CanonicalHostname})
+	}
 	if h := strings.ToLower(strings.TrimSpace(st.OneGateHostname)); h != "" {
 		out = append(out, portalCallbackURL{Hostname: h, Kind: "ONEGATE", URL: socialCallbackURL(h),
 			Canonical: st.HTTPSActive && h == st.CanonicalHostname})

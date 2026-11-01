@@ -247,8 +247,9 @@ func (s *Store) DropPending(host string) error {
 	return nil
 }
 
-// NewPendingKey generates a new ECDSA P-256 key, replacing any pending key, and returns its CSR.
-func (s *Store) NewPendingKey(host string) ([]byte, error) {
+// NewPendingKey generates a new ECDSA P-256 key, replacing any pending key, and returns its CSR. also are further
+// names the certificate must carry (the shared portal name's certificate also names the appliance's own hostname).
+func (s *Store) NewPendingKey(host string, also ...string) ([]byte, error) {
 	if !ValidHostname(host) {
 		return nil, ErrBadHostname
 	}
@@ -263,12 +264,12 @@ func (s *Store) NewPendingKey(host string) ([]byte, error) {
 	if err := s.writeKey(s.PendingKeyPath(host), pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})); err != nil {
 		return nil, err
 	}
-	return CreateCSR(host, key)
+	return CreateCSR(host, key, also...)
 }
 
 // PendingCSR rebuilds the CSR for the existing pending key. Reuse it after a failed order request or a 409, since
 // the open order may have been made with this key and can only be installed with it.
-func (s *Store) PendingCSR(host string) ([]byte, error) {
+func (s *Store) PendingCSR(host string, also ...string) ([]byte, error) {
 	if !ValidHostname(host) {
 		return nil, ErrBadHostname
 	}
@@ -279,15 +280,28 @@ func (s *Store) PendingCSR(host string) ([]byte, error) {
 		}
 		return nil, err
 	}
-	return CreateCSR(host, key)
+	return CreateCSR(host, key, also...)
 }
 
-// CreateCSR names exactly one DNS name and nothing else (no common name, no other SAN); Central refuses anything else.
-func CreateCSR(host string, key crypto.Signer) ([]byte, error) {
-	if !ValidHostname(host) {
-		return nil, ErrBadHostname
+// CreateCSR names host, then each of also, and nothing else (no common name, no other SAN); Central refuses
+// anything else. Without also it names exactly one DNS name.
+func CreateCSR(host string, key crypto.Signer, also ...string) ([]byte, error) {
+	names := []string{host}
+	for _, n := range append([]string{host}, also...) {
+		if !ValidHostname(n) {
+			return nil, ErrBadHostname
+		}
 	}
-	der, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{DNSNames: []string{host}}, key)
+	for _, n := range also {
+		dup := false
+		for _, m := range names {
+			dup = dup || strings.EqualFold(m, n)
+		}
+		if !dup {
+			names = append(names, n)
+		}
+	}
+	der, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{DNSNames: names}, key)
 	if err != nil {
 		return nil, err
 	}

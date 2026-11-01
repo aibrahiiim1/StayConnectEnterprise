@@ -357,7 +357,7 @@ export default function SocialProvidersPage() {
             <ul className="space-y-2">
               {callbacks.map((c) => {
                 const id = `cb-${c.hostname}`;
-                const googleOnOneGate = f.provider === "google" && c.kind === "ONEGATE";
+                const googleOnOneGate = f.provider === "google" && (c.kind === "ONEGATE" || c.kind === "SHARED");
                 return (
                   <li key={c.hostname} className="rounded-md border border-border px-3 py-2">
                     <div className="flex flex-wrap items-center gap-2">

@@ -159,7 +159,7 @@ func portalHTTPPort(topo Topology) int {
 func PortalHostnames(p PortalTLS) []string {
 	var out []string
 	seen := map[string]bool{}
-	for _, h := range []string{p.OneGateHostname, p.CustomDomain} {
+	for _, h := range []string{p.SharedHostname, p.OneGateHostname, p.CustomDomain} {
 		h = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(h)), ".")
 		if !ValidHostname(h) || seen[h] {
 			continue

@@ -410,7 +410,18 @@ func (s *store) LoadPortalTLS(ctx context.Context) (netcfg.PortalTLS, error) {
 	if errors.Is(err, pgx.ErrNoRows) || undefinedTable(err) {
 		return netcfg.PortalTLS{}, nil
 	}
-	return p, err
+	if err != nil {
+		return p, err
+	}
+	// The shared Client Portal name is the OneGate-kind certificate row that is not this appliance's own hostname
+	// (scd keeps that row exactly while the appliance uses the shared name).
+	if e2 := s.db.QueryRow(ctx, `
+        SELECT hostname FROM public.portal_certificates
+         WHERE kind = 'ONEGATE' AND hostname <> $1 ORDER BY hostname LIMIT 1`, p.OneGateHostname).Scan(&p.SharedHostname); e2 != nil &&
+		!errors.Is(e2, pgx.ErrNoRows) && !undefinedTable(e2) {
+		return p, e2
+	}
+	return p, nil
 }
 
 func (s *store) Event(ctx context.Context, revID, phase string, ok bool, detail map[string]any) {

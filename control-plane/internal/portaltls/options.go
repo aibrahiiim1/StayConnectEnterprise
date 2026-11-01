@@ -35,6 +35,11 @@ type Options struct {
 	CloudflareAPI    string        // not read from the environment
 	PropagationLimit time.Duration // default 2 min
 	PropagationPoll  time.Duration // default 5 s
+
+	// The shared Client Portal name (shared.go). Not a test override: the defaults are the product's.
+	// CTRLAPI_PORTAL_SHARED_HOSTNAME=off switches the shared name off.
+	SharedHostname string
+	SharedAddress  string
 }
 
 // OptionsFromEnv reads CTRLAPI_PORTAL_* and lists the active test overrides (empty in production).
@@ -47,6 +52,8 @@ func OptionsFromEnv() (Options, []string) {
 		ACMECAFile:      strings.TrimSpace(os.Getenv("CTRLAPI_PORTAL_ACME_CA_FILE")),
 		DNSCheckServers: splitList(os.Getenv("CTRLAPI_PORTAL_DNS_CHECK_SERVERS")),
 		DoHURLs:         splitList(os.Getenv("CTRLAPI_PORTAL_DOH_URLS")),
+		SharedHostname:  NormalizeFQDN(envOr("CTRLAPI_PORTAL_SHARED_HOSTNAME", DefaultSharedHostname)),
+		SharedAddress:   envOr("CTRLAPI_PORTAL_SHARED_ADDRESS", DefaultSharedAddress),
 	}
 	var active []string
 	if o.DNSProvider != ProviderCloudflare {
@@ -85,7 +92,28 @@ func (o Options) Check() error {
 			return fmt.Errorf("CTRLAPI_PORTAL_DNS_CHECK_SERVERS entry %q must be host:port", s)
 		}
 	}
+	if h := o.SharedHostname; h != "" && h != "off" {
+		if err := validHostnameSyntax(h); err != nil || strings.Count(h, ".") < 2 {
+			return fmt.Errorf("CTRLAPI_PORTAL_SHARED_HOSTNAME %q must be a host name such as portal.example.com", h)
+		}
+		if _, err := ParsePortalIP(o.SharedAddress); err != nil {
+			return fmt.Errorf("CTRLAPI_PORTAL_SHARED_ADDRESS: %v", err)
+		}
+	}
 	return nil
+}
+
+// Shared is the configured shared Client Portal name; disabled when switched off or unset (as in unit tests).
+func (o Options) Shared() SharedPortal {
+	h := NormalizeFQDN(o.SharedHostname)
+	if h == "" || h == "off" {
+		return SharedPortal{}
+	}
+	a, err := ParsePortalIP(o.SharedAddress)
+	if err != nil {
+		return SharedPortal{}
+	}
+	return SharedPortal{Hostname: h, Address: a}
 }
 
 // CheckEnv is Check plus the rule that a production Central never uses the test DNS server (audit Phase 1 CC2).

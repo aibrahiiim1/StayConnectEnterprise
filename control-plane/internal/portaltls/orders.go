@@ -2,6 +2,7 @@ package portaltls
 
 import (
 	"context"
+	"crypto/x509"
 	"errors"
 	"net/http"
 	"time"
@@ -37,25 +38,51 @@ func (s *Service) CreateOrder(ctx context.Context, applianceID string, in OrderR
 		return nil, refuse(http.StatusServiceUnavailable, "not_configured", "Central has no DNS/ACME configuration yet")
 	}
 	hostname := NormalizeFQDN(in.Hostname)
-	csr, name, err := ParseAndCheckCSR(in.CSRPEM)
-	if err != nil {
-		return nil, refuse(http.StatusUnprocessableEntity, "invalid_csr", "%s", err.Error())
-	}
-	if name != hostname {
-		return nil, refuse(http.StatusUnprocessableEntity, "invalid_csr", "the CSR names %s, not %s", name, hostname)
-	}
-
-	kind := ""
 	h, err := scanHost(s.DB.QueryRow(ctx, `SELECT `+hostCols+` FROM portal_hostnames WHERE appliance_id=$1`, applianceID))
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
-	if err == nil && h.FQDN == hostname {
+	hostKnown := err == nil
+
+	var csr *x509.CertificateRequest
+	kind := ""
+	if sp := s.Opts.Shared(); sp.Enabled() && hostname == sp.Hostname {
+		// THE SHARED NAME: this appliance's own certificate for it, naming its OneGate hostname too.
+		if !hostKnown || h.ReleasedAt != nil {
+			return nil, refuse(http.StatusUnprocessableEntity, "unknown_hostname", "this appliance has no live OneGate hostname yet")
+		}
+		if h.PortalIP != sp.Address.String() {
+			return nil, refuse(http.StatusUnprocessableEntity, "shared_not_eligible",
+				"the shared portal name answers %s; this appliance's portal address is %s", sp.Address, h.PortalIP)
+		}
+		if csr, err = ParseAndCheckSharedCSR(in.CSRPEM, sp.Hostname, h.FQDN); err != nil {
+			return nil, refuse(http.StatusUnprocessableEntity, "invalid_csr", "%s", err.Error())
+		}
+		// Re-checked before every order, as a hotel domain is.
+		if ok, why := s.sharedReady(ctx, st, true); !ok {
+			return nil, refuse(http.StatusUnprocessableEntity, "shared_not_ready", "the shared portal name is not ready in public DNS: %s", why)
+		}
+		kind = KindOneGate
+	} else {
+		var name string
+		csr, name, err = ParseAndCheckCSR(in.CSRPEM)
+		if err != nil {
+			return nil, refuse(http.StatusUnprocessableEntity, "invalid_csr", "%s", err.Error())
+		}
+		if name != hostname {
+			return nil, refuse(http.StatusUnprocessableEntity, "invalid_csr", "the CSR names %s, not %s", name, hostname)
+		}
+	}
+
+	switch {
+	case kind != "":
+		// The shared name, decided above.
+	case hostKnown && h.FQDN == hostname:
 		if h.ReleasedAt != nil {
 			return nil, refuse(http.StatusUnprocessableEntity, "hostname_released", "this hostname was released")
 		}
 		kind = KindOneGate
-	} else {
+	default:
 		d, err := s.liveDomain(ctx, s.DB, applianceID)
 		if err != nil {
 			return nil, err

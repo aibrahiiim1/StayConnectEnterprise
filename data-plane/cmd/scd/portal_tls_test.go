@@ -78,6 +78,7 @@ type fakeCentral struct {
 	available   bool
 	hostname    string
 	domain      *ptCustomDomain
+	shared      *ptShared
 	revoked     map[string]bool // serial -> revoked
 	renewAfter  map[string]time.Time
 
@@ -108,6 +109,10 @@ func (f *fakeCentral) Sync(_ context.Context, req ptSyncReq) (*ptSyncResp, error
 	if req.CustomDomain != nil && f.domain != nil {
 		d := *f.domain
 		r.CustomDomain = &d
+	}
+	if f.shared != nil {
+		sp := *f.shared
+		r.SharedPortal = &sp
 	}
 	for serial := range f.revoked {
 		r.Certificates = append(r.Certificates, ptCertStatus{Hostname: ogHost, Serial: serial, Revoked: true})
