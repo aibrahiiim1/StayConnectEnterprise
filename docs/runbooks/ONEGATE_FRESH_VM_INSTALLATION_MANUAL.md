@@ -1151,3 +1151,26 @@ Migrations **0193** (After Check-out Access), **0198** and **0199** (outage cont
 Checks after the upgrade: `psql -c "SELECT outage_continuity_minutes FROM public.enforcement_policy"` (60); the Admin Console shows **After Check-out Access** (the old Checkout Grace and Post-stay pages redirect to it); a client network may be created up to `/19` (an existing /20 is never widened in place); netd reports its continuity block (`journalctl -u stayconnect-netd | grep continuity`).
 Rollback: `binary-rollback.sh` for the binaries; each new migration has a `.down.sql` that states what it costs. Do not widen any network to /19 before 0200 is applied: the upper half of that network could not be enforced without it.
 
+### A3.14 The package-controls release on the test pair (2026-11-01)
+
+Release `bd8e571c` (PR #280, D86), deployed first for the Product Owner's manual testing (D87, T0278). Both versions are read back from the installed files.
+
+| Environment | Result |
+|---|---|
+| Central `central.onegate.getsemantics.com` (`172.21.96.96`) | `central-deploy.sh`: `onegate-central-bd8e571c5735`, ctrlapi `bd8e571c5735` unmodified, console build `ePpHfVZv5yoBL-kypzFVP`; no Central migration (63 applied, 0 pending); encrypted pre-deploy dump; smoke 9 of 9 PASS incl. `:9443` against the appliance CA. Previous: `5ac9cc5c9851` (rollback: `central-deploy.sh rollback`) |
+| Appliance `172.21.96.97` | `appliance-install.sh --upgrade --root-ca-sha256 10:3C:…:F1:B8` (the held pin equals Central's `FINGERPRINTS.txt`): `onegate-appliance-bd8e571c5735`, all eight binaries embed `bd8e571c5735` unmodified; migrations **0202** (End/Reset Package) and **0203** (secondary storage removal and change history; a platform migration), each after an encrypted, proven-restorable backup; Gate-P re-applied; units PASS (`pmsd` dormant). Previous: `11a5bfb4c007` (binary rollback command printed by the upgrade) |
+
+Checks after the upgrade:
+- `SELECT max(version) FROM public.schema_migrations` → `0203`;
+- `svc_edged` may EXECUTE `admin_end_package` / `admin_reset_package` and not `package_ended_by_staff`; `svc_scd` may EXECUTE `package_ended_by_staff`, `ledger_destination_clear` and `ledger_destination_history`;
+- no `iam_v2` definer function with a wrong owner;
+- the Admin Console login answers 200; the package-controls, backup status and ledger routes answer 200;
+- licence Active over verified mutual TLS, refreshed from Central.
+
+The appliance has no secondary storage set up, so erasure is refused until one is (Backups → Erasure ledger). It had no PMS stays at the time; End/Reset can be tried on Client Account and voucher packages.
+
+Rollback:
+- migrations 0202 and 0203 each have a `.down.sql`;
+- 0202 down keeps the entitlements and purchases a reset created;
+- 0203 down drops the change history.
+

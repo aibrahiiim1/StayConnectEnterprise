@@ -16,6 +16,9 @@ docker cp "$OGLAB/labapi.py" "$APPL:/root/labapi.py" >/dev/null
 appl() { docker exec "$APPL" sh -c ". /root/cont-lib.sh; $*"; }
 sql() { docker exec -i "$APPL" sh -c "docker exec -i stayconnect-pg psql -X -At -U stayconnect -d stayconnect_site -c \"$1\""; }
 api() { docker exec "$APPL" python3 /root/labapi.py "$@"; }
+# apifull <method> <path>: the whole answer (labapi.py prints at most 3,000 characters by default, and the backup and ledger status
+# documents are longer, so a key near their end was cut off and a check on it failed although the product was right).
+apifull() { docker exec "$APPL" python3 /root/labapi.py "$1" "$2" null 10000000; }
 authcount() { appl authset 2>/dev/null || echo 0; }
 
 # wait_for <seconds> <description> <command...>: polls every 2 s; fails the scenario at the bound.

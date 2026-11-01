@@ -1,0 +1,33 @@
+{
+  "transition_id": "T0278",
+  "seq": 278,
+  "timestamp": "2026-11-01T06:05:00Z",
+  "timestamp_derivation": "Computed from the session clock after both deployments were read back (Central 05:56Z, appliance 06:02Z) and their verification finished (06:04Z), before the commit that introduces this receipt.",
+  "record_type": "PACKAGE_CONTROLS_DEPLOYMENT",
+  "authorisation": "D87, the Product Owner's priority change of 2026-11-01 (deploy bd8e571c to the production Central and the test appliance first).",
+  "deployment": {
+    "central": "central.onegate.getsemantics.com (172.21.96.96): onegate-central-bd8e571c5735 by central-deploy.sh; release_commit bd8e571c5735f5c34564d488af706b9cbc7f1a90 and the ctrlapi revision read back unmodified; console build ePpHfVZv5yoBL-kypzFVP; no Central migration (63 applied, 0 pending); encrypted pre-deploy dump taken; smoke 9 of 9 PASS incl. the appliance mutual-TLS listener on 9443. Previously onegate-central-5ac9cc5c9851.",
+    "test_appliance": "172.21.96.97: onegate-appliance-bd8e571c5735 by appliance-install.sh --upgrade --root-ca-sha256 (the held pin equals Central's FINGERPRINTS.txt); migrations 0202 and 0203 applied, each after an encrypted backup proven restorable, 0203 as a platform migration, Gate-P re-applied; RELEASE.json source_commit and all eight binaries in DEPLOYED_BINARIES.sha256 embed bd8e571c5735f5c34564d488af706b9cbc7f1a90 unmodified; units PASS (pmsd deliberately dormant). Previously onegate-appliance-11a5bfb4c007."
+  },
+  "verification": "Appliance: schema at 0203; svc_edged holds EXECUTE on the End/Reset functions and not on the re-acquisition rule, svc_scd holds EXECUTE on it and on the storage clear and history functions; no iam_v2 definer function with a wrong owner; public.ledger_destination_changes owned by the platform role; the Admin Console login page answers 200 and the package-controls, backup status and ledger routes answer 200 as the console's role; licence Active, mutual TLS verified and the licence refreshed from Central after the upgrade; outage continuity setting 60. Not performed: End, Reset or a secondary-storage save on the live appliance (left to the Product Owner's manual testing), a client journey, real PMS traffic.",
+  "not_touched": "Active PKI and the Root CA, networking topology, PMS configuration and traffic, financial operations, production customer data, historical backups, every retired host.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "bd8e571c5735f5c34564d488af706b9cbc7f1a90",
+  "previous_delivery": "T0277",
+  "decision": "D87",
+  "go_live": "NOT authorised."
+}

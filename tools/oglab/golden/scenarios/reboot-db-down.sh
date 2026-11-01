@@ -11,7 +11,7 @@ appl "docker compose -f /opt/stayconnect/deploy/compose/infra.yml stop postgres"
 log "database stopped"
 appl "systemctl restart stayconnect-netd stayconnect-acctd stayconnect-scd" || true
 appl "nft flush set inet stayconnect phase3_auth_ipv4"   # what a reboot leaves: an empty set
-for i in $(seq 1 30); do
+for _ in $(seq 1 30); do
   [ "$(authcount)" -eq 0 ] || fail "an authorisation appeared with the database down after a restart (unmetered access)"
   sleep 2
 done

@@ -16,7 +16,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="${OGLAB_GOLDEN_ROOT:-$HOME/oglab-golden}"
-CONTAINERS=(${OGLAB_CONTAINERS:-oglab-central oglab-appl oglab-gen oglab-sink oglab-sftp})
+read -r -a CONTAINERS <<<"${OGLAB_CONTAINERS:-oglab-central oglab-appl oglab-gen oglab-sink oglab-sftp}"
 APPL="${OGLAB_APPLIANCE:-oglab-appl}"
 LIMIT="${OGLAB_SCENARIO_LIMIT:-300}"
 
@@ -150,7 +150,8 @@ cmd_run() {
   local s="${1:?scenario}" f="$HERE/scenarios/$1.sh"
   [ -x "$f" ] || die "no scenario $s (ls $HERE/scenarios)"
   mkdir -p "$ROOT/results"
-  local out="$ROOT/results/$(date -u +%Y%m%dT%H%M%SZ)-$s" t0 rc=0; t0=$(date +%s)
+  local out t0 rc=0
+  out="$ROOT/results/$(date -u +%Y%m%dT%H%M%SZ)-$s"; t0=$(date +%s)
   say "running $s (hard limit ${LIMIT} s)"
   timeout --signal=TERM --kill-after=10 "$LIMIT" "$f" > "$out.log" 2>&1 || rc=$?
   local el=$(( $(date +%s) - t0 )) verdict

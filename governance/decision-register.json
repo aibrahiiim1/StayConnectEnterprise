@@ -1275,6 +1275,18 @@
       "title": "PACKAGE CONTROLS, BACKUP AND STORAGE REMEDIATION (2026-10-31/11-01): staff End Package and Reset Package for every Internet entitlement (migration 0202: Reset is a free, linked ADMIN_GRANT cycle that moves no money; idempotent; After Check-out keeps its fixed device cohort), with the Product Owner's decision that a free benefit staff ended is not acquired again automatically by the same subject (a room package for the rest of that Stay; priced purchases, staff grants and later Stays unaffected; a staff Reset lifts it); Client Account removal is distinct from personal-data erasure, which keeps the mandatory Erasure Ledger; the secondary storage is saved only after the ledger is copied and read back there, can be edited and removed, and keeps a change history (migration 0203); at most five backups at rest with optional verified copies to the secondary storage; restore no longer re-owns column-owned sequences; continuity corrections for recently admitted sessions.",
       "authorization_evidence": "The Product Owner's final authorization of 2026-11-01 (GOAL: continue the delivery/package-controls-backup-remediation mission and complete it end to end through verified protected merge to master; merge pre-authorized; no deployment).",
       "does_not_authorize": "Any deployment (test appliance or production Central), Go-Live, real PMS traffic, financial or payment-provider activity, Root CA or trust changes, deleting historical backups or other destructive data changes, erasure with only a local ledger copy, live external storage or credentials."
+    },
+    {
+      "id": "D87",
+      "decided_on": "2026-11-01",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-11-01",
+      "status": "ACTIVE",
+      "title": "DEPLOY FIRST (2026-11-01): the merged master release bd8e571c (PR #280, D86) is deployed to the production Central central.onegate.getsemantics.com (172.21.96.96 / 41.128.240.133) and to the test appliance 172.21.96.97 for Product-Owner manual testing, before the remaining work of the mission (golden-lab harness corrections, review, documentation).",
+      "authorization_evidence": "The Product Owner's priority change of 2026-11-01 (GOAL: deploy the current merged master release bd8e571c immediately to BOTH named environments, verify, notify READY FOR PRODUCT OWNER MANUAL TESTING, then continue the authorized mission; protected merge authorized).",
+      "does_not_authorize": "Go-Live, changes to active PKI or networking topology, real PMS configuration or traffic, financial operations, production customer data, deleting historical backups, any other environment."
     }
   ]
 }
