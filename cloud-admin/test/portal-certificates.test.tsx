@@ -12,7 +12,7 @@ import PortalCertificatesPage from "@/app/(app)/system/portal-certificates/page"
 const SETTINGS: PortalTLSSettings = {
   acme_directory: "staging",
   contact_email: "pki@onegate.test",
-  zone_name: "onegate.work",
+  zone_name: "onegate.getsemantics.com",
   zone_id: "zone1",
   account_url: "https://acme-staging-v02.api.letsencrypt.org/acme/acct/1",
   account_directory: "https://acme-staging-v02.api.letsencrypt.org/directory",
@@ -31,7 +31,7 @@ const ROW: PortalFleetRow = {
   serial: "OG-0001",
   customer_name: "Nile Hotels",
   site_name: "Nile Cairo",
-  hostname: "k3x9q2ma.gw.onegate.work",
+  hostname: "k3x9q2ma.gw.onegate.getsemantics.com",
   portal_ip: "10.255.255.1",
   dns_state: "SYNCED",
   released: false,
@@ -39,7 +39,7 @@ const ROW: PortalFleetRow = {
   custom_domain_status: "VERIFIED",
   certificates: [
     {
-      hostname: "k3x9q2ma.gw.onegate.work", kind: "ONEGATE", order_id: "o1", status: "ISSUED", serial: "fa12",
+      hostname: "k3x9q2ma.gw.onegate.getsemantics.com", kind: "ONEGATE", order_id: "o1", status: "ISSUED", serial: "fa12",
       not_after: "2027-01-10T00:00:00Z", renew_after: "2026-12-10T00:00:00Z", revoked: false,
       acme_directory_url: "https://acme-staging-v02.api.letsencrypt.org/directory", acme_directory: "staging",
     },
@@ -86,7 +86,7 @@ describe("Portal certificates", () => {
     const table = await screen.findByRole("table", { name: "Portal certificates" });
     const row = within(table).getAllByRole("row")[1];
     expect(within(row).getByRole("link", { name: "OG-0001" })).toHaveAttribute("href", "/appliances/a1");
-    expect(within(row).getByText("k3x9q2ma.gw.onegate.work")).toBeInTheDocument();
+    expect(within(row).getByText("k3x9q2ma.gw.onegate.getsemantics.com")).toBeInTheDocument();
     expect(within(row).getByText("Issued")).toBeInTheDocument();
     expect(within(row).getByText("Staging")).toBeInTheDocument();
     expect(within(row).getByText("Published")).toBeInTheDocument();

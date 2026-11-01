@@ -98,8 +98,8 @@ func TestValidatePortalDomain(t *testing.T) {
 		"wifi.nilehotel.com":                   true,
 		"guest-wifi.hotel.co.uk":               true,
 		"nilehotel.com":                        false, // an apex
-		"abcd1234.gw.onegate.work":             false, // OneGate's own zone
-		"onegate.work":                         false,
+		"abcd1234.gw.onegate.getsemantics.com": false, // OneGate's own zone
+		"onegate.getsemantics.com":             false,
 		"wifi_.hotel.com":                      false,
 		"-wifi.hotel.com":                      false,
 		"wifi.hotel.c":                         false,
@@ -122,8 +122,8 @@ func TestEvaluatePortalHTTPS(t *testing.T) {
 	now := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
 	ago := now.Add(-48 * time.Hour)
 	in := func(d time.Duration) *time.Time { v := now.Add(d); return &v }
-	installed := []portalCertificate{{Hostname: "abcd1234.gw.onegate.work", InstalledAt: &ago, NotAfter: in(60 * 24 * time.Hour)}}
-	active := portalTLSState{HTTPSActive: true, CanonicalHostname: "abcd1234.gw.onegate.work", OneGateHostname: "abcd1234.gw.onegate.work"}
+	installed := []portalCertificate{{Hostname: "abcd1234.gw.onegate.getsemantics.com", InstalledAt: &ago, NotAfter: in(60 * 24 * time.Hour)}}
+	active := portalTLSState{HTTPSActive: true, CanonicalHostname: "abcd1234.gw.onegate.getsemantics.com", OneGateHostname: "abcd1234.gw.onegate.getsemantics.com"}
 	fallback := func(reason string) portalTLSState {
 		return portalTLSState{FallbackReason: reason, FallbackSince: &ago}
 	}
@@ -144,9 +144,9 @@ func TestEvaluatePortalHTTPS(t *testing.T) {
 		{"address down", fallback("PORTAL_ADDRESS_NOT_ACTIVE"), installed, portalCheckCritical, "PORTAL_ADDRESS_NOT_ACTIVE", "apply the network"},
 		{"central unreachable before any certificate", fallback("CENTRAL_UNREACHABLE"), nil, portalCheckWarn, "CENTRAL_UNREACHABLE", "cannot be reached"},
 		{"not configured after having worked", fallback("NOT_CONFIGURED"), installed, portalCheckCritical, "NOT_CONFIGURED", "was working before"},
-		{"expiring unrenewed", active, []portalCertificate{{Hostname: "abcd1234.gw.onegate.work", InstalledAt: &ago,
+		{"expiring unrenewed", active, []portalCertificate{{Hostname: "abcd1234.gw.onegate.getsemantics.com", InstalledAt: &ago,
 			NotAfter: in(3 * 24 * time.Hour), LastError: "order refused"}}, portalCheckCritical, "CERTIFICATE_EXPIRING", "order refused"},
-		{"eight days left is fine", active, []portalCertificate{{Hostname: "x.gw.onegate.work", InstalledAt: &ago,
+		{"eight days left is fine", active, []portalCertificate{{Hostname: "x.gw.onegate.getsemantics.com", InstalledAt: &ago,
 			NotAfter: in(8 * 24 * time.Hour)}}, portalCheckOK, "", "HTTPS"},
 		{"a pending certificate never installed is not an expiry", active, []portalCertificate{{Hostname: "wifi.hotel.com",
 			NotAfter: in(time.Hour)}}, portalCheckOK, "", "HTTPS"},
@@ -292,7 +292,7 @@ func TestPortalHTTPSRefusesBadInputFirst(t *testing.T) {
 	for _, tc := range []struct{ path, body, says string }{
 		{"/address", `{"portal_ip":"192.0.2.1","password":"x"}`, "private address"},
 		{"/address", `{"portal_ip":"10.0.0.1/24","password":"x"}`, "IPv4"},
-		{"/custom-domain", `{"fqdn":"x.gw.onegate.work","password":"x"}`, "onegate.work"},
+		{"/custom-domain", `{"fqdn":"x.gw.onegate.getsemantics.com","password":"x"}`, "onegate.getsemantics.com"},
 		{"/custom-domain", `{"fqdn":"nilehotel.com","password":"x"}`, "subdomain"},
 	} {
 		w := httptest.NewRecorder()
@@ -359,10 +359,10 @@ func TestKickPortalTLSCallsSCD(t *testing.T) {
 }
 
 func TestPortalHostnamesAndCallbackURLs(t *testing.T) {
-	st := portalTLSState{OneGateHostname: "abcd1234.gw.onegate.work", CustomDomain: "wifi.nilehotel.com",
+	st := portalTLSState{OneGateHostname: "abcd1234.gw.onegate.getsemantics.com", CustomDomain: "wifi.nilehotel.com",
 		CustomDomainStatus: "VERIFIED", HTTPSActive: true, CanonicalHostname: "wifi.nilehotel.com"}
 	got := portalHostnames(st)
-	if len(got) != 2 || got[0].URL != "https://abcd1234.gw.onegate.work/auth/social/callback" ||
+	if len(got) != 2 || got[0].URL != "https://abcd1234.gw.onegate.getsemantics.com/auth/social/callback" ||
 		got[1].URL != "https://wifi.nilehotel.com/auth/social/callback" || got[0].Canonical || !got[1].Canonical {
 		t.Fatalf("hostnames = %+v", got)
 	}

@@ -109,9 +109,9 @@ func TestARealProviderIsOfferedOnlyOverHTTPSOnARegisteredCallbackHost(t *testing
 		{"http fallback (accessor not wired)", nil, []string{"wifi.hotel.example"}, false, reasonHTTPFallback, ""},
 		{"http fallback", noPortalHTTPS{}, []string{"wifi.hotel.example"}, false, reasonHTTPFallback, ""},
 		{"active but no canonical", fakePortal{active: true}, []string{"wifi.hotel.example"}, false, reasonHTTPFallback, ""},
-		{"canonical not registered", fakePortal{true, "ab12cd34.gw.onegate.work"}, []string{"wifi.hotel.example"}, false, reasonCallbackNotRegd, ""},
+		{"canonical not registered", fakePortal{true, "ab12cd34.gw.onegate.getsemantics.com"}, []string{"wifi.hotel.example"}, false, reasonCallbackNotRegd, ""},
 		{"nothing registered", fakePortal{true, "wifi.hotel.example"}, nil, false, reasonCallbackNotRegd, ""},
-		{"registered", fakePortal{true, "wifi.hotel.example"}, []string{"ab12cd34.gw.onegate.work", "wifi.hotel.example"}, true, "",
+		{"registered", fakePortal{true, "wifi.hotel.example"}, []string{"ab12cd34.gw.onegate.getsemantics.com", "wifi.hotel.example"}, true, "",
 			"https://wifi.hotel.example/auth/social/callback"},
 		{"canonical case and trailing dot", fakePortal{true, "WiFi.Hotel.example."}, []string{"wifi.hotel.example"}, true, "",
 			"https://wifi.hotel.example/auth/social/callback"},
@@ -168,7 +168,7 @@ func TestSocialStartRefusesWithAReasonCode(t *testing.T) {
 		want   string
 	}{
 		{"http fallback", noPortalHTTPS{}, reasonHTTPFallback},
-		{"callback not registered", fakePortal{true, "ab12cd34.gw.onegate.work"}, reasonCallbackNotRegd},
+		{"callback not registered", fakePortal{true, "ab12cd34.gw.onegate.getsemantics.com"}, reasonCallbackNotRegd},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := socialServer(t, tc.portal, "wifi.hotel.example")

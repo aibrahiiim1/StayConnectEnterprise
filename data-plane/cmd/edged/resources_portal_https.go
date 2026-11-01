@@ -159,6 +159,10 @@ func validatePortalIP(raw string) (string, string) {
 	return ip4.String(), ""
 }
 
+// oneGateNameBase holds OneGate's own portal names (appliance hostnames, the shared Client Portal name); a hotel
+// domain is never one of them. Central refuses them too.
+const oneGateNameBase = "onegate.getsemantics.com"
+
 // The DB CHECK on portal_https_settings.custom_domain, verbatim.
 var portalDomainRe = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$`)
 
@@ -174,8 +178,8 @@ func validatePortalDomain(fqdn string) string {
 	if len(fqdn) < 4 || len(fqdn) > 253 || !portalDomainRe.MatchString(fqdn) {
 		return "the domain must be a host name such as wifi.example.com (letters, digits and hyphens only)"
 	}
-	if fqdn == "onegate.work" || strings.HasSuffix(fqdn, ".onegate.work") {
-		return "the portal domain must be a domain you own, not one under onegate.work"
+	if fqdn == oneGateNameBase || strings.HasSuffix(fqdn, "."+oneGateNameBase) {
+		return "the portal domain must be a domain you own, not one under " + oneGateNameBase
 	}
 	if strings.Count(fqdn, ".") < 2 {
 		return "use a subdomain such as wifi." + fqdn + ", not the domain itself"

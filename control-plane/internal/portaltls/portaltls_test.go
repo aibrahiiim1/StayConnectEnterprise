@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"math/big"
 	"net"
 	"net/http"
@@ -39,7 +40,7 @@ func TestParseAndCheckCSR(t *testing.T) {
 	p384, _ := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	rsa2048, _ := rsa.GenerateKey(rand.Reader, 2048)
 	rsa1024, _ := rsa.GenerateKey(rand.Reader, 1024)
-	host := "abcdefgh.gw.onegate.work"
+	host := "abcdefgh.gw.onegate.getsemantics.com"
 
 	good := csrPEM(t, p256, x509.CertificateRequest{DNSNames: []string{host}})
 	if _, name, err := ParseAndCheckCSR(good); err != nil || name != host {
@@ -58,7 +59,7 @@ func TestParseAndCheckCSR(t *testing.T) {
 		"email SAN":       csrPEM(t, p256, x509.CertificateRequest{DNSNames: []string{host}, EmailAddresses: []string{"a@b.c"}}),
 		"URI SAN":         csrPEM(t, p256, x509.CertificateRequest{DNSNames: []string{host}, URIs: []*url.URL{{Scheme: "https", Host: "x"}}}),
 		"CN differs":      csrPEM(t, p256, x509.CertificateRequest{DNSNames: []string{host}, Subject: pkix.Name{CommonName: "evil.example.com"}}),
-		"uppercase name":  csrPEM(t, p256, x509.CertificateRequest{DNSNames: []string{"ABCDEFGH.gw.onegate.work"}}),
+		"uppercase name":  csrPEM(t, p256, x509.CertificateRequest{DNSNames: []string{"ABCDEFGH.gw.onegate.getsemantics.com"}}),
 		"not PEM":         "hello",
 		"certificate PEM": strings.Replace(good, "CERTIFICATE REQUEST", "CERTIFICATE", -1),
 	}
@@ -102,13 +103,13 @@ func TestLabelsAndTokens(t *testing.T) {
 	if len(tok) != 32 || tok != strings.ToLower(tok) || strings.Trim(tok, "abcdefghijklmnopqrstuvwxyz234567") != "" {
 		t.Errorf("verify token %q must be 32 lowercase base32 characters", tok)
 	}
-	if HostnameFor("abcdefgh", "onegate.work") != "abcdefgh.gw.onegate.work" {
+	if HostnameFor("abcdefgh", "onegate.getsemantics.com") != "abcdefgh.gw.onegate.getsemantics.com" {
 		t.Error("hostname shape")
 	}
-	if ChallengeNameFor(KindOneGate, "abcdefgh.gw.onegate.work", "", "onegate.work") != "_acme-challenge.abcdefgh.gw.onegate.work" {
+	if ChallengeNameFor(KindOneGate, "abcdefgh.gw.onegate.getsemantics.com", "", "onegate.getsemantics.com") != "_acme-challenge.abcdefgh.gw.onegate.getsemantics.com" {
 		t.Error("ONEGATE challenge name")
 	}
-	if ChallengeNameFor(KindCustom, "wifi.nilehotel.com", "0123456789abcdef", "onegate.work") != "0123456789abcdef.acme.onegate.work" {
+	if ChallengeNameFor(KindCustom, "wifi.nilehotel.com", "0123456789abcdef", "onegate.getsemantics.com") != "0123456789abcdef.acme.onegate.getsemantics.com" {
 		t.Error("CUSTOM challenge name must be the delegate")
 	}
 }
@@ -122,18 +123,18 @@ func TestValidateCustomDomain(t *testing.T) {
 		"xn--wifi-8ra.hotel.com": "xn--wifi-8ra.hotel.com",
 	}
 	for in, want := range ok {
-		got, err := ValidateCustomDomain(in, "onegate.work")
+		got, err := ValidateCustomDomain(in, "onegate.getsemantics.com")
 		if err != nil || got != want {
 			t.Errorf("%q: got %q, %v; want %q", in, got, err, want)
 		}
 	}
 	for _, bad := range []string{
-		"nilehotel.com",            // an apex
-		"hotel.co.uk",              // an apex below a multi-label suffix
-		"co.uk",                    // a public suffix
-		"wifi.onegate.work",        // OneGate's zone
-		"abcdefgh.gw.onegate.work", // OneGate's zone
-		"onegate.work",
+		"nilehotel.com",                        // an apex
+		"hotel.co.uk",                          // an apex below a multi-label suffix
+		"co.uk",                                // a public suffix
+		"wifi.onegate.getsemantics.com",        // OneGate's zone
+		"abcdefgh.gw.onegate.getsemantics.com", // OneGate's zone
+		"onegate.getsemantics.com",
 		"WiFi.NileHotel.com", // must be lowercase
 		"wifi..nilehotel.com",
 		"-wifi.nilehotel.com",
@@ -143,7 +144,7 @@ func TestValidateCustomDomain(t *testing.T) {
 		"foo.github.io", // eTLD+1 of a private suffix: an apex there too
 		strings.Repeat("a", 64) + ".nilehotel.com",
 	} {
-		if got, err := ValidateCustomDomain(bad, "onegate.work"); err == nil {
+		if got, err := ValidateCustomDomain(bad, "onegate.getsemantics.com"); err == nil {
 			t.Errorf("%q must be refused (got %q)", bad, got)
 		}
 	}
@@ -272,12 +273,12 @@ func fakeDoH(t *testing.T, table map[string][]dohAnswer) *httptest.Server {
 }
 
 func TestCheckDomain(t *testing.T) {
-	c := DomainCheck{FQDN: "wifi.nilehotel.com", VerifyToken: "tok", CNAMETarget: "abcdefgh.gw.onegate.work",
-		ChallengeAlias: "0123456789abcdef.acme.onegate.work", AccountURL: "https://ca/acct/1"}
+	c := DomainCheck{FQDN: "wifi.nilehotel.com", VerifyToken: "tok", CNAMETarget: "abcdefgh.gw.onegate.getsemantics.com",
+		ChallengeAlias: "0123456789abcdef.acme.onegate.getsemantics.com", AccountURL: "https://ca/acct/1"}
 	good := map[string][]dohAnswer{
 		"_onegate-verify.wifi.nilehotel.com|16": {{Name: "_onegate-verify.wifi.nilehotel.com.", Type: 16, Data: `"tok"`}},
-		"wifi.nilehotel.com|5":                  {{Name: "wifi.nilehotel.com.", Type: 5, Data: "abcdefgh.gw.onegate.work."}},
-		"_acme-challenge.wifi.nilehotel.com|5":  {{Name: "_acme-challenge.wifi.nilehotel.com.", Type: 5, Data: "0123456789abcdef.acme.onegate.work."}},
+		"wifi.nilehotel.com|5":                  {{Name: "wifi.nilehotel.com.", Type: 5, Data: "abcdefgh.gw.onegate.getsemantics.com."}},
+		"_acme-challenge.wifi.nilehotel.com|5":  {{Name: "_acme-challenge.wifi.nilehotel.com.", Type: 5, Data: "0123456789abcdef.acme.onegate.getsemantics.com."}},
 		"nilehotel.com|257":                     {{Name: "nilehotel.com.", Type: 257, Data: `0 issue "letsencrypt.org"`}},
 	}
 	a, b := fakeDoH(t, good), fakeDoH(t, good)
@@ -381,17 +382,18 @@ func TestSettingsValidate(t *testing.T) {
 	if err := (SettingsUpdate{WeeklyNewLimit: n(51)}).Validate(); err == nil {
 		t.Error("weekly limit above Let's Encrypt's 50 is refused")
 	}
-	if err := (SettingsUpdate{ACMEDirectory: str("production"), ContactEmail: str("ops@onegate.work"), ZoneName: str("onegate.work"), WeeklyNewLimit: n(45)}).Validate(); err != nil {
+	if err := (SettingsUpdate{ACMEDirectory: str("production"), ContactEmail: str("ops@onegate.getsemantics.com"), ZoneName: str("onegate.getsemantics.com"), WeeklyNewLimit: n(45)}).Validate(); err != nil {
 		t.Error(err)
 	}
 }
 
 // fakeCF fakes /zones and /dns_records; the token is accepted only in the Authorization header.
 type fakeCF struct {
-	mu      sync.Mutex
-	records map[string]cfRecord
-	next    int
-	token   string
+	mu          sync.Mutex
+	records     map[string]cfRecord
+	next        int
+	token       string
+	zoneQueries []string
 }
 
 func (f *fakeCF) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -409,7 +411,12 @@ func (f *fakeCF) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case r.URL.Path == "/zones":
-		reply(200, []cfZone{{ID: "zone1", Name: "onegate.work", NameServers: []string{"a.ns.example", "b.ns.example"}}})
+		f.zoneQueries = append(f.zoneQueries, r.URL.Query().Get("name"))
+		if r.URL.Query().Get("name") == "getsemantics.com" {
+			reply(200, []cfZone{{ID: "zone1", Name: "getsemantics.com", NameServers: []string{"a.ns.example", "b.ns.example"}}})
+			return
+		}
+		reply(200, []cfZone{})
 	case r.URL.Path == "/zones/zone1/dns_records" && r.Method == http.MethodGet:
 		var out []cfRecord
 		for _, rec := range f.records {
@@ -431,6 +438,10 @@ func (f *fakeCF) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			reply(404, nil)
 			return
 		}
+		if r.Method == http.MethodGet {
+			reply(200, f.records[id])
+			return
+		}
 		if r.Method == http.MethodDelete {
 			delete(f.records, id)
 			reply(200, map[string]string{"id": id})
@@ -448,30 +459,51 @@ func (f *fakeCF) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func TestCloudflare(t *testing.T) {
 	f := &fakeCF{records: map[string]cfRecord{}, token: "secret-token-value"}
-	f.records["keep"] = cfRecord{ID: "keep", Type: "CAA", Name: "onegate.work", Data: map[string]any{"flags": 0, "tag": "iodef", "value": "mailto:sec@onegate.work"}}
-	f.records["other"] = cfRecord{ID: "other", Type: "CAA", Name: "onegate.work", Data: map[string]any{"flags": 0, "tag": "issue", "value": "digicert.com"}}
-	f.records["oldle"] = cfRecord{ID: "oldle", Type: "CAA", Name: "onegate.work", Data: map[string]any{"flags": 0, "tag": "issue", "value": "letsencrypt.org"}}
+	f.records["keep"] = cfRecord{ID: "keep", Type: "CAA", Name: "onegate.getsemantics.com", Data: map[string]any{"flags": 0, "tag": "iodef", "value": "mailto:sec@onegate.getsemantics.com"}}
+	f.records["other"] = cfRecord{ID: "other", Type: "CAA", Name: "onegate.getsemantics.com", Data: map[string]any{"flags": 0, "tag": "issue", "value": "digicert.com"}}
+	f.records["oldle"] = cfRecord{ID: "oldle", Type: "CAA", Name: "onegate.getsemantics.com", Data: map[string]any{"flags": 0, "tag": "issue", "value": "letsencrypt.org"}}
 	srv := httptest.NewServer(f)
 	defer srv.Close()
 	ctx := context.Background()
-	cf := &Cloudflare{Token: "secret-token-value", ZoneName: "onegate.work", BaseURL: srv.URL}
+	cf := &Cloudflare{Token: "secret-token-value", ZoneName: "onegate.getsemantics.com", BaseURL: srv.URL}
+
+	// A record of the company's own, outside the OneGate base, in the same Cloudflare zone.
+	f.records["company"] = cfRecord{ID: "company", Type: "A", Name: "central.getsemantics.com", Content: "41.128.240.133"}
 
 	zi, err := cf.Verify(ctx)
-	if err != nil || zi.ID != "zone1" || len(zi.NameServers) != 2 {
-		t.Fatalf("verify: %+v %v", zi, err)
+	if err != nil || zi.ID != "zone1" || zi.Name != "getsemantics.com" || len(zi.NameServers) != 2 {
+		t.Fatalf("verify finds the enclosing zone: %+v %v", zi, err)
 	}
-	id1, err := cf.UpsertA(ctx, "abcdefgh.gw.onegate.work", "10.255.255.1")
+	if len(f.zoneQueries) != 2 || f.zoneQueries[0] != "onegate.getsemantics.com" || f.zoneQueries[1] != "getsemantics.com" {
+		t.Fatalf("the base first, then its parent, never further: %v", f.zoneQueries)
+	}
+	// THE WRITE BOUNDARY: nothing outside the base is written or deleted, whatever is asked.
+	for _, name := range []string{"central.getsemantics.com", "getsemantics.com", "xonegate.getsemantics.com", "evil.example.com"} {
+		if _, err := cf.UpsertA(ctx, name, "10.255.255.1"); !errors.Is(err, errOutsideBase) {
+			t.Errorf("UpsertA %s: %v", name, err)
+		}
+		if _, err := cf.SetTXT(ctx, "_acme-challenge."+name, "v"); !errors.Is(err, errOutsideBase) {
+			t.Errorf("SetTXT %s: %v", name, err)
+		}
+	}
+	if err := cf.DeleteRecord(ctx, "company"); !errors.Is(err, errOutsideBase) {
+		t.Fatalf("a record outside the base is never deleted: %v", err)
+	}
+	if f.records["company"].Content != "41.128.240.133" {
+		t.Fatal("the company record is untouched")
+	}
+	id1, err := cf.UpsertA(ctx, "abcdefgh.gw.onegate.getsemantics.com", "10.255.255.1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	id2, err := cf.UpsertA(ctx, "abcdefgh.gw.onegate.work", "10.254.254.1")
+	id2, err := cf.UpsertA(ctx, "abcdefgh.gw.onegate.getsemantics.com", "10.254.254.1")
 	if err != nil || id1 != id2 {
 		t.Fatalf("an address change updates the same record: %s %s %v", id1, id2, err)
 	}
 	if r := f.records[id1]; r.Content != "10.254.254.1" || r.TTL != 300 || r.Proxied == nil || *r.Proxied {
 		t.Errorf("A record: %+v (TTL 300, never proxied)", r)
 	}
-	txt, err := cf.SetTXT(ctx, "_acme-challenge.abcdefgh.gw.onegate.work", "v")
+	txt, err := cf.SetTXT(ctx, "_acme-challenge.abcdefgh.gw.onegate.getsemantics.com", "v")
 	if err != nil || f.records[txt].TTL != 60 {
 		t.Fatalf("TXT: %v %+v", err, f.records[txt])
 	}
@@ -507,7 +539,7 @@ func TestCloudflare(t *testing.T) {
 		t.Errorf("ApplyCAA is idempotent: %v %d->%d", err, before, len(f.records))
 	}
 
-	bad := &Cloudflare{Token: "wrong-token", ZoneName: "onegate.work", BaseURL: srv.URL}
+	bad := &Cloudflare{Token: "wrong-token", ZoneName: "onegate.getsemantics.com", BaseURL: srv.URL}
 	_, err = bad.Verify(ctx)
 	if err == nil || strings.Contains(err.Error(), "wrong-token") {
 		t.Fatalf("a refused token is an error that never contains the token: %v", err)

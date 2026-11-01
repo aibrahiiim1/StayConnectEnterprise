@@ -57,7 +57,7 @@ func TestInterruptedOrderIsFailedAtMaxAttempts(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := pool.QueryRow(ctx, `INSERT INTO portal_certificate_orders (appliance_id, hostname, kind, csr_der, status, attempts, next_attempt_at)
-        VALUES ($1,'abcdefgh.gw.onegate.work','ONEGATE','\x00'::bytea,'PROCESSING',$2, now() - interval '1 minute') RETURNING id::text`,
+        VALUES ($1,'abcdefgh.gw.onegate.getsemantics.com','ONEGATE','\x00'::bytea,'PROCESSING',$2, now() - interval '1 minute') RETURNING id::text`,
 		app, maxAttempts).Scan(&order); err != nil {
 		t.Fatal(err)
 	}

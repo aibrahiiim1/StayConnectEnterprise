@@ -17,8 +17,8 @@ import (
 
 // Name shapes; they are also CHECK constraints in the database.
 const (
-	labelLen           = 8  // <label>.gw.onegate.work: [a-z][a-z0-9]{7}
-	challengeLabelLen  = 16 // <challenge_label>.acme.onegate.work: [a-z0-9]{16}
+	labelLen           = 8  // <label>.gw.<base>: [a-z][a-z0-9]{7}
+	challengeLabelLen  = 16 // <challenge_label>.acme.<base>: [a-z0-9]{16}
 	GatewaySubdomain   = "gw"
 	ChallengeSubdomain = "acme"
 )

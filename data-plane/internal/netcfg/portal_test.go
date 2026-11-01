@@ -98,7 +98,7 @@ func TestValidateSetPassesThePortalStateToOption114Rule(t *testing.T) {
 		t.Fatalf("the HTTP fallback was refused: %v", res.Issues)
 	}
 	topo.PortalVIP = "10.255.255.1"
-	topo.PortalTLS = PortalTLS{HTTPSActive: true, CanonicalHostname: "k3j9x0ab.gw.onegate.work"}
+	topo.PortalTLS = PortalTLS{HTTPSActive: true, CanonicalHostname: "k3j9x0ab.gw.onegate.getsemantics.com"}
 	if res := ValidateSet([]GuestNetwork{n}, topo, nil, nil); hasAny(res.Issues, "portal_https") {
 		t.Fatalf("the canonical HTTPS form was refused: %v", res.Issues)
 	}
@@ -118,7 +118,7 @@ func TestCaptivePortalURL(t *testing.T) {
 	base.PortalHTTPPort = 8380
 	// On the HTTP fallback the option is left out: a plain-HTTP value silenced the phones' own probes (2026-11-01 capture).
 	httpURL := ""
-	active := PortalTLS{HTTPSActive: true, CanonicalHostname: "k3j9x0ab.gw.onegate.work"}
+	active := PortalTLS{HTTPSActive: true, CanonicalHostname: "k3j9x0ab.gw.onegate.getsemantics.com"}
 
 	cases := []struct {
 		name string
@@ -128,16 +128,16 @@ func TestCaptivePortalURL(t *testing.T) {
 	}{
 		{"fallback carries no option 114", "10.255.255.1", PortalTLS{}, httpURL},
 		{"HTTPS active -> the captive API on the canonical name", "10.255.255.1", active,
-			"https://k3j9x0ab.gw.onegate.work/captive-portal/api"},
+			"https://k3j9x0ab.gw.onegate.getsemantics.com/captive-portal/api"},
 		{"the hotel's domain when it is canonical", "10.255.255.1",
 			PortalTLS{HTTPSActive: true, CanonicalHostname: "wifi.nilehotel.com"}, "https://wifi.nilehotel.com/captive-portal/api"},
 		{"active but no canonical name", "10.255.255.1", PortalTLS{HTTPSActive: true}, httpURL},
 		{"a canonical name that is not a hostname", "10.255.255.1",
 			PortalTLS{HTTPSActive: true, CanonicalHostname: "evil.example/\"x"}, httpURL},
 		{"a canonical name with a port", "10.255.255.1",
-			PortalTLS{HTTPSActive: true, CanonicalHostname: "a.gw.onegate.work:444"}, httpURL},
+			PortalTLS{HTTPSActive: true, CanonicalHostname: "a.gw.onegate.getsemantics.com:444"}, httpURL},
 		{"canonical but HTTPS not active", "10.255.255.1",
-			PortalTLS{CanonicalHostname: "k3j9x0ab.gw.onegate.work"}, httpURL},
+			PortalTLS{CanonicalHostname: "k3j9x0ab.gw.onegate.getsemantics.com"}, httpURL},
 		{"HTTPS active but no portal address on this render", "", active, httpURL},
 	}
 	for _, tc := range cases {
@@ -171,9 +171,9 @@ func TestRenderKea_Option114FollowsTheHTTPSState(t *testing.T) {
 	if got := option114(t, fallback); got != "" {
 		t.Fatalf("fallback option 114 = %q; the HTTP fallback must not carry option 114", got)
 	}
-	topo.PortalTLS = PortalTLS{HTTPSActive: true, CanonicalHostname: "k3j9x0ab.gw.onegate.work"}
+	topo.PortalTLS = PortalTLS{HTTPSActive: true, CanonicalHostname: "k3j9x0ab.gw.onegate.getsemantics.com"}
 	active := RenderKeaDhcp4([]GuestNetwork{vlan20()}, topo, "/x", "/y")
-	if got := option114(t, active); got != "https://k3j9x0ab.gw.onegate.work/captive-portal/api" {
+	if got := option114(t, active); got != "https://k3j9x0ab.gw.onegate.getsemantics.com/captive-portal/api" {
 		t.Fatalf("active option 114 = %q", got)
 	}
 	n := vlan20()
@@ -188,7 +188,7 @@ func TestRenderKea_Option114FollowsTheHTTPSState(t *testing.T) {
 func TestRenderUnboundPortal(t *testing.T) {
 	header := "# StayConnect generated -- portal hostnames -> portal address. Do not edit by hand.\n"
 
-	if got := string(RenderUnboundPortal("", PortalTLS{OneGateHostname: "k3j9x0ab.gw.onegate.work"})); got != header {
+	if got := string(RenderUnboundPortal("", PortalTLS{OneGateHostname: "k3j9x0ab.gw.onegate.getsemantics.com"})); got != header {
 		t.Fatalf("no portal address must render the header only, got:\n%s", got)
 	}
 	if got := string(RenderUnboundPortal("10.255.255.1", PortalTLS{})); got != header {
@@ -196,10 +196,10 @@ func TestRenderUnboundPortal(t *testing.T) {
 	}
 
 	got := string(RenderUnboundPortal("10.255.255.1", PortalTLS{
-		OneGateHostname: "k3j9x0ab.gw.onegate.work", CustomDomain: "wifi.nilehotel.com"}))
+		OneGateHostname: "k3j9x0ab.gw.onegate.getsemantics.com", CustomDomain: "wifi.nilehotel.com"}))
 	want := header + "server:\n" +
-		"    local-zone: \"k3j9x0ab.gw.onegate.work.\" static\n" +
-		"    local-data: \"k3j9x0ab.gw.onegate.work. IN A 10.255.255.1\"\n" +
+		"    local-zone: \"k3j9x0ab.gw.onegate.getsemantics.com.\" static\n" +
+		"    local-data: \"k3j9x0ab.gw.onegate.getsemantics.com. IN A 10.255.255.1\"\n" +
 		"    local-zone: \"wifi.nilehotel.com.\" static\n" +
 		"    local-data: \"wifi.nilehotel.com. IN A 10.255.255.1\"\n"
 	if got != want {
@@ -211,8 +211,8 @@ func TestRenderUnboundPortal(t *testing.T) {
 	}
 
 	evil := string(RenderUnboundPortal("10.255.255.1", PortalTLS{
-		OneGateHostname: "x.gw.onegate.work\"\n    local-zone: \".\" refuse", CustomDomain: "WIFI.NileHotel.com."}))
-	if strings.Contains(evil, "refuse") || strings.Contains(evil, "x.gw.onegate.work") {
+		OneGateHostname: "x.gw.onegate.getsemantics.com\"\n    local-zone: \".\" refuse", CustomDomain: "WIFI.NileHotel.com."}))
+	if strings.Contains(evil, "refuse") || strings.Contains(evil, "x.gw.onegate.getsemantics.com") {
 		t.Fatalf("an unsafe hostname was rendered:\n%s", evil)
 	}
 	if !strings.Contains(evil, "\"wifi.nilehotel.com. IN A 10.255.255.1\"") {

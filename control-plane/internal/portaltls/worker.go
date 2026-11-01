@@ -277,7 +277,7 @@ func (s *Service) runOrder(ctx context.Context, st *Settings, prov DNSProvider, 
 		identifiers = []string{hostname, own}
 		challengeFor = func(id string) string {
 			if id == sp.Hostname {
-				return SharedChallengeName(st.ZoneName)
+				return SharedChallengeName(sp, st.ZoneName)
 			}
 			return "_acme-challenge." + id
 		}

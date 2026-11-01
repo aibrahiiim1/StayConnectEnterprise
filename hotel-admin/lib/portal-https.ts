@@ -110,7 +110,7 @@ export function looksLikePortalDomain(raw: string): string | null {
   const v = raw.trim().toLowerCase().replace(/\.$/, "");
   if (!v) return "Enter a domain such as wifi.example.com.";
   if (/^https?:\/\//.test(v) || v.includes("/")) return "Enter only the host name, without https:// or a path.";
-  if (v === "onegate.work" || v.endsWith(".onegate.work")) return "Use a domain you own, not one under onegate.work.";
+  if (v === "onegate.getsemantics.com" || v.endsWith(".onegate.getsemantics.com")) return "Use a domain you own, not one under onegate.getsemantics.com.";
   if (!/^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$/.test(v)) {
     return "Use letters, digits, hyphens and dots only, for example wifi.example.com.";
   }

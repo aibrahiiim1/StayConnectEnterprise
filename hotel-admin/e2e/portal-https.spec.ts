@@ -1,7 +1,7 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
 import { installCapabilities } from "./capabilities";
 
-const ONEGATE = "abcd1234.gw.onegate.work";
+const ONEGATE = "abcd1234.gw.onegate.getsemantics.com";
 
 function doc(domain: string | null) {
   return {
@@ -12,7 +12,7 @@ function doc(domain: string | null) {
       custom_domain_records: domain ? [
         { type: "TXT", name: `_onegate-verify.${domain}`, value: "verify-token-1" },
         { type: "CNAME", name: domain, value: `${ONEGATE}.` },
-        { type: "CNAME", name: `_acme-challenge.${domain}`, value: "q1w2e3r4t5y6u7i8.acme.onegate.work." },
+        { type: "CNAME", name: `_acme-challenge.${domain}`, value: "q1w2e3r4t5y6u7i8.acme.onegate.getsemantics.com." },
       ] : [],
       custom_domain_error: "", canonical_hostname: "", https_active: false, fallback_reason: "NOT_CONFIGURED",
       fallback_since: "2026-10-12T09:00:00Z", last_sync_at: null, last_sync_error: "", updated_at: null,
@@ -60,6 +60,6 @@ test("Portal HTTPS: the fallback in words, then a hotel domain and its DNS recor
   await dlg.getByRole("button", { name: "Use this domain" }).click();
 
   await expect(page.getByText("verify-token-1")).toBeVisible();
-  await expect(page.getByText("q1w2e3r4t5y6u7i8.acme.onegate.work.")).toBeVisible();
+  await expect(page.getByText("q1w2e3r4t5y6u7i8.acme.onegate.getsemantics.com.")).toBeVisible();
   expect(sent).toEqual([{ method: "PUT", path: "/portal-https/custom-domain", body: { fqdn: "wifi.nilehotel.com", password: "pw" } }]);
 });

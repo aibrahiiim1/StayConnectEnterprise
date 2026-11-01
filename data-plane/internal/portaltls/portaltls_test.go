@@ -19,7 +19,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/portaltls/portaltlstest"
 )
 
-const host = "ab12cd34.gw.onegate.work"
+const host = "ab12cd34.gw.onegate.getsemantics.com"
 
 func fixture(t *testing.T) (*portaltls.Store, *portaltlstest.CA, time.Time) {
 	t.Helper()
@@ -139,7 +139,7 @@ func TestInstallRefusesWhatMustNotBeServed(t *testing.T) {
 	other, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	stranger, _ := portaltlstest.New(now)
 
-	wrongHost, _ := ca.Issue([]string{"zz99yy88.gw.onegate.work"}, parseCSR(t, csrPEM).PublicKey, now.Add(-time.Hour), now.Add(time.Hour))
+	wrongHost, _ := ca.Issue([]string{"zz99yy88.gw.onegate.getsemantics.com"}, parseCSR(t, csrPEM).PublicKey, now.Add(-time.Hour), now.Add(time.Hour))
 	wrongKey, _ := ca.Issue([]string{host}, &other.PublicKey, now.Add(-time.Hour), now.Add(time.Hour))
 	expired, _ := ca.IssueForCSR(csrPEM, now.Add(-48*time.Hour), now.Add(-time.Hour))
 	future, _ := ca.IssueForCSR(csrPEM, now.Add(time.Hour), now.Add(48*time.Hour))

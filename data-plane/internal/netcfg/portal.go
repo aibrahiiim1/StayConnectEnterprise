@@ -1,6 +1,6 @@
 package netcfg
 
-// The portal address and the portal's public names. The portal is served over HTTPS under <label>.gw.onegate.work or
+// The portal address and the portal's public names. The portal is served over HTTPS under <label>.gw.onegate.getsemantics.com or
 // the hotel's verified domain, whose public A record is one private /32 that exists only inside this appliance.
 // Everything here is pure; netd owns the side effects.
 

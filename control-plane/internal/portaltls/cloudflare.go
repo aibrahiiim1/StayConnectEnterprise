@@ -18,12 +18,26 @@ const CloudflareAPI = "https://api.cloudflare.com/client/v4"
 // Cloudflare is the production DNS provider. The token should be scoped to the one zone (Zone:Read, DNS:Edit).
 // Records are DNS-only (proxied=false): a proxied name would resolve to Cloudflare's edge, not the appliance's
 // private portal address.
+//
+// ZoneName is the OneGate NAME BASE (onegate.getsemantics.com), which need not be a Cloudflare zone itself: the
+// Cloudflare zone is the closest enclosing one (getsemantics.com). A token for that zone could edit every record
+// of the company's domain, so this provider refuses to write any name outside the base, and CAA goes on the base,
+// never on the company's apex.
 type Cloudflare struct {
 	Token    string // never logged
 	ZoneName string
 	ZoneID   string // looked up by name when empty
 	BaseURL  string
 	HTTP     *http.Client
+}
+
+// errOutsideBase: Central writes only under its own name base.
+var errOutsideBase = errors.New("refused: Central writes DNS records only under its own name base")
+
+// inBase reports whether fqdn is the base or below it.
+func (c *Cloudflare) inBase(fqdn string) bool {
+	f, b := NormalizeFQDN(fqdn), NormalizeFQDN(c.ZoneName)
+	return b != "" && (f == b || strings.HasSuffix(f, "."+b))
 }
 
 type cfError struct {
@@ -84,7 +98,9 @@ func (c *Cloudflare) do(ctx context.Context, method, path string, body, out any)
 		return fmt.Errorf("cloudflare %s %s: HTTP %d, unreadable answer", method, path, resp.StatusCode)
 	}
 	if !env.Success || resp.StatusCode/100 != 2 {
-		if resp.StatusCode == http.StatusNotFound && method == http.MethodDelete {
+		// A missing record (deleted, or read before deleting) is "not found", not a failure.
+		if resp.StatusCode == http.StatusNotFound && (method == http.MethodDelete ||
+			(method == http.MethodGet && strings.Contains(path, "/dns_records/"))) {
 			return errCFNotFound
 		}
 		msgs := make([]string, 0, len(env.Errors))
@@ -108,17 +124,31 @@ type cfZone struct {
 	Status      string   `json:"status"`
 }
 
+// zone finds the Cloudflare zone holding the name base: the base itself, else each parent down to the
+// registrable domain (never a public suffix).
 func (c *Cloudflare) zone(ctx context.Context) (cfZone, error) {
-	var zones []cfZone
-	if err := c.do(ctx, http.MethodGet, "/zones?name="+url.QueryEscape(c.ZoneName), nil, &zones); err != nil {
-		return cfZone{}, err
+	base := NormalizeFQDN(c.ZoneName)
+	reg, err := RegistrableDomain(base)
+	if err != nil {
+		reg = base
 	}
-	for _, z := range zones {
-		if strings.EqualFold(z.Name, c.ZoneName) {
-			return z, nil
+	for name := base; ; {
+		var zones []cfZone
+		if err := c.do(ctx, http.MethodGet, "/zones?name="+url.QueryEscape(name), nil, &zones); err != nil {
+			return cfZone{}, err
 		}
+		for _, z := range zones {
+			if strings.EqualFold(z.Name, name) {
+				return z, nil
+			}
+		}
+		_, parent, ok := strings.Cut(name, ".")
+		if name == reg || !ok || !strings.Contains(parent, ".") {
+			break
+		}
+		name = parent
 	}
-	return cfZone{}, fmt.Errorf("the token cannot see the zone %s", c.ZoneName)
+	return cfZone{}, fmt.Errorf("the token cannot see a zone holding %s", base)
 }
 
 func (c *Cloudflare) zoneID(ctx context.Context) (string, error) {
@@ -144,6 +174,9 @@ func (c *Cloudflare) records(ctx context.Context, typ, name string) ([]cfRecord,
 }
 
 func (c *Cloudflare) UpsertA(ctx context.Context, fqdn, ip string) (string, error) {
+	if !c.inBase(fqdn) {
+		return "", errOutsideBase
+	}
 	zid, err := c.zoneID(ctx)
 	if err != nil {
 		return "", err
@@ -178,6 +211,17 @@ func (c *Cloudflare) DeleteRecord(ctx context.Context, recordID string) error {
 	if err != nil {
 		return err
 	}
+	// Only a record under the base is ever deleted, whatever id is asked for.
+	var rec cfRecord
+	if err := c.do(ctx, http.MethodGet, "/zones/"+zid+"/dns_records/"+url.PathEscape(recordID), nil, &rec); err != nil {
+		if errors.Is(err, errCFNotFound) {
+			return nil
+		}
+		return err
+	}
+	if !c.inBase(rec.Name) {
+		return errOutsideBase
+	}
 	err = c.do(ctx, http.MethodDelete, "/zones/"+zid+"/dns_records/"+url.PathEscape(recordID), nil, nil)
 	if errors.Is(err, errCFNotFound) {
 		return nil
@@ -186,6 +230,9 @@ func (c *Cloudflare) DeleteRecord(ctx context.Context, recordID string) error {
 }
 
 func (c *Cloudflare) SetTXT(ctx context.Context, fqdn, value string) (string, error) {
+	if !c.inBase(fqdn) {
+		return "", errOutsideBase
+	}
 	zid, err := c.zoneID(ctx)
 	if err != nil {
 		return "", err

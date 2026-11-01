@@ -25,7 +25,7 @@ func TestReleasedHostnameIsNeverRestored(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO portal_hostnames (appliance_id, label, fqdn, released_at)
-        VALUES ($1,'abcdefgh','abcdefgh.gw.onegate.work', now() - interval '1 hour')`, app); err != nil {
+        VALUES ($1,'abcdefgh','abcdefgh.gw.onegate.getsemantics.com', now() - interval '1 hour')`, app); err != nil {
 		t.Fatal(err)
 	}
 	svc := New(pool, Options{SecretsDir: t.TempDir()})

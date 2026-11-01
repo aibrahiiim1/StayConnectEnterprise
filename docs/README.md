@@ -29,7 +29,7 @@ each from: [ARCHIVE.md](ARCHIVE.md). Audit findings and their status: [AUDIT_BAC
 | Backup, restore, disaster recovery | [BACKUP_AND_RESTORE.md](BACKUP_AND_RESTORE.md) · [BACKUP_RETENTION.md](BACKUP_RETENTION.md) · [DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md](DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md) |
 | Migrations and the Central-outage behaviour | [MIGRATION_RUNBOOK.md](MIGRATION_RUNBOOK.md) · [OFFLINE_OPERATION.md](OFFLINE_OPERATION.md) |
 | PMS interface commissioning | [runbooks/PMS-Interface-Commissioning.md](runbooks/PMS-Interface-Commissioning.md) (FIAS reference: [FIAS_2.20.24.pdf](FIAS_2.20.24.pdf)) |
-| Portal domain DNS and certificates | [runbooks/ONEGATE_WORK_DNS_AND_CERTIFICATES.md](runbooks/ONEGATE_WORK_DNS_AND_CERTIFICATES.md) |
+| Portal domain DNS and certificates | [runbooks/ONEGATE_PORTAL_DNS_AND_CERTIFICATES.md](runbooks/ONEGATE_PORTAL_DNS_AND_CERTIFICATES.md) (the `onegate.work` runbook is retired history) |
 | Testing both planes | [TESTING_RUNBOOK.md](TESTING_RUNBOOK.md) |
 | API deprecations | [API_DEPRECATIONS.md](API_DEPRECATIONS.md) |
 | Background (not re-verified against the current release) | [STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md](STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md) |

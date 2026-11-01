@@ -97,22 +97,22 @@ func TestPebbleSharedPortalName(t *testing.T) {
 		t.Fatalf("test access: %+v %v", res, err)
 	}
 	cts := &Challtestsrv{BaseURL: env.ctsURL}
-	_ = cts.post(ctx, "/clear-caa", map[string]any{"host": "onegate.work."})
+	_ = cts.post(ctx, "/clear-caa", map[string]any{"host": "onegate.getsemantics.com."})
 
-	// Public DNS: the A record only, the challenge delegation not yet published.
+	// Public DNS still answers the name's old address (as it did before the Product Owner changed it).
 	for _, d := range []*mutableDoH{doh1, doh2} {
-		d.set(shared, rrA, DefaultSharedAddress)
+		d.set(shared, rrA, "10.20.0.1")
 	}
 	syncA, err := svc.Sync(ctx, appA, SyncRequest{PortalIP: DefaultSharedAddress})
 	if err != nil {
 		t.Fatal(err)
 	}
 	sp := syncA.SharedPortal
-	if sp == nil || sp.Hostname != shared || !sp.Eligible || sp.Ready || sp.Error == nil || !strings.Contains(*sp.Error, "_acme-challenge") {
-		t.Fatalf("an eligible appliance sees the name, not ready until the delegation is published: %+v", sp)
+	if sp == nil || sp.Hostname != shared || !sp.Eligible || sp.Ready || sp.Error == nil || !strings.Contains(*sp.Error, "must answer only") {
+		t.Fatalf("an eligible appliance sees the name, not ready while it answers another address: %+v", sp)
 	}
-	if len(sp.Records) != 2 || sp.Records[1].Value != SharedChallengeLabel+".acme.onegate.work." {
-		t.Fatalf("the two fleet-wide records: %+v", sp.Records)
+	if len(sp.Records) != 1 || sp.Records[0].Type != "A" || sp.Records[0].Value != DefaultSharedAddress {
+		t.Fatalf("inside the base the only fleet-wide record is the A record: %+v", sp.Records)
 	}
 	hostA := syncA.Hostname
 	keyA, csrA := sharedCSR(t, shared, hostA)
@@ -120,16 +120,17 @@ func TestPebbleSharedPortalName(t *testing.T) {
 		t.Fatalf("no order before public DNS is ready: %v", err)
 	}
 
-	// Publish the delegation (both resolvers, and the CA's DNS server).
+	// The A record now answers the shared address. Central writes the challenge at the name's own _acme-challenge:
+	// no delegation record exists.
 	for _, d := range []*mutableDoH{doh1, doh2} {
-		d.set("_acme-challenge."+shared, rrCNAME, SharedChallengeName("onegate.work")+".")
-	}
-	if err := cts.post(ctx, "/set-cname", map[string]any{"host": dnsName("_acme-challenge." + shared), "target": SharedChallengeName("onegate.work") + "."}); err != nil {
-		t.Fatal(err)
+		d.mu.Lock()
+		delete(d.table, shared+"|1")
+		d.mu.Unlock()
+		d.set(shared, rrA, DefaultSharedAddress)
 	}
 
 	// Wrong name sets are refused.
-	for _, names := range [][]string{{shared}, {shared, "zzzzzzzz.gw.onegate.work"}, {hostA}, {shared, hostA, "x.example.com"}} {
+	for _, names := range [][]string{{shared}, {shared, "zzzzzzzz.gw.onegate.getsemantics.com"}, {hostA}, {shared, hostA, "x.example.com"}} {
 		_, bad := sharedCSR(t, names...)
 		if _, err := svc.CreateOrder(ctx, appA, OrderRequest{Hostname: shared, CSRPEM: bad}); !isRefusal(err, 422) {
 			t.Fatalf("CSR %v for the shared name must be refused: %v", names, err)

@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	ogHost     = "ab12cd34.gw.onegate.work"
+	ogHost     = "ab12cd34.gw.onegate.getsemantics.com"
 	customHost = "wifi.nilehotel.com"
 )
 

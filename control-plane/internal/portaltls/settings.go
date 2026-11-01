@@ -82,7 +82,7 @@ func (u SettingsUpdate) Validate() error {
 	if u.ZoneName != nil {
 		z := NormalizeFQDN(*u.ZoneName)
 		if err := validHostnameSyntax(z); err != nil || !strings.Contains(z, ".") {
-			return errors.New("zone_name must be a DNS zone such as onegate.work")
+			return errors.New("zone_name must be a DNS name such as onegate.getsemantics.com")
 		}
 	}
 	if u.WeeklyNewLimit != nil && (*u.WeeklyNewLimit < 1 || *u.WeeklyNewLimit > 50) {

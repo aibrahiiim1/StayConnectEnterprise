@@ -1564,7 +1564,7 @@
     },
     {
       "id": "external.cloudflare",
-      "name": "Cloudflare DNS (zone onegate.work)",
+      "name": "Cloudflare DNS (zone getsemantics.com; OneGate names under onegate.getsemantics.com)",
       "kind": "external",
       "host": "external",
       "technology": "service",

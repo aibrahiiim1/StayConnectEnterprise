@@ -10,13 +10,13 @@ import (
 )
 
 var twoHostnames = portalTLSState{
-	OneGateHostname: "abcd1234.gw.onegate.work", CustomDomain: "wifi.nilehotel.com", CustomDomainStatus: "VERIFIED",
+	OneGateHostname: "abcd1234.gw.onegate.getsemantics.com", CustomDomain: "wifi.nilehotel.com", CustomDomainStatus: "VERIFIED",
 	HTTPSActive: true, CanonicalHostname: "wifi.nilehotel.com",
 }
 
 func TestValidateCallbackHosts(t *testing.T) {
-	got, msg := validateCallbackHosts([]string{" WIFI.nilehotel.com. ", "abcd1234.gw.onegate.work", "wifi.nilehotel.com", ""}, twoHostnames)
-	if msg != "" || !reflect.DeepEqual(got, []string{"abcd1234.gw.onegate.work", "wifi.nilehotel.com"}) {
+	got, msg := validateCallbackHosts([]string{" WIFI.nilehotel.com. ", "abcd1234.gw.onegate.getsemantics.com", "wifi.nilehotel.com", ""}, twoHostnames)
+	if msg != "" || !reflect.DeepEqual(got, []string{"abcd1234.gw.onegate.getsemantics.com", "wifi.nilehotel.com"}) {
 		t.Fatalf("got %v %q", got, msg)
 	}
 	if got, msg := validateCallbackHosts(nil, twoHostnames); msg != "" || len(got) != 0 || got == nil {
@@ -25,7 +25,7 @@ func TestValidateCallbackHosts(t *testing.T) {
 	if _, msg := validateCallbackHosts([]string{"portal.example.com"}, twoHostnames); !strings.Contains(msg, "not a portal hostname") {
 		t.Fatalf("an unknown host was accepted: %q", msg)
 	}
-	if _, msg := validateCallbackHosts([]string{"abcd1234.gw.onegate.work"}, portalTLSState{}); !strings.Contains(msg, "no portal hostname yet") {
+	if _, msg := validateCallbackHosts([]string{"abcd1234.gw.onegate.getsemantics.com"}, portalTLSState{}); !strings.Contains(msg, "no portal hostname yet") {
 		t.Fatalf("no hostnames yet: %q", msg)
 	}
 	removed := twoHostnames
@@ -36,10 +36,10 @@ func TestValidateCallbackHosts(t *testing.T) {
 }
 
 func TestSocialOffered(t *testing.T) {
-	onegateCanonical := portalTLSState{OneGateHostname: "abcd1234.gw.onegate.work", HTTPSActive: true,
-		CanonicalHostname: "abcd1234.gw.onegate.work"}
-	fallback := portalTLSState{OneGateHostname: "abcd1234.gw.onegate.work", FallbackReason: "NO_CERTIFICATE"}
-	both := []string{"abcd1234.gw.onegate.work", "wifi.nilehotel.com"}
+	onegateCanonical := portalTLSState{OneGateHostname: "abcd1234.gw.onegate.getsemantics.com", HTTPSActive: true,
+		CanonicalHostname: "abcd1234.gw.onegate.getsemantics.com"}
+	fallback := portalTLSState{OneGateHostname: "abcd1234.gw.onegate.getsemantics.com", FallbackReason: "NO_CERTIFICATE"}
+	both := []string{"abcd1234.gw.onegate.getsemantics.com", "wifi.nilehotel.com"}
 	for _, tc := range []struct {
 		name, provider string
 		enabled        bool
@@ -48,13 +48,13 @@ func TestSocialOffered(t *testing.T) {
 		offered        bool
 		reason         string
 	}{
-		{"facebook on the OneGate hostname", "facebook", true, []string{"abcd1234.gw.onegate.work"}, onegateCanonical, true, ""},
+		{"facebook on the OneGate hostname", "facebook", true, []string{"abcd1234.gw.onegate.getsemantics.com"}, onegateCanonical, true, ""},
 		{"apple on the hotel domain", "apple", true, both, twoHostnames, true, ""},
 		{"google on the hotel domain", "google", true, []string{"wifi.nilehotel.com"}, twoHostnames, true, ""},
 		{"google needs the hotel domain", "google", true, both, onegateCanonical, false, "needs_hotel_domain"},
 		{"disabled", "microsoft", false, both, twoHostnames, false, "disabled"},
 		{"http fallback hides every provider", "facebook", true, both, fallback, false, "http_fallback"},
-		{"canonical not registered", "microsoft", true, []string{"abcd1234.gw.onegate.work"}, twoHostnames, false, "callback_not_registered"},
+		{"canonical not registered", "microsoft", true, []string{"abcd1234.gw.onegate.getsemantics.com"}, twoHostnames, false, "callback_not_registered"},
 		{"nothing registered", "facebook", true, nil, onegateCanonical, false, "callback_not_registered"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -79,8 +79,8 @@ func TestLegacyRedirectURIBecomesACallbackHost(t *testing.T) {
 	}
 	// callback_hosts wins over a redirect_uri sent alongside it.
 	both := socialWriteReq{RedirectURI: sp("https://wifi.nilehotel.com/auth/social/callback"),
-		CallbackHosts: &[]string{"abcd1234.gw.onegate.work"}}
-	if hosts, _ := resolveCallbackHosts(&both, twoHostnames); !reflect.DeepEqual(hosts, []string{"abcd1234.gw.onegate.work"}) {
+		CallbackHosts: &[]string{"abcd1234.gw.onegate.getsemantics.com"}}
+	if hosts, _ := resolveCallbackHosts(&both, twoHostnames); !reflect.DeepEqual(hosts, []string{"abcd1234.gw.onegate.getsemantics.com"}) {
 		t.Fatalf("got %v", hosts)
 	}
 	// Neither field: unchanged (nil), which the UPDATE reads as "keep what is stored".
@@ -140,7 +140,7 @@ func TestSocialReloadCallsSCD(t *testing.T) {
 }
 
 func TestSocialProviderResponseShape(t *testing.T) {
-	p := edgeSocialProvider{Provider: "facebook", Enabled: true, CallbackHosts: []string{"abcd1234.gw.onegate.work"}, SecretSet: true}
+	p := edgeSocialProvider{Provider: "facebook", Enabled: true, CallbackHosts: []string{"abcd1234.gw.onegate.getsemantics.com"}, SecretSet: true}
 	decorateSocial(&p, twoHostnames)
 	b, _ := json.Marshal(p)
 	for _, want := range []string{`"callback_hosts"`, `"callback_urls"`, `"secret_set":true`, `"offered":false`,

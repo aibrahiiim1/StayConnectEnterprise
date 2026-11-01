@@ -142,13 +142,13 @@ func TestTheInterstitialAddress(t *testing.T) {
 	}
 	h = socialHandler(t, &fakeSCD{}) // tls-state 404
 	r := socialStartReq("google", uaAndroidWebView, "en")
-	r.Host = "ab12cd34.gw.onegate.work:443"
+	r.Host = "ab12cd34.gw.onegate.getsemantics.com:443"
 	r.TLS = nil
 	if got := h.portalAddress(r); got != "" {
 		t.Errorf("plain HTTP must not invent an HTTPS address: %q", got)
 	}
-	r = httptest.NewRequest(http.MethodGet, "https://ab12cd34.gw.onegate.work/auth/social/start?provider=google", nil)
-	if got := h.portalAddress(r); got != "https://ab12cd34.gw.onegate.work/" {
+	r = httptest.NewRequest(http.MethodGet, "https://ab12cd34.gw.onegate.getsemantics.com/auth/social/start?provider=google", nil)
+	if got := h.portalAddress(r); got != "https://ab12cd34.gw.onegate.getsemantics.com/" {
 		t.Errorf("TLS host: %q", got)
 	}
 	r = httptest.NewRequest(http.MethodGet, "https://x/auth/social/start", nil)
