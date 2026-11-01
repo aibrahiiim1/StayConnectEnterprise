@@ -240,7 +240,7 @@ test("no credential surface is presented, and no credential is ever fetched", as
   expect(mutations.filter((m) => m.path.includes("/secret"))).toHaveLength(0);
 });
 
-test("adding a Protel connection sends exactly the create and draft requests, and nothing else", async ({ page }) => {
+test("adding a Protel connection sends the create, draft, put-live and activate requests, and nothing else", async ({ page }) => {
   const mutations: Mutations = [];
   await installBackend(page, { mutations });
   await page.goto("/pms-interfaces");
@@ -252,12 +252,15 @@ test("adding a Protel connection sends exactly the create and draft requests, an
   await wizard.getByLabel(/^Name/).fill("Front office");
   await wizard.getByLabel(/PMS address and port/).fill("10.0.0.5:5010");
   await wizard.getByRole("button", { name: "Next" }).click();
-  await wizard.getByRole("button", { name: "Create connection" }).click();
-  await expect(page.getByRole("button", { name: "Publish and activate" })).toBeVisible();
+  await wizard.getByLabel(/Confirm your password/).fill("operator-pw");
+  await wizard.getByRole("button", { name: "Create and activate" }).click();
+  await expect(page.getByRole("button", { name: "Open the connection" })).toBeVisible();
 
   expect(mutations.map((m) => `${m.method} ${m.path}`)).toEqual([
     "POST /pms-interfaces",
     "POST /pms-interfaces/new1/revisions",
+    "POST /pms-interfaces/new1/publish",
+    "POST /pms-interfaces/new1/lifecycle",
   ]);
   expect(mutations[0].body).toEqual({ connector_kind: "protel-fias", display_label: "Front office" });
   expect(mutations[1].body).toEqual({

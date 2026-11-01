@@ -108,10 +108,11 @@ async function openWizard() {
 }
 
 describe("adding a connection", () => {
-  it("sends exactly today's Protel requests — create, then a draft — and nothing else", async () => {
+  it("commissions a Protel connection in one confirmation: create, draft, put live, activate, nothing else", async () => {
     mockBackend();
     post.mockImplementation((path: string) => Promise.resolve(
-      path === "/pms-interfaces" ? { id: "new1", lifecycle_state: "AUTH_DISABLED" } : { revision_id: "rv1", revision_no: 1 }));
+      path === "/pms-interfaces" ? { id: "new1", lifecycle_state: "AUTH_DISABLED" }
+        : path.endsWith("/revisions") ? { revision_id: "rv1", revision_no: 1 } : { ok: true }));
     await renderPage();
     const dialog = await openWizard();
 
@@ -119,10 +120,13 @@ describe("adding a connection", () => {
     await userEvent.type(within(dialog).getByLabelText(/^Name/), "Front office");
     await userEvent.type(within(dialog).getByLabelText(/PMS address and port/), "10.0.0.5:5010");
     await userEvent.click(within(dialog).getByRole("button", { name: "Next" }));
-    expect(within(dialog).queryByLabelText(/Confirm your password/)).toBeNull();
-    await userEvent.click(within(dialog).getByRole("button", { name: "Create connection" }));
+    // Create is the one confirmation, so it asks for the password even though Protel stores no credential.
+    await userEvent.click(within(dialog).getByRole("button", { name: "Create and activate" }));
+    expect(post).not.toHaveBeenCalled();
+    await userEvent.type(within(dialog).getByLabelText(/Confirm your password/), "operator-pw");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Create and activate" }));
 
-    await waitFor(() => expect(post).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(4));
     expect(post.mock.calls[0]).toEqual(["/pms-interfaces", { connector_kind: "protel-fias", display_label: "Front office" }]);
     const [path, body] = post.mock.calls[1];
     expect(path).toBe("/pms-interfaces/new1/revisions");
@@ -132,8 +136,71 @@ describe("adding a connection", () => {
       heartbeat_interval_ms: 30000, heartbeat_timeout_ms: 90000, feed_freshness_ms: 120000, complete_sync_ms: 600000,
       read_only: true,
     });
-    expect(await within(dialog).findByRole("button", { name: "Publish and activate" })).toBeTruthy();
-    expect(post.mock.calls.some(([p]) => /publish|lifecycle|secret/.test(String(p)))).toBe(false);
+    expect(post.mock.calls[2]).toEqual(["/pms-interfaces/new1/publish", {
+      revision_id: "rv1", expected_revision_id: "", reason_code: "INITIAL_COMMISSIONING", password: "operator-pw",
+    }]);
+    expect(post.mock.calls[3]).toEqual(["/pms-interfaces/new1/lifecycle", {
+      state: "ACTIVE", reason_code: "COMMISSIONING", password: "operator-pw",
+    }]);
+    expect(post.mock.calls.some(([p]) => /secret/.test(String(p)))).toBe(false);
+    expect(await within(dialog).findByRole("button", { name: "Open the connection" })).toBeTruthy();
+  });
+
+  it("leaves a connection paused when it could not be put live, and resumes from that step", async () => {
+    mockBackend();
+    let publishAttempts = 0;
+    post.mockImplementation((path: string) => {
+      if (path === "/pms-interfaces") return Promise.resolve({ id: "new4" });
+      if (path.endsWith("/revisions")) return Promise.resolve({ revision_id: "rv4", revision_no: 1 });
+      if (path.endsWith("/publish")) {
+        publishAttempts += 1;
+        return publishAttempts === 1
+          ? Promise.reject(Object.assign(new Error("the configuration is not valid"), { code: "validation" }))
+          : Promise.resolve({ ok: true });
+      }
+      return Promise.resolve({ ok: true });
+    });
+    await renderPage();
+    const dialog = await openWizard();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Next" }));
+    await userEvent.type(within(dialog).getByLabelText(/^Name/), "Draft only");
+    await userEvent.type(within(dialog).getByLabelText(/PMS address and port/), "10.0.0.7:5010");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Next" }));
+    await userEvent.type(within(dialog).getByLabelText(/Confirm your password/), "operator-pw");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Create and activate" }));
+
+    const alert = await within(dialog).findByRole("alert");
+    expect(alert.textContent).toMatch(/could not be put live, so it stays paused/i);
+    expect(post.mock.calls.some(([p]) => /lifecycle/.test(String(p)))).toBe(false);
+
+    await userEvent.click(within(dialog).getByRole("button", { name: "Try again" }));
+    await within(dialog).findByRole("button", { name: "Open the connection" });
+    expect(post.mock.calls.filter(([p]) => p === "/pms-interfaces")).toHaveLength(1);
+    expect(post.mock.calls.filter(([p]) => String(p).endsWith("/revisions"))).toHaveLength(1);
+    expect(post.mock.calls.filter(([p]) => /lifecycle/.test(String(p)))).toHaveLength(1);
+  });
+
+  it("keeps the connection paused and says why when the PMS source is already used", async () => {
+    mockBackend();
+    post.mockImplementation((path: string) => {
+      if (path === "/pms-interfaces") return Promise.resolve({ id: "new5" });
+      if (path.endsWith("/revisions")) return Promise.resolve({ revision_id: "rv5", revision_no: 1 });
+      if (path.endsWith("/lifecycle")) {
+        return Promise.reject(Object.assign(new Error("this PMS source is already used by Main PMS"), { code: "source_in_use" }));
+      }
+      return Promise.resolve({ ok: true });
+    });
+    await renderPage();
+    const dialog = await openWizard();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Next" }));
+    await userEvent.type(within(dialog).getByLabelText(/^Name/), "Duplicate");
+    await userEvent.type(within(dialog).getByLabelText(/PMS address and port/), "10.0.0.1:5003");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Next" }));
+    await userEvent.type(within(dialog).getByLabelText(/Confirm your password/), "operator-pw");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Create and activate" }));
+    const alert = await within(dialog).findByRole("alert");
+    expect(alert.textContent).toMatch(/configuration is live, but the connection could not be activated, so it stays paused/i);
+    expect(alert.textContent).toMatch(/already used/i);
   });
 
   it("sends a web-API provider's settings as provider_config and its credential as a structured secret", async () => {
@@ -165,9 +232,9 @@ describe("adding a connection", () => {
 
     expect(dialog.textContent).not.toContain("s3cr3t");
     await userEvent.type(within(dialog).getByLabelText(/Confirm your password/), "operator-pw");
-    await userEvent.click(within(dialog).getByRole("button", { name: "Create connection" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Create and activate" }));
 
-    await waitFor(() => expect(post).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(5));
     expect(post.mock.calls[0]).toEqual(["/pms-interfaces", { connector_kind: "apaleo", display_label: "Cloud PMS" }]);
     expect(post.mock.calls[1]).toEqual(["/pms-interfaces/new2/revisions", {
       source_timezone: "Africa/Cairo", read_only: true,
@@ -176,6 +243,10 @@ describe("adding a connection", () => {
     expect(post.mock.calls[2]).toEqual(["/pms-interfaces/new2/secret", {
       secret: { client_id: "sc-client", client_secret: "s3cr3t" },
       reason_code: "INITIAL_COMMISSIONING", password: "operator-pw",
+    }]);
+    expect(post.mock.calls[3][0]).toBe("/pms-interfaces/new2/publish");
+    expect(post.mock.calls[4]).toEqual(["/pms-interfaces/new2/lifecycle", {
+      state: "ACTIVE", reason_code: "COMMISSIONING", password: "operator-pw",
     }]);
   });
 
@@ -195,14 +266,15 @@ describe("adding a connection", () => {
     await userEvent.type(within(dialog).getByLabelText(/^Name/), "Spa");
     await userEvent.type(within(dialog).getByLabelText(/PMS address and port/), "10.0.0.9:5010");
     await userEvent.click(within(dialog).getByRole("button", { name: "Next" }));
-    await userEvent.click(within(dialog).getByRole("button", { name: "Create connection" }));
+    await userEvent.type(within(dialog).getByLabelText(/Confirm your password/), "operator-pw");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Create and activate" }));
 
     const alert = await within(dialog).findByRole("alert");
     expect(alert.textContent).toMatch(/connection was created, but its configuration was not saved/i);
     expect(alert.textContent).toMatch(/not a recognised time zone/i);
 
     await userEvent.click(within(dialog).getByRole("button", { name: "Try again" }));
-    await within(dialog).findByRole("button", { name: "Publish and activate" });
+    await within(dialog).findByRole("button", { name: "Open the connection" });
     expect(post.mock.calls.filter(([p]) => p === "/pms-interfaces")).toHaveLength(1);
   });
 

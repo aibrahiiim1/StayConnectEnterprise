@@ -423,8 +423,12 @@ right now, and where the guest list comes from.
   links to *Roster reconciliation* and *Unresolved departures*, with a warning when there is something to
   investigate.
 - **Add connection** (wizard): **Provider → Connection → Credentials** (only when the provider needs one) **→
-  Review**. The result is a saved draft; *"Publish and activate"* are separate steps, and both ask for your
-  password.
+  Review**. Pressing **Create and activate** (with your password) does the whole commissioning in one confirmed
+  action: it creates the connection, saves the settings, stores the credential if one is needed, puts the settings
+  live and activates the connection, so the appliance connects and loads the guest list. If a step fails the
+  connection stays paused and **Try again** resumes from that step; nothing is created twice. A PMS source that
+  another active connection already uses is refused with the reason. Room charge stays off. The *Put live*
+  and activate controls under **Manage** remain for changing an existing connection.
 - **Manage** opens a side sheet with tabs:
   - **Overview** — the checks, guest list and backlog, links to investigate further.
   - **Configuration** — the live version and drafts. **Put live** — **password confirmation** with a reason

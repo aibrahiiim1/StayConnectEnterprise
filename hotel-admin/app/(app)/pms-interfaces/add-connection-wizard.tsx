@@ -1,9 +1,12 @@
 "use client";
 
-// Creates the connection (room sign-in paused), saves its configuration as a draft, and stores the
-// credential if the provider needs one. It never publishes or activates; both change what happens to guests
-// and are separate confirmed actions. After a failure, "Try again" resumes from the failed step and never
-// creates a second connection.
+// Commissions a connection in one confirmed action: it creates the connection (paused), saves the configuration,
+// stores the credential if the provider needs one, then puts that configuration live and activates the connection.
+// Pressing Create is the confirmation, with the administrator's password, so there is no hidden second step.
+// A draft that is not completed stays paused: the connection is activated only after every earlier step succeeded.
+// After a failure, "Try again" resumes from the failed step and never creates a second connection. Each step uses the
+// same audited endpoint as the manual path, so validation, duplicate-source protection and the lifecycle rules apply
+// unchanged.
 
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
@@ -24,7 +27,9 @@ import {
 import { ProviderFieldsForm } from "./provider-fields";
 import { ProviderTile } from "./connection-card";
 
-type Progress = { id?: string; revisionId?: string; revisionNo?: number; secretStored?: boolean };
+type Progress = {
+  id?: string; revisionId?: string; revisionNo?: number; secretStored?: boolean; published?: boolean; activated?: boolean;
+};
 
 export function AddConnectionWizard({
   open,
@@ -111,7 +116,7 @@ export function AddConnectionWizard({
 
   async function create() {
     if (!provider) return;
-    if (withCreds && !progress.secretStored && password === "") { setShowErrors(true); return; }
+    if (password === "") { setShowErrors(true); return; }
     setBusy(true); setErr(null);
     let p = { ...progress };
     try {
@@ -136,9 +141,21 @@ export function AddConnectionWizard({
         p = { ...p, secretStored: true };
         setProgress(p);
       }
+      if (!p.published) {
+        await api.post(`/pms-interfaces/${p.id}/publish`, {
+          revision_id: p.revisionId, expected_revision_id: "", reason_code: "INITIAL_COMMISSIONING", password,
+        });
+        p = { ...p, published: true };
+        setProgress(p);
+      }
+      if (!p.activated) {
+        await api.post(`/pms-interfaces/${p.id}/lifecycle`, { state: "ACTIVE", reason_code: "COMMISSIONING", password });
+        p = { ...p, activated: true };
+        setProgress(p);
+      }
       setPassword("");
       setDone(true);
-      toast.success("Connection created", "Its configuration is saved as a draft. Publish and activate it next.");
+      toast.success("Connection activated", "The appliance is connecting to the PMS and will load the guest list.");
       await onChanged();
     } catch (e) {
       setErr(e);
@@ -151,17 +168,19 @@ export function AddConnectionWizard({
   const failedStepWords = !progress.id ? null
     : !progress.revisionId ? "The connection was created, but its configuration was not saved."
       : withCreds && !progress.secretStored ? "The connection and its configuration were saved, but the credential was not stored."
-        : null;
+        : !progress.published ? "The connection is saved but not live yet: its configuration could not be put live, so it stays paused."
+          : !progress.activated ? "The configuration is live, but the connection could not be activated, so it stays paused."
+            : null;
 
   return (
     <Dialog open={open} onOpenChange={(v) => !busy && onOpenChange(v)}>
       <DialogContent size="lg">
         <DialogHeader>
-          <DialogTitle>{done ? "Connection created" : "Add a PMS connection"}</DialogTitle>
+          <DialogTitle>{done ? "Connection activated" : "Add a PMS connection"}</DialogTitle>
           <DialogDescription>
             {done
-              ? "One more step before guests can use it: publish its configuration and activate it."
-              : "Link the appliance to the site's PMS so guests can sign in with their room number."}
+              ? "It is live and connecting. Point a client network at it on the PMS routing screen so Clients can use it."
+              : "Link the appliance to the Site's PMS so Clients can sign in with their room number."}
           </DialogDescription>
           {!done && <Stepper className="pt-3" steps={steps} current={step} onStep={progress.revisionId ? undefined : (i) => !busy && setStep(i)} />}
         </DialogHeader>
@@ -306,18 +325,18 @@ export function AddConnectionWizard({
                   />
                   <Callout tone="info" title="What happens when you press Create">
                     <ol className="list-decimal space-y-0.5 ps-4">
-                      <li>The connection is added with room sign-in paused. It does not contact the PMS yet.</li>
-                      <li>These settings are saved as a draft configuration.</li>
+                      <li>The connection is added and these settings are saved.</li>
                       {withCreds && <li>The credential is stored, encrypted.</li>}
+                      <li>The settings are put live and the connection is activated: the appliance connects to the PMS and loads the guest list.</li>
                     </ol>
                     <p className="mt-1">
-                      Publishing the configuration and activating the connection are separate steps you confirm
-                      afterwards.
+                      If a step fails the connection stays paused and you can try again from that step. Room charge stays
+                      off; this connection only reads the guest list.
                     </p>
                   </Callout>
-                  {withCreds && !progress.secretStored && (
+                  {!progress.activated && (
                     <Field label="Confirm your password" required
-                      hint="Storing a PMS credential needs your own admin password."
+                      hint="Commissioning a connection needs your own admin password."
                       error={showErrors && password === "" ? "Required." : undefined}>
                       <Input type="password" autoComplete="current-password" value={password}
                         onChange={(e) => setPassword(e.target.value)} />
@@ -334,7 +353,7 @@ export function AddConnectionWizard({
             <>
               <Button variant="ghost" onClick={() => onOpenChange(false)}>Close</Button>
               <Button onClick={() => { onOpenChange(false); if (progress.id) onOpenConnection(progress.id); }}>
-                Publish and activate
+                Open the connection
               </Button>
             </>
           ) : (
@@ -349,7 +368,7 @@ export function AddConnectionWizard({
                 <Button onClick={next} disabled={busy}>Next</Button>
               ) : (
                 <Button onClick={() => void create()} disabled={busy}>
-                  {busy ? "Creating…" : progress.id ? "Try again" : "Create connection"}
+                  {busy ? "Working…" : progress.id ? "Try again" : "Create and activate"}
                 </Button>
               )}
             </>
@@ -365,19 +384,17 @@ function DoneView({
 }: { provider: PmsProvider; name: string; progress: Progress; withCreds: boolean }) {
   return (
     <div className="space-y-4">
-      <Callout tone="success" title={`${name} was added`}>
-        Its configuration is saved as draft version {progress.revisionNo ?? 1}
-        {withCreds ? " and its credential is stored" : ""}. Room sign-in is paused, and the appliance has not
-        contacted the PMS.
+      <Callout tone="success" title={`${name} is live`}>
+        Version {progress.revisionNo ?? 1} is the configuration in use
+        {withCreds ? " and its credential is stored" : ""}. The appliance is connecting to {provider.label} and will
+        load the guest list; this page shows whether it connected.
       </Callout>
       <div className="space-y-2 text-sm">
-        <p className="font-medium">Next: publish and activate</p>
+        <p className="font-medium">Next</p>
         <ol className="list-decimal space-y-1 ps-5 text-muted-foreground">
-          <li>Publish the draft configuration — this makes it the one the connection uses.</li>
-          <li>Activate the connection — the appliance connects to {provider.label} and loads the guest list.</li>
-          <li>Point at least one client network at it on the PMS routing screen — a site administrator does this; it decides which property&rsquo;s guests are checked on which network.</li>
+          <li>Check the connection status: Connected, then In sync once the guest list has loaded.</li>
+          <li>Point at least one client network at it on the PMS routing screen. It decides which property&rsquo;s guests are checked on which network.</li>
         </ol>
-        <p className="text-muted-foreground">Both steps ask for your password.</p>
       </div>
     </div>
   );

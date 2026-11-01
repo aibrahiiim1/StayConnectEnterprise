@@ -14,6 +14,21 @@ import (
 // Chrome Custom Tabs and the Chrome app do not carry the WebView marker.
 func isAndroidWebView(ua string) bool { return strings.Contains(ua, "; wv)") }
 
+// isEmbeddedBrowser reports whether the request comes from a browser view an app controls, which Google and Facebook
+// refuse for sign-in: an Android WebView, and on iPhone and iPad any WebKit view that is not Safari or another browser
+// app, which is what the captive-network assistant (the sign-in sheet iOS opens by itself) and in-app browsers are.
+// Safari and every iOS browser app carry "Safari/" in their user agent; these views do not.
+func isEmbeddedBrowser(ua string) bool {
+	if isAndroidWebView(ua) {
+		return true
+	}
+	if strings.Contains(ua, "CaptiveNetworkSupport") {
+		return true
+	}
+	ios := strings.Contains(ua, "iPhone") || strings.Contains(ua, "iPad") || strings.Contains(ua, "iPod")
+	return ios && strings.Contains(ua, "AppleWebKit") && !strings.Contains(ua, "Safari/")
+}
+
 func refusesEmbeddedBrowser(provider string) bool {
 	return provider == "google" || provider == "facebook"
 }

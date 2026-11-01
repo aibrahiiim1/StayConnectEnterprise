@@ -12,7 +12,7 @@ Current since 2026-11-01. **`onegate.work` is retired and is never used again** 
 | `portal.onegate.getsemantics.com` | the shared Client Portal name of every appliance, `A 10.255.255.1` | Product Owner (done 2026-11-01) |
 | `<label>.gw.onegate.getsemantics.com` | each appliance's permanent technical hostname, `A <its portal address>` | Central |
 | `_acme-challenge.<name>` under `onegate.getsemantics.com` | temporary DNS-01 TXT values | Central |
-| `<16 chars>.acme.onegate.getsemantics.com` | a hotel domain's challenge delegate (temporary TXT) | Central |
+| `<16 chars>.acme.onegate.getsemantics.com` | a portal domain's challenge delegate (temporary TXT) | Central |
 | `onegate.getsemantics.com CAA` | `0 issue "letsencrypt.org; accounturi=…"`, `0 issuewild ";"` | Central (**Apply CAA**, an explicit action) |
 
 The Cloudflare zone is `getsemantics.com`. Central's name base is `onegate.getsemantics.com`; Central finds the

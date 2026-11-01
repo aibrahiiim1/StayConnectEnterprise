@@ -78,7 +78,7 @@ func (s *server) socialStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// OFFERED ONLY OVER HTTPS, ON A CALLBACK HOST THE HOTEL REGISTERED. The redirect URI is derived from the canonical hostname, not the Host header
+	// OFFERED ONLY OVER HTTPS, ON A CALLBACK HOST THE SITE REGISTERED. The redirect URI is derived from the canonical hostname (the Site's own portal domain for Google), not the Host header
 	// or the provider row, and stored on the attempt so the exchange uses the value the provider was sent.
 	offer := s.offerSocial(req.Provider, req.RedirectURI)
 	if !offer.ok {

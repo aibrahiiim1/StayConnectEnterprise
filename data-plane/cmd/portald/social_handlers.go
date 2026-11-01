@@ -26,7 +26,7 @@ func (h *handler) socialStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Google and Facebook refuse sign-in inside an Android WebView; send the guest to their own browser before any attempt exists.
-	if refusesEmbeddedBrowser(provider) && isAndroidWebView(r.UserAgent()) {
+	if refusesEmbeddedBrowser(provider) && isEmbeddedBrowser(r.UserAgent()) {
 		h.renderOpenInBrowser(w, r, provider)
 		return
 	}

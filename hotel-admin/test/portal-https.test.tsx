@@ -246,6 +246,39 @@ describe("Identity providers: derived callback URLs", () => {
     expect(await screen.findByText(/not ticked as registered/)).toBeInTheDocument();
   });
 
+  it("shows a Google setup checklist: what this appliance verified, what is left, and what only Google can confirm", async () => {
+    const google = {
+      id: "g1", provider: "google", enabled: true, client_id: "1-x.apps.googleusercontent.com", callback_hosts: [],
+      callback_urls: [], secret_set: true, offered: false, offered_reason: "needs_hotel_domain",
+      created_at: "2026-10-01T00:00:00Z", updated_at: "2026-10-01T00:00:00Z",
+      setup: [
+        { id: "site_domain", state: "todo", title: "Give this Site its own portal domain",
+          detail: "Enter a domain of yours on Portal HTTPS.", href: "/portal-https" },
+        { id: "client_id", state: "ok", title: "Client ID entered" },
+        { id: "google_domain", state: "manual", title: "Verify your domain with Google", detail: "OneGate cannot check this." },
+      ],
+    };
+    social([google]);
+    render(<SocialProvidersPage />);
+    expect(await screen.findByText(/Google needs your portal domain/)).toBeInTheDocument();
+    fireEvent.click(await screen.findByText("Google"));
+    const list = await screen.findByRole("group", { name: "Google setup checklist" });
+    expect(within(list).getByText("Give this Site its own portal domain")).toBeInTheDocument();
+    expect(within(list).getByLabelText("To do")).toBeInTheDocument();
+    expect(within(list).getByLabelText("Done")).toBeInTheDocument();
+    expect(within(list).getByLabelText("Only Google can confirm this")).toBeInTheDocument();
+    expect(within(list).getByRole("link", { name: "Open Portal HTTPS" })).toHaveAttribute("href", "/portal-https");
+    expect(list.textContent).toMatch(/nothing about them goes through OneGate Central/);
+  });
+
+  it("shows no checklist for the other providers", async () => {
+    social([fb]);
+    render(<SocialProvidersPage />);
+    fireEvent.click(await screen.findByText("Facebook"));
+    await screen.findByRole("dialog");
+    expect(screen.queryByRole("group", { name: "Google setup checklist" })).toBeNull();
+  });
+
   it("has no redirect URI field; the ticks are what is sent", async () => {
     social([]);
     post.mockResolvedValueOnce({});
