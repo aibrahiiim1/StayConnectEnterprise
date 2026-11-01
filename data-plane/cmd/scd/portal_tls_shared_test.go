@@ -161,3 +161,22 @@ func TestUnreadableRecordsAndNoCentralKeepTheSharedName(t *testing.T) {
 		t.Fatalf("and stays canonical once both recover: %+v", st)
 	}
 }
+
+// Review finding (PR #283): a hotel domain that was canonical and is removed while Central and the records are both
+// unavailable must not be mistaken for the shared name.
+func TestARemovedHotelDomainIsNeverRecoveredAsTheSharedName(t *testing.T) {
+	f := newAgentFixture(t)
+	f.repo.set.CustomDomain = customHost
+	f.central.domain = &ptCustomDomain{FQDN: customHost, Status: "VERIFIED"}
+	f.cycle(t, false)
+	if st := f.cycle(t, false); st.Canonical != customHost {
+		t.Fatalf("precondition: the hotel domain is canonical: %+v", st)
+	}
+	f.central.unreachable = true
+	f.repo.certsErr = errors.New("connection reset")
+	f.repo.set.CustomDomain = ""
+	st := f.cycle(t, false)
+	if st.SharedHostname != "" || st.Canonical == customHost {
+		t.Fatalf("the removed hotel domain must be neither the shared name nor canonical: %+v", st)
+	}
+}

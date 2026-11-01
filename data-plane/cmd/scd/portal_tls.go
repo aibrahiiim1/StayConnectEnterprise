@@ -442,8 +442,10 @@ func (a *portalTLSAgent) cycle(ctx context.Context, forceRenew bool) error {
 			sharedHost = ptSharedFromRows(rows, st.OneGateHostname)
 		}
 		// Rows unreadable as well: the last canonical name, persisted in portal_tls_state, recovers the shared name
-		// for this cycle (with readable rows the rows decide, so a just-removed hotel domain is never mistaken for it).
-		if c := prev.Canonical; rowsErr != nil && c != "" && c != st.OneGateHostname && c != set.CustomDomain && portaltls.ValidHostname(c) {
+		// for this cycle. It is never the OneGate hostname or a hotel domain, the current one or the one last
+		// recorded (removed or changed while Central is unreachable); with readable rows the rows decide.
+		if c := prev.Canonical; rowsErr != nil && c != "" && c != st.OneGateHostname && c != set.CustomDomain &&
+			c != prev.CustomDomain && portaltls.ValidHostname(c) {
 			sharedHost = c
 		}
 	}
