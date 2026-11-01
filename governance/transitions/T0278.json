@@ -1,8 +1,8 @@
 {
   "transition_id": "T0278",
   "seq": 278,
-  "timestamp": "2026-11-01T06:45:00Z",
-  "timestamp_derivation": "Computed from the session clock after both deployments were read back (Central 05:56Z, appliance 06:02Z) and verified, before the commit that introduces this receipt.",
+  "timestamp": "2026-11-01T06:05:00Z",
+  "timestamp_derivation": "Computed from the session clock after both deployments were read back (Central 05:56Z, appliance 06:02Z) and their verification finished (06:04Z), before the commit that introduces this receipt.",
   "record_type": "PACKAGE_CONTROLS_DEPLOYMENT",
   "authorisation": "D87, the Product Owner's priority change of 2026-11-01 (deploy bd8e571c to the production Central and the test appliance first).",
   "deployment": {

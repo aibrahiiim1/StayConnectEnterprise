@@ -192,8 +192,8 @@ Still open:
 ## 8. Deployment (2026-11-01, D87, T0278)
 
 The merged release `bd8e571c` was deployed first, for the Product Owner's manual testing:
-- Central runs `onegate-central-bd8e571c5735`;
-- the test appliance runs `onegate-appliance-bd8e571c5735`, with migrations 0202 and 0203.
+- on Central: `onegate-central-bd8e571c5735`;
+- on the test appliance: `onegate-appliance-bd8e571c5735`, with migrations 0202 and 0203.
 
 The record is in the installation manual, A3.14. Corrections made afterwards (the golden-lab harness, this record) change no runtime code, so the deployed version stays `bd8e571c`.
 

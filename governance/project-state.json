@@ -1860,7 +1860,7 @@
   "current_delivery": {
     "kind": "PACKAGE_CONTROLS_DEPLOYMENT",
     "decision": "D87 (Product-Owner priority change of 2026-11-01: deploy the merged release bd8e571c to the production Central and the test appliance first, then complete the mission).",
-    "decision_note": "Deployment record: Central runs onegate-central-bd8e571c5735 and the test appliance onegate-appliance-bd8e571c5735 (migrations 0202 and 0203), both read back from the installed files; evidence in docs/runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md A3.14.",
+    "decision_note": "Deployment record: the release is installed on Central (onegate-central-bd8e571c5735) and on the test appliance (onegate-appliance-bd8e571c5735, migrations 0202 and 0203), both read back from the installed files; evidence in docs/runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md A3.14.",
     "manifest": "docs/manifests/PackageControlsDeployment-change-manifest.md",
     "base": "bd8e571c5735f5c34564d488af706b9cbc7f1a90",
     "base_note": "Master after the merge of PR #280.",
