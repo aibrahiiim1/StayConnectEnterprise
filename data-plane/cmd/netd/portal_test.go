@@ -483,7 +483,8 @@ func opt114Of(d map[string]any) string { return captiveOptions(d)["10.20.0.0/22"
 
 func TestRefresh_HTTPSBecomingActiveSwitchesOption114WithoutARevision(t *testing.T) {
 	a, fk, pn := refreshApplier(t, netcfg.PortalTLS{HTTPSActive: true, CanonicalHostname: "k3j9x0ab.gw.onegate.work"})
-	if got := opt114Of(fk.running); got != "http://10.20.0.1:8380/" {
+	// On the HTTP fallback option 114 is omitted (a plain-HTTP value silenced the phones' probes, 2026-11-01).
+	if got := opt114Of(fk.running); got != "" {
 		t.Fatalf("precondition: Kea runs %q", got)
 	}
 
@@ -511,15 +512,15 @@ func TestRefresh_HTTPSBecomingActiveSwitchesOption114WithoutARevision(t *testing
 	}
 }
 
-func TestRefresh_FallbackSwitchesBackToHTTP(t *testing.T) {
+func TestRefresh_FallbackWithdrawsOption114(t *testing.T) {
 	a, fk, _ := refreshApplier(t, netcfg.PortalTLS{HTTPSActive: true, CanonicalHostname: "k3j9x0ab.gw.onegate.work"})
 	a.portalRefresh(context.Background())
 	a.portalTLSFn = func(context.Context) (netcfg.PortalTLS, error) {
 		return netcfg.PortalTLS{OneGateHostname: "k3j9x0ab.gw.onegate.work"}, nil
 	}
 	a.portalRefresh(context.Background())
-	if got := opt114Of(fk.running); got != "http://10.20.0.1:8380/" {
-		t.Fatalf("after the fallback Kea runs %q", got)
+	if got := opt114Of(fk.running); got != "" {
+		t.Fatalf("after the fallback Kea runs %q; the HTTP fallback carries no option 114", got)
 	}
 }
 

@@ -413,13 +413,10 @@ func (s *store) LoadPortalTLS(ctx context.Context) (netcfg.PortalTLS, error) {
 	if err != nil {
 		return p, err
 	}
-	// The shared Client Portal name is the OneGate-kind certificate row that is not this appliance's own hostname
-	// (scd keeps that row exactly while the appliance uses the shared name).
-	if e2 := s.db.QueryRow(ctx, `
-        SELECT hostname FROM public.portal_certificates
-         WHERE kind = 'ONEGATE' AND hostname <> $1 ORDER BY hostname LIMIT 1`, p.OneGateHostname).Scan(&p.SharedHostname); e2 != nil &&
-		!errors.Is(e2, pgx.ErrNoRows) && !undefinedTable(e2) {
-		return p, e2
+	// The shared Client Portal name is the canonical name whenever it is neither the appliance's own hostname nor
+	// its hotel domain. svc_netd reads portal_tls_state only (not the certificate records), which is all this needs.
+	if c := p.CanonicalHostname; c != "" && c != p.OneGateHostname && c != p.CustomDomain {
+		p.SharedHostname = c
 	}
 	return p, nil
 }
