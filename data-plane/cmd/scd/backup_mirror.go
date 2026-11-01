@@ -15,7 +15,9 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/ledger"
@@ -37,6 +39,20 @@ type backupCopySet struct {
 	Error      string                    `json:"error,omitempty"`
 }
 
+// backupCopyIdentity names the storage the copies are in. The display text is not enough: an S3 description is the bucket and
+// prefix only, so another server with the same bucket name would have been taken for the one that holds the copies (review
+// finding on PR #280). The endpoint and region of a bucket, and the pinned host key of an SFTP server, are part of it; no
+// credential is.
+func backupCopyIdentity(d ledger.Destination) string {
+	switch x := d.(type) {
+	case *ledger.S3Dest:
+		return "s3|" + strings.TrimRight(strings.ToLower(x.Endpoint), "/") + "|" + x.Region + "|" + x.Bucket + "|" + strings.Trim(x.Prefix, "/")
+	case *ledger.SFTPDest:
+		return x.Describe() + "|" + x.Fingerprint
+	}
+	return d.Describe()
+}
+
 type backupCopyState struct {
 	Destination string                   `json:"destination"`
 	Sets        map[string]backupCopySet `json:"sets"`
@@ -46,6 +62,9 @@ type backupCopyState struct {
 }
 
 var mirrorMu sync.Mutex
+
+// mirrorRunning is true while a copy pass holds mirrorMu; the status reports it so "Copy now" can return at once.
+var mirrorRunning atomic.Bool
 
 func readBackupCopyState() backupCopyState {
 	st := backupCopyState{Sets: map[string]backupCopySet{}}
@@ -86,6 +105,8 @@ func (s *server) mirrorBackups(ctx context.Context) {
 		return
 	}
 	defer mirrorMu.Unlock()
+	mirrorRunning.Store(true)
+	defer mirrorRunning.Store(false)
 	st := readBackupCopyState()
 	now := time.Now().UTC()
 	st.LastTry = &now
@@ -104,9 +125,9 @@ func (s *server) mirrorBackups(ctx context.Context) {
 		st.LastError = "this kind of secondary storage cannot hold backups"
 		return
 	}
-	if st.Destination != dest.Describe() {
+	if st.Destination != backupCopyIdentity(dest) {
 		// A new or replaced storage: every retained set is copied to it from the start. What the previous one holds stays there.
-		st.Destination, st.Sets = dest.Describe(), map[string]backupCopySet{}
+		st.Destination, st.Sets = backupCopyIdentity(dest), map[string]backupCopySet{}
 	}
 	metas := listBackupMetas()
 	retained := map[string]bool{}
@@ -207,7 +228,7 @@ func (s *server) mirrorStatus(set backupSettings, metas []backupMeta) map[string
 	if set.Replicate {
 		mode = "local_and_secondary"
 	}
-	out := map[string]any{"mode": mode, "last_ok": st.LastOK, "last_error": nilIfEmpty(st.LastError)}
+	out := map[string]any{"mode": mode, "last_ok": st.LastOK, "last_error": nilIfEmpty(st.LastError), "running": mirrorRunning.Load()}
 	var dest ledger.Destination
 	if s.ledgerRT.store != nil {
 		dest = s.ledgerRT.store.Destination()
@@ -218,7 +239,7 @@ func (s *server) mirrorStatus(set backupSettings, metas []backupMeta) map[string
 		ms, ok := st.Sets[m.Name]
 		state := "pending"
 		switch {
-		case ok && ms.Complete && dest != nil && st.Destination == dest.Describe():
+		case ok && ms.Complete && dest != nil && st.Destination == backupCopyIdentity(dest):
 			state = "copied"
 		case ok && ms.Error != "":
 			state = "failed"

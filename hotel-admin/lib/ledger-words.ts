@@ -52,6 +52,8 @@ export type BackupStatus = {
     message: string;
     last_ok?: string | null;
     last_error?: string | null;
+    /** A copy pass is running now ("Copy now" starts one and returns at once). */
+    running?: boolean;
     sets: { name: string; state: "copied" | "pending" | "failed"; verified_at?: string | null; error?: string | null }[];
   };
   retention?: { max_total: number; regular: number; protective: number; held: number };

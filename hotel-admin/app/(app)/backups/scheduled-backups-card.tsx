@@ -72,6 +72,7 @@ export function ScheduledBackupsCard({ writable }: { writable: boolean }) {
   async function copyNow() {
     setCopying(true); setErr(null);
     try {
+      // scd starts the copy and answers at once; the table shows each set as it is read back.
       await api.post("/backups/mirror/run", {});
       await load();
     } catch (e) { setErr(e instanceof ApiError ? e.message : errMsg(e)); } finally { setCopying(false); }
@@ -213,6 +214,7 @@ export function ScheduledBackupsCard({ writable }: { writable: boolean }) {
           >
             {d.mirror.message}
             {d.mirror.last_ok ? ` Last complete copy ${formatDate(d.mirror.last_ok)}.` : ""}
+            {d.mirror.running ? " Copying now: refresh to see each backup as it is read back." : ""}
             {writable && d.mirror.state !== "ok" && d.mirror.state !== "no_destination" && (
               <span className="mt-2 block">
                 <Button size="sm" variant="secondary" disabled={copying} onClick={() => void copyNow()}>{copying ? "Copying…" : "Copy now"}</Button>

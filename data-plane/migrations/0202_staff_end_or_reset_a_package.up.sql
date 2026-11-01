@@ -371,8 +371,13 @@ BEGIN
 
   -- The new cycle: a zero-price administrative purchase, never a payment, posting or redemption.
   PERFORM iam_v2.begin_controlled_operation('commerce_intent');
-  INSERT INTO iam_v2.purchases (tenant_id, site_id, package_revision_id, pms_interface_id, stay_id, trigger, amount_minor, state)
-  VALUES (p_tenant, p_site, o.package_revision_id, o.pms_interface_id, o.stay_id, 'ADMIN_GRANT', 0, 'GRANTED')
+  -- The new purchase keeps the original's acquisition lineage (its auth context, so the device that acquired the package), which
+  -- session activation follows to admit the purchasing device and to let others join only on their own sign-in. It is a free
+  -- ADMIN_GRANT with no quote, so no quote pin applies; a room package without an auth context stays without one.
+  INSERT INTO iam_v2.purchases (tenant_id, site_id, package_revision_id, pms_interface_id, stay_id, auth_context_id, trigger,
+                                amount_minor, state)
+  VALUES (p_tenant, p_site, o.package_revision_id, o.pms_interface_id, o.stay_id,
+          (SELECT pu.auth_context_id FROM iam_v2.purchases pu WHERE pu.id = o.purchase_id), 'ADMIN_GRANT', 0, 'GRANTED')
   RETURNING id INTO v_purchase;
 
   INSERT INTO iam_v2.entitlements (tenant_id, site_id, stay_id, guest_account_id, voucher_id, guest_principal_id,

@@ -777,13 +777,24 @@ func (s *server) backupStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// backupMirrorRun copies the retained backups to the secondary storage now (the same pass the loop runs) and returns the result.
+// backupMirrorRun starts the copy of the retained backups to the secondary storage now (the same pass the loop runs) and answers
+// at once with 202: copying and reading back large sets takes far longer than any request may wait (review finding on PR #280,
+// the relay gave up after 15 s while the copy went on). Progress and the outcome are in the backup status (mirror.running and
+// each set's copy state). A pass already running is not started twice.
 func (s *server) backupMirrorRun(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 2*time.Hour)
-	defer cancel()
-	if err := s.mirrorNow(ctx); err != nil {
-		writeJSON(w, http.StatusConflict, map[string]any{"error": "mirror_off", "message": err.Error()})
+	if !readBackupSettings().Replicate {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "mirror_off", "message": errMirrorOff.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, s.mirrorStatus(readBackupSettings(), listBackupMetas()))
+	already := mirrorRunning.Load()
+	if !already {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
+			defer cancel()
+			_ = s.mirrorNow(ctx)
+		}()
+	}
+	out := s.mirrorStatus(readBackupSettings(), listBackupMetas())
+	out["started"], out["already_running"] = !already, already
+	writeJSON(w, http.StatusAccepted, out)
 }
