@@ -1045,6 +1045,14 @@ func (p *phase3Auth) openSessionWithMethodTx(ctx context.Context, tx pgx.Tx, ent
 		RETURNING id::text`,
 		p.srv.tenID, p.srv.siteID, entitlement, dev.DeviceID,
 		dev.IP.String(), dev.MAC.String(), p.bridgeFor(ctx, dev.IP), method).Scan(&id)
+	if err != nil {
+		return id, err
+	}
+	// Tell the plan producer (acctd) at commit, as the voucher and account path does (iamv2_session_activate.go). Without it a
+	// Room sign-in waited for acctd's next period, and on the real CHR appliance enforcement was confirmed 2.4 s after the
+	// commit: after portald's 2.5 s budget, so a guest who was in fact online was told the stay could not be verified
+	// (2026-11-01). Delivered only if this transaction commits; the periodic submission stays the fallback.
+	_, err = tx.Exec(ctx, `SELECT pg_notify('onegate_session_pending', $1)`, id)
 	return id, err
 }
 

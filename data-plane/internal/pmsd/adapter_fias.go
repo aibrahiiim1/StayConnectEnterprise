@@ -153,7 +153,15 @@ func (a *fiasAdapter) serve(ctx context.Context, sink AxisSink) error {
 	// A single serialized writer owns every outbound frame; the read loop only submits requests. wctx cancellation
 	// emits a controlled LE and stops; the deferred drain prevents goroutine leaks.
 	wctx, wcancel := context.WithCancel(ctx)
-	w := newSerialWriter(a.g, a.rev.HeartbeatInterval)
+	// The idle keepalive is a dated LS, which Protel answers at once with LA (measured against the real CHR Protel,
+	// 2026-11-01). A bare LA is never answered: Protel sends its own LA only after 30 s in which it received nothing, and
+	// our 30 s LA kept resetting that timer, so a quiet link carried no inbound frame and the read deadline ended it every
+	// heartbeat_timeout (90 s) with TRANSPORT_TIMEOUT, followed by a reconnect and a full resync. The answer to the LS is
+	// real inbound evidence that the PMS is alive (OnHeartbeat), never our own write.
+	w := newSerialWriter(a.g, a.rev.HeartbeatInterval, func() string {
+		t := a.now()
+		return pms.BuildLS(t.Format("060102"), t.Format("150405"))
+	})
 	go w.run(wctx)
 	defer func() { wcancel(); <-w.done }()
 	defer a.g.st.freeze() // runs before the writer is stopped
@@ -201,6 +209,8 @@ func (a *fiasAdapter) serve(ctx context.Context, sink AxisSink) error {
 	skippedNoIdentity := 0
 	lastReportedSkipped := 0
 	readDeadline := a.rev.HeartbeatTimeout
+	// lastFull is when the last complete DS..DE sweep was published on this link (zero until the first).
+	var lastFull time.Time
 	for {
 		if port != nil {
 			// A posting command is carried only between resyncs, never inside a DS..DE window.
@@ -285,6 +295,20 @@ func (a *fiasAdapter) serve(ctx context.Context, sink AxisSink) error {
 				sink.OnFullSyncRequested()
 				resyncing = true
 			}
+		}
+		// A periodic complete sync, as the REST connectors make every complete_sync_ms. On FIAS a stay's occupancy evidence is
+		// refreshed only by a sweep, and Room sign-in refuses evidence older than complete_sync_ms + heartbeat_timeout; on a
+		// stable link nothing else refreshed it, so every in-house stay aged out of Room sign-in about 11.5 minutes after the
+		// last sweep (found on the real CHR Protel, 2026-11-01, once the link stopped dropping). Same gate as the operator's.
+		if !resyncing && !lastFull.IsZero() && a.rev.CompleteSyncBound > 0 && a.now().Sub(lastFull) >= periodicSweepAfter(a.rev) {
+			if a.log != nil {
+				a.log.Info("pmsd: periodic complete sync requested", "interface", a.iface.ID)
+			}
+			if werr := w.SubmitSync(ctx, pms.BuildDR()); werr != nil {
+				return failedAt(stepWriteResyncReq, werr)
+			}
+			sink.OnFullSyncRequested()
+			resyncing = true
 		}
 		// The financial mirror's own resync, from the same place under the same gate.
 		if asker, ok := sink.(FinancialResyncAsker); ok {
@@ -377,6 +401,7 @@ func (a *fiasAdapter) serve(ctx context.Context, sink AxisSink) error {
 				sink.RecordSkipped(int64(skippedNoIdentity))
 			}
 			resyncing = false
+			lastFull = a.now()
 			fin.completed()
 			if err := sink.OnResyncComplete(a.now(), ""); err != nil {
 				return failedAt(stepPublishResync, err)
@@ -549,4 +574,14 @@ func missingIdentityField(err error) string {
 		return ia.Missing
 	}
 	return "unknown"
+}
+
+// periodicSweepAfter is how long after a published sweep the next is requested: early enough that it is published inside
+// the freshness ceiling (complete_sync_ms + heartbeat_timeout) even though the check runs only when a frame arrives (at
+// least every heartbeat interval, now that the keepalive is answered) and a sweep takes time.
+func periodicSweepAfter(r Revision) time.Duration {
+	if r.HeartbeatTimeout > 0 && r.HeartbeatTimeout < r.CompleteSyncBound {
+		return r.CompleteSyncBound - r.HeartbeatTimeout
+	}
+	return r.CompleteSyncBound / 2
 }

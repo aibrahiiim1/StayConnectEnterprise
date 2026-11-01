@@ -26,6 +26,12 @@ const (
 func (f *apiFixture) seedInterface(t *testing.T) (iface, rev1, rev2 string) {
 	t.Helper()
 	ctx := context.Background()
+	// A site with a PMS interface offers Room sign-in in its Sign-in methods, as a configured hotel does; readiness now
+	// reports a site whose method is off as off (scd refuses every guest there), so the fixture states it.
+	if _, err := f.pool.Exec(ctx, `UPDATE public.tenants SET auth_methods = COALESCE(auth_methods,'{}'::jsonb) || '{"pms":{"enabled":true,"mode":"either"}}'::jsonb
+		WHERE id=$1::uuid`, f.tenant); err != nil {
+		t.Fatalf("switch room sign-in on: %v", err)
+	}
 	if err := f.pool.QueryRow(ctx, `
 		INSERT INTO iam_v2.pms_interfaces(id,tenant_id,site_id,connector_kind,display_label,lifecycle_state)
 		VALUES (gen_random_uuid(),$1,$2,'protel-fias',$3,'ACTIVE') RETURNING id::text`,

@@ -225,6 +225,24 @@ the next governance sync).
    - Only after verifying: the PR is merged; the merge commit is on master; the branch is not protected; it holds no unique unmerged work; no other owner depends on it; the provenance stays reachable.
    - Never delete unmerged work, or a branch still needed for pending verification.
 
+## 0I. PRODUCTION-REAL OPERATING STANDARD (permanent PO instruction, 2026-11-01)
+
+**Configured is not Working. Working is not Verified.** Every feature requested, implemented or delivered must be fully
+operational, end to end and production-grade **in its authorized target environment**. Not accepted as done: merely
+configured, published, shown as ACTIVE, mocked, dormant or technically installed without functioning. A feature is DONE
+only with evidence of:
+
+- real service operation, real persistence and correct state transitions;
+- real network enforcement where applicable, and correct integration with the genuine configured endpoints;
+- health and readiness that report the actual runtime state (never a configuration flag standing in for it);
+- secure failure handling and recovery; installation, upgrade and the relevant service restarts tested;
+- no fake PASS, no hidden disabled feature, no misleading success or failure message.
+
+Evidence is runtime evidence from the target environment, not a TCP connect, a mock, fabricated records or a UI that exists.
+What cannot be proven stays **NOT VERIFIED** and is said so. This standard is not an authorization for financial
+transactions, destructive data changes, uncontrolled network changes, PKI changes or Go-Live: those keep their own explicit
+authority (§0, §12), and the product stays PRE-LIVE until Go-Live is authorized. One primary agent (§0H).
+
 ---
 
 ## 1–13. DIRECT EXECUTION RULES

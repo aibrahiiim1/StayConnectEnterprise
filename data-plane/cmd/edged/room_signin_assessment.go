@@ -92,6 +92,10 @@ type rsNetworkFacts struct {
 	Archived      bool
 	IsDefault     bool
 	RoomMethodOff bool // the network's own sign-in settings switch the room method off
+	// SiteMethodOff: Room sign-in is switched off in the site's Sign-in methods (tenants.auth_methods.pms), which scd
+	// enforces before it looks at any PMS (pms_method_disabled). Readiness used to ignore it and said "can answer" for a
+	// network on which every guest was refused (found on the test appliance, 2026-11-01).
+	SiteMethodOff bool
 	Policy        string
 	Mapped        []string
 }
@@ -160,9 +164,11 @@ func assessRoomSignIn(nets []rsNetworkFacts, ifaces map[string]rsInterface, now 
 		switch {
 		case !live:
 			n.State, n.Summary = rsInactive, "This network is switched off or archived. Its room sign-in routing is kept as it is."
-		case policy == policyNone || f.RoomMethodOff:
+		case policy == policyNone || f.RoomMethodOff || f.SiteMethodOff:
 			n.State = rsOff
-			if f.RoomMethodOff && policy != policyNone {
+			if f.SiteMethodOff && policy != policyNone {
+				n.Summary = "Room sign-in is switched off in Sign-in methods, so no guest is asked for a room number. Switch it on there."
+			} else if f.RoomMethodOff && policy != policyNone {
 				n.Summary = "Room sign-in is switched off in this network's sign-in methods."
 			} else {
 				n.Summary = "Room sign-in is not offered on this network, by choice. Guests use the other sign-in methods."
@@ -323,6 +329,13 @@ func issueFor(n rsNetwork) rsIssue {
 }
 
 func (s *server) roomSignInFacts(ctx context.Context) ([]rsNetworkFacts, map[string]rsInterface, error) {
+	// The site-wide switch, read as scd reads it: on only when auth_methods.pms.enabled is true.
+	var siteOn bool
+	if err := s.db.QueryRow(ctx, `SELECT COALESCE((auth_methods->'pms'->>'enabled')::boolean, false) FROM public.tenants WHERE id = $1::uuid`,
+		s.tenantID).Scan(&siteOn); err != nil {
+		return nil, nil, err
+	}
+	siteOff := !siteOn
 	archived := s.archivedSet(ctx)
 	def := s.defaultNetworkID(ctx)
 	rows, err := s.db.Query(ctx, `
@@ -346,6 +359,7 @@ func (s *server) roomSignInFacts(ctx context.Context) ([]rsNetworkFacts, map[str
 			return nil, nil, err
 		}
 		f.Archived, f.IsDefault = archived[f.ID], f.ID == def
+		f.SiteMethodOff = siteOff
 		nets = append(nets, f)
 	}
 	rows.Close()
