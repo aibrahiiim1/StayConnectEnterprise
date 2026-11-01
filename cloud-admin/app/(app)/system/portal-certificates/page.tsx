@@ -265,7 +265,7 @@ export default function PortalCertificatesPage() {
               <HelpList
                 items={[
                   <>Set the <strong>contact email</strong> and keep the directory on <strong>Staging</strong>.</>,
-                  <>Paste a Cloudflare API token scoped to the zone (<strong>Zone: Read</strong>, <strong>DNS: Edit</strong>), then <strong>Test DNS access</strong>.</>,
+                  <>Paste a Cloudflare API token for the zone that contains the name base (<strong>Zone: Read</strong>, <strong>DNS: Edit</strong>), then <strong>Test DNS access</strong>. Leave the name base as it is.</>,
                   <>Once one appliance has a staging certificate, switch to <strong>Production</strong> and <strong>Apply CAA</strong>.</>,
                 ]}
               />
@@ -308,7 +308,7 @@ export default function PortalCertificatesPage() {
         <div className="grid gap-5 lg:grid-cols-2">
           <SectionCard
             title="ACME and DNS"
-            description="Which CA issues, who it writes to, and the zone Central publishes in."
+            description="Which CA issues, who it writes to, and the name base Central publishes under."
             footer={
               canManage ? (
                 <Button disabled={!dirty} loading={savingSettings} onClick={onSaveSettings}>Save settings</Button>
@@ -347,10 +347,15 @@ export default function PortalCertificatesPage() {
               />
             </Field>
             <FieldGrid cols={2}>
-              <Field label="DNS zone">
+              <Field
+                label="Name base"
+                hint={settings.live_hostnames > 0
+                  ? `Fixed while ${settings.live_hostnames} appliance hostname${settings.live_hostnames === 1 ? "" : "s"} live under it. The Cloudflare zone is found automatically.`
+                  : "OneGate's own names live under this, e.g. onegate.getsemantics.com. Not the Cloudflare zone itself."}
+              >
                 <Input
                   value={draft.zone_name}
-                  disabled={!canManage}
+                  disabled={!canManage || settings.live_hostnames > 0}
                   onChange={(e) => setDraft((d) => ({ ...d, zone_name: e.target.value }))}
                 />
               </Field>
@@ -369,7 +374,7 @@ export default function PortalCertificatesPage() {
               items={[
                 { label: "Directory URL", value: <span className="break-all font-mono text-xs">{settings.directory_url}</span> },
                 { label: "ACME account", value: settings.account_url ? <MonoId value={settings.account_url} head={28} title="Account" /> : "Not registered yet" },
-                { label: "Zone id", value: settings.zone_id ? <MonoId value={settings.zone_id} head={12} title="Zone id" /> : "Not verified yet" },
+                { label: "Cloudflare zone id", value: settings.zone_id ? <MonoId value={settings.zone_id} head={12} title="Zone id" /> : "Not verified yet (run Test DNS access)" },
                 { label: "CAA", value: settings.caa_applied_at ? `Applied ${formatDateTime(settings.caa_applied_at)}` : "Not applied" },
               ]}
             />
@@ -650,13 +655,13 @@ export default function PortalCertificatesPage() {
       <ConfirmDialog
         open={confirmCAA}
         onOpenChange={setConfirmCAA}
-        title="Apply CAA to the zone"
+        title="Apply CAA to the name base"
         description={settings ? <>Pins certificate issuance for <span className="font-mono">{settings.zone_name}</span> to Let&apos;s Encrypt and this ACME account.</> : undefined}
         confirmLabel="Apply CAA"
         busy={applyingCAA}
         consequences={[
-          "Only this ACME account can obtain certificates for names in the zone from Let's Encrypt.",
-          "Wildcard certificates are forbidden for the whole zone.",
+          "Only this ACME account can obtain certificates for names under the name base from Let's Encrypt.",
+          "Wildcard certificates are forbidden under the name base.",
           "Switching between staging and production registers a new account: apply CAA again afterwards.",
         ]}
         onConfirm={applyCAA}

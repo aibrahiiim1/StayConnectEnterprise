@@ -22,6 +22,8 @@ type SettingsView struct {
 	TestOverrides []string `json:"test_overrides"`
 	// SharedPortal: the shared Client Portal name, its public-DNS readiness and the records it needs.
 	SharedPortal *SharedView `json:"shared_portal,omitempty"`
+	// LiveHostnames counts the appliance hostnames under the name base (zone_name); while any exist the base is fixed.
+	LiveHostnames int `json:"live_hostnames"`
 }
 
 func (s *Service) View(ctx context.Context) (*SettingsView, error) {
@@ -31,9 +33,11 @@ func (s *Service) View(ctx context.Context) (*SettingsView, error) {
 	}
 	ok, why := s.Availability(st)
 	overrides := append([]string{}, s.Overrides...)
+	var live int
+	_ = s.DB.QueryRow(ctx, `SELECT count(*) FROM portal_hostnames WHERE released_at IS NULL OR dns_record_id IS NOT NULL`).Scan(&live)
 	return &SettingsView{Settings: st, DirectoryURL: s.Opts.directoryURL(st.ACMEDirectory), TokenSet: s.Secrets.TokenSet(),
 		DNSProvider: s.Opts.DNSProvider, Available: ok, Unavailable: why, TestOverrides: overrides,
-		SharedPortal: s.sharedView(ctx, st, "")}, nil
+		SharedPortal: s.sharedView(ctx, st, ""), LiveHostnames: live}, nil
 }
 
 func (s *Service) UpdateSettings(ctx context.Context, u SettingsUpdate, actor string) (Settings, error) {
@@ -54,7 +58,9 @@ func (s *Service) UpdateSettings(ctx context.Context, u SettingsUpdate, actor st
 		}
 		if inUse > 0 {
 			return Settings{}, refuse(http.StatusConflict, "zone_in_use",
-				"%d appliance hostname(s) live in %s; the zone cannot change while they exist", inUse, before.ZoneName)
+				"the name base is %s and %d appliance hostname(s) live under it, so it cannot change. Leave it as it is: "+
+					"Central finds the DNS provider's zone for it by itself (for example getsemantics.com), so only the token is needed",
+				before.ZoneName, inUse)
 		}
 	}
 	// CAA pins the production account; leaving production would make every order fail.

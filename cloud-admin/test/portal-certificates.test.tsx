@@ -24,6 +24,7 @@ const SETTINGS: PortalTLSSettings = {
   available: false,
   unavailable_reason: "no DNS API token is stored",
   test_overrides: [],
+  live_hostnames: 0,
 };
 
 const ROW: PortalFleetRow = {
@@ -121,6 +122,28 @@ describe("Portal certificates", () => {
     await user.click(within(dialog).getByRole("button", { name: "Switch to production" }));
     await waitFor(() => expect(calls.some((c) => c.method === "PUT" &&
       (c.body as { acme_directory: string }).acme_directory === "production")).toBe(true));
+  });
+
+  it("calls the setting the name base, and fixes it while appliance hostnames live under it", async () => {
+    mockFetch([
+      { match: "/api/cloud/v1/portal-tls/settings", method: "GET", body: { ...SETTINGS, live_hostnames: 1 } },
+      { match: "/api/cloud/v1/portal-tls/fleet", body: { items: [] } },
+    ]);
+    renderAs(PLATFORM_ME, <PortalCertificatesPage />);
+    const base = await screen.findByLabelText("Name base");
+    expect(base).toHaveValue("onegate.getsemantics.com");
+    expect(base).toBeDisabled();
+    expect(screen.getByText(/Fixed while 1 appliance hostname live under it/)).toBeInTheDocument();
+    expect(screen.queryByLabelText("DNS zone")).not.toBeInTheDocument();
+  });
+
+  it("lets the name base be set while no appliance hostname exists", async () => {
+    mockFetch([
+      { match: "/api/cloud/v1/portal-tls/settings", method: "GET", body: SETTINGS },
+      { match: "/api/cloud/v1/portal-tls/fleet", body: { items: [] } },
+    ]);
+    renderAs(PLATFORM_ME, <PortalCertificatesPage />);
+    expect(await screen.findByLabelText("Name base")).toBeEnabled();
   });
 
   it("shows support staff the page without any control that writes", async () => {

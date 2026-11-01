@@ -129,6 +129,17 @@ func TestPebbleSharedPortalName(t *testing.T) {
 		d.set(shared, rrA, DefaultSharedAddress)
 	}
 
+	// The name base is fixed while appliance hostnames live under it, and the refusal says what to do instead
+	// (found when the Product Owner typed the Cloudflare zone, getsemantics.com, into the field).
+	if v, err := svc.View(ctx); err != nil || v.LiveHostnames < 1 {
+		t.Fatalf("the settings view counts the live hostnames: %+v %v", v, err)
+	}
+	apex := "getsemantics.com"
+	if _, err := svc.UpdateSettings(ctx, SettingsUpdate{ZoneName: &apex}, "test"); !isRefusal(err, 409) ||
+		!strings.Contains(err.Error(), "onegate.getsemantics.com") || !strings.Contains(err.Error(), "Leave it as it is") {
+		t.Fatalf("changing the base under live hostnames is refused with advice: %v", err)
+	}
+
 	// Wrong name sets are refused.
 	for _, names := range [][]string{{shared}, {shared, "zzzzzzzz.gw.onegate.getsemantics.com"}, {hostA}, {shared, hostA, "x.example.com"}} {
 		_, bad := sharedCSR(t, names...)
