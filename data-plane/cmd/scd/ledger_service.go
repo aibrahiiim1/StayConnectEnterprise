@@ -855,7 +855,9 @@ func (s *server) ledgerHandover(ctx context.Context, dest ledger.Destination, ah
 		if len(dbE) > 0 && (dbE[len(dbE)-1].Hash != lhash || dbE[len(dbE)-1].Seq != lseq) {
 			return nil, errors.New("the ledger on the appliance and the database disagree; see the ledger status")
 		}
-		cand := ledger.NewStore(ledger.Config{LocalPath: rt.store.LocalPath, Dest: dest, Cipher: s.ledgerCipher, MACKey: s.ledgerCachedKey})
+		// The candidate encrypts exactly as the running store does (its configured cipher), so the copy written at the handover is
+		// the copy every later push writes.
+		cand := ledger.NewStore(ledger.Config{LocalPath: rt.store.LocalPath, Dest: dest, Cipher: rt.store.Cipher, MACKey: s.ledgerCachedKey})
 		if err := cand.PushExternal(ctx); err != nil {
 			return nil, err
 		}
