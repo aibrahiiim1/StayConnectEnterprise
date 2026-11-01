@@ -437,6 +437,10 @@ func (h *handler) activateEnforced(r *http.Request, sess commerceSession, entitl
 // returnBase is the portal's own origin, never the client's Host header: the canonical name over HTTPS, the portal address (else the connection's address) on the HTTP fallback, and the request origin only as a last resort.
 func (h *handler) returnBase(r *http.Request) string {
 	st := h.tlsState()
+	if st.HTTPSActive && st.isSiteDomain(requestHost(r)) {
+		// The journey is on the Site's own portal domain: a card payment returns to the origin that holds the cookie.
+		return "https://" + requestHost(r)
+	}
 	if st.HTTPSActive && st.Canonical != "" {
 		return "https://" + st.Canonical
 	}

@@ -27,15 +27,32 @@ const portalTLSPollEvery = 15 * time.Second
 const androidCustomTabsVersion = 361335020
 
 type portalTLSState struct {
-	HTTPSActive     bool     `json:"https_active"`
-	Canonical       string   `json:"canonical_hostname"`
-	OneGateHostname string   `json:"onegate_hostname"`
-	CustomDomain    string   `json:"custom_domain"`
-	PortalIP        string   `json:"portal_ip"`
-	PortalIPActive  bool     `json:"portal_ip_active"`
-	FallbackReason  string   `json:"fallback_reason"`
-	Hostnames       []string `json:"portal_hostnames"`
-	CertDir         string   `json:"cert_dir"`
+	HTTPSActive     bool   `json:"https_active"`
+	Canonical       string `json:"canonical_hostname"`
+	OneGateHostname string `json:"onegate_hostname"`
+	CustomDomain    string `json:"custom_domain"`
+	// CustomDomainStatus is VERIFIED only while the Site's portal domain passed Central's check.
+	CustomDomainStatus string   `json:"custom_domain_status"`
+	PortalIP           string   `json:"portal_ip"`
+	PortalIPActive     bool     `json:"portal_ip_active"`
+	FallbackReason     string   `json:"fallback_reason"`
+	Hostnames          []string `json:"portal_hostnames"`
+	CertDir            string   `json:"cert_dir"`
+}
+
+// isSiteDomain reports whether host is the Site's own portal domain with an installed certificate. A journey that
+// began there (Google returns to it, section 5 of the contract) stays there: the commerce cookie is host-only, so a
+// redirect to the canonical name would lose the session.
+func (st portalTLSState) isSiteDomain(host string) bool {
+	if host == "" || st.CustomDomain == "" || st.CustomDomainStatus != "VERIFIED" || host != strings.ToLower(st.CustomDomain) {
+		return false
+	}
+	for _, h := range st.Hostnames {
+		if h == host {
+			return true
+		}
+	}
+	return false
 }
 
 func (st portalTLSState) isPortalHost(host string) bool {
@@ -295,7 +312,7 @@ func (h *handler) tlsFront(next http.Handler) http.Handler {
 			http.Error(w, "misdirected request", http.StatusMisdirectedRequest)
 			return
 		}
-		if st.Canonical != "" && host != st.Canonical && !canonicalExempt(r.URL.Path) {
+		if st.Canonical != "" && host != st.Canonical && !st.isSiteDomain(host) && !canonicalExempt(r.URL.Path) {
 			code := http.StatusFound
 			if r.Method != http.MethodGet && r.Method != http.MethodHead {
 				code = http.StatusTemporaryRedirect
