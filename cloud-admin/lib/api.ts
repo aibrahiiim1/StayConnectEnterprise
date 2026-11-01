@@ -323,6 +323,8 @@ export type PortalTLSSettings = {
   available: boolean;
   unavailable_reason?: string;
   test_overrides: string[];
+  /** Appliance hostnames under the name base; while any exist the base is fixed. */
+  live_hostnames: number;
 };
 
 export type PortalTLSTestResult = {

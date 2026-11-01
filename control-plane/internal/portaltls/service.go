@@ -489,7 +489,7 @@ func (s *Service) reconcileDomain(ctx context.Context, applianceID string, h hos
 	fqdn, verr := ValidateCustomDomain(raw, st.ZoneName)
 	if verr == nil && s.Opts.Shared().IsSharedName(fqdn) {
 		// The shared name belongs to every appliance at once: no single appliance may claim it as its own.
-		verr = fmt.Errorf("%s is the shared OneGate Client Portal name; every appliance already uses it, so it cannot be a hotel's own domain",
+		verr = fmt.Errorf("%s is the shared OneGate Client Portal name; every appliance already uses it, so it cannot be a Site's own domain",
 			s.Opts.Shared().Hostname)
 	}
 	if verr != nil {
