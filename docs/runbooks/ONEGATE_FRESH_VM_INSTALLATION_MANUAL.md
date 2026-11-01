@@ -124,7 +124,7 @@ OneGate's design rule is **two NICs and no more**. The installer counts physical
 | NTP | Outbound UDP 123 to the site's/clock source | — |
 | Inbound to the appliance | **22/tcp** (SSH; not address-pinned) and **443/tcp** (Admin Console, pinned to the WAN IP by the rendered firewall). Nothing else on the WAN. Restrict who may reach these at the upstream firewall. | **[CODE][VM]** |
 | PMS | Protel FIAS is a **TCP** link from the appliance to the PMS host:port (reached over the WAN NIC unless a route says otherwise). REST PMS kinds need outbound HTTPS to the vendor. | **[CODE]** |
-| Portal public name (optional, later) | `<label>.gw.onegate.work` is issued by Central; resolvers must allow answers pointing at private addresses (DNS-rebinding protection) for that zone. | **[DOC]** |
+| Portal public name (optional, later) | `portal.onegate.getsemantics.com` (shared) and `<label>.gw.onegate.getsemantics.com` are issued by Central; resolvers must allow answers pointing at private addresses (DNS-rebinding protection) for that zone. | **[DOC]** |
 
 ### A.5 What to have in hand before you start
 
@@ -381,7 +381,7 @@ After Confirm, on the VM: `ip -br addr` shows the bridge with the gateway addres
 
 * The **portal address** is a private RFC 1918 /32 on `ogportal0` (default series starting `10.255.255.1`, chosen by migration 0116, changeable under *Portal HTTPS*); it must lie outside every Client and host subnet.
 * *Portal settings* (`/portal-branding`): brand, welcome text, languages, layout. Images are uploaded to `/opt/stayconnect/portal-assets`.
-* **Portal HTTPS** (`/portal-https`): obtains `<label>.gw.onegate.work` through Central (requires Central's Cloudflare token + ACME contact configured by the Product Owner — status on PRE-LIVE was recorded as NOT_CONFIGURED until then). Until HTTPS is active, option 114 carries the HTTP gateway URL and **social login is not offered**. Hotel-owned domains need three DNS records (Handbook §14.3).
+* **Portal HTTPS** (`/portal-https`): obtains `portal.onegate.getsemantics.com` and `<label>.gw.onegate.getsemantics.com` through Central (requires Central's Cloudflare token + ACME contact configured by the Product Owner — status on PRE-LIVE was recorded as NOT_CONFIGURED until then). Until HTTPS is active, option 114 carries the HTTP gateway URL and **social login is not offered**. Hotel-owned domains need three DNS records (Handbook §14.3).
 * *TLS certificate* (`/network/certificate`): Admin Console certificate status/rotate; auto-renews.
 
 ### C.9 Sign-in methods, packages and the Client Portal

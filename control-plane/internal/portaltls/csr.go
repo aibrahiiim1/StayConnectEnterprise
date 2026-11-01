@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	KindOneGate = "ONEGATE" // <label>.gw.onegate.work
+	KindOneGate = "ONEGATE" // <label>.gw.<base>, or the shared Client Portal name
 	KindCustom  = "CUSTOM"  // the hotel's own verified domain
 )
 

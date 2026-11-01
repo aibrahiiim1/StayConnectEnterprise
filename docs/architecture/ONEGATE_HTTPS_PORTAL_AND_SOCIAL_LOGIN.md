@@ -27,16 +27,17 @@ authorisation. Where this document and code disagree, the code is wrong.
 
 | Thing | Value | Owner |
 |---|---|---|
-| Zone | `onegate.work` (registrar GoDaddy; DNS hosted at Cloudflare) | OneGate |
-| Appliance hostname | `<label>.gw.onegate.work`, label = 8 chars `[a-z][a-z0-9]{7}`, random, permanent, never reused | Central |
-| Its public A record | `<label>.gw.onegate.work A <portal address>` (TTL 300, DNS-only, never proxied, no AAAA) | Central |
-| ACME challenge (OneGate name) | `_acme-challenge.<label>.gw.onegate.work TXT` (temporary) | Central |
-| ACME challenge delegate (hotel domain) | `<challenge_label>.acme.onegate.work TXT` (temporary), challenge_label = 16 `[a-z0-9]` | Central |
-| CAA | `onegate.work CAA 0 issue "letsencrypt.org; accounturi=<OneGate ACME account URL>"`, `0 issuewild ";"` | Central (explicit action) |
-| Hotel portal domain | e.g. `wifi.nilehotel.com` (a subdomain of a domain the hotel owns; never under onegate.work, never an apex) | Hotel |
+| Name base | `onegate.getsemantics.com` (since 2026-11-01, Central migration 0064); the Cloudflare zone is `getsemantics.com`, found by Central as the zone enclosing the base. **`onegate.work` is retired and never used again**; it held these names until then | OneGate |
+| Appliance hostname | `<label>.gw.onegate.getsemantics.com`, label = 8 chars `[a-z][a-z0-9]{7}`, random, permanent, never reused | Central |
+| Its public A record | `<label>.gw.onegate.getsemantics.com A <portal address>` (TTL 300, DNS-only, never proxied, no AAAA) | Central |
+| ACME challenge (OneGate name) | `_acme-challenge.<label>.gw.onegate.getsemantics.com TXT` (temporary) | Central |
+| ACME challenge delegate (hotel domain) | `<challenge_label>.acme.onegate.getsemantics.com TXT` (temporary), challenge_label = 16 `[a-z0-9]` | Central |
+| CAA | `onegate.getsemantics.com CAA 0 issue "letsencrypt.org; accounturi=<OneGate ACME account URL>"`, `0 issuewild ";"` -- on the base, never on the `getsemantics.com` apex | Central (explicit action) |
+| Write boundary | Central writes and deletes records **only under the base**; any other name in the zone is refused by the DNS provider code | Central |
+| Hotel portal domain | e.g. `wifi.nilehotel.com` (a subdomain of a domain the hotel owns; never under the base, never an apex) | Hotel |
 | **Shared Client Portal name** (since 2026-11-01, §16) | `portal.onegate.getsemantics.com`, one name for every appliance | OneGate (Product Owner publishes its two records once) |
 | Its public A record | `portal.onegate.getsemantics.com A 10.255.255.1` (the fleet-wide portal address, DNS-only, never proxied, no AAAA) | Product Owner |
-| Its ACME challenge delegate | `_acme-challenge.portal.onegate.getsemantics.com CNAME sharedportal.acme.onegate.work.`; Central writes the TXT values there | Product Owner (CNAME), Central (TXT) |
+| Its ACME challenge | `_acme-challenge.portal.onegate.getsemantics.com TXT` (temporary), written directly by Central: the name lies under the base, so no delegation exists | Central |
 
 **HSTS is never set** on any portal name: it would make the approved HTTP fallback unreachable.
 
@@ -79,9 +80,9 @@ appliance (scd)                                  Central (ctrlapi)              
   it, otherwise at two thirds of the lifetime; it re-checks ARI daily. The appliance orders a new certificate
   once `now > renew_after`, or immediately when its certificate is missing, expired, revoked or does not match.
 * **Limits**: Central allows at most one open order per (appliance, hostname), 10 orders per appliance per day,
-  and at most `weekly_new_limit` (default 45 < Let's Encrypt's 50) *new* `gw.onegate.work` certificates per
+  and at most `weekly_new_limit` (default 45 < Let's Encrypt's 50) *new* `gw.onegate.getsemantics.com` certificates per
   rolling 7 days; further new orders wait QUEUED. A renewal (same hostname previously issued) is not new.
-  Hotel-domain certificates count against the hotel's own registered domain, not `onegate.work`.
+  Hotel-domain certificates count against the hotel's own registered domain, not `getsemantics.com`.
 * **Validation by Central before ordering**: the CSR is a valid P-256 or RSA≥2048 CSR, self-signed, naming
   exactly one DNS name, which is the appliance's own OneGate hostname or its VERIFIED hotel domain.
 * **Revocation**: on appliance decommission/revoke/delete (the central lifecycle path), on hotel-domain removal,
@@ -100,11 +101,11 @@ The hotel enters `wifi.nilehotel.com` in the Admin Console. Central returns thre
 | Record | Purpose |
 |---|---|
 | `_onegate-verify.wifi.nilehotel.com TXT <verify_token>` | proves the claimant controls the domain and binds it to this appliance |
-| `wifi.nilehotel.com CNAME <label>.gw.onegate.work.` | the name follows the portal address |
-| `_acme-challenge.wifi.nilehotel.com CNAME <challenge_label>.acme.onegate.work.` | lets Central answer DNS-01 for this one name |
+| `wifi.nilehotel.com CNAME <label>.gw.onegate.getsemantics.com.` | the name follows the portal address |
+| `_acme-challenge.wifi.nilehotel.com CNAME <challenge_label>.acme.onegate.getsemantics.com.` | lets Central answer DNS-01 for this one name |
 
 Central verifies all three through two independent public resolvers (DNS-over-HTTPS: Cloudflare and Google),
-checks CAA on the name and its parents permits `letsencrypt.org`, refuses names under `onegate.work`, apex
+checks CAA on the name and its parents permits `letsencrypt.org`, refuses names under the base (`onegate.getsemantics.com`), apex
 names, public suffixes, and a name already claimed by another appliance. It re-checks before every order and
 daily; a broken delegation marks the domain FAILED, stops renewals and alerts. Removal revokes its certificate.
 
@@ -221,7 +222,7 @@ they carry hostnames, the portal address, CSRs and certificate status — no gue
   WebView login windows. **While the shared Client Portal name is canonical (§16) Google sign-in is not offered**: a
   hotel cannot verify OneGate's domain in its own Google app. Making a verified hotel domain win over the shared name
   for hotels that need Google is a Product Owner decision.
-* A site whose own DNS server applies DNS-rebinding protection must allow `gw.onegate.work` (and its hotel
+* A site whose own DNS server applies DNS-rebinding protection must allow `onegate.getsemantics.com` (and its hotel
   domain) to resolve to a private address.
 * With external DHCP, the hotel's DHCP server must hand out option 114 itself if wanted; probes still work.
 * **On the HTTP fallback option 114 is not emitted at all.** Until 2026-11-01 it carried `http://<gateway>:8380/`. A
@@ -270,6 +271,8 @@ they carry hostnames, the portal address, CSRs and certificate status — no gue
 
 ## 12. Verified on Central and PRE-LIVE (2026-10-13), with a temporary test CA
 
+*Historical record: the names below were under `onegate.work`, retired on 2026-11-01. Kept as measured.*
+
 The full chain ran on the real Central (`172.21.96.196`) and the PRE-LIVE appliance (`172.21.60.25`), both retired since 2026-10-28, against a
 temporary Pebble ACME CA (15-minute certificates) and a challenge-test DNS server standing in for Let's Encrypt
 and Cloudflare, then both were removed and the configuration reset (the appliance is back on `NOT_CONFIGURED`).
@@ -290,6 +293,9 @@ Phones do not trust that CA, so this proves the machinery, not public trust.
 | Social offering: sealed secret, button only when the callback host is canonical, authorize with HTTPS callback + PKCE S256 + nonce, forged state refused, WebView page, garden pairs | `scripts/portal-social-offering-test.sh` 15/15 (placeholder Microsoft app) |
 
 ## 13. Verified with the real Cloudflare zone and Let's Encrypt (2026-10-14)
+
+*Historical record: `onegate.work` and the Central that held its token are both retired (2026-10-28, 2026-11-01).
+The current procedure is [runbooks/ONEGATE_PORTAL_DNS_AND_CERTIFICATES.md](../runbooks/ONEGATE_PORTAL_DNS_AND_CERTIFICATES.md).*
 
 onegate.work is hosted at Cloudflare; the zone-scoped token is on Central (entered by the Product Owner).
 
@@ -360,7 +366,7 @@ appliance at every hotel. The appliance answers the name locally as well, so a r
 unchanged: the address is answered on client networks only, never on the WAN/management interface.
 
 **Certificates: one per appliance, never shared.** Each appliance generates its own P-256 key and orders its own
-certificate naming exactly two names: the shared name and its permanent `<label>.gw.onegate.work`. Central refuses any
+certificate naming exactly two names: the shared name and its permanent `<label>.gw.onegate.getsemantics.com`. Central refuses any
 other name set (`ParseAndCheckSharedCSR`). Consequences:
 
 * No private key is ever shared between hotels or held by Central; one appliance's certificate is revoked alone
@@ -372,14 +378,15 @@ other name set (`ParseAndCheckSharedCSR`). Consequences:
 * What a shared name cannot prevent, and is accepted: any appliance holds a valid certificate for the name, so a rogue
   device that is itself a hotel's gateway could present it. It could do so only to guests already routed through it.
 
-**Challenge.** Central answers DNS-01 for the shared name at one delegate, `sharedportal.acme.onegate.work` (12
-characters, so it can never equal a hotel delegate label, which has 16), through the `onegate.work` token it already
-holds. The shared name's own zone (`getsemantics.com`) is never written by Central: its two records are published once
-by the Product Owner, so no DNS token for that zone exists anywhere.
+**Challenge.** The shared name lies under Central's name base, so Central answers its DNS-01 challenge directly at
+`_acme-challenge.portal.onegate.getsemantics.com` with the `getsemantics.com` token (several appliances' values may
+coexist there; each order deletes only its own record). A deployment whose shared name lay outside the base would
+delegate instead: `_acme-challenge.<name> CNAME sharedportal.acme.<base>` (12 characters, so it can never equal a hotel
+delegate label, which has 16). The shared name's A record is the Product Owner's; Central never writes it.
 
 **Readiness gate.** Central checks the shared name through both DoH resolvers before every order and every 10 minutes
-(failures every minute): `A` must be exactly the shared address, `_acme-challenge` must be the CNAME to the delegate,
-and CAA must permit Let's Encrypt. Until then no order is placed and the appliance keeps its own hostname.
+(failures every minute): `A` must be exactly the shared address, CAA must permit Let's Encrypt, and (only outside the
+base) `_acme-challenge` must be the CNAME to the delegate. Until then no order is placed and the appliance keeps its own hostname.
 
 **Eligibility.** Only an appliance whose portal address is the shared address uses the name: the public answer would
 not reach any other. Such an appliance keeps its own hostname, as before.
@@ -396,12 +403,11 @@ feature off) and `CTRLAPI_PORTAL_SHARED_ADDRESS` (default `10.255.255.1`, RFC 19
 the shared certificate is a OneGate-kind row whose hostname is the shared name. The shared name can never be
 registered as a hotel's own domain.
 
-**Records the Product Owner publishes once** (zone `getsemantics.com`, DNS-only):
+**Record the Product Owner publishes once** (zone `getsemantics.com`, DNS-only; done 2026-11-01):
 
 | Type | Name | Value |
 |---|---|---|
 | A | `portal.onegate.getsemantics.com` | `10.255.255.1` |
-| CNAME | `_acme-challenge.portal.onegate.getsemantics.com` | `sharedportal.acme.onegate.work` |
 
 Central's console (*Portal certificates*, `GET /cloud/v1/portal-tls/settings` → `shared_portal`) shows the readiness
-and the same two records.
+and the records the name needs.

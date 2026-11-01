@@ -343,11 +343,14 @@ belong with the other keys in backups and on a host move; neither ever reaches a
 
 Bring-up, all from **System → Portal certificates**:
 
-1. In Cloudflare, create an API token scoped to the `onegate.work` zone only, with *Zone: Read* and *DNS: Edit*.
+1. In Cloudflare, create an API token scoped to the `getsemantics.com` zone only, with *Zone: Read* and *DNS: Edit*
+   (exact fields: [runbooks/ONEGATE_PORTAL_DNS_AND_CERTIFICATES.md](runbooks/ONEGATE_PORTAL_DNS_AND_CERTIFICATES.md)).
+   Central's names live under `onegate.getsemantics.com`; it refuses to write anything else in the zone.
+   (`onegate.work` is retired since 2026-11-01 and never used again.)
 2. Set the ACME contact email (the directory stays **staging**), paste the token (write-only), **Test DNS access** —
    it records the zone id and registers the staging ACME account.
 3. Let one appliance obtain a staging certificate. Then switch the directory to **production** (a new account is
-   registered on first use) and **Apply CAA**, which pins `onegate.work` to Let's Encrypt and this account and forbids
+   registered on first use) and **Apply CAA**, which pins `onegate.getsemantics.com` (the base, not the company apex) to Let's Encrypt and this account and forbids
    wildcards. Other CAs' existing `issue` records are kept and reported. **Order matters:** Central refuses Apply CAA
    while the directory is staging (`caa_needs_production` — CAA would pin the staging account and block every
    production order), and refuses leaving production once CAA is applied (`caa_pins_production`).
@@ -356,9 +359,8 @@ Bring-up, all from **System → Portal certificates**:
    protection drops such answers, so its own DNS must allow the zone.
 
 **The shared Client Portal name** (`portal.onegate.getsemantics.com`, [contract §16](architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md#16-one-shared-client-portal-name-for-every-appliance-product-owner-decision-2026-11-01))
-needs no further secret: Central answers its challenge at `sharedportal.acme.onegate.work` with the `onegate.work`
-token. Its two public records (`A 10.255.255.1`, `_acme-challenge` CNAME to that delegate) are published once in the
-`getsemantics.com` zone by the Product Owner; the console shows whether they are in place.
+needs no further secret: it lies under the base, so Central answers its challenge directly with the same token. Its one
+public record (`A 10.255.255.1`) is the Product Owner's; the console shows whether it is in place.
 `CTRLAPI_PORTAL_SHARED_HOSTNAME=off` switches the feature off.
 
 **Test chain before a token exists** (TEST-ONLY, never on a production Central): run Pebble and pebble-challtestsrv

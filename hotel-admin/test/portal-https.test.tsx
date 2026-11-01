@@ -26,7 +26,7 @@ const put = api.put as unknown as ReturnType<typeof vi.fn>;
 const patch = api.patch as unknown as ReturnType<typeof vi.fn>;
 const del = api.del as unknown as ReturnType<typeof vi.fn>;
 
-const ONEGATE = "abcd1234.gw.onegate.work";
+const ONEGATE = "abcd1234.gw.onegate.getsemantics.com";
 
 function portalDoc(over: { state?: Record<string, unknown>; settings?: Record<string, unknown>; health?: Record<string, unknown> } = {}) {
   return {
@@ -75,7 +75,8 @@ describe("the words", () => {
     expect(looksLikePortalDomain("wifi.nilehotel.com")).toBeNull();
     expect(looksLikePortalDomain("WiFi.NileHotel.com.")).toBeNull();
     expect(looksLikePortalDomain("nilehotel.com")).toMatch(/subdomain/);
-    expect(looksLikePortalDomain("x.gw.onegate.work")).toMatch(/onegate\.work/);
+    expect(looksLikePortalDomain("x.gw.onegate.getsemantics.com")).toMatch(/not one under onegate\.getsemantics\.com/);
+    expect(looksLikePortalDomain("portal.onegate.getsemantics.com")).toMatch(/not one under onegate\.getsemantics\.com/);
     expect(looksLikePortalDomain("https://wifi.nilehotel.com")).toMatch(/without https/);
   });
 
@@ -168,7 +169,7 @@ describe("Portal HTTPS page", () => {
     const records = [
       { type: "TXT", name: "_onegate-verify.wifi.nilehotel.com", value: "tok123" },
       { type: "CNAME", name: "wifi.nilehotel.com", value: `${ONEGATE}.` },
-      { type: "CNAME", name: "_acme-challenge.wifi.nilehotel.com", value: "q1w2e3r4t5y6u7i8.acme.onegate.work." },
+      { type: "CNAME", name: "_acme-challenge.wifi.nilehotel.com", value: "q1w2e3r4t5y6u7i8.acme.onegate.getsemantics.com." },
     ];
     const doc = portalDoc({
       settings: { custom_domain: "wifi.nilehotel.com" },

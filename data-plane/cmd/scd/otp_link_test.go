@@ -35,7 +35,7 @@ func portalTLSWith(st PortalTLSState) *portalTLSAgent {
 	return a
 }
 
-var httpsOn = PortalTLSState{HTTPSActive: true, Canonical: "ab12cd34.gw.onegate.work", OneGateHostname: "ab12cd34.gw.onegate.work"}
+var httpsOn = PortalTLSState{HTTPSActive: true, Canonical: "ab12cd34.gw.onegate.getsemantics.com", OneGateHostname: "ab12cd34.gw.onegate.getsemantics.com"}
 
 type capturedSMS struct{ msgs []sms.Message }
 
@@ -84,7 +84,7 @@ func TestTheSMSCodeCarriesTheHTTPSLinkOnlyWhileHTTPSIsActive(t *testing.T) {
 		t.Fatalf("fallback: %q, want %q", got, want)
 	}
 	s.portalTLS = portalTLSWith(httpsOn)
-	if got, want := issue(), "Wi-Fi code: 731946 (expires in 10m) https://ab12cd34.gw.onegate.work/connect?c=chal-1&k=731946"; got != want {
+	if got, want := issue(), "Wi-Fi code: 731946 (expires in 10m) https://ab12cd34.gw.onegate.getsemantics.com/connect?c=chal-1&k=731946"; got != want {
 		t.Fatalf("https: %q, want %q", got, want)
 	}
 }
@@ -109,10 +109,10 @@ func TestAnEmailCodeIsNoLongerIssued(t *testing.T) {
 }
 
 func TestOTPLinkBaseIsTheCanonicalHTTPSOriginOrNothing(t *testing.T) {
-	if got := otpLinkBase(httpsOn); got != "https://ab12cd34.gw.onegate.work" {
+	if got := otpLinkBase(httpsOn); got != "https://ab12cd34.gw.onegate.getsemantics.com" {
 		t.Fatalf("active: %q", got)
 	}
-	for _, st := range []PortalTLSState{{}, {Canonical: "ab12cd34.gw.onegate.work"}, {HTTPSActive: true}} {
+	for _, st := range []PortalTLSState{{}, {Canonical: "ab12cd34.gw.onegate.getsemantics.com"}, {HTTPSActive: true}} {
 		if got := otpLinkBase(st); got != "" {
 			t.Errorf("%+v -> %q, want no link", st, got)
 		}

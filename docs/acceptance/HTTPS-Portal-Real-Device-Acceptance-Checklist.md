@@ -8,6 +8,8 @@ never PASS. Never record a guest's name, email or room in this file.
 Prerequisite: Admin Console → **Network → Portal HTTPS** shows **HTTPS active** with a **production**
 (publicly trusted) certificate. A staging certificate is not trusted by phones and these tests would fail.
 
+*Historical: the record below was made under `onegate.work`, retired on 2026-11-01. The portal is now `https://portal.onegate.getsemantics.com/`; the checklist steps apply unchanged to that name.*
+
 **Prerequisite met on 2026-10-14:** PRE-LIVE serves a production Let's Encrypt certificate for
 `t89b76xm.gw.onegate.work` (issuer YE1, valid to 2027-01-12); HTTPS active. Automated guest-device checks passed
 18/18 (HTTPS path), 12/12 (sign-in), 15/15 (social offering). The rows below are for real phones and are NOT RUN

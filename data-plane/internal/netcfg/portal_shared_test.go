@@ -7,8 +7,8 @@ import (
 
 // Every appliance answers the shared Client Portal name locally with its OWN portal address, first in the list.
 func TestTheSharedPortalNameIsAnsweredLocally(t *testing.T) {
-	p := PortalTLS{SharedHostname: "portal.onegate.getsemantics.com", OneGateHostname: "k3j9x0ab.gw.onegate.work"}
-	if got := PortalHostnames(p); len(got) != 2 || got[0] != "portal.onegate.getsemantics.com" || got[1] != "k3j9x0ab.gw.onegate.work" {
+	p := PortalTLS{SharedHostname: "portal.onegate.getsemantics.com", OneGateHostname: "k3j9x0ab.gw.onegate.getsemantics.com"}
+	if got := PortalHostnames(p); len(got) != 2 || got[0] != "portal.onegate.getsemantics.com" || got[1] != "k3j9x0ab.gw.onegate.getsemantics.com" {
 		t.Fatalf("names: %v", got)
 	}
 	out := string(RenderUnboundPortal("10.255.255.1", p))

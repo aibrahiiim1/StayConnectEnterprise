@@ -101,7 +101,7 @@ type PortalTLS struct {
 	// HTTPSActive is scd's verdict: hostname, valid certificate and portal address are all up; false means the HTTP fallback.
 	HTTPSActive       bool   `json:"https_active"`
 	CanonicalHostname string `json:"canonical_hostname,omitempty"`
-	// OneGateHostname is <label>.gw.onegate.work, allocated by Central.
+	// OneGateHostname is <label>.gw.onegate.getsemantics.com, allocated by Central.
 	OneGateHostname string `json:"onegate_hostname,omitempty"`
 	// CustomDomain is the hotel's portal domain, filled ONLY while its status is VERIFIED.
 	CustomDomain string `json:"custom_domain,omitempty"`

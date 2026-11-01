@@ -1,5 +1,7 @@
 # onegate.work DNS hosting and portal certificates — operator runbook
 
+> **RETIRED, 2026-11-01.** `onegate.work` is no longer used by OneGate and must never be used again. This runbook is kept only as history. Current procedure: [ONEGATE_PORTAL_DNS_AND_CERTIFICATES.md](ONEGATE_PORTAL_DNS_AND_CERTIFICATES.md).
+
 Who: the OneGate platform owner (holds the GoDaddy and Cloudflare logins). Contract:
 [`docs/architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md`](../architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md).
 

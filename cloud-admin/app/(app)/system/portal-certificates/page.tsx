@@ -343,7 +343,7 @@ export default function PortalCertificatesPage() {
                 value={draft.contact_email}
                 disabled={!canManage}
                 onChange={(e) => setDraft((d) => ({ ...d, contact_email: e.target.value }))}
-                placeholder="pki@onegate.work"
+                placeholder="pki@getsemantics.com"
               />
             </Field>
             <FieldGrid cols={2}>

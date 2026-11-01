@@ -199,7 +199,7 @@ func (f *ssFixture) sendAndTakeToken(t *testing.T, wantPath string) string {
 		t.Fatalf("expected exactly one message from the outbox, got %d", len(f.mail.msgs)-before)
 	}
 	text := f.mail.msgs[len(f.mail.msgs)-1].Text
-	i := strings.Index(text, "https://ab12cd34.gw.onegate.work"+wantPath+"?t=")
+	i := strings.Index(text, "https://ab12cd34.gw.onegate.getsemantics.com"+wantPath+"?t=")
 	if i < 0 {
 		t.Fatalf("the message must link to %s on the canonical portal:\n%s", wantPath, text)
 	}

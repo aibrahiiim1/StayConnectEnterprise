@@ -126,14 +126,14 @@ func TestPebbleEndToEnd(t *testing.T) {
 		t.Fatalf("apply CAA: %v", err)
 	}
 	// Pebble's CA identity is pebble.letsencrypt.org, so the CAA policy would block it; clear it.
-	_ = (&Challtestsrv{BaseURL: env.ctsURL}).post(ctx, "/clear-caa", map[string]any{"host": "onegate.work."})
+	_ = (&Challtestsrv{BaseURL: env.ctsURL}).post(ctx, "/clear-caa", map[string]any{"host": "onegate.getsemantics.com."})
 
 	// Hostname allocation and its A record.
 	sync1, err := svc.Sync(ctx, appA, SyncRequest{PortalIP: "10.255.255.1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !sync1.Available || !strings.HasSuffix(sync1.Hostname, ".gw.onegate.work") || !IsLabel(strings.Split(sync1.Hostname, ".")[0]) {
+	if !sync1.Available || !strings.HasSuffix(sync1.Hostname, ".gw.onegate.getsemantics.com") || !IsLabel(strings.Split(sync1.Hostname, ".")[0]) {
 		t.Fatalf("sync: %+v", sync1)
 	}
 	if sync1.DNSState != "SYNCED" {
@@ -157,7 +157,7 @@ func TestPebbleEndToEnd(t *testing.T) {
 	if _, err := svc.CreateOrder(ctx, appA, OrderRequest{Hostname: hostA, CSRPEM: csrA1}); !isRefusal(err, 409) {
 		t.Fatalf("a second open order for the same hostname is 409: %v", err)
 	}
-	if _, err := svc.CreateOrder(ctx, appA, OrderRequest{Hostname: "other.gw.onegate.work", CSRPEM: csrA1}); !isRefusal(err, 422) {
+	if _, err := svc.CreateOrder(ctx, appA, OrderRequest{Hostname: "other.gw.onegate.getsemantics.com", CSRPEM: csrA1}); !isRefusal(err, 422) {
 		t.Fatalf("a CSR for another name is 422: %v", err)
 	}
 	svc.Tick(ctx)

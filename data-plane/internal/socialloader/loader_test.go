@@ -20,7 +20,7 @@ import (
 func TestAssembleBuildsOnlyFromOpenedSecrets(t *testing.T) {
 	rows := []Row{
 		{ID: "p-google", Provider: "google", ClientID: "gid", ExtraJSON: `{}`, CallbackHosts: []string{"WiFi.Hotel.example.", " "}},
-		{ID: "p-facebook", Provider: "facebook", ClientID: "fid", ExtraJSON: `{}`, CallbackHosts: []string{"ab12cd34.gw.onegate.work"}},
+		{ID: "p-facebook", Provider: "facebook", ClientID: "fid", ExtraJSON: `{}`, CallbackHosts: []string{"ab12cd34.gw.onegate.getsemantics.com"}},
 		{ID: "p-microsoft", Provider: "microsoft", ClientID: "mid", ExtraJSON: `not json`},
 	}
 	var asked []string

@@ -234,7 +234,7 @@ func TestPortalVIP_ChangesTheFingerprintAndOnlyWhenItChanges(t *testing.T) {
 	}
 	// The HTTPS state is NOT structure: flipping it must not touch the ruleset.
 	topo.PortalVIP = testVIP
-	topo.PortalTLS = PortalTLS{HTTPSActive: true, CanonicalHostname: "abcdefgh.gw.onegate.work"}
+	topo.PortalTLS = PortalTLS{HTTPSActive: true, CanonicalHostname: "abcdefgh.gw.onegate.getsemantics.com"}
 	if RenderFingerprint(vipNets(), topo) != a {
 		t.Fatal("the HTTPS state changed the ruleset; whether HTTPS is active must never change what the firewall admits")
 	}

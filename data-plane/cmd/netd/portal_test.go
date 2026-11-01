@@ -482,7 +482,7 @@ func refreshApplier(t *testing.T, tls netcfg.PortalTLS) (*applier, *fakeKea, *fa
 func opt114Of(d map[string]any) string { return captiveOptions(d)["10.20.0.0/22"] }
 
 func TestRefresh_HTTPSBecomingActiveSwitchesOption114WithoutARevision(t *testing.T) {
-	a, fk, pn := refreshApplier(t, netcfg.PortalTLS{HTTPSActive: true, CanonicalHostname: "k3j9x0ab.gw.onegate.work"})
+	a, fk, pn := refreshApplier(t, netcfg.PortalTLS{HTTPSActive: true, CanonicalHostname: "k3j9x0ab.gw.onegate.getsemantics.com"})
 	// On the HTTP fallback option 114 is omitted (a plain-HTTP value silenced the phones' probes, 2026-11-01).
 	if got := opt114Of(fk.running); got != "" {
 		t.Fatalf("precondition: Kea runs %q", got)
@@ -493,7 +493,7 @@ func TestRefresh_HTTPSBecomingActiveSwitchesOption114WithoutARevision(t *testing
 	if fk.tested != 1 || fk.set != 1 {
 		t.Fatalf("config-test=%d config-set=%d; want one of each", fk.tested, fk.set)
 	}
-	if got := opt114Of(fk.running); got != "https://k3j9x0ab.gw.onegate.work/captive-portal/api" {
+	if got := opt114Of(fk.running); got != "https://k3j9x0ab.gw.onegate.getsemantics.com/captive-portal/api" {
 		t.Fatalf("Kea now runs %q", got)
 	}
 	want := a.renderKea(localIntent())
@@ -513,10 +513,10 @@ func TestRefresh_HTTPSBecomingActiveSwitchesOption114WithoutARevision(t *testing
 }
 
 func TestRefresh_FallbackWithdrawsOption114(t *testing.T) {
-	a, fk, _ := refreshApplier(t, netcfg.PortalTLS{HTTPSActive: true, CanonicalHostname: "k3j9x0ab.gw.onegate.work"})
+	a, fk, _ := refreshApplier(t, netcfg.PortalTLS{HTTPSActive: true, CanonicalHostname: "k3j9x0ab.gw.onegate.getsemantics.com"})
 	a.portalRefresh(context.Background())
 	a.portalTLSFn = func(context.Context) (netcfg.PortalTLS, error) {
-		return netcfg.PortalTLS{OneGateHostname: "k3j9x0ab.gw.onegate.work"}, nil
+		return netcfg.PortalTLS{OneGateHostname: "k3j9x0ab.gw.onegate.getsemantics.com"}, nil
 	}
 	a.portalRefresh(context.Background())
 	if got := opt114Of(fk.running); got != "" {
@@ -525,7 +525,7 @@ func TestRefresh_FallbackWithdrawsOption114(t *testing.T) {
 }
 
 func TestRefresh_StandsAsideAndFailsSafe(t *testing.T) {
-	active := netcfg.PortalTLS{HTTPSActive: true, CanonicalHostname: "k3j9x0ab.gw.onegate.work"}
+	active := netcfg.PortalTLS{HTTPSActive: true, CanonicalHostname: "k3j9x0ab.gw.onegate.getsemantics.com"}
 
 	t.Run("an apply in progress", func(t *testing.T) {
 		a, fk, _ := refreshApplier(t, active)
@@ -556,7 +556,7 @@ func TestRefresh_StandsAsideAndFailsSafe(t *testing.T) {
 		a.portalRefresh(context.Background())
 		a.portalTLSFn = func(context.Context) (netcfg.PortalTLS, error) { return netcfg.PortalTLS{}, errors.New("db down") }
 		a.portalRefresh(context.Background())
-		if got := opt114Of(fk.running); got != "https://k3j9x0ab.gw.onegate.work/captive-portal/api" {
+		if got := opt114Of(fk.running); got != "https://k3j9x0ab.gw.onegate.getsemantics.com/captive-portal/api" {
 			t.Fatalf("a transient read failure flipped every device's option 114 to %q", got)
 		}
 	})
@@ -581,7 +581,7 @@ func TestRefresh_ReassertsADeletedPortalInterface(t *testing.T) {
 }
 
 func TestRefresh_WritesThePortalNamesFragmentAndReloadsOnlyOnChange(t *testing.T) {
-	a, _, pn := refreshApplier(t, netcfg.PortalTLS{OneGateHostname: "k3j9x0ab.gw.onegate.work"})
+	a, _, pn := refreshApplier(t, netcfg.PortalTLS{OneGateHostname: "k3j9x0ab.gw.onegate.getsemantics.com"})
 	a.unboundPortalFrag = filepath.Join(t.TempDir(), "stayconnect-portal.conf")
 
 	a.portalRefresh(context.Background())
@@ -590,7 +590,7 @@ func TestRefresh_WritesThePortalNamesFragmentAndReloadsOnlyOnChange(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(got), `local-data: "k3j9x0ab.gw.onegate.work. IN A 10.255.255.1"`) {
+	if !strings.Contains(string(got), `local-data: "k3j9x0ab.gw.onegate.getsemantics.com. IN A 10.255.255.1"`) {
 		t.Fatalf("fragment:\n%s", got)
 	}
 	joined := strings.Join(pn.cmds, "|")
@@ -607,7 +607,7 @@ func TestRefresh_WritesThePortalNamesFragmentAndReloadsOnlyOnChange(t *testing.T
 	}
 
 	a.portalTLSFn = func(context.Context) (netcfg.PortalTLS, error) {
-		return netcfg.PortalTLS{OneGateHostname: "k3j9x0ab.gw.onegate.work", CustomDomain: "wifi.nilehotel.com"}, nil
+		return netcfg.PortalTLS{OneGateHostname: "k3j9x0ab.gw.onegate.getsemantics.com", CustomDomain: "wifi.nilehotel.com"}, nil
 	}
 	a.portalRefresh(context.Background())
 	got, _ = os.ReadFile(a.unboundPortalFrag)
@@ -617,7 +617,7 @@ func TestRefresh_WritesThePortalNamesFragmentAndReloadsOnlyOnChange(t *testing.T
 }
 
 func TestRefresh_ARefusedFragmentIsPutBack(t *testing.T) {
-	a, _, pn := refreshApplier(t, netcfg.PortalTLS{OneGateHostname: "k3j9x0ab.gw.onegate.work"})
+	a, _, pn := refreshApplier(t, netcfg.PortalTLS{OneGateHostname: "k3j9x0ab.gw.onegate.getsemantics.com"})
 	a.unboundPortalFrag = filepath.Join(t.TempDir(), "stayconnect-portal.conf")
 	prev := []byte("# previous good fragment\n")
 	if err := os.WriteFile(a.unboundPortalFrag, prev, 0o644); err != nil {

@@ -241,10 +241,10 @@ func TestNormalizeAccountEmail(t *testing.T) {
 // THE LINK goes to the local portal: the canonical HTTPS hostname while HTTPS is active, else the portal address.
 func TestAccountLinkBase(t *testing.T) {
 	cases := map[string]PortalTLSState{
-		"https://ab12cd34.gw.onegate.work": {HTTPSActive: true, Canonical: "ab12cd34.gw.onegate.work", PortalIP: "10.255.255.1"},
-		"http://10.255.255.1":              {Canonical: "ab12cd34.gw.onegate.work", PortalIP: "10.255.255.1"},
-		"http://10.254.254.1":              {PortalIP: "10.254.254.1/32"},
-		"":                                 {},
+		"https://ab12cd34.gw.onegate.getsemantics.com": {HTTPSActive: true, Canonical: "ab12cd34.gw.onegate.getsemantics.com", PortalIP: "10.255.255.1"},
+		"http://10.255.255.1":                          {Canonical: "ab12cd34.gw.onegate.getsemantics.com", PortalIP: "10.255.255.1"},
+		"http://10.254.254.1":                          {PortalIP: "10.254.254.1/32"},
+		"":                                             {},
 	}
 	for want, st := range cases {
 		if got := accountLinkBase(st); got != want {

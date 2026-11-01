@@ -355,7 +355,7 @@ that signs in again while it still has an open session on the stay keeps that se
 ## 9. Portal hostnames and certificates
 
 By Product-Owner decision (contract [architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md](architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md)),
-Central also manages each appliance's **portal hostname** (`<label>.gw.onegate.work`, permanent, never reused) and the
+Central also manages each appliance's **portal hostname** (`<label>.gw.onegate.getsemantics.com`, permanent, never reused; `onegate.work` until its retirement on 2026-11-01) and the
 **HTTPS certificate lifecycle** for it and for a hotel's own verified portal domain. Central never sees a private key:
 the appliance sends a CSR, Central answers DNS-01 in its own zone and finalises the Let's Encrypt order with that CSR.
 Nothing in this path carries client data. Implementation: `control-plane/internal/portaltls` (migration 0050).
@@ -373,7 +373,7 @@ refused CSR/name, 429 over 10/day, 503 Central not configured) · `GET /v1/appli
 `POST /cloud/v1/portal-tls/appliances/{id}/revoke {reason, hostname?}`. Console page: **System → Portal certificates**.
 
 **Worker** (in ctrlapi, every 30 s; idle until configured): publishes and deletes A records, revokes what was asked to
-be revoked, issues queued orders within the weekly cap on *new* `gw.onegate.work` certificates (renewals are exempt),
+be revoked, issues queued orders within the weekly cap on *new* `gw.onegate.getsemantics.com` certificates (renewals are exempt),
 refreshes ACME Renewal Information daily (the appliance renews after `renew_after`, earlier when the CA's window moves),
 and re-checks verified custom domains daily. Every action is in the append-only `portal_tls_events`.
 

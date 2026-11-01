@@ -25,8 +25,9 @@ import (
 // Each appliance holds its OWN key and its own certificate for the shared name. The certificate also names the
 // appliance's permanent <label>.gw.<zone> hostname, so every appliance's identifier set is unique: the CA's
 // limit on certificates per exact set of names never couples two appliances, and each one can be revoked alone.
-// Central answers the DNS-01 challenge for the shared name at one delegate, <SharedChallengeLabel>.acme.<zone>,
-// which the shared name's _acme-challenge CNAME points at (published once by the Product Owner).
+// Central answers the DNS-01 challenge for the shared name: directly at its _acme-challenge name when the name lies
+// under Central's name base (the default), otherwise at one delegate, <SharedChallengeLabel>.acme.<zone>, which the
+// shared name's _acme-challenge CNAME points at.
 const (
 	DefaultSharedHostname = "portal.onegate.getsemantics.com"
 	DefaultSharedAddress  = "10.255.255.1"
@@ -46,20 +47,33 @@ type SharedPortal struct {
 
 func (sp SharedPortal) Enabled() bool { return sp.Hostname != "" && sp.Address.IsValid() }
 
-// SharedChallengeName is the delegate TXT name Central writes for the shared name's DNS-01 challenges.
-func SharedChallengeName(zone string) string {
+// InZone reports whether the shared name lies under Central's name base, so Central writes its challenge
+// directly and no delegation is needed (the default: portal.onegate.getsemantics.com under onegate.getsemantics.com).
+func (sp SharedPortal) InZone(zone string) bool {
+	z := NormalizeFQDN(zone)
+	return sp.Enabled() && z != "" && strings.HasSuffix(sp.Hostname, "."+z)
+}
+
+// SharedChallengeName is the TXT name Central writes for the shared name's DNS-01 challenges: the name's own
+// _acme-challenge inside the base, otherwise the delegate the name's _acme-challenge CNAME points at.
+func SharedChallengeName(sp SharedPortal, zone string) string {
+	if sp.InZone(zone) {
+		return "_acme-challenge." + sp.Hostname
+	}
 	return SharedChallengeLabel + "." + ChallengeSubdomain + "." + NormalizeFQDN(zone)
 }
 
-// SharedRecords are the two public records the shared name needs, published once for the whole fleet.
+// SharedRecords are the public records the shared name needs, published once for the whole fleet: its A record,
+// and the challenge delegation only when the name lies outside the base.
 func SharedRecords(sp SharedPortal, zone string) []Record {
 	if !sp.Enabled() {
 		return []Record{}
 	}
-	return []Record{
-		{Type: "A", Name: sp.Hostname, Value: sp.Address.String()},
-		{Type: "CNAME", Name: "_acme-challenge." + sp.Hostname, Value: SharedChallengeName(zone) + "."},
+	out := []Record{{Type: "A", Name: sp.Hostname, Value: sp.Address.String()}}
+	if !sp.InZone(zone) {
+		out = append(out, Record{Type: "CNAME", Name: "_acme-challenge." + sp.Hostname, Value: SharedChallengeName(sp, zone) + "."})
 	}
+	return out
 }
 
 // SharedView is what an appliance (in its sync answer) and an operator learn about the shared name.
@@ -69,7 +83,7 @@ type SharedView struct {
 	// Eligible: this appliance's portal address IS the shared address, so the public name reaches its portal.
 	// An appliance on another address keeps its own hostname (the public answer would not reach it).
 	Eligible bool `json:"eligible"`
-	// Ready: public DNS publishes the name at the shared address and delegates its challenge to Central.
+	// Ready: public DNS publishes the name at the shared address (and delegates its challenge, when outside the base).
 	Ready   bool     `json:"ready"`
 	Error   *string  `json:"error"`
 	Records []Record `json:"records"`
@@ -100,8 +114,21 @@ func CheckShared(ctx context.Context, r DoHResolver, sp SharedPortal, zone, acco
 			return fmt.Errorf("A %s answers %s; it must answer only %s", sp.Hostname, strings.Join(got, ", "), sp.Address)
 		}
 	}
-	if err := checkCNAME(ctx, r, "_acme-challenge."+sp.Hostname, SharedChallengeName(zone)); err != nil {
-		return err
+	if !sp.InZone(zone) {
+		if err := checkCNAME(ctx, r, "_acme-challenge."+sp.Hostname, SharedChallengeName(sp, zone)); err != nil {
+			return err
+		}
+	} else {
+		// Inside the base Central writes the TXT values at the name itself; a CNAME there (for instance a delegation
+		// left from an earlier layout) would capture every lookup and no challenge could ever validate.
+		got, err := r.Query(ctx, "_acme-challenge."+sp.Hostname, rrCNAME)
+		if err != nil {
+			return err
+		}
+		if len(got) > 0 {
+			return fmt.Errorf("_acme-challenge.%s is a CNAME to %s; delete it (Central writes this name's challenge itself)",
+				sp.Hostname, NormalizeFQDN(got[0]))
+		}
 	}
 	return checkCAA(ctx, r, sp.Hostname, accountURL)
 }

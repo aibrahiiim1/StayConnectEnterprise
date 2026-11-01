@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	tOG     = "ab12cd34.gw.onegate.work"
+	tOG     = "ab12cd34.gw.onegate.getsemantics.com"
 	tCustom = "wifi.nilehotel.com"
 )
 

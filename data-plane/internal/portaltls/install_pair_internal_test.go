@@ -12,7 +12,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/portaltls/portaltlstest"
 )
 
-const pairHost = "ab12cd34.gw.onegate.work"
+const pairHost = "ab12cd34.gw.onegate.getsemantics.com"
 
 func pairFixture(t *testing.T) (*Store, *portaltlstest.CA, time.Time) {
 	t.Helper()
@@ -96,7 +96,7 @@ func TestInspectChecksTheHostName(t *testing.T) {
 	if _, err := s.Install(pairHost, issue(t, s, ca, now)); err != nil {
 		t.Fatal(err)
 	}
-	other := "zz99yy88.gw.onegate.work"
+	other := "zz99yy88.gw.onegate.getsemantics.com"
 	for _, ext := range []string{".key", ".crt"} {
 		b, _ := os.ReadFile(filepath.Join(s.Dir, pairHost+ext))
 		if err := os.WriteFile(filepath.Join(s.Dir, other+ext), b, 0o600); err != nil {
