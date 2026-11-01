@@ -17,6 +17,8 @@ export type PortalTLSState = {
   last_sync_at: string | null;
   last_sync_error: string;
   updated_at: string | null;
+  /** The shared Client Portal name while this appliance uses it; "" otherwise. */
+  shared_hostname?: string;
 };
 
 export type PortalCertificate = {

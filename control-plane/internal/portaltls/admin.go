@@ -20,6 +20,8 @@ type SettingsView struct {
 	Available     bool     `json:"available"`
 	Unavailable   string   `json:"unavailable_reason,omitempty"`
 	TestOverrides []string `json:"test_overrides"`
+	// SharedPortal: the shared Client Portal name, its public-DNS readiness and the records it needs.
+	SharedPortal *SharedView `json:"shared_portal,omitempty"`
 }
 
 func (s *Service) View(ctx context.Context) (*SettingsView, error) {
@@ -30,7 +32,8 @@ func (s *Service) View(ctx context.Context) (*SettingsView, error) {
 	ok, why := s.Availability(st)
 	overrides := append([]string{}, s.Overrides...)
 	return &SettingsView{Settings: st, DirectoryURL: s.Opts.directoryURL(st.ACMEDirectory), TokenSet: s.Secrets.TokenSet(),
-		DNSProvider: s.Opts.DNSProvider, Available: ok, Unavailable: why, TestOverrides: overrides}, nil
+		DNSProvider: s.Opts.DNSProvider, Available: ok, Unavailable: why, TestOverrides: overrides,
+		SharedPortal: s.sharedView(ctx, st, "")}, nil
 }
 
 func (s *Service) UpdateSettings(ctx context.Context, u SettingsUpdate, actor string) (Settings, error) {

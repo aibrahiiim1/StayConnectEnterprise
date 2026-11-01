@@ -105,6 +105,9 @@ type PortalTLS struct {
 	OneGateHostname string `json:"onegate_hostname,omitempty"`
 	// CustomDomain is the hotel's portal domain, filled ONLY while its status is VERIFIED.
 	CustomDomain string `json:"custom_domain,omitempty"`
+	// SharedHostname is the fleet's shared Client Portal name while it is this appliance's canonical name. Every
+	// appliance answers it locally with its OWN portal address; before that, public DNS gives the same answer.
+	SharedHostname string `json:"shared_hostname,omitempty"`
 }
 
 const (

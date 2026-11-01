@@ -2,9 +2,22 @@ package netcfg
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 )
+
+var macRe = regexp.MustCompile(`^[0-9a-f]{2}(:[0-9a-f]{2}){5}$`)
+
+// usableMAC reports whether m is a unicast, non-zero MAC in lower-case colon form, the only kind a bridge may be given.
+func usableMAC(m string) bool {
+	if !macRe.MatchString(m) || m == "00:00:00:00:00:00" {
+		return false
+	}
+	var first byte
+	fmt.Sscanf(m[:2], "%x", &first)
+	return first&1 == 0
+}
 
 // RenderNetplan produces a netplan YAML defining, for each enabled guest network, the VLAN sub-interface (tagged) and
 // the bridge carrying the L3 gateway. Management and WAN interfaces are never emitted, so applying it cannot disturb
@@ -12,7 +25,15 @@ import (
 // Untagged: the bridge enslaves the parent directly. Tagged: parent.VID vlan device -> bridge (the parent may also
 // carry an untagged bridge). Parents are L2 here but are still declared, because netplan will not resolve a bridge
 // member that nothing defines.
-func RenderNetplan(nets []GuestNetwork) []byte {
+func RenderNetplan(nets []GuestNetwork) []byte { return RenderNetplanWith(nets, nil) }
+
+// RenderNetplanWith is RenderNetplan, and gives the bridge of every TAGGED (VLAN) network the MAC address of its parent
+// interface, read by parentMAC (empty or unusable = no change). Without it systemd-networkd gives each bridge a random
+// locally administered MAC, and on a virtual NIC behind a virtual switch the unicast frames of clients on a tagged VLAN
+// never reach a bridge whose MAC is not the NIC's own: the clients got an address by broadcast DHCP and then sent nothing
+// the appliance could see (found on the test appliance, 2026-11-01, VLAN 90: not one unicast frame arrived in an hour;
+// with the NIC's MAC the client's DNS and web traffic arrived at once). An untagged bridge is left as it always was.
+func RenderNetplanWith(nets []GuestNetwork, parentMAC func(iface string) string) []byte {
 	var b strings.Builder
 	b.WriteString("# StayConnect generated — guest network L2/L3. Do not edit by hand.\n")
 	b.WriteString("network:\n  version: 2\n  renderer: networkd\n")
@@ -68,6 +89,11 @@ func RenderNetplan(nets []GuestNetwork) []byte {
 			}
 			fmt.Fprintf(&b, "    %s:\n", n.BridgeName)
 			fmt.Fprintf(&b, "      interfaces: [%s]\n", member)
+			if n.NetworkType == "vlan" && parentMAC != nil {
+				if m := strings.ToLower(strings.TrimSpace(parentMAC(n.ParentInterface))); usableMAC(m) {
+					fmt.Fprintf(&b, "      macaddress: %s\n", m)
+				}
+			}
 			fmt.Fprintf(&b, "      addresses:\n        - %s\n", gatewayCIDR(n))
 			b.WriteString("      dhcp4: no\n      dhcp6: no\n")
 			b.WriteString("      parameters:\n        stp: false\n        forward-delay: 0\n")

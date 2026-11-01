@@ -80,6 +80,8 @@ type PortalTLSState struct {
 	PortalIPActive bool       `json:"portal_ip_active"`
 	FallbackReason string     `json:"fallback_reason"`
 	FallbackSince  *time.Time `json:"fallback_since"`
+	// SharedHostname is the fleet's shared Client Portal name while this appliance uses it ("" otherwise).
+	SharedHostname string `json:"shared_hostname"`
 	// Hostnames are the portal hostnames portald may serve a certificate for: those with an installed, valid
 	// certificate. The canonical hostname is one of them whenever it is set.
 	Hostnames []string `json:"portal_hostnames"`
@@ -166,11 +168,22 @@ type ptCertStatus struct {
 	Error      string     `json:"error"`
 }
 
+// ptShared is Central's word on the shared Client Portal name (absent from an older Central).
+type ptShared struct {
+	Hostname string     `json:"hostname"`
+	Address  string     `json:"address"`
+	Eligible bool       `json:"eligible"` // this appliance's portal address is the shared address
+	Ready    bool       `json:"ready"`    // public DNS publishes the name and delegates its challenge
+	Error    string     `json:"error"`
+	Records  []ptRecord `json:"records"`
+}
+
 type ptSyncResp struct {
 	Available    bool            `json:"available"`
 	Hostname     string          `json:"hostname"`
 	DNSState     string          `json:"dns_state"`
 	CustomDomain *ptCustomDomain `json:"custom_domain"`
+	SharedPortal *ptShared       `json:"shared_portal"`
 	Certificates []ptCertStatus  `json:"certificates"`
 }
 
@@ -338,6 +351,7 @@ func (a *portalTLSAgent) cycle(ctx context.Context, forceRenew bool) error {
 	// 1. SYNC.
 	mode := centralSynced
 	certStatus := map[string]ptCertStatus{}
+	var sharedResp *ptShared
 	switch {
 	case set.PortalIP == "":
 		mode = centralNoAddress
@@ -386,6 +400,7 @@ func (a *portalTLSAgent) cycle(ctx context.Context, forceRenew bool) error {
 		for _, c := range resp.Certificates {
 			certStatus[strings.ToLower(c.Hostname)] = c
 		}
+		sharedResp = resp.SharedPortal
 		t := now
 		st.LastSyncAt = &t
 		st.LastSyncError = ""
@@ -398,12 +413,44 @@ func (a *portalTLSAgent) cycle(ctx context.Context, forceRenew bool) error {
 		st.CustomDomainRecords = json.RawMessage("[]")
 	}
 
+	rows, rowsErr := a.repo.Certs(ctx)
+	if rowsErr != nil {
+		slog.Warn("portal-tls: could not read portal_certificates; certificates are not renewed this cycle", "err", rowsErr)
+		rows = nil
+	}
+
 	// 2. WHICH HOSTNAMES. Orders are placed for the OneGate hostname and for a VERIFIED hotel domain; a hotel
 	// domain that is still configured but not verified (PENDING, or FAILED after a broken delegation) keeps
 	// whatever it has but is neither renewed nor canonical.
 	targets := map[string]string{}
 	if st.OneGateHostname != "" {
 		targets[st.OneGateHostname] = ptKindOneGate
+	}
+	// THE SHARED CLIENT PORTAL NAME: used while Central offers it to this appliance (its portal address is the
+	// shared address). Its certificate is this appliance's own and also names the OneGate hostname, so it is
+	// ordered only once that hostname is known, and only while public DNS is ready. Without a Central answer the
+	// name already in use is kept: an unreachable Central never takes a valid certificate down.
+	sharedHost, sharedReady := "", false
+	if mode == centralSynced {
+		if sp := sharedResp; sp != nil && sp.Eligible && strings.TrimSpace(sp.Address) == set.PortalIP {
+			if h := strings.ToLower(strings.TrimSpace(sp.Hostname)); portaltls.ValidHostname(h) && h != st.OneGateHostname && h != set.CustomDomain {
+				sharedHost, sharedReady = h, sp.Ready
+			}
+		}
+	} else {
+		if rowsErr == nil {
+			sharedHost = ptSharedFromRows(rows, st.OneGateHostname)
+		}
+		// Rows unreadable as well: the last canonical name, persisted in portal_tls_state, recovers the shared name
+		// for this cycle. It is never the OneGate hostname or a hotel domain, the current one or the one last
+		// recorded (removed or changed while Central is unreachable); with readable rows the rows decide.
+		if c := prev.Canonical; rowsErr != nil && c != "" && c != st.OneGateHostname && c != set.CustomDomain &&
+			c != prev.CustomDomain && portaltls.ValidHostname(c) {
+			sharedHost = c
+		}
+	}
+	if sharedHost != "" && st.OneGateHostname != "" {
+		targets[sharedHost] = ptKindOneGate
 	}
 	customVerified := set.CustomDomain != "" && st.CustomDomain == set.CustomDomain && st.CustomDomainStatus == "VERIFIED"
 	if customVerified {
@@ -413,16 +460,14 @@ func (a *portalTLSAgent) cycle(ctx context.Context, forceRenew bool) error {
 	for h := range targets {
 		keep[h] = true
 	}
+	if sharedHost != "" {
+		keep[sharedHost] = true
+	}
 	if set.CustomDomain != "" && st.CustomDomain == set.CustomDomain && st.CustomDomainStatus != "REMOVED" {
 		keep[set.CustomDomain] = true
 	}
 
 	// 3. PER HOSTNAME.
-	rows, rowsErr := a.repo.Certs(ctx)
-	if rowsErr != nil {
-		slog.Warn("portal-tls: could not read portal_certificates; certificates are not renewed this cycle", "err", rowsErr)
-		rows = nil
-	}
 	pendingAny := false
 	if rowsErr == nil {
 		for _, host := range sortedKeys(targets) {
@@ -435,7 +480,13 @@ func (a *portalTLSAgent) cycle(ctx context.Context, forceRenew bool) error {
 			if c, ok := certStatus[host]; ok {
 				cs = &c
 			}
-			a.reconcileHost(ctx, row, cs, mode == centralSynced && st.CentralAvailable, forceRenew, now)
+			canOrder := mode == centralSynced && st.CentralAvailable
+			var also []string
+			if host == sharedHost {
+				canOrder = canOrder && sharedReady
+				also = []string{st.OneGateHostname}
+			}
+			a.reconcileHost(ctx, row, cs, canOrder, forceRenew, now, also...)
 			// Quick polling only while the order is young: one Central holds QUEUED (its weekly limit) is
 			// collected at the normal cadence rather than every 30 seconds for days.
 			if row.PendingOrderID != "" && row.PendingSince != nil && now.Sub(*row.PendingSince) < portalTLSFastPollFor {
@@ -460,7 +511,9 @@ func (a *portalTLSAgent) cycle(ctx context.Context, forceRenew bool) error {
 			slog.Info("portal-tls: stopped serving a hostname", "host", host)
 		}
 	}
-	if hosts, err := a.store.Hosts(); err == nil {
+	// Files are removed only when the records could be read: without them this cycle may not know every name in
+	// use, and a certificate removed by mistake cannot be replaced while Central is unreachable.
+	if hosts, err := a.store.Hosts(); err == nil && rowsErr == nil {
 		for _, host := range hosts {
 			if !keep[host] {
 				_ = a.store.Remove(host)
@@ -470,7 +523,7 @@ func (a *portalTLSAgent) cycle(ctx context.Context, forceRenew bool) error {
 	a.pendingAny = pendingAny
 
 	// 5. DECIDE (contract section 4).
-	view := a.decide(set, &st, mode, customVerified, now)
+	view := a.decide(set, &st, mode, customVerified, sharedHost, now)
 	if !st.HTTPSActive {
 		if prev.HTTPSActive || prev.FallbackSince == nil || prev.FallbackReason == "" {
 			t := now
@@ -505,9 +558,16 @@ func (a *portalTLSAgent) usable(host string, now time.Time) (*portaltls.Installe
 	return inst, !now.Before(inst.NotBefore) && now.Add(ptMinRemaining).Before(inst.NotAfter)
 }
 
-func (a *portalTLSAgent) decide(set ptSettings, st *ptState, mode centralMode, customVerified bool, now time.Time) PortalTLSState {
+// decide picks the canonical name: the shared Client Portal name, then a verified hotel domain, then the OneGate
+// hostname, each only with a usable certificate.
+func (a *portalTLSAgent) decide(set ptSettings, st *ptState, mode centralMode, customVerified bool, sharedHost string, now time.Time) PortalTLSState {
 	canonical := ""
-	if customVerified {
+	if sharedHost != "" {
+		if _, ok := a.usable(sharedHost, now); ok {
+			canonical = sharedHost
+		}
+	}
+	if canonical == "" && customVerified {
 		if _, ok := a.usable(set.CustomDomain, now); ok {
 			canonical = set.CustomDomain
 		}
@@ -524,7 +584,7 @@ func (a *portalTLSAgent) decide(set ptSettings, st *ptState, mode centralMode, c
 		}
 	} else {
 		anyExpired := false
-		for _, h := range []string{st.OneGateHostname, set.CustomDomain} {
+		for _, h := range []string{sharedHost, st.OneGateHostname, set.CustomDomain} {
 			if h == "" {
 				continue
 			}
@@ -554,7 +614,7 @@ func (a *portalTLSAgent) decide(set ptSettings, st *ptState, mode centralMode, c
 	st.FallbackReason = reason
 
 	var hosts []string
-	for _, h := range []string{st.OneGateHostname, set.CustomDomain} {
+	for _, h := range []string{sharedHost, st.OneGateHostname, set.CustomDomain} {
 		if h == "" || (h == set.CustomDomain && st.CustomDomain != set.CustomDomain) {
 			continue
 		}
@@ -566,7 +626,7 @@ func (a *portalTLSAgent) decide(set ptSettings, st *ptState, mode centralMode, c
 		hosts = []string{}
 	}
 	return PortalTLSState{
-		HTTPSActive: st.HTTPSActive, Canonical: canonical, OneGateHostname: st.OneGateHostname,
+		HTTPSActive: st.HTTPSActive, Canonical: canonical, OneGateHostname: st.OneGateHostname, SharedHostname: sharedHost,
 		CustomDomain: set.CustomDomain, CustomDomainStatus: st.CustomDomainStatus, PortalIP: set.PortalIP,
 		PortalIPActive: set.PortalIP != "" && a.addrUp != nil && a.addrUp(set.PortalIP),
 		FallbackReason: reason, Hostnames: hosts, CertDir: a.defaultState().CertDir, Trust: a.trust,
@@ -588,7 +648,8 @@ func (a *portalTLSAgent) logTransition(prev, st ptState) {
 // reconcileHost brings one hostname's certificate forward by at most one step: collect an open order, or place
 // a new one when the installed certificate is not good enough. canOrder is false while Central is unreachable
 // or not configured for portal certificates -- ordering would only fail.
-func (a *portalTLSAgent) reconcileHost(ctx context.Context, row *ptCertRow, cs *ptCertStatus, canOrder, forceRenew bool, now time.Time) {
+func (a *portalTLSAgent) reconcileHost(ctx context.Context, row *ptCertRow, cs *ptCertStatus, canOrder, forceRenew bool, now time.Time,
+	also ...string) {
 	host := row.Hostname
 	inst, ierr := a.store.Inspect(host)
 	if ierr == nil && row.Serial != inst.Serial {
@@ -659,9 +720,9 @@ func (a *portalTLSAgent) reconcileHost(ctx context.Context, row *ptCertRow, cs *
 	var csr []byte
 	var err error
 	if a.store.HasPending(host) && !forceRenew {
-		csr, err = a.store.PendingCSR(host)
+		csr, err = a.store.PendingCSR(host, also...)
 	} else {
-		csr, err = a.store.NewPendingKey(host)
+		csr, err = a.store.NewPendingKey(host, also...)
 	}
 	if err != nil {
 		row.LastError = "could not create a key and request: " + err.Error()
@@ -748,6 +809,26 @@ func (a *portalTLSAgent) collect(ctx context.Context, row *ptCertRow, now time.T
 	default:
 		// QUEUED / PENDING / PROCESSING: Central is working on it.
 	}
+}
+
+// ptSharedFromRows recovers the shared name in use from the certificate rows when Central cannot be asked: it is
+// the OneGate-kind row that is not this appliance's own hostname.
+func ptSharedFromRows(rows map[string]*ptCertRow, own string) string {
+	for _, h := range sortedRowKeys(rows) {
+		if r := rows[h]; r != nil && r.Kind == ptKindOneGate && h != own && portaltls.ValidHostname(h) {
+			return h
+		}
+	}
+	return ""
+}
+
+func sortedRowKeys(m map[string]*ptCertRow) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // defaultRenewAfter is two thirds of the lifetime -- the same rule Central applies when the CA offers no ARI.

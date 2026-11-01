@@ -33,6 +33,8 @@ type Service struct {
 	// hanging behind a whole order (audit Phase 1 M13).
 	acmeSem chan struct{}
 	nudge   chan struct{}
+
+	shared sharedCache
 }
 
 // ErrACMEBusy: another ACME conversation is running and the caller's deadline passed while waiting.
@@ -153,6 +155,8 @@ const (
 	EvAccountRegistered = "ACME_ACCOUNT_REGISTERED"
 	EvCAAApplied        = "CAA_APPLIED"
 	EvRenewalForced     = "RENEWAL_FORCED"
+	EvSharedReady       = "SHARED_NAME_READY"
+	EvSharedNotReady    = "SHARED_NAME_NOT_READY"
 )
 
 const ActorSystem = "system"
@@ -300,6 +304,8 @@ type SyncResponse struct {
 	Hostname     string      `json:"hostname"`
 	DNSState     string      `json:"dns_state"`
 	CustomDomain *DomainView `json:"custom_domain"`
+	// SharedPortal is the shared Client Portal name; absent when the feature is off. An older appliance ignores it.
+	SharedPortal *SharedView `json:"shared_portal,omitempty"`
 	Certificates []CertView  `json:"certificates"`
 }
 
@@ -353,11 +359,13 @@ func (s *Service) Sync(ctx context.Context, applianceID string, in SyncRequest) 
 	if err != nil {
 		return nil, err
 	}
-	certs, err := s.certViews(ctx, applianceID, h, dom)
+	shared := s.sharedView(ctx, st, ip.String())
+	certs, err := s.certViews(ctx, applianceID, h, dom, shared)
 	if err != nil {
 		return nil, err
 	}
-	return &SyncResponse{Available: available, Hostname: h.FQDN, DNSState: h.DNSState(), CustomDomain: dom, Certificates: certs}, nil
+	return &SyncResponse{Available: available, Hostname: h.FQDN, DNSState: h.DNSState(), CustomDomain: dom,
+		SharedPortal: shared, Certificates: certs}, nil
 }
 
 // syncHostDNS publishes the A record while the hostname is live and deletes it once released. Errors are
@@ -479,6 +487,11 @@ func (s *Service) reconcileDomain(ctx context.Context, applianceID string, h hos
 		return nil, nil
 	}
 	fqdn, verr := ValidateCustomDomain(raw, st.ZoneName)
+	if verr == nil && s.Opts.Shared().IsSharedName(fqdn) {
+		// The shared name belongs to every appliance at once: no single appliance may claim it as its own.
+		verr = fmt.Errorf("%s is the shared OneGate Client Portal name; every appliance already uses it, so it cannot be a hotel's own domain",
+			s.Opts.Shared().Hostname)
+	}
 	if verr != nil {
 		// Refused without a row; any earlier claim stays until the appliance asks for something valid.
 		msg := verr.Error()
@@ -653,12 +666,16 @@ func ReleaseAppliance(ctx context.Context, db DB, applianceID, actor string) err
 }
 
 // certViews reports, per hostname, the newest order and the newest issued certificate.
-func (s *Service) certViews(ctx context.Context, applianceID string, h hostRow, dom *DomainView) ([]CertView, error) {
+func (s *Service) certViews(ctx context.Context, applianceID string, h hostRow, dom *DomainView, shared *SharedView) ([]CertView, error) {
 	type hk struct{ host, kind string }
 	hosts := []hk{{h.FQDN, KindOneGate}}
 	// A domain view without records is a refused name: it has no certificate.
 	if dom != nil && len(dom.Records) > 0 {
 		hosts = append(hosts, hk{dom.FQDN, KindCustom})
+	}
+	// The shared name's certificate is this appliance's own (its key, its order), reported like the others.
+	if shared != nil && shared.Eligible {
+		hosts = append(hosts, hk{shared.Hostname, KindOneGate})
 	}
 	out := make([]CertView, 0, len(hosts))
 	for _, x := range hosts {

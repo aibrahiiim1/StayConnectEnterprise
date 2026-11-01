@@ -184,9 +184,10 @@ func (s *Service) processNextOrder(ctx context.Context, st *Settings, prov DNSPr
 	if kind == KindOneGate {
 		// NEW = no earlier certificate for this hostname from THIS directory (renewals are exempt from the CA's
 		// limit); a staging certificate does not make a production one a renewal.
+		// Per appliance: every appliance orders the shared name, and each one's first certificate for it is new.
 		if err := tx.QueryRow(ctx, `SELECT NOT EXISTS (SELECT 1 FROM portal_certificate_orders
-		        WHERE hostname=$1 AND issued_at IS NOT NULL AND acme_directory_url=$2)`,
-			hostname, dirURL).Scan(&countsNew); err != nil {
+		        WHERE appliance_id=$3::uuid AND hostname=$1 AND issued_at IS NOT NULL AND acme_directory_url=$2)`,
+			hostname, dirURL, applianceID).Scan(&countsNew); err != nil {
 			return false, err
 		}
 	}
@@ -255,14 +256,38 @@ func (s *Service) processNextOrder(ctx context.Context, st *Settings, prov DNSPr
 func (s *Service) runOrder(ctx context.Context, st *Settings, prov DNSProvider, dirURL, id, applianceID, hostname, kind string,
 	csrDER []byte) (*issued, bool, error) {
 	challengeLabel := ""
-	switch kind {
-	case KindOneGate:
+	identifiers := []string{hostname}
+	challengeFor := func(id string) string { return ChallengeNameFor(kind, id, challengeLabel, st.ZoneName) }
+	sp := s.Opts.Shared()
+	switch {
+	case kind == KindOneGate && sp.Enabled() && hostname == sp.Hostname:
+		var own, portalIP string
+		var released *time.Time
+		err := s.DB.QueryRow(ctx, `SELECT fqdn, COALESCE(host(portal_ip),''), released_at FROM portal_hostnames WHERE appliance_id=$1`,
+			applianceID).Scan(&own, &portalIP, &released)
+		if err != nil || released != nil {
+			return nil, true, errors.New("this appliance no longer has a live OneGate hostname")
+		}
+		if portalIP != sp.Address.String() {
+			return nil, true, fmt.Errorf("the appliance's portal address %s is no longer the shared address %s", portalIP, sp.Address)
+		}
+		if ok, why := s.sharedReady(ctx, *st, false); !ok {
+			return nil, false, fmt.Errorf("the shared portal name is not ready in public DNS: %s", why)
+		}
+		identifiers = []string{hostname, own}
+		challengeFor = func(id string) string {
+			if id == sp.Hostname {
+				return SharedChallengeName(st.ZoneName)
+			}
+			return "_acme-challenge." + id
+		}
+	case kind == KindOneGate:
 		var released *time.Time
 		err := s.DB.QueryRow(ctx, `SELECT released_at FROM portal_hostnames WHERE appliance_id=$1 AND fqdn=$2`, applianceID, hostname).Scan(&released)
 		if err != nil || released != nil {
 			return nil, true, errors.New("the hostname is no longer this appliance's")
 		}
-	case KindCustom:
+	case kind == KindCustom:
 		d, err := s.liveDomain(ctx, s.DB, applianceID)
 		if err != nil {
 			return nil, false, err
@@ -282,7 +307,7 @@ func (s *Service) runOrder(ctx context.Context, st *Settings, prov DNSProvider, 
 	if err != nil {
 		return nil, false, err
 	}
-	res, err := s.issue(ictx, c, prov, hostname, ChallengeNameFor(kind, hostname, challengeLabel, st.ZoneName), csrDER,
+	res, err := s.issue(ictx, c, prov, identifiers, challengeFor, csrDER,
 		func(u string) {
 			_, _ = s.DB.Exec(ctx, `UPDATE portal_certificate_orders SET acme_order_url=$2 WHERE id=$1::uuid`, id, u)
 		})

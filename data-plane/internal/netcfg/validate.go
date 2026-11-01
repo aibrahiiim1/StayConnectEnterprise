@@ -163,11 +163,11 @@ func ValidateOne(n GuestNetwork, topo Topology, availIfaces, knownIfaces map[str
 	}
 
 	// Portal URL (option 114), only for local+captive networks. HTTPS is allowed in one form: while the portal's HTTPS
-	// is active, https://CANONICAL/captive-portal/api; the default is http://GATEWAY:PORT/. Any other https URL would
+	// is active, https://CANONICAL/captive-portal/api; otherwise the option is omitted. Any other https URL would
 	// hand a device a TLS endpoint the appliance has no certificate for.
 	if n.DHCPMode == DHCPLocal && n.CaptiveEnabled && gw != nil {
 		url := CaptivePortalURL(n.GatewayIP, topo)
-		if strings.HasPrefix(url, "https://") {
+		if url != "" && strings.HasPrefix(url, "https://") {
 			want, ok := captiveAPIURL(topo)
 			if !ok || url != want {
 				r.add(f("portal_url"), "portal_https",

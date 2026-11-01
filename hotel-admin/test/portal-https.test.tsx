@@ -105,6 +105,24 @@ describe("Portal HTTPS page", () => {
     expect(screen.getByText("No certificate yet")).toBeInTheDocument();
   });
 
+  it("shows the shared Client Portal name first, canonical once HTTPS is active", async () => {
+    const shared = "portal.onegate.getsemantics.com";
+    routes(portalDoc({ state: { shared_hostname: shared, canonical_hostname: shared, https_active: true, fallback_reason: "" },
+      health: { level: "ok", reason: "", message: "" } }), ["site_admin"]);
+    render(<PortalHTTPSPage />);
+    expect(await screen.findByText("Client Portal address")).toBeInTheDocument();
+    expect(screen.getAllByText(shared).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Shared by every OneGate appliance/)).toBeInTheDocument();
+    expect(screen.getAllByText("Canonical")).toHaveLength(1);
+  });
+
+  it("does not show a shared name the appliance does not use", async () => {
+    routes(portalDoc(), ["site_admin"]);
+    render(<PortalHTTPSPage />);
+    await screen.findByText("The Client Portal is on the HTTP fallback");
+    expect(screen.queryByText("Client Portal address")).not.toBeInTheDocument();
+  });
+
   it("changes the portal address with the password and sends the operator to apply it", async () => {
     routes(portalDoc(), ["site_admin"]);
     put.mockResolvedValueOnce({ changed: true, apply_required: true, apply_href: "/network" });

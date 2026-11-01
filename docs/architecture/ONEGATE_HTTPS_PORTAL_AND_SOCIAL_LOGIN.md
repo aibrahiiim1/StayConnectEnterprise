@@ -34,6 +34,9 @@ authorisation. Where this document and code disagree, the code is wrong.
 | ACME challenge delegate (hotel domain) | `<challenge_label>.acme.onegate.work TXT` (temporary), challenge_label = 16 `[a-z0-9]` | Central |
 | CAA | `onegate.work CAA 0 issue "letsencrypt.org; accounturi=<OneGate ACME account URL>"`, `0 issuewild ";"` | Central (explicit action) |
 | Hotel portal domain | e.g. `wifi.nilehotel.com` (a subdomain of a domain the hotel owns; never under onegate.work, never an apex) | Hotel |
+| **Shared Client Portal name** (since 2026-11-01, §16) | `portal.onegate.getsemantics.com`, one name for every appliance | OneGate (Product Owner publishes its two records once) |
+| Its public A record | `portal.onegate.getsemantics.com A 10.255.255.1` (the fleet-wide portal address, DNS-only, never proxied, no AAAA) | Product Owner |
+| Its ACME challenge delegate | `_acme-challenge.portal.onegate.getsemantics.com CNAME sharedportal.acme.onegate.work.`; Central writes the TXT values there | Product Owner (CNAME), Central (TXT) |
 
 **HSTS is never set** on any portal name: it would make the approved HTTP fallback unreachable.
 
@@ -109,8 +112,9 @@ daily; a broken delegation marks the domain FAILED, stops renewals and alerts. R
 
 scd computes, every cycle:
 
-* `canonical` = the hotel domain if VERIFIED and its certificate is installed and valid; else the OneGate
-  hostname if its certificate is installed and valid; else none.
+* `canonical` = the shared Client Portal name (§16) if this appliance uses it and its certificate is installed and
+  valid; else the hotel domain if VERIFIED and its certificate is installed and valid; else the OneGate hostname if
+  its certificate is installed and valid; else none.
 * `https_active` = canonical exists, the portal address is up on `ogportal0`, and the canonical certificate is
   valid for at least 5 more minutes.
 * otherwise `fallback_reason` ∈ `NOT_CONFIGURED` (Central has no DNS/ACME configuration yet), `NO_HOSTNAME`,
@@ -121,7 +125,7 @@ local socket).
 
 | | HTTPS active | Fallback |
 |---|---|---|
-| DHCP option 114 (local DHCP) | `https://<canonical>/captive-portal/api` | today's `http://<gateway>:8380/` |
+| DHCP option 114 (local DHCP) | `https://<canonical>/captive-portal/api` | omitted (since 2026-11-01; a plain-HTTP value made phones skip their probes, see §6) |
 | OS probe on port 80 | 302 → `https://<canonical>/` | today's behaviour |
 | Any other HTTP portal page | 302 → same path on `https://<canonical>` | served over HTTP |
 | Email/SMS code message | code + link `https://<canonical>/connect?...` | **code only** |
@@ -213,11 +217,18 @@ they carry hostnames, the portal address, CSRs and certificate status — no gue
 ## 10. Known limitations (documented, accepted)
 
 * Android older than 7.1.1 does not trust ISRG Root X1 and shows a certificate warning on the HTTPS portal.
-* Google sign-in needs a hotel portal domain; Facebook and Google are unavailable inside Android WebView login
-  windows.
+* Google sign-in needs a hotel portal domain as the canonical name; Facebook and Google are unavailable inside Android
+  WebView login windows. **While the shared Client Portal name is canonical (§16) Google sign-in is not offered**: a
+  hotel cannot verify OneGate's domain in its own Google app. Making a verified hotel domain win over the shared name
+  for hotels that need Google is a Product Owner decision.
 * A site whose own DNS server applies DNS-rebinding protection must allow `gw.onegate.work` (and its hotel
   domain) to resolve to a private address.
 * With external DHCP, the hotel's DHCP server must hand out option 114 itself if wanted; probes still work.
+* **On the HTTP fallback option 114 is not emitted at all.** Until 2026-11-01 it carried `http://<gateway>:8380/`. A
+  capture on the test appliance (VLAN 90) showed an iPhone and an Android 11 phone each request option 114, receive that
+  plain-HTTP value and then send no captive request of any kind: no API fetch (RFC 8908 requires HTTPS, so the value is
+  discarded) and no legacy probe either, so no sign-in sheet. Without the option the phones run their probes, which the
+  gateway's port-80 redirect answers. The earlier MacBook observation below was the same effect.
 
 ## 11. Implementation decisions taken during delivery (2026-10-13)
 
@@ -334,3 +345,63 @@ check no longer follows redirects, and while HTTPS is active it completes a veri
 :8343 for the canonical hostname (system roots, hostname, validity), so a real certificate or listener failure is
 still reported.
 
+## 16. One shared Client Portal name for every appliance (Product Owner decision, 2026-11-01)
+
+**Decision.** Every appliance's guests use one permanent public name, `portal.onegate.getsemantics.com`.
+`central.onegate.getsemantics.com` stays Central's alone. Each guest reaches its own hotel's appliance, with complete
+site isolation, and no guest traffic passes through Central.
+
+**How a guest reaches its own appliance.** The name resolves, in public DNS and in each appliance's own resolver, to
+the fleet-wide portal address `10.255.255.1` (§2.1). That address exists only on each appliance's `ogportal0` and is
+never routed: a guest's packets for it go to the guest's default gateway, which is that hotel's appliance, and are
+answered there (TCP 443 → portald :8343, TCP 80 → :8380). The same public answer therefore lands on a different, local
+appliance at every hotel. The appliance answers the name locally as well, so a resolver that drops private answers
+(DNS-rebinding protection) is not in the path for guests using the appliance's DNS. The two-NIC architecture is
+unchanged: the address is answered on client networks only, never on the WAN/management interface.
+
+**Certificates: one per appliance, never shared.** Each appliance generates its own P-256 key and orders its own
+certificate naming exactly two names: the shared name and its permanent `<label>.gw.onegate.work`. Central refuses any
+other name set (`ParseAndCheckSharedCSR`). Consequences:
+
+* No private key is ever shared between hotels or held by Central; one appliance's certificate is revoked alone
+  (retirement, operator revocation) and the others keep theirs.
+* Every appliance's identifier set is unique, so Let's Encrypt's limit of 5 certificates per exact set of names per
+  week never couples two appliances; ARI renewals are exempt from the CA's limits; new certificates count against
+  Central's weekly cap (§3), counted per appliance (`counts_new` is now decided per appliance).
+* Renewal is automatic and identical to the OneGate hostname's (ARI `renew_after`, a new key every time).
+* What a shared name cannot prevent, and is accepted: any appliance holds a valid certificate for the name, so a rogue
+  device that is itself a hotel's gateway could present it. It could do so only to guests already routed through it.
+
+**Challenge.** Central answers DNS-01 for the shared name at one delegate, `sharedportal.acme.onegate.work` (12
+characters, so it can never equal a hotel delegate label, which has 16), through the `onegate.work` token it already
+holds. The shared name's own zone (`getsemantics.com`) is never written by Central: its two records are published once
+by the Product Owner, so no DNS token for that zone exists anywhere.
+
+**Readiness gate.** Central checks the shared name through both DoH resolvers before every order and every 10 minutes
+(failures every minute): `A` must be exactly the shared address, `_acme-challenge` must be the CNAME to the delegate,
+and CAA must permit Let's Encrypt. Until then no order is placed and the appliance keeps its own hostname.
+
+**Eligibility.** Only an appliance whose portal address is the shared address uses the name: the public answer would
+not reach any other. Such an appliance keeps its own hostname, as before.
+
+**Appliance behaviour (scd).** The shared name is targeted while Central offers it (sync answer `shared_portal`); it is
+ordered only once the OneGate hostname is known and public DNS is ready; it becomes canonical as soon as its
+certificate is installed (preferred over a hotel domain and the OneGate hostname); a hotel domain and the OneGate
+hostname stay served and redirect to it. An unreachable Central never takes it down; Central withdrawing it (address
+changed, feature switched off) removes it. Option 114 becomes `https://portal.onegate.getsemantics.com/captive-portal/api`
+and the probes redirect to it automatically, because both already follow the canonical name.
+
+**Configuration.** `CTRLAPI_PORTAL_SHARED_HOSTNAME` (default `portal.onegate.getsemantics.com`; `off` switches the
+feature off) and `CTRLAPI_PORTAL_SHARED_ADDRESS` (default `10.255.255.1`, RFC 1918 only). No migration on either side:
+the shared certificate is a OneGate-kind row whose hostname is the shared name. The shared name can never be
+registered as a hotel's own domain.
+
+**Records the Product Owner publishes once** (zone `getsemantics.com`, DNS-only):
+
+| Type | Name | Value |
+|---|---|---|
+| A | `portal.onegate.getsemantics.com` | `10.255.255.1` |
+| CNAME | `_acme-challenge.portal.onegate.getsemantics.com` | `sharedportal.acme.onegate.work` |
+
+Central's console (*Portal certificates*, `GET /cloud/v1/portal-tls/settings` → `shared_portal`) shows the readiness
+and the same two records.

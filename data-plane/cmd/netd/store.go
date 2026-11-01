@@ -410,7 +410,15 @@ func (s *store) LoadPortalTLS(ctx context.Context) (netcfg.PortalTLS, error) {
 	if errors.Is(err, pgx.ErrNoRows) || undefinedTable(err) {
 		return netcfg.PortalTLS{}, nil
 	}
-	return p, err
+	if err != nil {
+		return p, err
+	}
+	// The shared Client Portal name is the canonical name whenever it is neither the appliance's own hostname nor
+	// its hotel domain. svc_netd reads portal_tls_state only (not the certificate records), which is all this needs.
+	if c := p.CanonicalHostname; c != "" && c != p.OneGateHostname && c != p.CustomDomain {
+		p.SharedHostname = c
+	}
+	return p, nil
 }
 
 func (s *store) Event(ctx context.Context, revID, phase string, ok bool, detail map[string]any) {

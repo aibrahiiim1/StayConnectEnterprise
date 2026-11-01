@@ -85,7 +85,7 @@ func (a *applier) applyBundle(ctx context.Context, revID string, intent []netcfg
 	// Persistence: write the netplan file and validate it (no apply; the live state is already correct via ip commands).
 	// A dry run writes nothing: these files decide what comes up after the next reboot.
 	if !a.dryRun {
-		if err := writeFileAtomic(a.netplanFile, netcfg.RenderNetplan(managed), 0o600); err != nil {
+		if err := writeFileAtomic(a.netplanFile, netcfg.RenderNetplanWith(managed, sysParentMAC), 0o600); err != nil {
 			return fmt.Errorf("write netplan: %w", err)
 		}
 		if err := a.run(ctx, "netplan", "generate"); err != nil {

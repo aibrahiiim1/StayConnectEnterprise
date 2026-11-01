@@ -682,9 +682,11 @@ func socialOffered(provider string, enabled bool, callbackHosts []string, st por
 	if !st.HTTPSActive || canonical == "" {
 		return false, "http_fallback"
 	}
-	// Google accepts only callback domains the app owner verified in Search Console, which a OneGate hostname
-	// can never be: Google needs the hotel portal domain to be the canonical hostname.
-	if provider == "google" && canonical == strings.ToLower(st.OneGateHostname) {
+	// Google accepts only callback domains the app owner verified in Search Console, which neither a OneGate
+	// hostname nor the shared Client Portal name (owned by OneGate) can be for a hotel's own Google app: Google
+	// needs the hotel portal domain to be the canonical hostname.
+	if provider == "google" && (canonical == strings.ToLower(st.OneGateHostname) ||
+		(st.SharedHostname != "" && canonical == strings.ToLower(st.SharedHostname))) {
 		return false, "needs_hotel_domain"
 	}
 	for _, h := range callbackHosts {
