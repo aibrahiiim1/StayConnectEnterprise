@@ -219,3 +219,18 @@ func TestRoutingFingerprintIsOrderIndependentAndPolicySensitive(t *testing.T) {
 		t.Fatal("undecided and NONE must differ: one is a decision, the other is not")
 	}
 }
+
+// Room sign-in switched off for the whole site is not "ready", however healthy the PMS is: scd refuses every guest
+// (pms_method_disabled). Switching it on makes the same network ready.
+func TestRoomSignInSwitchedOffForTheSiteIsNotReportedReady(t *testing.T) {
+	off := rsNetworkFacts{ID: "n", Name: "Client Wi-Fi", Enabled: true, Policy: policyDedicated, Mapped: []string{"p1"}, SiteMethodOff: true}
+	a := assessRoomSignIn([]rsNetworkFacts{off}, ifs(ready("p1", "CHR")), now)
+	n := netOf(a, "n")
+	if n.State != rsOff || a.Overall == "READY" || !strings.Contains(n.Summary, "Sign-in methods") {
+		t.Fatalf("site switch off: state %s overall %s summary %q", n.State, a.Overall, n.Summary)
+	}
+	off.SiteMethodOff = false
+	if a := assessRoomSignIn([]rsNetworkFacts{off}, ifs(ready("p1", "CHR")), now); netOf(a, "n").State != rsReady || a.Overall != "READY" {
+		t.Fatalf("site switch on: %s %s", netOf(a, "n").State, a.Overall)
+	}
+}

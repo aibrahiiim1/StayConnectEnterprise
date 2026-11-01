@@ -280,3 +280,56 @@ func TestWriter_AQuietProtelLinkStaysUpOnAnsweredKeepalives(t *testing.T) {
 		t.Fatalf("%d heartbeats recorded from the answered keepalives, want at least 5", hb)
 	}
 }
+
+// A stable FIAS link makes a complete sync every complete_sync_ms - heartbeat_timeout, so the occupancy evidence Room sign-in
+// relies on never ages past its ceiling. Before, a FIAS link that stayed up never swept again after the first.
+func TestFIAS_AStableLinkSweepsAgainBeforeTheEvidenceAgesOut(t *testing.T) {
+	adapter, server := newAdapterOverPipe(t)
+	adapter.rev.HeartbeatInterval = 20 * time.Millisecond
+	adapter.rev.HeartbeatTimeout = 100 * time.Millisecond
+	adapter.rev.CompleteSyncBound = 250 * time.Millisecond // next sweep requested 150 ms after each publish
+	conn := server
+	var mu sync.Mutex
+	drs := 0
+	go func() {
+		br := bufio.NewReader(conn)
+		for {
+			body, err := pms.ReadFramedRecord(br)
+			if err != nil {
+				return
+			}
+			switch pms.RecordID(body) {
+			case "LS":
+				go func() { _ = pms.WriteFramedRecord(conn, pms.BuildLA()) }()
+			case "DR":
+				mu.Lock()
+				drs++
+				mu.Unlock()
+				go func() {
+					_ = pms.WriteFramedRecord(conn, "DS|")
+					_ = pms.WriteFramedRecord(conn, "GI|RN201|G#2001|")
+					_ = pms.WriteFramedRecord(conn, "DE|")
+				}()
+			}
+		}
+	}()
+	sink := &recordingSink{q: NewBoundedQueue(64, time.Second)}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- adapter.Serve(ctx, sink) }()
+	select {
+	case err := <-done:
+		t.Fatalf("the link ended: %v", err)
+	case <-time.After(1200 * time.Millisecond):
+	}
+	mu.Lock()
+	n := drs
+	mu.Unlock()
+	sink.mu.Lock()
+	complete := sink.resyncComplete
+	sink.mu.Unlock()
+	if n < 3 || complete < 3 {
+		t.Fatalf("%d sweeps requested and %d published in 1.2 s on a stable link, want at least 3 (the first plus periodic ones)", n, complete)
+	}
+}
