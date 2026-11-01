@@ -21,6 +21,10 @@ otherwise edit every record of the company's domain). CAA goes on the base, neve
 The base's CAA also covers `central.onegate.getsemantics.com`; Central's own certificate comes from its internal CA,
 which CAA does not govern.
 
+**No CNAME at `_acme-challenge.portal.onegate.getsemantics.com`.** Central writes that name's TXT values itself. A
+CNAME there (for instance the `sharedportal.acme.onegate.work` delegation an earlier layout described) would capture
+the lookups; Central reports the shared name *not ready* until it is deleted. None exists today (checked 2026-11-01).
+
 ## 2. Create the token Central uses
 
 Cloudflare → **My Profile → API Tokens → Create Token → Create Custom Token**:

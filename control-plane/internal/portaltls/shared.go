@@ -118,6 +118,17 @@ func CheckShared(ctx context.Context, r DoHResolver, sp SharedPortal, zone, acco
 		if err := checkCNAME(ctx, r, "_acme-challenge."+sp.Hostname, SharedChallengeName(sp, zone)); err != nil {
 			return err
 		}
+	} else {
+		// Inside the base Central writes the TXT values at the name itself; a CNAME there (for instance a delegation
+		// left from an earlier layout) would capture every lookup and no challenge could ever validate.
+		got, err := r.Query(ctx, "_acme-challenge."+sp.Hostname, rrCNAME)
+		if err != nil {
+			return err
+		}
+		if len(got) > 0 {
+			return fmt.Errorf("_acme-challenge.%s is a CNAME to %s; delete it (Central writes this name's challenge itself)",
+				sp.Hostname, NormalizeFQDN(got[0]))
+		}
 	}
 	return checkCAA(ctx, r, sp.Hostname, accountURL)
 }

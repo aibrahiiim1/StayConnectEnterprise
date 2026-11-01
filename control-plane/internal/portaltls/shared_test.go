@@ -172,6 +172,13 @@ func TestCheckSharedInsideTheBase(t *testing.T) {
 	}); err == nil {
 		t.Fatal("a CAA that excludes Let's Encrypt is not ready")
 	}
+	// Review finding (PR #284): a delegation CNAME left at the name would capture Central's direct TXT values.
+	if err := run(func(d *mutableDoH) {
+		d.set(sp.Hostname, rrA, DefaultSharedAddress)
+		d.set("_acme-challenge."+sp.Hostname, rrCNAME, "sharedportal.acme.onegate.work.")
+	}); err == nil || !strings.Contains(err.Error(), "delete it") {
+		t.Fatalf("a leftover CNAME at the challenge name is not ready, and says what to do: %v", err)
+	}
 }
 
 func TestSameNames(t *testing.T) {
