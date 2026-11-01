@@ -188,3 +188,12 @@ Still open:
 1. **Erasure with only a local copy.** Not implemented. On the appliance alone no record exists that is as independent as the secondary copy: a restore can replace every local disk the appliance controls. Allowing it would weaken the anti-resurrection guarantee. It needs an explicit security decision; the recommendation is to keep it fail-closed.
 2. **Earlier backups above the five-set cap.** Rotation never deletes them. They are removed only by the existing confirmed "Remove the earlier backups" action, which requires a verified new backup. The number at rest is shown on the console. An absolute physical maximum of five needs that action, taken by the hotel or explicitly authorized for the test appliance.
 3. **Hard deletion of an unused Client Account** removes a row without a ledger entry, so an old restore would bring the account back. Under the decision above this is account removal, not an erasure, and it is labelled so everywhere; an erasure of that person is Guest data → Erase.
+
+## 8. Deployment (2026-11-01, D87, T0278)
+
+The merged release `bd8e571c` was deployed first, for the Product Owner's manual testing:
+- Central runs `onegate-central-bd8e571c5735`;
+- the test appliance runs `onegate-appliance-bd8e571c5735`, with migrations 0202 and 0203.
+
+The record is in the installation manual, A3.14. Corrections made afterwards (the golden-lab harness, this record) change no runtime code, so the deployed version stays `bd8e571c`.
+

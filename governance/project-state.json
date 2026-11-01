@@ -344,7 +344,7 @@
   "next_authorized_action": "Work normal missions under the PRODUCT-OWNER-LED DELIVERY model D42 (2026-09-26): implement, target-test, deploy routine software to the test appliance 172.21.96.97 under its standing deployment authorization (current_state_facts.standing_test_appliance_deployment_authorization) (the production Central only when a mission names it), stop at READY FOR PRODUCT OWNER TESTING, and merge only after explicit Product Owner acceptance (po-merge-approved). The comprehensive validation runs only on 'FULL CHECK THE WHOLE CODE'. Retired hosts (current_state_facts.retired_hosts) are never contacted.",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase7-Plan.md",
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
-  "latest_accepted_po_decision": "D86",
+  "latest_accepted_po_decision": "D87",
   "current_state_facts": {
     "_note": "MACHINE-READABLE CURRENT STATE. Every current-state surface in this repository is validated against these fields by tools/validate-current-state-parity.py, which runs in the Project Governance gate. They exist because prose alone let a contradiction survive a green gate: current_maturity still said an authorization was awaited and iam_v2 was 49/0 while this file already recorded 63 tables and an executed Live Increment 9. A fact that is only asserted in sentences cannot be diffed; a fact recorded here can be.",
     "phase": "7",
@@ -1293,7 +1293,7 @@
       "name": "central.onegate.getsemantics.com",
       "recorded": "Product-Owner record, 2026-10-28: this is the current production Central; 172.21.96.196 is retired and must not be contacted.",
       "trust_universe": "Installed fresh by central-install.sh, so it has its own vendor key, assignment key, registry root, appliance CA and internal TLS CA (installation manual Appendix 3). Appliances provisioned against the retired Central, PRE-LIVE among them, do not trust it.",
-      "release": "onegate-central-5ac9cc5c9851 (2026-10-30, read back from DEPLOYED.json: release_commit 5ac9cc5c9851f01c9a9aa87d97acbec0c961e940; ctrlapi connects as the least-privilege role ctrlapi_rt since migration 0063; installation manual A3.12)",
+      "release": "onegate-central-bd8e571c5735 (2026-11-01, read back from DEPLOYED.json: release_commit bd8e571c5735f5c34564d488af706b9cbc7f1a90; ctrlapi connects as the least-privilege role ctrlapi_rt since migration 0063; installation manual A3.14)",
       "retired_host": {
         "address": "172.21.96.196",
         "name": "sc-central.echofusion.com",
@@ -1339,7 +1339,7 @@
       "_note": "The current test appliance (Product-Owner record, 2026-10-28, D78/T0264). Activated on the production Central, in its trust universe.",
       "host": "172.21.96.97",
       "central": "central.onegate.getsemantics.com (41.128.240.133)",
-      "release": "onegate-appliance-11a5bfb4c007 (2026-10-31, source commit 11a5bfb4c0074c03292bb21a0c40543db492ba48 read back from RELEASE.json and all eight installed binaries via DEPLOYED_BINARIES.sha256; installation manual A3.13)",
+      "release": "onegate-appliance-bd8e571c5735 (2026-11-01, source commit bd8e571c5735f5c34564d488af706b9cbc7f1a90 read back from RELEASE.json and all eight installed binaries via DEPLOYED_BINARIES.sha256; installation manual A3.14)",
       "status": "TEST. Go-Live not authorised. Routine software deployments are covered by the standing authorization D79.",
       "deployed_note": "The closure round of the audit-decision mission (T0270 to T0272) is deployed and verified on this appliance (T0273): migrations through 0179, units active, licence Active over mutual TLS, appliance Root CA pinned against its fingerprint, client journey 12/12, 500 simultaneous sign-in attempts answered with no busy answer. The earlier release (T0269) had stopped safely once at migration 0162 and was fixed by PR #266."
     },
@@ -1362,7 +1362,7 @@
       "dispositions": "docs/AUDIT_DECISION_DISPOSITIONS.md"
     }
   },
-  "latest_transition_id": "T0277",
+  "latest_transition_id": "T0278",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1858,16 +1858,16 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "PACKAGE_CONTROLS_REMEDIATION_DELIVERY",
-    "decision": "D86 (Product-Owner authorization of 2026-11-01: staff End/Reset Package, no automatic re-acquisition after an End, secondary storage and backup remediation, restore correctness; merge authorised, no deployment).",
-    "decision_note": "Delivery record: merged through the protected pull request; nothing deployed (the test appliance stays onegate-appliance-11a5bfb4c007, Central unchanged); verification in docs/reviews/PACKAGE_CONTROLS_AND_STORAGE_REMEDIATION.md section 7.",
-    "manifest": "docs/manifests/PackageControls-change-manifest.md",
-    "base": "f059af959e020b04090d5c2e653e9fa738638d8e",
-    "base_note": "Master after the merge of PR #279.",
-    "transition": "T0277",
-    "previous_delivery": "T0276",
-    "branch": "delivery/package-controls-backup-remediation",
-    "note": "T0277. Go-Live not authorised."
+    "kind": "PACKAGE_CONTROLS_DEPLOYMENT",
+    "decision": "D87 (Product-Owner priority change of 2026-11-01: deploy the merged release bd8e571c to the production Central and the test appliance first, then complete the mission).",
+    "decision_note": "Deployment record: Central runs onegate-central-bd8e571c5735 and the test appliance onegate-appliance-bd8e571c5735 (migrations 0202 and 0203), both read back from the installed files; evidence in docs/runbooks/ONEGATE_FRESH_VM_INSTALLATION_MANUAL.md A3.14.",
+    "manifest": "docs/manifests/PackageControlsDeployment-change-manifest.md",
+    "base": "bd8e571c5735f5c34564d488af706b9cbc7f1a90",
+    "base_note": "Master after the merge of PR #280.",
+    "transition": "T0278",
+    "previous_delivery": "T0277",
+    "branch": "delivery/package-controls-deployment-record",
+    "note": "T0278. Go-Live not authorised."
   },
   "onboarding_reconciliation": {
     "decision": "D37",

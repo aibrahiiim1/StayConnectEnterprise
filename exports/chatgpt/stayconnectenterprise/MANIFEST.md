@@ -24,8 +24,8 @@
 
 | # | Exported filename | Original repository path | Source | Status | SHA-256 |
 |---|---|---|---|---|---|
-| 1 | `00-START-HERE.md` | *(generated)* | `0e3da816` | Entry point | `a2cb0d459147a7fb345c0a0dfb0cbf1ea661e96f9c1c609d2bdf79c0ca84c6e4` |
-| 2 | `PROJECT-INSTRUCTIONS.md` | *(generated)* | `0e3da816` | Project config | `6cd4b4b5346ef54a32d456795b903026cb0b7fead11ade74ca596f863d47a64b` |
+| 1 | `00-START-HERE.md` | *(generated)* | `0e3da816` | Entry point | `74de8f414f073f6728b8e3b3e8cfc332c1a807c438ddce081d48fc56e26c0879` |
+| 2 | `PROJECT-INSTRUCTIONS.md` | *(generated)* | `0e3da816` | Project config | `54347ba6d58f8371eae6c4fee693e0da431583ae8bd43cc650fc29f477a7baa2` |
 | 3 | `StayConnect-IAM-Phase0-Contract.md` | `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | `0e3da816` | **Authoritative** *(sanitized)* | `6d628111623404320c23f3d75df83be64e92663598e583bec991d578595bdd56` |
 | 4 | `StayConnect-IAM-Handoff.md` | `docs/context/StayConnect-IAM-Handoff.md` | `0e3da816` | **Authoritative** | `e277f3adb8e2cbe7c85f0dd6382a783e3bf492e7c6f872d6097c37a2de70db11` |
 | 5 | `StayConnect-IAM-Phase1A-Plan.md` | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | `0e3da816` | **Authoritative (closed phase)** | `9fb3d3283eaf47aa4a412a2857da4ecdba44c00b866be39d7c1fb06871aa61bb` |

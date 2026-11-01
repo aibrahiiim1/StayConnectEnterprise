@@ -17,9 +17,13 @@ echo "$out" | grep -q '"replicated": false' || fail "a test was not labelled a c
 out="$(api PUT /backups/ledger/destination "$(body upload/onegate)")"
 echo "$out" | head -c 600; echo
 echo "$out" | grep -q '^200' || fail "save did not answer 200"
-remote="$(docker exec "$SFTP" sh -c 'sha256sum /home/ledger/upload/onegate/erasure-ledger.jsonl* | head -1' | awk '{print $1}')"
-[ -n "$remote" ] || fail "save answered ok but the folder on the server is empty (the reported defect)"
-note="$(docker exec "$SFTP" cat /home/ledger/upload/onegate/erasure-ledger.head.json)"
+note="$(docker exec "$SFTP" cat /home/ledger/upload/onegate/erasure-ledger.head.json 2>/dev/null || true)"
+[ -n "$note" ] || fail "save answered ok but the folder on the server is empty (the reported defect)"
+# The object the note names (erasure-ledger.jsonl, or .jsonl.age when backup key holders exist), hashed on the server's own disk.
+obj="$(echo "$note" | sed -n 's/.*"object":"\([^"]*\)".*/\1/p')"
+[ -n "$obj" ] || fail "the note on the server names no object"
+remote="$(docker exec "$SFTP" sha256sum "/home/ledger/upload/onegate/$obj" | awk '{print $1}')"
+[ -n "$remote" ] || fail "the object $obj the note names is not on the server"
 echo "$note" | grep -q "\"object_sha256\":\"$remote\"" || fail "the object on the server is not the one the note describes"
 log "ok: the ledger is in the folder the server shows, and it matches its note"
 
@@ -27,7 +31,7 @@ docker exec "$SFTP" sh -c 'mkdir -p /home/ledger/upload/ro && chown root:root /h
 out="$(api PUT /backups/ledger/destination "$(body upload/ro)")"
 echo "$out" | head -c 400; echo
 echo "$out" | grep -q '"saved": false' || fail "an unwritable folder was saved"
-api GET /backups/ledger?fresh=1 | grep -q '"in_sync": true' || fail "a refused replacement disturbed the destination in use"
+apifull GET '/backups/ledger?fresh=1' | grep -q '"in_sync": true' || fail "a refused replacement disturbed the destination in use"
 
 out="$(api POST /backups/ledger/destination/remove '{"password":"@PW","confirm":"remove secondary storage"}')"
 echo "$out" | grep -q '"state": "not_configured"' || fail "removal did not make erasure refused"
