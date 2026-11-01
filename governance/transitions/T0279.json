@@ -1,0 +1,33 @@
+{
+  "transition_id": "T0279",
+  "seq": 279,
+  "timestamp": "2026-11-01T09:40:00Z",
+  "timestamp_derivation": "Computed from the session clock after the 12-minute real-time check and the room sign-in on the final release (09:37Z), before the commit that introduces this receipt.",
+  "record_type": "CHR_PMS_COMMISSIONING",
+  "authorisation": "D88, the Product Owner's instruction of 2026-11-01 (real CHR PMS, non-financial, test appliance 172.21.96.97).",
+  "deployment": {
+    "central": "Not deployed. Central is unchanged (onegate-central-bd8e571c5735).",
+    "test_appliance": "172.21.96.97: onegate-appliance-f5347cf23afc by appliance-install.sh --upgrade (no migration; all eight binaries embed f5347cf23afcef696b084de091fc0ce04534e5dd unmodified), after c9cb37be828b and 9f17d5545d57 the same morning; pmsd commissioned and enabled (pmsd.env with the svc_pmsd DSN and new HMAC keys), Room sign-in switched on, Client Wi-Fi routed DEDICATED to CHR."
+  },
+  "verification": "Real CHR feed: CONNECTED/CONTINUOUS/IN_SYNC, about 420 in-house stays, 0 duplicate stay identities after five reconnects, live check-in/change/check-out applied, 12 minutes without reconnect, periodic sweep keeping the oldest evidence at 606 s of 690 s, room sign-in 7/7 on two real stays (portal ok, session active, kernel authorised, Internet). Evidence: docs/reviews/CHR_PMS_COMMISSIONING.md. Not performed: a host reboot, room-charge posting.",
+  "not_touched": "Room-charge posting and every monetary path, payment providers, the production Central, PKI and the Root CA, networking topology, every retired host.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "03dec72e44de71dcf4dd9662771b44bf7525275d",
+  "previous_delivery": "T0278",
+  "decision": "D88",
+  "go_live": "NOT authorised."
+}

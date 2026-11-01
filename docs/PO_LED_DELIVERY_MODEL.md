@@ -157,3 +157,13 @@ production Central, migrations or schema decisions, destructive or historical da
 PMS configuration, posting or traffic, financial or payment-provider activity, Guest activation, Root-CA or trust
 changes, or Go-Live. It supersedes the standing per-change PRE-LIVE decision of 2026-09-24, whose appliance is
 retired. In §1 and §9, "PRE-LIVE" now means the test environment the Product Owner names.
+
+## 10. Production-real operating standard (permanent Product-Owner instruction, 2026-11-01)
+
+Configured is not Working; Working is not Verified. A feature is done only when it operates end to end in its authorized
+target environment, with runtime evidence: the service runs, state persists and moves correctly, enforcement is real, the
+genuine configured endpoint is integrated, health and readiness report the actual runtime state, failures are handled and
+recovered, and installation, upgrade and restart have been exercised. A configured, published, ACTIVE, mocked, dormant or
+merely installed feature is not done, and a success or failure message that does not match what happened is a defect.
+What cannot be proven is reported NOT VERIFIED. The standard grants no financial, destructive, network, PKI or Go-Live
+authority. The binding text is in `CLAUDE.md` §0I.

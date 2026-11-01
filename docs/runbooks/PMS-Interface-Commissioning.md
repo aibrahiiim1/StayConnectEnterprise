@@ -266,6 +266,46 @@ projection intact. On reboot the connector re-dials, re-runs a DR resync and re-
 
 ---
 
+## What commissioning the real CHR Protel found (test appliance 172.21.96.97, 2026-11-01)
+
+The interface had been configured, published and set ACTIVE in the Admin Console, and nothing connected: an ACTIVE interface
+does nothing until pmsd is commissioned. These are the steps that made it work, and the product defects that only a real,
+quiet Protel link showed.
+
+**pmsd itself (§3).** `/etc/stayconnect/pmsd.env` was still the installer's empty dark template and the unit was disabled.
+Commissioning wrote the four Phase-3 flags, `PMSD_DB_URL` taken from `/etc/stayconnect/.dsn` (the least-privilege
+`svc_pmsd` login) and two new 32-byte HMAC keys (`openssl rand -hex 32`), file mode 0640 `root:stayconnect-pmsd`, then
+`systemctl enable` and start. The dark template is kept beside it (`pmsd.env.dark-<time>`), and a root-only copy of the keys
+is in `/root/onegate-vault/`; the encrypted configuration backup also carries them. **Keep a vault copy outside the
+appliance.** An upgrade keeps `pmsd.env` and restarts pmsd when it is enabled (verified on three upgrades).
+
+**The grace preflight (§6)** returned `EMERGENCY_GRACE_CATALOG_ABSENT` until `bootstrap_emergency_grace` ran; then `OK`.
+
+**The site's Sign-in methods.** Room sign-in must also be switched on in *Sign-in methods* (`auth_methods.pms`). scd checks it
+before anything else and refused every guest with `pms_method_disabled`, while routing readiness still said "can answer".
+Readiness now reports a site whose method is off as OFF, with that reason.
+
+**Routing (§8).** The Client network had no decision; it was set `DEDICATED` to CHR by preview and apply.
+
+**Three connector defects, fixed and deployed:**
+- *The idle keepalive.* Protel answers a dated `LS` at once with `LA`, never answers a bare `LA`, and sends its own `LA`
+  only after 30 s in which it received nothing (measured with a read-only probe while pmsd was stopped). pmsd's 30 s bare
+  `LA` kept resetting that timer, so a quiet link carried no inbound frame and the 90 s read deadline ended it, followed by a
+  reconnect and a full resync every ~2.5 minutes. The idle keepalive is now a dated `LS`; each answer is heartbeat evidence.
+- *The periodic sweep.* Room sign-in refuses occupancy evidence older than `complete_sync_ms + heartbeat_timeout` (690 s
+  here), and the FIAS connector never swept again after its first DS..DE, so on a stable link every stay aged out about
+  11.5 minutes after the last sweep (`STAY_NOT_ELIGIBLE`). It now requests a complete sync `complete_sync_ms −
+  heartbeat_timeout` after the last published one, as the REST connectors do.
+- *The commit-time wake-up.* A Room sign-in session did not notify the plan producer (`onegate_session_pending`), so
+  enforcement waited for acctd's next period. On CHR it arrived 2.4 s after the commit, past portald's 2.5 s budget, and a
+  guest who was in fact online was told the stay could not be verified. It now notifies at commit, as voucher sign-in does.
+
+**What the first connection does.** Protel replays the live records it queued while no interface was connected. Check-outs and
+room changes for stays the appliance has never seen are held for review (`GO_UNKNOWN_STAY`, `GC_UNKNOWN_STAY`) rather than
+inventing stays, and roster departure snapshots without a reservation number are skipped and counted. Both are expected.
+
+Evidence: [`docs/reviews/CHR_PMS_COMMISSIONING.md`](../reviews/CHR_PMS_COMMISSIONING.md).
+
 ## Defects this procedure exists because of
 
 Every one of these was found on a live link, and each presented as something working.

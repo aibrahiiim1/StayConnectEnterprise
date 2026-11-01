@@ -1287,6 +1287,18 @@
       "title": "DEPLOY FIRST (2026-11-01): the merged master release bd8e571c (PR #280, D86) is deployed to the production Central central.onegate.getsemantics.com (172.21.96.96 / 41.128.240.133) and to the test appliance 172.21.96.97 for Product-Owner manual testing, before the remaining work of the mission (golden-lab harness corrections, review, documentation).",
       "authorization_evidence": "The Product Owner's priority change of 2026-11-01 (GOAL: deploy the current merged master release bd8e571c immediately to BOTH named environments, verify, notify READY FOR PRODUCT OWNER MANUAL TESTING, then continue the authorized mission; protected merge authorized).",
       "does_not_authorize": "Go-Live, changes to active PKI or networking topology, real PMS configuration or traffic, financial operations, production customer data, deleting historical backups, any other environment."
+    },
+    {
+      "id": "D88",
+      "decided_on": "2026-11-01",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-11-01",
+      "status": "ACTIVE",
+      "title": "PRODUCTION-REAL OPERATING STANDARD and the real CHR PMS on the test appliance (2026-11-01): permanently, a feature is done only when it operates end to end in its authorized target environment with runtime evidence (configured is not working, working is not verified; CLAUDE.md 0I). The CHR Protel FIAS interface (150.0.0.18:5003) is commissioned on the test appliance 172.21.96.97 for non-financial traffic: pmsd configured and enabled, roster synchronized, live check-in/change/check-out processed, Room sign-in verified end to end on real stays; three connector defects (idle keepalive, periodic sweep, commit-time wake-up) and one readiness defect fixed.",
+      "authorization_evidence": "The Product Owner's permanent instruction and immediate mission of 2026-11-01 (COMMISSION THE REAL CHR PMS on 172.21.96.97, non-financial; Room sign-in test on any in-house room authorized by the Product Owner the same day).",
+      "does_not_authorize": "Room-charge posting or any other monetary transaction (a separately defined financial authority), payment-provider calls, refunds, Go-Live, destructive data changes, network or PKI changes, the production Central."
     }
   ]
 }
