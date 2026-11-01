@@ -1,7 +1,7 @@
 {
   "transition_id": "T0279",
   "seq": 279,
-  "timestamp": "2026-11-01T09:40:00Z",
+  "timestamp": "2026-11-01T09:37:30Z",
   "timestamp_derivation": "Computed from the session clock after the 12-minute real-time check and the room sign-in on the final release (09:37Z), before the commit that introduces this receipt.",
   "record_type": "CHR_PMS_COMMISSIONING",
   "authorisation": "D88, the Product Owner's instruction of 2026-11-01 (real CHR PMS, non-financial, test appliance 172.21.96.97).",
