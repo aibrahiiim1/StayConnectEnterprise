@@ -1,0 +1,4 @@
+commit 33ae5228e56148946b23dc479f3d6bfec67aacb8
+Date:   Mon Nov 2 23:23:04 2026 +0200
+
+    Governance: the test appliance runs the console from aae43c84 (Codex fix), read back

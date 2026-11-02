@@ -1,4 +1,0 @@
-commit 8376f33901b2f531be82091c1d55980085a21a6e
-Date:   Mon Nov 2 23:14:44 2026 +0200
-
-    Governance: T0285 records the settings reorganisation delivery and its test-appliance read-back
