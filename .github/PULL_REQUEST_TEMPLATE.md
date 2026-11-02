@@ -1,16 +1,12 @@
 <!--
-DELIVERY MODEL: D42 (docs/PO_LED_DELIVERY_MODEL.md).
-
-NO PRODUCT OWNER ACCEPTANCE = NO MERGE. The only required check is `po-merge-authorization`. It passes only
-while this PR carries the label `po-merge-approved` on its current head, applied after the Product Owner's
-explicit approval ("Approved", "Merge it", ...) or when the mission authorized the merge in advance. Any
-later push removes the label.
-
-The comprehensive gates run only for "FULL CHECK THE WHOLE CODE" (python tools/full-check.py --ref <branch>).
-When they do, the `governance` gate reads THIS BODY live via tools/validate-pr-metadata.sh, which requires the
-Status block to state the current phase status verbatim and to cite the decision and receipt that granted it.
-Fill it from the canonical state:  python tools/project-state.py validate
+DELIVERY MODEL: PO-approved NO GITHUB CI, 2026-11-02 (docs/PO_LED_DELIVERY_MODEL.md).
+NO PO ACCEPTANCE = NO MERGE, even though GitHub status checks no longer enforce it.
+Merge only through protected master PR, merge commits, resolved review threads,
+and no bypass, direct push, force push or deletion.
+Local targeted tests and evidence remain mandatory; do not claim a GitHub gate PASS.
+The Product Owner approval applies to the exact approved PR head.
 -->
+
 
 ## Status
 
@@ -48,7 +44,7 @@ extend or re-evaluate it.
 | targeted tests for the changed components | |
 | build of anything deployed | |
 | PRE-LIVE smoke / health (if deployed) | |
-| FULL CHECK (only if requested) | not requested |
+| FULL CHECK (local only, if requested) | not requested |
 
 ## Scope held
 
