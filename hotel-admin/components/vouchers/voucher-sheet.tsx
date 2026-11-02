@@ -2,6 +2,7 @@
 
 // Card actions require password step-up and a recorded reason.
 
+import { InfoHint } from "@/components/ui/quiet";
 import * as React from "react";
 import { Ban, Eye, EyeOff, Layers, Ticket } from "lucide-react";
 import { api } from "@/lib/api";
@@ -275,8 +276,9 @@ function VoucherDetail({
             <>
               <Timeline items={timeline} />
               {(!history.redemption_available || !history.cancellation_available) && (
-                <p className="text-xs text-muted-foreground">
-                  Part of this card&apos;s history could not be read just now, so it may be incomplete.
+                <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                  History may be incomplete.
+                  <InfoHint>Part of this card&apos;s history could not be read just now.</InfoHint>
                 </p>
               )}
               {canRevealCodes && reveals && reveals.length >= 200 && (
@@ -355,9 +357,12 @@ function VoucherDetail({
         requirePassword
         onConfirm={cancel}
       >
-        <p className="text-sm text-muted-foreground">
-          Nothing else changes: other cards in the batch keep working, and no client who is already online is
-          disconnected. A card that has already been used cannot be cancelled here.
+        <p className="flex items-center gap-1 text-sm text-muted-foreground">
+          Only this card stops working.
+          <InfoHint>
+            Other cards in the batch keep working, and no client who is already online is disconnected. A card that
+            has already been used cannot be cancelled here.
+          </InfoHint>
         </p>
       </ConfirmDialog>
     </>

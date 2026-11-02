@@ -222,7 +222,15 @@ export function validityWords(from: string | null | undefined, until: string | n
 }
 
 /** A short, human batch label: its date plus the first characters of its id. */
-export function batchLabel(b: { batch_id: string; created_at?: string | null }): string {
+/** A batch's name is the note given when it was issued; a batch without one is named by its date and reference. */
+export function batchName(b: { notes?: string | null }): string | null {
+  const n = (b.notes ?? "").trim().split("\n")[0].trim();
+  return n || null;
+}
+
+export function batchLabel(b: { batch_id: string; created_at?: string | null; notes?: string | null }): string {
+  const name = batchName(b);
+  if (name) return name;
   const d = b.created_at ? shortDate(b.created_at) : "";
   return d ? `${d} · ${b.batch_id.slice(0, 8)}` : b.batch_id.slice(0, 8);
 }

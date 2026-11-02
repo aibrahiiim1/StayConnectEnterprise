@@ -10,10 +10,11 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner, Callout } from "@/components/ui/error-banner";
-import { Field, Input, Textarea } from "@/components/ui/input";
+import { Field, Input } from "@/components/ui/input";
 import { KeyValueGrid, OptionCard, Stepper } from "@/components/ui/data";
 import { Skeleton } from "@/components/ui/misc";
 import { useToast } from "@/components/ui/toast";
+import { InfoHint } from "@/components/ui/quiet";
 import { formatPrice, validityWords, type Grantable, type IssuedBatch } from "@/lib/api/vouchers";
 import { CodesHeld } from "./codes-held";
 import { stepUpError } from "./shared";
@@ -121,7 +122,7 @@ export function IssueDialog({
       <DialogContent size="lg">
         <DialogHeader>
           <DialogTitle>{issued ? `${issued.count.toLocaleString()} voucher${issued.count === 1 ? "" : "s"} issued` : "Issue vouchers"}</DialogTitle>
-          <DialogDescription>
+          <DialogDescription className={issued ? undefined : "sr-only"}>
             {issued
               ? "These codes are shown once. Copy, download or print them now."
               : "Print a batch of cards a client redeems for internet access."}
@@ -149,9 +150,7 @@ export function IssueDialog({
             loadErr ? (
               <div className="space-y-3">
                 <ErrorBanner err={loadErr} />
-                <p className="text-sm text-muted-foreground">
-                  The list of packages a card can grant could not be loaded, so there is nothing to choose from yet.
-                </p>
+                <p className="text-sm text-muted-foreground">The packages could not be loaded.</p>
                 <Button variant="secondary" size="sm" onClick={loadGrantable}>
                   <RefreshCw /> Try again
                 </Button>
@@ -196,8 +195,8 @@ export function IssueDialog({
               <Field label="Valid until (optional)" hint="Leave empty for cards that never expire." error={windowProblem ?? undefined}>
                 <Input type="datetime-local" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />
               </Field>
-              <Field label="Note (optional)" hint="For your own reference, e.g. who the cards are for." className="sm:col-span-2">
-                <Textarea value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} placeholder="Visitor desk, week 12" />
+              <Field label="Batch name (optional)" hint="Shown on the Batches tab and beside each card, e.g. who the cards are for." className="sm:col-span-2">
+                <Input value={note} maxLength={120} onChange={(e) => setNote(e.target.value)} placeholder="Visitor desk, week 12" />
               </Field>
             </div>
           ) : (
@@ -208,12 +207,13 @@ export function IssueDialog({
                   { label: "Price per card", value: chosen ? formatPrice(chosen.price_minor, chosen.currency, chosen.currency_exponent) : null },
                   { label: "Cards", value: n.toLocaleString() },
                   { label: "Validity", value: validity },
-                  { label: "Note", value: note.trim() || null, wide: true },
+                  { label: "Batch name", value: note.trim() || null, wide: true },
                 ]}
               />
-              <Callout tone="info">
-                The codes appear once, on the next screen. The code format is the one set under Code security.
-              </Callout>
+              <p className="flex items-center gap-1 text-sm text-muted-foreground">
+                Codes are shown once, on the next screen.
+                <InfoHint>The code format is the one set under Code security.</InfoHint>
+              </p>
               <Field label="Confirm your password" hint="Issuing a batch of cards is recorded against your name." required
                 htmlFor="voucher-issue-password">
                 <Input id="voucher-issue-password" type="password" autoComplete="current-password" value={password}
