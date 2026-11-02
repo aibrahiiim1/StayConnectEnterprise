@@ -143,7 +143,8 @@ describe("Active sessions", () => {
     await chooseInRow(document.body, /disconnect/i);
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("Disconnect Room 318's device?")).toBeTruthy();
-    expect(within(dialog).getByText(/Their 2 other devices stay online/)).toBeTruthy();
+    // The other devices are named in the confirmation's facts.
+    expect(within(dialog).getByText("2 will stay online")).toBeTruthy();
     await user.click(within(dialog).getByRole("button", { name: "Disconnect" }));
     await waitFor(() => expect(post).toHaveBeenCalledWith("/sessions/sess-1/disconnect", { reason: "admin" }));
   });
@@ -174,9 +175,11 @@ describe("Guest accounts", () => {
     for (const name of [/add account/i, /^edit\b/i, /password/i, /disable/i, /^delete\b/i, /disconnect/i]) {
       expect(screen.queryByRole("button", { name })).toBeNull();
     }
-    const sw = screen.getByRole("switch", { name: /offer username-and-password sign-in/i });
+    // The portal switch lives under Account settings.
+    await userEvent.click(screen.getByRole("button", { name: /account settings/i }));
+    const sw = await screen.findByRole("switch", { name: /offer username-and-password sign-in/i });
     expect(sw).toBeDisabled();
-    expect(screen.getByText("Shown on the portal")).toBeTruthy();
+    expect(screen.getByText("Shown")).toBeTruthy();
   });
 
   it("reveals a generated password once, in the one-time reveal", async () => {
