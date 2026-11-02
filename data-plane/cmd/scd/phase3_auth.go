@@ -601,17 +601,13 @@ func (p *phase3Auth) probeInterface(ctx context.Context, seen *observations, ifa
 	started := time.Now()
 	for {
 		var one observations
-		out, stay, err := p.probeRoster(ctx, &one, ifaceID, room, last, first, res)
-		if err != nil || (out != pmsresolve.NoMatch && out != pmsresolve.AmbiguousLocal) {
+		out, stay, draining, err := p.probeSnapshot(ctx, &one, ifaceID, room, last, first, res)
+		if err != nil || (out != pmsresolve.NoMatch && out != pmsresolve.AmbiguousLocal) || !draining {
+			// A match, an error, or a non-match read from a roster the SAME snapshot shows complete.
 			seen.merge(&one)
 			return out, stay, err
 		}
-		draining, derr := p.rosterDraining(ctx, ifaceID)
-		if derr == nil && !draining {
-			seen.merge(&one)
-			return out, stay, nil
-		}
-		if derr != nil || ctx.Err() != nil || time.Since(started)+drainWaitStep > drainWaitMax {
+		if ctx.Err() != nil || time.Since(started)+drainWaitStep > drainWaitMax {
 			seen.add(probeObservation{InterfaceID: ifaceID, Failed: true})
 			return pmsresolve.Stale, "", nil
 		}
@@ -622,20 +618,41 @@ func (p *phase3Auth) probeInterface(ctx context.Context, seen *observations, ifa
 	}
 }
 
-// rosterDraining: rows of a published refresh are still waiting to be written into the stays (0205).
-func (p *phase3Auth) rosterDraining(ctx context.Context, ifaceID string) (bool, error) {
+// probeSnapshot reads the roster and the drain state from ONE read-only REPEATABLE READ snapshot. The applier writes each
+// stay together with its event's status in one commit, so a snapshot that shows no drain also holds the complete roster;
+// read in two statements, the last row could be written in between and an obsolete non-match would look final.
+func (p *phase3Auth) probeSnapshot(ctx context.Context, seen *observations, ifaceID, room, last, first, res string) (pmsresolve.CandidateOutcome, string, bool, error) {
+	tx, err := p.srv.db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		seen.add(probeObservation{InterfaceID: ifaceID, Failed: true})
+		return pmsresolve.Unavailable, "", false, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	out, stay, err := p.probeRoster(ctx, tx, seen, ifaceID, room, last, first, res)
+	if err != nil || (out != pmsresolve.NoMatch && out != pmsresolve.AmbiguousLocal) {
+		return out, stay, false, err
+	}
 	var draining bool
-	err := p.srv.db.QueryRow(ctx, `SELECT iam_v2.p3_interface_roster_draining($1::uuid,$2::uuid,$3::uuid)`,
-		p.srv.tenID, p.srv.siteID, ifaceID).Scan(&draining)
-	return draining, err
+	if err := tx.QueryRow(ctx, `SELECT iam_v2.p3_interface_roster_draining($1::uuid,$2::uuid,$3::uuid)`,
+		p.srv.tenID, p.srv.siteID, ifaceID).Scan(&draining); err != nil {
+		// An unreadable drain state is not evidence the roster is complete: hold the non-match back.
+		return out, stay, true, nil
+	}
+	return out, stay, draining, nil
 }
 
-func (p *phase3Auth) probeRoster(ctx context.Context, seen *observations, ifaceID, room, last, first, res string) (pmsresolve.CandidateOutcome, string, error) {
+// probeQuerier is what one roster probe reads through: the snapshot transaction.
+type probeQuerier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+func (p *phase3Auth) probeRoster(ctx context.Context, q probeQuerier, seen *observations, ifaceID, room, last, first, res string) (pmsresolve.CandidateOutcome, string, error) {
 	obs := probeObservation{InterfaceID: ifaceID}
 	// Each candidate answers for its own mirror. A candidate whose feed cannot be trusted is STALE, never NO_MATCH: on a shared network "this PMS has no such guest"
 	// is only worth something when this PMS was actually in a position to say so.
 	var feedOK bool
-	if err := p.srv.db.QueryRow(ctx, `SELECT iam_v2.p3_interface_can_authorise($1::uuid,$2::uuid,$3::uuid)`, p.srv.tenID, p.srv.siteID, ifaceID).Scan(&feedOK); err != nil {
+	if err := q.QueryRow(ctx, `SELECT iam_v2.p3_interface_can_authorise($1::uuid,$2::uuid,$3::uuid)`, p.srv.tenID, p.srv.siteID, ifaceID).Scan(&feedOK); err != nil {
 		obs.Failed = true
 		seen.add(obs)
 		return pmsresolve.Unavailable, "", err
@@ -645,7 +662,7 @@ func (p *phase3Auth) probeRoster(ctx context.Context, seen *observations, ifaceI
 		seen.add(obs)
 		return pmsresolve.Stale, "", nil
 	}
-	rows, err := p.srv.db.Query(ctx, `
+	rows, err := q.Query(ctx, `
 		SELECT s.id::text,
 		       s.status IN ('IN_HOUSE','POST_STAY_ACTIVE') AS eligible,
 		       ($5 <> '' AND EXISTS (SELECT 1 FROM iam_v2.stay_guests g
