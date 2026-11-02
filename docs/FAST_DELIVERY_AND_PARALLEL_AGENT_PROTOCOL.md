@@ -1,5 +1,7 @@
 # PERMANENT RULE — Fast Delivery and Parallel-Agent Protocol (project-wide, mandatory)
 
+> **CURRENT 2026-11-02 PO OVERRIDE — GitHub CI removed.** Historical GitHub-gate procedures below describe the old model. After the live ruleset change there are NO GitHub Actions workflows or required status checks. Execute focused tests, local full matrix when requested, and real review evidence outside GitHub Actions. Protected PR-only merge, review-thread resolution and explicit PO acceptance remain mandatory; no local test may be weakened or mislabeled PASS.
+
 This is the single authoritative protocol for **how a delivery is executed quickly and safely**, and for **how
 more than one agent may work at once without corrupting a delivery**. It sits beside the
 [GitHub Execution and Delivery rule](GITHUB_EXECUTION_AND_DELIVERY_RULE.md), which governs *what* a delivery
