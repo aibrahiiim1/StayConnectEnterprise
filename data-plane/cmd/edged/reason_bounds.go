@@ -28,3 +28,14 @@ func validReason(reason string) bool {
 	_, ok := reasonText(reason)
 	return ok
 }
+
+// defaultSettingReason is what the audit trail records when an operator confirms an ordinary settings change without
+// typing a justification: the confirm dialog is the consent. Actions that need a real reason keep validReason.
+const defaultSettingReason = "Confirmed in the console"
+
+func settingReason(reason string) string {
+	if t := strings.TrimSpace(reason); t != "" {
+		return t
+	}
+	return defaultSettingReason
+}

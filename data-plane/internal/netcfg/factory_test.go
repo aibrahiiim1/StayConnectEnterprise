@@ -9,10 +9,10 @@ import (
 func TestFactoryNetworkIsTheSpecifiedOneAndValid(t *testing.T) {
 	n := Factory("ens192")
 	n.BridgeName = BridgeNameFor("untagged", 0, "factory")
-	if n.SubnetCIDR != "10.20.0.0/20" || n.GatewayIP != "10.20.0.1" || n.NetworkType != "untagged" || n.DHCPMode != DHCPLocal {
+	if n.SubnetCIDR != "10.20.0.0/19" || n.GatewayIP != "10.20.0.1" || n.NetworkType != "untagged" || n.DHCPMode != DHCPLocal {
 		t.Fatalf("%+v", n)
 	}
-	if len(n.Pools) != 1 || n.Pools[0].StartIP != "10.20.0.10" || n.Pools[0].EndIP != "10.20.15.254" {
+	if len(n.Pools) != 1 || n.Pools[0].StartIP != "10.20.0.10" || n.Pools[0].EndIP != "10.20.31.254" {
 		t.Fatalf("pool %+v", n.Pools)
 	}
 	if iss := ValidateOne(n, topoT(), map[string]bool{"ens192": true}, nil, ""); len(iss) != 0 {
@@ -21,8 +21,8 @@ func TestFactoryNetworkIsTheSpecifiedOneAndValid(t *testing.T) {
 	if !n.CaptiveEnabled || !n.InternetEnabled || !n.NATEnabled || n.DNSMode != "appliance" {
 		t.Fatalf("default services are not prepared: %+v", n)
 	}
-	if got := poolSizeOf(n.Pools); got != 4085 {
-		t.Fatalf("pool holds %d addresses, want 4085", got)
+	if got := poolSizeOf(n.Pools); got != 8181 {
+		t.Fatalf("pool holds %d addresses, want 8181", got)
 	}
 }
 

@@ -5,7 +5,6 @@ package main
 import (
 	"errors"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -50,7 +49,7 @@ func (s *server) setAccountRetention(w http.ResponseWriter, r *http.Request) {
 			b.Label+" must be between "+itoa(b.Min)+" and "+itoa(b.Max)+" "+b.Unit+".")
 		return
 	}
-	reason := strings.TrimSpace(in.Reason)
+	reason := settingReason(in.Reason)
 	if !validReason(reason) {
 		jsonErr(w, http.StatusBadRequest, "reason_required", "a bounded reason (4-500 characters) is required")
 		return

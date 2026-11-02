@@ -74,6 +74,17 @@ describe("Portal certificates", () => {
     expect(document.body.textContent).not.toContain("cf-secret-123");
   });
 
+  it("shows the Client Portal address first and the technical name second", async () => {
+    mockFetch([
+      { match: "/api/cloud/v1/portal-tls/settings", method: "GET", body: SETTINGS },
+      { match: "/api/cloud/v1/portal-tls/fleet", body: { items: [{ ...ROW, client_portal: "portal.onegate.getsemantics.com" }] } },
+    ]);
+    renderAs(PLATFORM_ME, <PortalCertificatesPage />);
+    const table = await screen.findByRole("table", { name: "Portal certificates" });
+    expect(within(table).getByText("portal.onegate.getsemantics.com")).toBeInTheDocument();
+    expect(within(table).getByText(/technical name /)).toBeInTheDocument();
+  });
+
   it("lists the fleet and revokes with a reason", async () => {
     const user = userEvent.setup();
     const { calls } = mockFetch([

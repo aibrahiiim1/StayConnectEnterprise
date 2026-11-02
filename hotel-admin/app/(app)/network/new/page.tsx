@@ -25,6 +25,7 @@ import { HelpList, HelpSection } from "@/components/help";
 import { HealthCheckList, SwitchRow, ValidationIssueList, useNetworkAccess } from "@/components/network/shared";
 import { isReauth, useNetworkChangeStepUp } from "@/components/network/change-step-up";
 import { SUBNET_SIZE_HINT, subnetSizeProblem } from "@/lib/network-subnet";
+import { addressingFor, suggestSubnet } from "@/lib/network-trunk";
 import {
   VlanAddressingTable, VlanIdList, newVlanRow, vlanPlanProblems, withSuggestedAddressing, type VlanRow,
 } from "@/components/network/vlan-plan";
@@ -104,6 +105,17 @@ export default function NewGuestNetworkPage() {
     }
   }, [step, interfaces]);
 
+  // A native network starts from the same /19 suggestion as a VLAN does; the operator may change every value.
+  useEffect(() => {
+    if (step !== 2 || vlanTagged || subnetCidr.trim()) return;
+    const s = suggestSubnet(20, new Set(existing.filter((n) => n.enabled).map((n) => n.subnet_cidr)));
+    const a = addressingFor(s);
+    if (!s || !a.gateway) return;
+    setSubnetCidr(s);
+    setGatewayIp(a.gateway);
+    setPools([{ start_ip: a.poolStart, end_ip: a.poolEnd }]);
+  }, [step, vlanTagged, subnetCidr, existing]);
+
   const onParent = existing.filter((n) => n.parent_interface === parentInterface && n.enabled);
   const untaggedHere = onParent.find((n) => n.network_type === "untagged");
   const usedVLANs = new Set(onParent.filter((n) => n.vlan_id).map((n) => n.vlan_id!));
@@ -144,7 +156,7 @@ export default function NewGuestNetworkPage() {
           if (first) return vlanProblems[first.key];
           return null;
         }
-        if (!subnetCidr.trim()) return "Subnet CIDR is required (e.g. 10.20.0.0/22).";
+        if (!subnetCidr.trim()) return "Subnet CIDR is required (e.g. 10.20.0.0/19).";
         if (subnetSizeProblem(subnetCidr)) return subnetSizeProblem(subnetCidr);
         if (!gatewayIp.trim()) return "Gateway IP is required.";
         if (usedSubnets.has(subnetCidr.trim())) return "That subnet is already used by another client network.";
@@ -506,7 +518,7 @@ export default function NewGuestNetworkPage() {
               ) : (
                 <>
                   <Field label="Subnet (CIDR)" required hint={`The whole address range of this network, e.g. 10.20.0.0/22. ${SUBNET_SIZE_HINT}`}>
-                    <Input value={subnetCidr} onChange={(e) => setSubnetCidr(e.target.value)} placeholder="10.20.0.0/22" className="font-mono" />
+                    <Input value={subnetCidr} onChange={(e) => setSubnetCidr(e.target.value)} placeholder="10.20.0.0/19" className="font-mono" />
                   </Field>
                   <Field
                     label="Gateway IP"

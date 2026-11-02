@@ -375,10 +375,11 @@ type portModePlan struct {
 	External []string             `json:"external_requirements"`
 }
 
-// suggestSubnet is the first 10.<n>.0.0/24 from the VLAN id up that overlaps nothing taken.
+// suggestSubnet is the first 10.<n>.0.0/19 from the VLAN id up that overlaps nothing taken (every client network is a
+// /19 by default: Product Owner, 2026-11-02).
 func suggestSubnet(vlan int, taken []string) string {
 	for i := 0; i < 250; i++ {
-		c := fmt.Sprintf("10.%d.0.0/24", (vlan+i)%250)
+		c := fmt.Sprintf("10.%d.0.0/19", (vlan+i)%250)
 		clash := false
 		for _, t := range taken {
 			if cidrsOverlap(c, t) {
@@ -558,8 +559,8 @@ func (s *server) planTrunk(ctx context.Context, port *portInfo, vlans []vlanRequ
 			gw = net.IPv4(base[0], base[1], base[2], base[3]+1).String()
 		}
 		if len(pools) == 0 {
-			if ones, _ := ipn.Mask.Size(); ones == 24 {
-				pools = []netcfg.Pool{{StartIP: net.IPv4(base[0], base[1], base[2], 100).String(), EndIP: net.IPv4(base[0], base[1], base[2], 250).String()}}
+			if start, end, ok := defaultPoolFor(ipn); ok {
+				pools = []netcfg.Pool{{StartIP: start, EndIP: end}}
 			} else {
 				plan.Conflicts = append(plan.Conflicts, fmt.Sprintf("Give VLAN %d an address pool.", v.VLANID))
 				continue
@@ -646,4 +647,22 @@ func (s *server) portPlanImpact(ctx context.Context, port *portInfo, plan *portM
 		ext = externalRequirements("untagged", nil, port.Name)
 	}
 	return s.consequencesFor(ctx, ids), ext
+}
+
+// defaultPoolFor is the DHCP pool a client network gets when the request names none: a /24 keeps .100 to .250; a wider
+// network (/19 to /23, the default being /19) starts at .10 and stops five addresses before the broadcast address. Any
+// other size must be given a pool.
+func defaultPoolFor(n *net.IPNet) (start, end string, ok bool) {
+	ones, bits := n.Mask.Size()
+	if bits != 32 || ones < 19 || ones > 24 {
+		return "", "", false
+	}
+	base := n.IP.To4()
+	if ones == 24 {
+		return net.IPv4(base[0], base[1], base[2], 100).String(), net.IPv4(base[0], base[1], base[2], 250).String(), true
+	}
+	size := uint32(1) << uint(32-ones)
+	first := uint32(base[0])<<24 | uint32(base[1])<<16 | uint32(base[2])<<8 | uint32(base[3])
+	toIP := func(v uint32) string { return net.IPv4(byte(v>>24), byte(v>>16), byte(v>>8), byte(v)).String() }
+	return toIP(first + 10), toIP(first + size - 6), true
 }

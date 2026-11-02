@@ -232,11 +232,14 @@ type FleetCert struct {
 }
 
 type FleetRow struct {
-	ApplianceID  string      `json:"appliance_id"`
-	Serial       string      `json:"serial"`
-	CustomerName *string     `json:"customer_name"`
-	SiteName     *string     `json:"site_name"`
-	Hostname     string      `json:"hostname"`
+	ApplianceID  string  `json:"appliance_id"`
+	Serial       string  `json:"serial"`
+	CustomerName *string `json:"customer_name"`
+	SiteName     *string `json:"site_name"`
+	Hostname     string  `json:"hostname"`
+	// ClientPortal is the shared Client Portal name this appliance's Clients use (portal.onegate.getsemantics.com), set
+	// while its portal address is the shared one. Hostname is the appliance's own technical name, not what Clients see.
+	ClientPortal *string     `json:"client_portal"`
 	PortalIP     *string     `json:"portal_ip"`
 	DNSState     string      `json:"dns_state"`
 	DNSError     *string     `json:"dns_error"`
@@ -295,6 +298,10 @@ func (s *Service) Fleet(ctx context.Context) ([]FleetRow, error) {
 		if h.PortalIP != "" {
 			ip := h.PortalIP
 			r.PortalIP = &ip
+			if sp := s.Opts.Shared(); sp.Enabled() && h.ReleasedAt == nil && ip == sp.Address.String() {
+				name := sp.Hostname
+				r.ClientPortal = &name
+			}
 		}
 		if h.DNSError != "" {
 			e := h.DNSError

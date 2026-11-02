@@ -17,3 +17,9 @@ func sysParentMAC(iface string) string {
 	}
 	return strings.TrimSpace(string(b))
 }
+
+// Both are variables so a test can stand in for /sys.
+var (
+	parentMACOf = sysParentMAC
+	bridgeMACOf = sysParentMAC
+)

@@ -170,7 +170,7 @@ describe("Operators (N-8)", () => {
     expect(screen.getByRole("link", { name: "Change my password: me@hotel" }).getAttribute("href")).toBe("/account/password");
   });
 
-  it("sign-in protection is saved with a reason and the password", async () => {
+  it("sign-in protection is saved after one confirmation", async () => {
     routes(["site_admin"]);
     put.mockResolvedValue({ config_version: 1 });
     const Page = (await import("@/app/(app)/operators/page")).default;
@@ -180,13 +180,12 @@ describe("Operators (N-8)", () => {
     await userEvent.clear(field);
     await userEvent.type(field, "3");
     const save = screen.getByRole("button", { name: "Save sign-in protection" }) as HTMLButtonElement;
-    expect(save.disabled, "a reason and the password are required").toBe(true);
-    await userEvent.type(screen.getByLabelText(/^Reason/), "tighten after the audit");
-    await userEvent.type(screen.getByLabelText(/Confirm your password/), "pw");
     await userEvent.click(save);
+    expect(screen.queryByLabelText(/Confirm your password/)).toBeNull();
+    await userEvent.click(await screen.findByRole("button", { name: "Confirm" }));
     await waitFor(() => expect(put).toHaveBeenCalledWith("/operators/signin-protection", {
       account_max_failures: 3, account_window_seconds: 900, ip_max_failures: 20, ip_window_seconds: 900,
-      lockout_seconds: 900, reason: "tighten after the audit", password: "pw",
+      lockout_seconds: 900,
     }));
   });
 

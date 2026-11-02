@@ -1,16 +1,15 @@
 "use client";
 
 // One collapsible panel for each operator policy the appliance bounds (sign-in protection, session limits,
-// disabled-account retention): the appliance supplies the values and their bounds, a change needs a reason and the
-// password, and a failure to load leaves the Operators page usable.
+// disabled-account retention): the appliance supplies the values and their bounds, a change is confirmed in a popup
+// (no reason or password to retype), and a failure to load leaves the Operators page usable.
 
 import { useCallback, useEffect, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { api } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Field, Input } from "@/components/ui/input";
-import { ErrorBanner } from "@/components/ui/error-banner";
+import { ConfirmDialog } from "@/components/ui/dialog";
 import { SettingField } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { errMsg, formatDate } from "@/lib/utils";
@@ -19,6 +18,7 @@ export type PolicySettings = { config_version: number; updated_at?: string | nul
 export type PolicyBound<S> = {
   key: keyof S & string;
   label: string; unit: string; min: number; max: number; default: number; explains: string;
+  allow_never?: boolean;
 };
 
 export function OperatorPolicyPanel<S extends PolicySettings>({
@@ -42,8 +42,7 @@ export function OperatorPolicyPanel<S extends PolicySettings>({
   const toast = useToast();
   const [data, setData] = useState<{ settings: S; bounds: PolicyBound<S>[] } | null>(null);
   const [edits, setEdits] = useState<Record<string, string>>({});
-  const [reason, setReason] = useState("");
-  const [password, setPassword] = useState("");
+  const [confirming, setConfirming] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -65,19 +64,16 @@ export function OperatorPolicyPanel<S extends PolicySettings>({
     return raw === undefined || raw.trim() === "" ? current(b) : Number(raw);
   };
   const dirty = bounds.some((b) => valueOf(b) !== current(b));
-  const outOfRange = bounds.some((b) => { const v = valueOf(b); return !Number.isInteger(v) || v < b.min || v > b.max; });
-  const reasonOk = reason.trim().length >= 4 && reason.trim().length <= 500;
+  const outOfRange = bounds.some((b) => { const v = valueOf(b); return !Number.isInteger(v) || (b.allow_never && v === 0 ? false : v < b.min) || v > b.max; });
 
   async function save() {
     setSaving(true); setErr(null);
     try {
       await api.put(endpoint, {
         ...Object.fromEntries(bounds.map((b) => [b.key, valueOf(b)])),
-        reason: reason.trim(),
-        password,
       });
       toast.success(saved.title, saved.body);
-      setReason(""); setPassword("");
+      setConfirming(false);
       await load();
     } catch (e) { setErr(errMsg(e)); } finally { setSaving(false); }
   }
@@ -107,37 +103,46 @@ export function OperatorPolicyPanel<S extends PolicySettings>({
                 key={b.key}
                 label={b.label}
                 unit={b.unit}
-                min={b.min}
+                min={b.allow_never ? 0 : b.min}
                 max={b.max}
                 defaultValue={b.default}
                 explanation={b.explains}
                 readOnly={!writable}
                 value={edits[b.key] ?? String(current(b))}
                 onChange={(v) => setEdits((m) => ({ ...m, [b.key]: v }))}
+                extra={b.allow_never && (
+                  <label className="mt-1.5 flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      disabled={!writable}
+                      checked={valueOf(b) === 0}
+                      onChange={(e) => setEdits((m) => ({ ...m, [b.key]: e.target.checked ? "0" : String(b.default) }))}
+                    />
+                    Never (no limit)
+                  </label>
+                )}
               />
             ))}
           </div>
           {writable && dirty && (
-            <div className="space-y-3 rounded-md border border-border bg-surface p-4">
-              <ErrorBanner err={err} className="mb-0" />
-              <Field label="Reason" required hint="Recorded with the change.">
-                <Input value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} />
-              </Field>
-              <Field label="Confirm your password" className="max-w-sm">
-                <Input type="password" autoComplete="current-password" value={password}
-                  onChange={(e) => setPassword(e.target.value)} />
-              </Field>
-              <div className="flex flex-wrap gap-2">
-                <Button disabled={saving || !password || !reasonOk || outOfRange} onClick={save}>
-                  {saving ? "Saving…" : saveLabel}
-                </Button>
-                <Button variant="ghost" disabled={saving} onClick={() => {
-                  setEdits(Object.fromEntries(bounds.map((b) => [b.key, String(current(b))])));
-                  setReason(""); setPassword(""); setErr(null);
-                }}>Discard changes</Button>
-              </div>
+            <div className="flex flex-wrap gap-2">
+              <Button disabled={saving || outOfRange} onClick={() => { setErr(null); setConfirming(true); }}>{saveLabel}</Button>
+              <Button variant="ghost" disabled={saving} onClick={() => {
+                setEdits(Object.fromEntries(bounds.map((b) => [b.key, String(current(b))])));
+                setErr(null);
+              }}>Discard changes</Button>
             </div>
           )}
+          <ConfirmDialog
+            open={confirming}
+            onOpenChange={setConfirming}
+            title={saveLabel}
+            description="The change applies right away."
+            confirmLabel="Confirm"
+            busy={saving}
+            error={err}
+            onConfirm={save}
+          />
         </div>
       </details>
     </Card>
