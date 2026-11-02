@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `0292089b64e375f820a776ac765ce748c70d24b8`
-- **HEAD commit:** `aaa24842`
-- **Provenance (generation HEAD = inventory_head):** `aaa2484266a27be5c82d378c8122f992d46dfcbc`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `e5ffe227`
+- **Provenance (generation HEAD = inventory_head):** `e5ffe2271272d6f2df61690c70db6ab9caf959fb`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/room-charge-confirm-only`
 - **Remote branch:** `origin/delivery/room-charge-confirm-only`
 - **Changed files:** 45
@@ -20,7 +20,7 @@
 | `data-plane/cmd/portald/portal_css.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Room sign-in during a roster refresh; in-page room-charge confirmation |
 | `data-plane/cmd/portald/templates.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Room sign-in during a roster refresh; in-page room-charge confirmation |
 | `data-plane/cmd/scd/phase3_attempts.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Room sign-in during a roster refresh; in-page room-charge confirmation |
-| `data-plane/cmd/scd/phase3_auth.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Room sign-in during a roster refresh; in-page room-charge confirmation |
+| `data-plane/cmd/scd/phase3_auth.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Room sign-in drain: read the roster and the drain state from one snapshot |
 | `data-plane/cmd/scd/phase3_offers.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Room sign-in: package names, room-charge confirmation, no refusal on roster refresh |
 | `data-plane/cmd/scd/phase3_roster_drain_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Room sign-in during a roster refresh; in-page room-charge confirmation |
 | `data-plane/internal/authctx/materialization_race_integration_test.go` | MODIFIED | `M` | tests/tooling | RUNTIME | rollback RESTORES prior content | Room sign-in during a roster refresh; in-page room-charge confirmation |
@@ -34,23 +34,23 @@
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: D90 and T0281 for PR #290 (room sign-in drain, room-charge confirmation), deployment read-back |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: D90 and T0281 for PR #290 (room sign-in drain, room-charge confirmation), deployment read-back |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: D90 and T0281 for PR #290 (room sign-in drain, room-charge confirmation), deployment read-back |
-| `docs/manifests/RoomSignInDrain20261102-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Governance: change manifest for PR #290 |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt for T0281 |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt for T0281 |
+| `docs/manifests/RoomSignInDrain20261102-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Governance: manifest regenerated for the delivery head |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt after the scd read-back |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt after the scd read-back |
+| `exports/chatgpt/phase-evidence/GIT_STAT_0f35f13f.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Packs rebuilt after the scd read-back |
 | `exports/chatgpt/phase-evidence/GIT_STAT_34fd1ce4.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Packs rebuilt for T0281 |
-| `exports/chatgpt/phase-evidence/GIT_STAT_401138cb.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Packs rebuilt for T0281 |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt for T0281 |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt for T0281 |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt after the scd read-back |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt after the scd read-back |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt for T0281 |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: D90 and T0281 for PR #290 (room sign-in drain, room-charge confirmation), deployment read-back |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt for T0281 |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt after the scd read-back |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: D90 and T0281 for PR #290 (room sign-in drain, room-charge confirmation), deployment read-back |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt for T0281 |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt for T0281 |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt for T0281 |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt for T0281 |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: D90 and T0281 for PR #290 (room sign-in drain, room-charge confirmation), deployment read-back |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: D90 and T0281 for PR #290 (room sign-in drain, room-charge confirmation), deployment read-back |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: the test appliance runs scd 0e6a972d (snapshot fix), read back |
 | `governance/transitions/T0281.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: D90 and T0281 for PR #290 (room sign-in drain, room-charge confirmation), deployment read-back |
 | `hotel-admin/app/(app)/portal-branding/strings.ts` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Room sign-in during a roster refresh; in-page room-charge confirmation |
 | `hotel-admin/app/(app)/room-charge/page.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Room charge approval: Yes/No confirmation, USD by default |
@@ -68,7 +68,7 @@
  data-plane/cmd/portald/portal_css.go               |   2 +
  data-plane/cmd/portald/templates.go                |  78 ++++++++-
  data-plane/cmd/scd/phase3_attempts.go              |  35 ++++
- data-plane/cmd/scd/phase3_auth.go                  |  51 +++++-
+ data-plane/cmd/scd/phase3_auth.go                  |  72 +++++++-
  data-plane/cmd/scd/phase3_offers.go                |   6 +-
  .../scd/phase3_roster_drain_integration_test.go    | 185 +++++++++++++++++++++
  .../materialization_race_integration_test.go       |  68 +++++++-
@@ -82,11 +82,11 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   4 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   4 +-
  docs/context/StayConnect-IAM-Handoff.md            |   4 +-
- .../RoomSignInDrain20261102-change-manifest.md     |  99 +++++++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 354565 -> 354556 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 177474 -> 177903 bytes
+ .../RoomSignInDrain20261102-change-manifest.md     | 125 ++++++++++++++
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 354565 -> 354555 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 177474 -> 177924 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_0f35f13f.txt   |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_34fd1ce4.txt   |   4 -
- .../chatgpt/phase-evidence/GIT_STAT_401138cb.txt   |   4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   6 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   6 +-
  .../governance/decision-register.json              |  12 ++
@@ -105,7 +105,7 @@
  hotel-admin/e2e/fixtures/portal-landing.html       |  78 ++++++++-
  hotel-admin/e2e/fixtures/portal-success.html       |   2 +
  hotel-admin/test/room-charge-page.test.tsx         |  46 ++---
- 45 files changed, 1074 insertions(+), 201 deletions(-)
+ 45 files changed, 1119 insertions(+), 203 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -115,6 +115,10 @@
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: e5ffe227 Packs rebuilt after the scd read-back
+HISTORICAL: 0f35f13f Governance: the test appliance runs scd 0e6a972d (snapshot fix), read back
+HISTORICAL: 0e6a972d Room sign-in drain: read the roster and the drain state from one snapshot
+HISTORICAL: 6cf9c29d Governance: manifest regenerated for the delivery head
 HISTORICAL: aaa24842 Packs rebuilt for T0281
 HISTORICAL: 401138cb Governance: change manifest for PR #290
 HISTORICAL: d2a934a4 Governance: D90 and T0281 for PR #290 (room sign-in drain, room-charge confirmation), deployment read-back
