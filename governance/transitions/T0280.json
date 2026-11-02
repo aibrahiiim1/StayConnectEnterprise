@@ -1,0 +1,33 @@
+{
+  "transition_id": "T0280",
+  "seq": 280,
+  "timestamp": "2026-11-02T08:27:58Z",
+  "timestamp_derivation": "Session clock after the live read-back on both hosts, before the commit that introduces this receipt.",
+  "record_type": "OPERATOR_REQUESTS_DELIVERY",
+  "authorisation": "D89, the Product Owner's mission of 2026-11-02 (complete PR #287; test appliance 172.21.96.97 and the affected Central components on 172.21.96.96).",
+  "deployment": {
+    "central": "172.21.96.96: onegate-central-f08c3413634d by central-deploy.sh (pre-deploy dump kept); DEPLOYED.json release_commit and ctrlapi vcs.revision f08c3413634d9e3556e152598b452b4dbf0fe998; smoke 9/9 PASS.",
+    "test_appliance": "172.21.96.97: onegate-appliance-f08c3413634d by appliance-install.sh --upgrade after a verified manual backup; all eight binaries embed f08c3413634d9e3556e152598b452b4dbf0fe998 unmodified with the production tag; no pending migration (0204 applied earlier the same day by onegate-appliance-591ad79f5140 as a platform migration); APPLIANCE_UNITS PASS."
+  },
+  "verification": "Tests: data-plane unit suite on Linux (71 packages), control-plane (19), the whole edged integration package against a factory-clean full schema with EDGED_ROLE_TEST_DSN and SCD_ROLE_TEST_DSN (759 PASS), Admin Console and Central console suites; Codex review clean on the merged head 69ff907e. Live: session limits Never/Never saved confirm-only and restored to 30 min/12 h; strict step-up refuses a missing or wrong password with 401 for backup-key add and WAN/LAN apply, creating nothing; a client-network confirm passes step-up without a password; br-g3 and br-g90 carry the parent NIC MAC 00:0c:29:6f:39:53; portal answers. Product Owner accepted VLAN 3 and Portal Templates. Not verified: a phone on the newest release, a real Google round trip.",
+  "not_touched": "PMS configuration and traffic, room-charge posting and every monetary path, payment providers, PKI and the Root CA, networking topology, every retired host.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "e275ad29e98b1ad16ad8a7d88d4b5dd36eac6e7f",
+  "previous_delivery": "T0279",
+  "decision": "D89",
+  "go_live": "NOT authorised."
+}
