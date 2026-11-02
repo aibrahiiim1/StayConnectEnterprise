@@ -1,0 +1,34 @@
+{
+  "transition_id": "T0282",
+  "seq": 282,
+  "timestamp": "2026-11-02T18:05:00Z",
+  "timestamp_derivation": "Session clock after verifying the merge on master and reading the posting record back from the test appliance, before the commit that introduces this receipt.",
+  "record_type": "PR290_MERGE_AND_ACCEPTANCE_RECORDS",
+  "authorisation": "The Product Owner's authorization of 2026-11-02 (complete the PR #290 delivery cleanup and merge a records-only correction end to end; documentation and governance only).",
+  "merge": "PR #290 merged by the Product Owner as 080f2b4f9e63665614fbde81d26687b6892cd160, a merge commit with parents 0292089b64e375f820a776ac765ce748c70d24b8 (master) and 5977c259163aee31fefa542b3da907707b66d2f0 (the reviewed and deployed head); migration 0205 and the roster-drain fix verified on master.",
+  "review": "Codex review of the final head 5977c259 completed with no findings (code_review has_any_findings=false, status completed); its one earlier finding (P2, on caf74104) was fixed in 0e6a972d and its thread resolved.",
+  "acceptance": "Product Owner acceptance on a mobile device on the test appliance 172.21.96.97 (reported by the Product Owner, 2026-11-02).",
+  "financial_evidence": "A room-charge posting from the PO's separate controlled test: posting attempt P#2 at 2026-11-02T17:09:03Z, outcome ACKED, Protel answer AS=OK, sent by onegate-appliance-caf74104392c (installed 16:47Z); the Product Owner confirmed the charge on the guest folio in Protel. Room, reservation and guest identifiers are withheld from published records (guest data never enters delivery evidence). The agent sent no charge.",
+  "branches": "delivery/room-charge-confirm-only deleted locally and on GitHub after the merge (0 commits outside master). governance/disable-github-ci-2026-11-02 (PR #291, closed unmerged) deleted on the PO's authorization; its history stays reachable at refs/pull/291/head = 01bdac8582784f15162ed683262bd16cfa44fa86.",
+  "deployment": "None. The test appliance keeps onegate-appliance-caf74104392c with scd 0e6a972d411d, the same code as master 080f2b4f.",
+  "not_touched": "Application code, deployments, infrastructure, GitHub protections and workflows, PMS configuration and traffic, financial execution permissions.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "PR #290 merged and PO-accepted. Go-Live remains unauthorised.",
+  "base": "0292089b64e375f820a776ac765ce748c70d24b8",
+  "previous_delivery": "T0281",
+  "decision": "D90",
+  "go_live": "NOT authorised."
+}
