@@ -111,6 +111,7 @@ type phase3Response struct {
 type phase3Offer struct {
 	PackageRevisionID string   `json:"package_revision_id"`
 	Code              string   `json:"code"`
+	Name              string   `json:"name"`
 	DownKbps          int      `json:"down_kbps"`
 	UpKbps            int      `json:"up_kbps"`
 	PriceMinor        int64    `json:"price_minor"`
@@ -418,6 +419,16 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 	// Ask whether the mirror can answer before looking at the room or evaluating evidence: the ordering is a
 	// security property (see mirrorStateFor) and keeps "cannot check right now" truthful.
 	mirror := p.mirrorStateFor(ctx, dev.GuestNetwork)
+	// A connected feed refuses for a few seconds after every complete sync while the new roster is written in
+	// (each one ~3.5 s at ~420 stays). The answer is site-wide, so waiting it out reveals nothing about any room;
+	// keep enough of the caller's deadline for the grant and enforcement that follow.
+	for waitStart := time.Now(); !mirror.CanAuthoriseAnyone && mirror.TransportStatus == "CONNECTED" && mirrorWaitAllowed(ctx, waitStart); {
+		select {
+		case <-ctx.Done():
+		case <-time.After(mirrorWaitStep):
+		}
+		mirror = p.mirrorStateFor(ctx, dev.GuestNetwork)
+	}
 	at.PMSTransportStatus = mirror.TransportStatus
 	at.MirrorLastCompleteSyncAt, at.MirrorAgeSeconds = mirror.LastCompleteSync, mirror.AgeSeconds
 	if !mirror.CanAuthoriseAnyone {
@@ -544,7 +555,7 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 	offers := make([]phase3Offer, 0, len(decisions))
 	for _, d := range decisions {
 		offers = append(offers, phase3Offer{
-			PackageRevisionID: d.PackageRevisionID, Code: d.Code,
+			PackageRevisionID: d.PackageRevisionID, Code: d.Code, Name: d.Name,
 			DownKbps: d.DownKbps, UpKbps: d.UpKbps,
 			PriceMinor: d.PriceMinor, Currency: d.Currency, CurrencyExponent: d.CurrencyExponent, Methods: d.Methods})
 	}

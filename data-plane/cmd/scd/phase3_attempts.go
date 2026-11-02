@@ -102,6 +102,24 @@ type mirrorState struct {
 	CanAuthoriseAnyone bool
 }
 
+const (
+	mirrorWaitStep = 150 * time.Millisecond
+	// mirrorWaitMax fits portald's 2.5 s guest budget with the grant and enforcement wait still ahead.
+	mirrorWaitMax     = 1100 * time.Millisecond
+	mirrorWaitReserve = 1100 * time.Millisecond // kept before a caller's deadline, when it sends one
+)
+
+// mirrorWaitAllowed: another mirror poll fits both the fixed cap and any caller deadline.
+func mirrorWaitAllowed(ctx context.Context, started time.Time) bool {
+	if ctx.Err() != nil || time.Since(started)+mirrorWaitStep > mirrorWaitMax {
+		return false
+	}
+	if dl, ok := ctx.Deadline(); ok {
+		return time.Until(dl) > mirrorWaitReserve+mirrorWaitStep
+	}
+	return true
+}
+
 // mirrorStateFor answers the site-wide question: can the local mirror authorise anybody right now?
 // The ordering is the security property: it is asked before any room is looked up and used to refuse with
 // MIRROR_STALE_OR_MISSING_CHANGE before evidence is evaluated, otherwise a per-room signal wearing a site-wide label would

@@ -1679,6 +1679,9 @@ const landingHTML = `<!doctype html>
       if (btn) btn.disabled = false;
     }
 
+    // The last refusal's sentence, so the sign-in can tell "the property could not check" from a wrong detail.
+    var PHASE3_LAST_MSG = '';
+
     async function submitPhase3(body, errEl) {
       let j = {};
       let reached = true;
@@ -1705,6 +1708,7 @@ const landingHTML = `<!doctype html>
         renderPhase3Choices(j.choices || [], errEl);
         return true;
       }
+      PHASE3_LAST_MSG = (j && typeof j.message === 'string') ? j.message : '';
       // EVERY other answer — including a transport failure — is the server's sentence or the uniform one.
       // NOTHING ABOUT THE FAILED ATTEMPT IS CARRIED FORWARD: the next tap mints its own id and is evaluated on
       // its own evidence. retry_after_seconds is present on exactly one answer — the restricted one — and it is
@@ -1748,7 +1752,7 @@ const landingHTML = `<!doctype html>
         const name = document.createElement('span');
         name.className = 'c-name';
         name.dir = 'auto';
-        name.textContent = c.code;
+        name.textContent = c.name || c.code;
         text.appendChild(name);
         const down = Math.round((c.down_kbps || 0) / 1000);
         if (down > 0) {
@@ -1768,6 +1772,9 @@ const landingHTML = `<!doctype html>
         b.appendChild(text);
         b.insertAdjacentHTML('beforeend', ICON_CHEV);
         b.addEventListener('click', async function() {
+          // A room charge posts to the guest's bill in the PMS: the guest confirms the amount first.
+          if (c.method === 'PMS_POSTING' &&
+              !window.confirm(t('room.confirm').split('{price}').join(c.price || '').split('{name}').join(c.name || c.code))) return;
           box.querySelectorAll('button').forEach(function(x){ x.disabled = true; });
           errEl.textContent = '';
           const ok = await submitPhase3({ auth_context_id: PMS_AUTH_CONTEXT, package_revision_id: c.package_revision_id, method: c.method || '' }, errEl);
@@ -1820,7 +1827,14 @@ const landingHTML = `<!doctype html>
         }
         // PHASE 3: THIS tap is one resolution request, so it gets an id of its own, minted here.
         body.request_id = newRequestID();
-        await submitPhase3(body, errEl);
+        const done = await submitPhase3(body, errEl);
+        // "Unable to verify your stay right now" is a property-wide pause (the guest list refreshing every few
+        // minutes takes a few seconds); it never answers a wrong detail. Ask once more on the guest's behalf.
+        if (!done && ROOM_MESSAGES[PHASE3_LAST_MSG] === 'err.room.technical') {
+          await new Promise(function(res){ setTimeout(res, 2000); });
+          body.request_id = newRequestID();
+          await submitPhase3(body, errEl);
+        }
       } catch (err) {
         errEl.textContent = PHASE3_FAIL();
       } finally {
