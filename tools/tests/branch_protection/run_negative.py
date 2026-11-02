@@ -47,8 +47,6 @@ def no(msg, detail=""):
 
 spec = json.loads(io.open(SPEC, encoding="utf-8").read())
 EXP = spec["expected"]
-CONTEXTS = EXP["required_status_checks"]["contexts"]
-IID = EXP["required_status_checks"]["integration_id"]
 
 # The canned "healthy" GitHub, matching governance/branch-protection.json exactly.
 GOOD_RULES = [
@@ -59,9 +57,6 @@ GOOD_RULES = [
         "required_review_thread_resolution": True,
         "dismiss_stale_reviews_on_push": True,
         "allowed_merge_methods": ["merge"]}},
-    {"type": "required_status_checks", "parameters": {
-        "strict_required_status_checks_policy": True,
-        "required_status_checks": [{"context": c, "integration_id": IID} for c in CONTEXTS]}},
 ]
 GOOD_SETS = [{"id": 1, "name": spec["ruleset_name"]}]
 GOOD_DETAIL = {"id": 1, "name": spec["ruleset_name"], "enforcement": "active", "bypass_actors": []}
@@ -112,8 +107,9 @@ def fixture():
     d = tempfile.mkdtemp(prefix="protck-")
     os.makedirs(os.path.join(d, ".github", "workflows"))
     os.makedirs(os.path.join(d, "governance"))
-    for f in os.listdir(WFDIR):
-        shutil.copy(os.path.join(WFDIR, f), os.path.join(d, ".github", "workflows", f))
+    if os.path.isdir(WFDIR):
+        for f in os.listdir(WFDIR):
+            shutil.copy(os.path.join(WFDIR, f), os.path.join(d, ".github", "workflows", f))
     shutil.copy(SPEC, os.path.join(d, "governance", "branch-protection.json"))
     return d
 
@@ -159,23 +155,24 @@ def rule(t):
     return [r for r in State.rules if r["type"] == t][0]
 
 
-# 1. THE REQUIRED CONTEXT QUIETLY DROPPED. Under D42 that is the Product Owner merge authorization, and
-#    without it a pull request could merge with no approval at all.
-def drop_context(_):
-    rule("required_status_checks")["parameters"]["required_status_checks"] = [
-        {"context": c, "integration_id": IID} for c in CONTEXTS if c != "po-merge-authorization"]
+# 1. Adding a CI check violates the PO's explicit no-CI decision.
+def add_ci_check(_):
+    State.rules.append({"type": "required_status_checks", "parameters": {
+        "strict_required_status_checks_policy": True,
+        "required_status_checks": [{"context": "po-merge-authorization", "integration_id": 15368}]}})
 
 
-case("a required gate removed from the ruleset is refused", drop_context, "MISSING")
+case("adding a required GitHub CI status rule is refused", add_ci_check, "still requires GitHub status checks")
 
 
-# 2. STRICT OFF: a stale branch could merge without ever seeing current master.
-def unstrict(_):
-    rule("required_status_checks")["parameters"]["strict_required_status_checks_policy"] = False
+# 2. Even an empty required-status rule must be removed.
+def add_empty_ci_rule(_):
+    State.rules.append({"type": "required_status_checks", "parameters": {
+        "strict_required_status_checks_policy": False,
+        "required_status_checks": []}})
 
 
-case("strict (branch must be current) turned off is refused", unstrict, "strict")
-
+case("adding an empty required-status rule is refused", add_empty_ci_rule, "still requires GitHub status checks")
 
 # 3. FORCE PUSH RE-ENABLED.
 def drop_nff(_):
@@ -217,14 +214,15 @@ def evaluate_only(_):
 case("enforcement downgraded to evaluate-only is refused", evaluate_only, "enforcement is")
 
 
-# 8. A CONTEXT NO LONGER PINNED to the GitHub Actions app: another app could satisfy it by name.
-def unpin(_):
-    rule("required_status_checks")["parameters"]["required_status_checks"] = [
-        {"context": c, "integration_id": (99999 if c == "po-merge-authorization" else IID)} for c in CONTEXTS]
+# 8. The recorded ruleset name must match the actual protecting ruleset.
+def wrong_ruleset_name(d):
+    p = os.path.join(d, "governance", "branch-protection.json")
+    doc = json.loads(io.open(p, encoding="utf-8").read())
+    doc["ruleset_name"] = "different-unprotected-ruleset"
+    io.open(p, "w", encoding="utf-8").write(json.dumps(doc, indent=2) + "\n")
 
 
-case("a required context not pinned to the Actions app is refused", unpin, "not pinned")
-
+case("an incorrect recorded ruleset name is refused", wrong_ruleset_name, "is not present")
 
 # 9. MERGE METHODS WIDENED. Squash/rebase rewrite the tree, breaking the validated-head-to-master link the
 #    evidence-reuse design depends on.
@@ -268,16 +266,13 @@ def api_dead(_):
 case("an unreachable API fails closed rather than passing", api_dead, "could not be read")
 
 
-# 14. A JOB RENAMED. The required context is the job NAME; rename it and the context never reports.
-def rename_job(d):
-    p = os.path.join(d, ".github", "workflows", "po-merge-authorization.yml")
-    t = io.open(p, encoding="utf-8").read()
-    old = "    name: po-merge-authorization\n"
-    assert old in t, "the merge-authorization job name is not where this fixture expects it"
-    io.open(p, "w", encoding="utf-8", newline="\n").write(t.replace(old, "    name: renamed-gate\n", 1))
+# 14. A changed approving-review count is visible, not silently accepted.
+def change_reviews(_):
+    rule("pull_request")["parameters"]["required_approving_review_count"] = 1
 
 
-case("renaming a gate job away from its required context is refused", rename_job, "exactly one job named")
+case("changed required approving-review count is refused", change_reviews, "required approving reviews")
+
 
 
 print("-" * 60)
@@ -285,7 +280,4 @@ print("BRANCH_PROTECTION_NEGATIVE pass=%d fail=%d" % (passed, failed))
 srv.shutdown()
 if failed:
     sys.exit(1)
-print("the protection check refuses a dropped gate, unstrict merges, restored force-push, unblocked "
-      "deletion, a removed PR requirement, an added bypass actor, evaluate-only enforcement, an unpinned "
-      "context, widened merge methods, disabled conversation resolution, a vanished ruleset, re-added "
-      "classic protection, an unreachable API, and a renamed gate job")
+print("the protection check refuses added required CI rules, weakened force-push/deletion/PR/merge/thread protections, bypass actors, inconsistent rulesets and classic overlap")
