@@ -1299,6 +1299,18 @@
       "title": "PRODUCTION-REAL OPERATING STANDARD and the real CHR PMS on the test appliance (2026-11-01): permanently, a feature is done only when it operates end to end in its authorized target environment with runtime evidence (configured is not working, working is not verified; CLAUDE.md 0I). The CHR Protel FIAS interface (150.0.0.18:5003) is commissioned on the test appliance 172.21.96.97 for non-financial traffic: pmsd configured and enabled, roster synchronized, live check-in/change/check-out processed, Room sign-in verified end to end on real stays; three connector defects (idle keepalive, periodic sweep, commit-time wake-up) and one readiness defect fixed.",
       "authorization_evidence": "The Product Owner's permanent instruction and immediate mission of 2026-11-01 (COMMISSION THE REAL CHR PMS on 172.21.96.97, non-financial; Room sign-in test on any in-house room authorized by the Product Owner the same day).",
       "does_not_authorize": "Room-charge posting or any other monetary transaction (a separately defined financial authority), payment-provider calls, refunds, Go-Live, destructive data changes, network or PKI changes, the production Central."
+    },
+    {
+      "id": "D89",
+      "decided_on": "2026-11-02",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-11-02",
+      "status": "ACTIVE",
+      "title": "OPERATOR REQUESTS 2026-11-02 (PR #287, merged f08c3413634d): the Client Portal address is shown first on Central; tagged-VLAN bridges carry the parent NIC's MAC live (VLAN 3 redirect, PO-accepted); every new client network defaults to /19 with CIDR-overlap suggestions and validation; Admin Console session limits accept Never (migration 0204; the store and the cookie honour it); portald serves the admin loopback over HTTP so template previews do not depend on the captive-portal address (PO-accepted); quiet Admin Console design; and two step-up levels: ordinary settings are confirm-only (a signed-in, CSRF-guarded session is the consent, a supplied password is still verified, an empty reason becomes 'Confirmed in the console'), while secrets, keys, backups, personal data, money, commercial terms, certificates/portal HTTPS, PMS configuration and decisions, provider secrets, reveals, operator management, WAN/LAN, enforcement policy and the guest-device setting always verify the password (pinned by stepup_strict_test.go).",
+      "authorization_evidence": "The Product Owner's mission of 2026-11-02 (complete PR #287 end to end: resolve the four Codex findings, test, merge through the protected process, deploy to the test appliance 172.21.96.97 and the affected Central components on 172.21.96.96, verify, synchronise records), after the PO personally accepted VLAN 3 and Portal Templates on the test appliance.",
+      "does_not_authorize": "Unrelated product changes, network topology changes, destructive operations, financial traffic, payment-provider calls, PKI or Root-CA changes, Go-Live."
     }
   ]
 }
