@@ -1,0 +1,33 @@
+{
+  "transition_id": "T0281",
+  "seq": 281,
+  "timestamp": "2026-11-02T17:20:00Z",
+  "timestamp_derivation": "Session clock after the live read-back on the test appliance, before the commit that introduces this receipt.",
+  "record_type": "ROOM_SIGN_IN_DRAIN_AND_ROOM_CHARGE_CONFIRMATION_DELIVERY",
+  "authorisation": "D90, the Product Owner's mission of 2026-11-02 (test appliance 172.21.96.97, existing test deployment authority).",
+  "deployment": {
+    "test_appliance": "172.21.96.97: onegate-appliance-caf74104392c by appliance-install.sh --upgrade (verified pre-migration backup by edge-migrate.sh; binaries kept as .bak-20261102T164746Z); RELEASE.json source_commit and all six Go binaries read back: vcs.revision caf74104392c, -tags=stayconnect_production, vcs.modified=false, each sha256 equal to DEPLOYED_BINARIES.sha256; schema ledger head 0205; p3_interface_roster_draining owned by iam_v2_owner, SECURITY DEFINER, EXECUTE for svc_scd; the room-charge posting settings in /etc/stayconnect unchanged; APPLIANCE_UNITS PASS.",
+    "central": "Not changed."
+  },
+  "verification": "Tests against a full schema built as iam_v2_owner with the svc_scd and svc_edged roles: internal/authctx 70 PASS 0 FAIL (drain admits a found guest, LIVE blocks during a drain, an abandoned generation is not a drain, no privilege widening); cmd/scd phase-3 subset 87 PASS 0 FAIL (five roster-drain tests incl. 12 concurrent sign-ins); cmd/portald unit suite PASS (in-page confirmation, six-language strings); hotel-admin room-charge and portal-profiles PASS. Live: a complete CHR sync was published at 16:58:27.9Z and drained 16:58:28.25-16:58:31.5 (404 pending RESYNC events falling to 52 at the last sample, no LIVE event); polled every 200 ms for ~6 min (1,750 samples), p3_interface_can_authorise stayed true in every sample including all 9 taken during the drain (before 0205 every drain sample refused every guest); no sign-in attempt, PMS posting or scd error after the upgrade. The portal page carries the in-page confirmation and no window.confirm. Not verified on a phone: the in-page confirmation and a room sign-in during a drain (no guest signed in during the observed drain).",
+  "not_touched": "PMS configuration and traffic (no charge sent by the agent), financial execution permissions, payment providers, PKI and the Root CA, networking topology, the production Central, every retired host.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "PR #290 is open and unmerged; the test appliance runs ahead of master. Go-Live remains unauthorised.",
+  "base": "0292089b64e375f820a776ac765ce748c70d24b8",
+  "previous_delivery": "T0280",
+  "decision": "D90",
+  "go_live": "NOT authorised."
+}

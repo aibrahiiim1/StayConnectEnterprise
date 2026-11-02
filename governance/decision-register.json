@@ -1311,6 +1311,18 @@
       "title": "OPERATOR REQUESTS 2026-11-02 (PR #287, merged f08c3413634d): the Client Portal address is shown first on Central; tagged-VLAN bridges carry the parent NIC's MAC live (VLAN 3 redirect, PO-accepted); every new client network defaults to /19 with CIDR-overlap suggestions and validation; Admin Console session limits accept Never (migration 0204; the store and the cookie honour it); portald serves the admin loopback over HTTP so template previews do not depend on the captive-portal address (PO-accepted); quiet Admin Console design; and two step-up levels: ordinary settings are confirm-only (a signed-in, CSRF-guarded session is the consent, a supplied password is still verified, an empty reason becomes 'Confirmed in the console'), while secrets, keys, backups, personal data, money, commercial terms, certificates/portal HTTPS, PMS configuration and decisions, provider secrets, reveals, operator management, WAN/LAN, enforcement policy and the guest-device setting always verify the password (pinned by stepup_strict_test.go).",
       "authorization_evidence": "The Product Owner's mission of 2026-11-02 (complete PR #287 end to end: resolve the four Codex findings, test, merge through the protected process, deploy to the test appliance 172.21.96.97 and the affected Central components on 172.21.96.96, verify, synchronise records), after the PO personally accepted VLAN 3 and Portal Templates on the test appliance.",
       "does_not_authorize": "Unrelated product changes, network topology changes, destructive operations, financial traffic, payment-provider calls, PKI or Root-CA changes, Go-Live."
+    },
+    {
+      "id": "D90",
+      "decided_on": "2026-11-02",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-11-02",
+      "status": "ACTIVE",
+      "title": "ROOM SIGN-IN DURING A PMS ROSTER REFRESH AND ROOM-CHARGE CONFIRMATION (PR #290, unmerged): migration 0205 lets a guest who is found sign in while a published refresh is written into the stays (a claimable LIVE event still blocks), and scd holds back a non-match while iam_v2.p3_interface_roster_draining is true, answering it as technical (never wrong details, never counted) if the drain outlasts 1.2 s; the portal confirms a room charge in an in-page panel with the exact package and amount (window.confirm is suppressed by captive-portal windows); room-charge approval is a Yes/No confirmation with USD as the default currency; the portal shows package names.",
+      "authorization_evidence": "The Product Owner's mission of 2026-11-02 (HIGH PRIORITY: fix PMS sign-in blocking and unresponsive package selection on the test appliance 172.21.96.97, under the existing test deployment authority, with tests and the protected delivery process), and the PO's instructions earlier the same day for the Yes/No room-charge approval with a USD default and for live room-charge posting on the test appliance.",
+      "does_not_authorize": "A merge (the PO's approval of the exact head is required), Go-Live, PMS configuration changes, networking topology, financial execution permission changes, additional real PMS charges by the agent, the production Central."
     }
   ]
 }

@@ -344,7 +344,7 @@
   "next_authorized_action": "Work normal missions under the PRODUCT-OWNER-LED DELIVERY model D42 (2026-09-26): implement, target-test, deploy routine software to the test appliance 172.21.96.97 under its standing deployment authorization (current_state_facts.standing_test_appliance_deployment_authorization) (the production Central only when a mission names it), stop at READY FOR PRODUCT OWNER TESTING, and merge only after explicit Product Owner acceptance (po-merge-approved). The comprehensive validation runs only on 'FULL CHECK THE WHOLE CODE'. Retired hosts (current_state_facts.retired_hosts) are never contacted.",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase7-Plan.md",
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
-  "latest_accepted_po_decision": "D89",
+  "latest_accepted_po_decision": "D90",
   "current_state_facts": {
     "_note": "MACHINE-READABLE CURRENT STATE. Every current-state surface in this repository is validated against these fields by tools/validate-current-state-parity.py, which runs in the Project Governance gate. They exist because prose alone let a contradiction survive a green gate: current_maturity still said an authorization was awaited and iam_v2 was 49/0 while this file already recorded 63 tables and an executed Live Increment 9. A fact that is only asserted in sentences cannot be diffed; a fact recorded here can be.",
     "phase": "7",
@@ -1339,7 +1339,7 @@
       "_note": "The current test appliance (Product-Owner record, 2026-10-28, D78/T0264). Activated on the production Central, in its trust universe.",
       "host": "172.21.96.97",
       "central": "central.onegate.getsemantics.com (41.128.240.133)",
-      "release": "onegate-appliance-f08c3413634d (2026-11-02, appliance-install.sh --upgrade from master f08c3413634d9e3556e152598b452b4dbf0fe998; RELEASE.json source_commit and all eight installed binaries read back: vcs.revision f08c3413634d, -tags=stayconnect_production, vcs.modified=false, each sha256 equal to DEPLOYED_BINARIES.sha256; schema ledger head 0204; D89/T0280)",
+      "release": "onegate-appliance-caf74104392c (2026-11-02, appliance-install.sh --upgrade from the delivery branch of PR #290, NOT master; caf74104392ca5a4eafbd776352e1025f8f372c9 read back from RELEASE.json and all six Go binaries: vcs.revision caf74104392c, -tags=stayconnect_production, vcs.modified=false, each sha256 equal to DEPLOYED_BINARIES.sha256; schema ledger head 0205; room-charge posting enabled in /etc/stayconnect by the PO's instruction of 2026-11-02; D90/T0281)",
       "status": "TEST. Go-Live not authorised. Routine software deployments are covered by the standing authorization D79.",
       "deployed_note": "The closure round of the audit-decision mission (T0270 to T0272) is deployed and verified on this appliance (T0273): migrations through 0179, units active, licence Active over mutual TLS, appliance Root CA pinned against its fingerprint, client journey 12/12, 500 simultaneous sign-in attempts answered with no busy answer. The earlier release (T0269) had stopped safely once at migration 0162 and was fixed by PR #266."
     },
@@ -1362,7 +1362,7 @@
       "dispositions": "docs/AUDIT_DECISION_DISPOSITIONS.md"
     }
   },
-  "latest_transition_id": "T0280",
+  "latest_transition_id": "T0281",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1858,16 +1858,16 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "OPERATOR_REQUESTS_2026_11_02",
-    "decision": "D89 (Product-Owner mission of 2026-11-02: complete PR #287 end to end).",
-    "decision_note": "PR #287 merged as f08c3413634d and installed on the test appliance and Central, read back from the installed files; migration 0204 applied; evidence in docs/reviews/OPERATOR_REQUESTS_2026_11_02.md.",
-    "manifest": "docs/manifests/OperatorRequests20261102-change-manifest.md",
-    "base": "e275ad29e98b1ad16ad8a7d88d4b5dd36eac6e7f",
-    "base_note": "Master after the merge of PR #286.",
-    "transition": "T0280",
-    "previous_delivery": "T0279",
-    "branch": "delivery/operator-requests-2026-11-02 (deleted after the merge)",
-    "note": "T0280. Go-Live not authorised."
+    "kind": "ROOM_SIGN_IN_DRAIN_AND_ROOM_CHARGE_CONFIRMATION",
+    "decision": "D90 (Product-Owner mission of 2026-11-02: fix PMS sign-in blocking and unresponsive package selection).",
+    "decision_note": "PR #290 open and unmerged; installed on the test appliance as onegate-appliance-caf74104392c, read back from the installed files; migration 0205 applied.",
+    "manifest": "docs/manifests/RoomSignInDrain20261102-change-manifest.md",
+    "base": "0292089b64e375f820a776ac765ce748c70d24b8",
+    "base_note": "Master after the merge of PR #289.",
+    "transition": "T0281",
+    "previous_delivery": "T0280",
+    "branch": "delivery/room-charge-confirm-only (PR #290)",
+    "note": "T0281. Merge requires the Product Owner's approval of the exact head. Go-Live not authorised."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
