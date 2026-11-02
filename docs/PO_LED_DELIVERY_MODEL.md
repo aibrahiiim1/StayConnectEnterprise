@@ -1,4 +1,6 @@
-# Product-Owner-Led Delivery Model (D42)
+# Product-Owner-Led Delivery Model (D42; amended 2026-11-02)
+
+**CURRENT AMENDMENT — Product Owner decision 2026-11-02 (no GitHub CI).** The PO explicitly removed all GitHub Actions workflows and all required status checks. This overrides D42's former CI mechanics, not its local test, PR, review, security, environment or financial authorization boundaries. GitHub's active ruleset must retain PR-only merges, merge commits, review-thread resolution, no bypass, no force push and no deletion. Never claim the change effective until the live ruleset was checked. Historical D42 material below remains only where it does not contradict this amendment.
 
 **Authoritative. Product-Owner governance decision D42, 2026-09-26, recorded by T0196.** It supersedes the
 Nightly Authoritative Delivery model ([`NIGHTLY_AUTHORITATIVE_DELIVERY.md`](NIGHTLY_AUTHORITATIVE_DELIVERY.md),
@@ -33,55 +35,19 @@ REQUEST → SCOPE → IMPLEMENT → FOCUSED SELF-REVIEW → TARGETED TESTS → F
   and pull request: fix, targeted tests, redeploy the affected component, return for testing. No new
   governance cycle per correction.
 
-## 2. Merge authorization — enforced, not remembered
+## 2. Merge authorization — PO controlled, without GitHub CI
 
-**NO PRODUCT OWNER ACCEPTANCE = NO MERGE.**
+**NO PO ACCEPTANCE = NO MERGE.** Approval is recorded in the mission/PR conversation and applies to the exact head reviewed; later changes require renewed approval. With GitHub CI removed, this is a mandatory delivery procedure, **not an automated GitHub status-check gate**. Do not apply or rely on `po-merge-approved` as a status-check substitute. No direct/force push or bypass, even for administrator accounts. GitHub cannot automatically prove PO approval once CI is removed.
 
-A merge to master needs an explicit Product-Owner instruction — *Approved*, *Merge it*, *Approved, merge*, or
-equally explicit — or a mission that said "implement and merge" in advance. Implementation completion and
-PRE-LIVE deployment never authorize a merge.
+## 3. Master protection
 
-GitHub enforces it:
+One active ruleset `master-protected-delivery`: protected PR-only merges, resolved review conversations, merge commits only, required approving reviews 0, deletion and force-push forbidden, no bypass actors, and **no required status checks**. There is no overlapping classic protection. Live ruleset and `governance/branch-protection.json` must match. Removing a required CI check must never remove the PR protection rule itself.
 
-| Mechanism | What it does |
-|---|---|
-| Ruleset `master-protected-delivery` | Requires exactly one status context, `po-merge-authorization`, pinned to the GitHub Actions app (15368). No bypass actors. |
-| `.github/workflows/po-merge-authorization.yml` | Re-evaluates on opened / reopened / synchronize / ready_for_review / converted_to_draft / labeled / unlabeled. Runs in seconds. |
-| `tools/po_merge_authorization.py` | Passes **only** while the pull request carries the label **`po-merge-approved`** on the exact head being judged and is not a draft. A push after approval **removes the label** and fails: what was tested is no longer what would merge. Every error fails. |
+## 4. FULL CHECK THE WHOLE CODE — opt-in, local only
 
-**Recording approval.** After the Product Owner's explicit instruction, the agent (or the Product Owner) applies
-`po-merge-approved`. GitHub keeps the labelling event, actor and time in the PR timeline, and the check prints
-them in its log. Then merge with a merge commit through the pull request.
+Run `python tools/full-check.py --ref <checked-out-head> --phase3-command '<real local command>' --phase4-command '<real local command>' --phase5-command '<real local command>'`, with each command executing the relevant complete existing suite against isolated infrastructure. The script runs `bash tools/preflight.sh --full` first and refuses to claim a full PASS if any local integration command is missing or fails. Also perform the required independent review, governance/state consistency, proven provenance and authorized environment verification. Never fake PASS from compilation or skip a required safety test.
 
-*Limit, stated plainly:* the Product Owner and the agent use one GitHub account, so the check cannot tell who
-applied the label. It makes an accidental or automatic merge impossible and every approval auditable. See
-`governance/branch-protection.json` → `residual_risks`.
-
-## 3. Master protection (unchanged except the required context)
-
-PR-only delivery; no direct push; no force push; no deletion; **merge commits only**; **no bypass actors**;
-conversation resolution required; **required approvals 0** (GitHub refuses self-approval on this
-single-collaborator repository); strict (branch current with master). Recorded in
-`governance/branch-protection.json` and compared with the live ruleset by `tools/validate-branch-protection.py`.
-
-## 4. FULL CHECK THE WHOLE CODE — explicit opt-in only
-
-The comprehensive validation runs **only** when the Product Owner says **"FULL CHECK THE WHOLE CODE"**. Then:
-
-1. `python tools/full-check.py --ref <branch>` — dispatches the four comprehensive gates (`governance`,
-   `phase3-full-software-gate`, `phase4-financial-core-gate`, `phase5-post-stay-transfer-gate`) at the ref,
-   waits, and reports each verdict for the exact head. The gates execute fresh (no evidence reuse).
-2. Full repository/code review, full relevant local suites and browser suites.
-3. Complete governance/state consistency: `bash tools/preflight.sh` (all stages), stale-state and closure
-   validation, packs, manifests and evidence synchronization.
-4. Complete provenance checks, and full live verification where deployment is authorized.
-5. Correct related failures; final comprehensive report.
-
-FULL CHECK does **not** authorize a merge, Go-Live, destructive database changes, new PMS or financial
-traffic, networking-architecture changes, or a deployment to an unnamed environment.
-
-The four gates are `workflow_dispatch` only. No pull request, push or schedule triggers them; that is asserted
-by `tools/validate-delivery-protocol.py`.
+No GitHub Actions workflow dispatches, pull-request CI or scheduled CI exist under the new PO decision. This removal does **not** authorize a merge, Go-Live, schema destruction, networking, Root CA, PMS/financial transactions, or unnamed deployments.
 
 ## 5. Controlled boundaries (stop for a new decision)
 
@@ -99,7 +65,7 @@ with the smallest practical final update, at a milestone or on request.
 
 ## 7. Nothing runs unattended
 
-No workflow has a schedule and no workflow merges. The nightly orchestrator
+No GitHub Actions workflows remain. No CI job runs automatically or on manual dispatch, and nothing merges automatically. The nightly orchestrator
 (`nightly-authoritative-validation.yml`) and its tooling (`tools/nightly_delivery.py`,
 `tools/nightly-status.py`, `scripts/ci/nightly-orchestrate.py`) were removed by T0196; the orchestrator was
 first disabled in GitHub (`disabled_manually`). Their history remains in Git and in T0182–T0195.
