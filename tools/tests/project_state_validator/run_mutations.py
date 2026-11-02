@@ -440,27 +440,16 @@ MUTATIONS = [
    ("replace", [("aibrahiiim1/StayConnectEnterprise.git", "attacker/Evil.git")])),
  ("M17 GH delivery decision removed", "governance/decision-register.json",
    ("replace", [('"id": "GH-SOURCE-OF-TRUTH"', '"id": "GH-SOURCE-OF-TRUTH-DISABLED"')])),
- ("M18 governance CI workflow missing", ".github/workflows/project-governance.yml",
-   ("remove", None)),
- ("M19 required CI validation command removed", ".github/workflows/project-governance.yml",
-   ("replace", [("python tools/project-state.py validate", "echo skip-validate")])),
- # M20 HAS NOW BEEN RETARGETED TWICE, AND THE SECOND TIME WAS A CORRECTION OF THE FIRST.
- #
- # Originally: "CI no longer runs on PRs to master", disabling `pull_request:`. T0183 removed that trigger in
- # favour of a nightly workflow_dispatch, so the anchor vanished and the case aborted the suite as fixture
- # drift; it was retargeted at the dispatch. T0184 then established by measurement that a dispatched run's
- # checks do NOT satisfy a ruleset-required status check, so `pull_request:` came back as the only trigger that
- # earns the context -- and this case comes back with it, testing exactly what it originally tested.
- #
- # Worth keeping the history visible: for the span of T0183 this case was pointed at a trigger that could not
- # earn the context at all, so it was proving the reachability of something unreachable.
- # D42 (T0196) retargets it a third time: the governance gate is FULL CHECK only, so the defect is losing the
- # trigger FULL CHECK THE WHOLE CODE dispatches.
- ("M20 the governance gate can no longer be dispatched, so FULL CHECK cannot run it",
-  ".github/workflows/project-governance.yml",
-   ("replace", [("  workflow_dispatch:\n", "  workflow_dispatch_disabled:\n")])),
- ("M21 CI job ignores failures", ".github/workflows/project-governance.yml",
-   ("append", "\n    continue-on-error: true\n")),
+ # PO NO-GITHUB-CI delivery (2026-11-02): these fixtures must now prove that
+ # a deleted CI cannot be reintroduced via current-state/config records.
+ ("M18 retired GitHub CI workflow pointer reintroduced", "governance/project-state.json",
+  ("json_set", [(["delivery_governance", "ci_workflow"], ".github/workflows/project-governance.yml")])),
+ ("M19 retired GitHub CI check name reintroduced", "governance/project-state.json",
+  ("json_set", [(["delivery_governance", "ci_check_name"], "governance")])),
+ ("M20 required GitHub Actions status context reintroduced", "governance/branch-protection.json",
+  ("json_set", [(["expected", "required_status_checks", "contexts"], ["po-merge-authorization"])])),
+ ("M21 protected master deletion rule weakened", "governance/branch-protection.json",
+  ("json_set", [(["expected", "deletion"], False)])),
  ("M22 agent-only-operations decision removed", "governance/decision-register.json",
    ("replace", [('"id": "GH-AGENT-ONLY-OPERATIONS"', '"id": "GH-AGENT-ONLY-OPERATIONS-DISABLED"')])),
  ("M23 rule flipped to require manual PO Git commands", "docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md",
@@ -631,35 +620,26 @@ MUTATIONS = [
  # comprehensive gates are FULL CHECK only and the one required context is the Product Owner merge
  # authorization. What these defend: no normal change runs the full matrix automatically, nothing runs on a
  # clock, FULL CHECK stays reachable and executes fresh, and no merge happens without a recorded approval.
- ("M61 a gate runs on pull_request again, so every normal change pays for the full matrix",
-  ".github/workflows/phase3-software.yml",
-   ("replace", [("  workflow_dispatch:\n", "  workflow_dispatch:\n  pull_request:\n    branches: [ master ]\n")])),
- ("M61b a gate stops executing fresh, so FULL CHECK could be satisfied by earlier evidence",
-  ".github/workflows/phase4-financial-core.yml",
-   ("replace", [("          NIGHTLY_VALIDATION: 'true'", "          NIGHTLY_VALIDATION: 'false'")])),
- ("M61c a gate is put back on a clock, so validation runs unattended again",
-  ".github/workflows/phase5-post-stay-transfer.yml",
-   ("replace", [("  workflow_dispatch:\n", "  workflow_dispatch:\n  schedule:\n    - cron: '0 6 * * *'\n")])),
- ("M61d the merge-authorization workflow stops running its decision",
-  ".github/workflows/po-merge-authorization.yml",
-   ("replace", [('          python3 "$f"\n', "          true\n")])),
- ("M61e the register declares a delivery model nobody enforces",
-  "governance/project-state.json",
-   ("json_set", [(["current_state_facts", "delivery_model"], "SOMETHING_ELSE")])),
- # THE SINGLE WORST DEFECT THIS MODEL CAN HAVE: an approval that survives a push. What the Product Owner
- # tested would no longer be what merges.
- ("M61f approval is no longer revoked by a new push",
-  ".github/workflows/po-merge-authorization.yml",
-   ("replace", [("types: [ opened, reopened, synchronize, ", "types: [ opened, reopened, ")])),
- ("M61g the merge-authorization workflow is deleted, so nothing blocks an unapproved merge",
-  ".github/workflows/po-merge-authorization.yml",
-   ("remove", None)),
- ("M62 a FULL CHECK can race another (concurrency block removed)",
-  ".github/workflows/phase4-financial-core.yml",
-   ("replace", [("concurrency:\n  group:", "removed_concurrency:\n  group:")])),
- ("M63 cancel-in-progress made true, so a running FULL CHECK can be cancelled",
-  ".github/workflows/phase5-post-stay-transfer.yml",
-   ("replace", [("  cancel-in-progress: false\n", "  cancel-in-progress: true\n")])),
+ # CI files are intentionally absent: prove the new machine policy refuses their
+ # resurrection and any weakening of protected PR delivery.
+ ("M61 required GitHub check recorded again", "governance/branch-protection.json",
+  ("json_set", [(["expected", "required_status_checks", "contexts"], ["governance"])])),
+ ("M61b retired FULL CHECK GitHub binding restored", "governance/branch-protection.json",
+  ("json_set", [(["full_check_gates", "project-governance.yml"], "governance")])),
+ ("M61c retired required job binding restored", "governance/branch-protection.json",
+  ("json_set", [(["workflow_job_bindings", "po-merge-authorization.yml"], "po-merge-authorization")])),
+ ("M61d CI workflow field restored in current state", "governance/project-state.json",
+  ("json_set", [(["delivery_governance", "ci_workflow"], ".github/workflows/project-governance.yml")])),
+ ("M61e the register declares a delivery model nobody enforces", "governance/project-state.json",
+  ("json_set", [(["current_state_facts", "delivery_model"], "SOMETHING_ELSE")])),
+ ("M61f no-bypass policy removed from recorded ruleset", "governance/branch-protection.json",
+  ("json_set", [(["expected", "bypass_actors"], [{"actor_id": 1, "actor_type": "OrganizationAdmin", "bypass_mode": "always"}])])),
+ ("M61g branch force-push protection removed", "governance/branch-protection.json",
+  ("json_set", [(["expected", "non_fast_forward"], False)])),
+ ("M62 merge methods widened beyond merge-commit", "governance/branch-protection.json",
+  ("json_set", [(["expected", "pull_request", "allowed_merge_methods"], ["merge", "squash"])])),
+ ("M63 review-thread resolution made optional", "governance/branch-protection.json",
+  ("json_set", [(["expected", "pull_request", "required_review_thread_resolution"], False)])),
  ("M64 the preflight hollowed out into a stub that still exits 0",
   "tools/preflight.sh",
    ("replace", [("python tools/check-fixture-parity.py || rc=1",
