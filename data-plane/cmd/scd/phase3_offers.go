@@ -20,6 +20,7 @@ type offerDecision struct {
 	PackageRevisionID string
 	PackageID         string
 	Code              string
+	Name              string // the operator's display name; the code when none is set
 	ServicePlanRevID  string
 	PackageType       string
 	DurationPolicy    []byte
@@ -123,7 +124,8 @@ func (p *phase3Auth) offersFor(ctx context.Context, stayID, interfaceID, guestNe
 	rows, err := p.srv.db.Query(ctx, `
 		SELECT ipr.id::text, ip.id::text, ip.code, ipr.service_plan_revision_id::text, ipr.package_type,
 		       ipr.duration_policy, COALESCE(spr.down_kbps,0), COALESCE(spr.up_kbps,0),
-		       ipr.price_minor, COALESCE(ipr.currency,''), COALESCE(ipr.currency_exponent,2), ipr.settlement_methods
+		       ipr.price_minor, COALESCE(ipr.currency,''), COALESCE(ipr.currency_exponent,2), ipr.settlement_methods,
+		       COALESCE(NULLIF(btrim(ipr.display->>'name'),''), ip.code)
 		  FROM iam_v2.internet_package_revisions ipr
 		  JOIN iam_v2.internet_packages ip
 		    ON ip.tenant_id=ipr.tenant_id AND ip.site_id=ipr.site_id AND ip.id=ipr.package_id
@@ -179,7 +181,7 @@ func (p *phase3Auth) offersFor(ctx context.Context, stayID, interfaceID, guestNe
 		var d offerDecision
 		if err := rows.Scan(&d.PackageRevisionID, &d.PackageID, &d.Code, &d.ServicePlanRevID,
 			&d.PackageType, &d.DurationPolicy, &d.DownKbps, &d.UpKbps,
-			&d.PriceMinor, &d.Currency, &d.CurrencyExponent, &d.SettlementMethods); err != nil {
+			&d.PriceMinor, &d.Currency, &d.CurrencyExponent, &d.SettlementMethods, &d.Name); err != nil {
 			return nil, err
 		}
 		candidates = append(candidates, d)

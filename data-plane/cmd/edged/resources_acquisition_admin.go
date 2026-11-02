@@ -546,6 +546,13 @@ func (s *server) setFinancialMirrorMaxAge(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, map[string]any{"max_age_seconds": got})
 }
 
+// The approval defaults when the operator only confirms: USD (the admin may record another currency), and the operator's
+// own confirmation of reservation-number uniqueness recorded in place of a typed vendor reference.
+const (
+	defaultOnboardingCurrency    = "USD"
+	defaultOnboardingAttestation = "Confirmed by the operator in the console: reservation numbers on this interface are unique and never reused."
+)
+
 func (s *server) approveFinancialOnboarding(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var in struct {
@@ -560,7 +567,8 @@ func (s *server) approveFinancialOnboarding(w http.ResponseWriter, r *http.Reque
 		jsonErr(w, http.StatusBadRequest, "bad_request", "interface and expected revision are required")
 		return
 	}
-	if !s.reauthStrict(r, in.Password) {
+	// Confirm-only (PO, 2026-11-02): the signed-in operator's Yes is the approval; a supplied password is still verified.
+	if !s.reauth(r, in.Password) {
 		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
@@ -570,6 +578,16 @@ func (s *server) approveFinancialOnboarding(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	cur := strings.ToUpper(strings.TrimSpace(in.Currency))
+	if cur == "" {
+		cur = defaultOnboardingCurrency
+	}
+	if strings.TrimSpace(in.PostingTarget) == "" {
+		in.PostingTarget = "RESERVATION"
+	}
+	if strings.TrimSpace(in.Attestation) == "" {
+		in.Attestation = defaultOnboardingAttestation
+	}
+	in.Reason = settingReason(in.Reason)
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	var rev string

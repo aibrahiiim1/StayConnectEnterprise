@@ -68,6 +68,16 @@ func (o *observations) add(p probeObservation) {
 	o.seen = append(o.seen, p)
 }
 
+// merge adds another probe's observations (one probe's final attempt, after any drain wait).
+func (o *observations) merge(other *observations) {
+	other.mu.Lock()
+	got := append([]probeObservation(nil), other.seen...)
+	other.mu.Unlock()
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.seen = append(o.seen, got...)
+}
+
 func (o *observations) summarise() (roomExists bool, eligible int, matched probeObservation, anyFailed bool) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -100,6 +110,31 @@ type mirrorState struct {
 	LastCompleteSync   *time.Time
 	AgeSeconds         *int64
 	CanAuthoriseAnyone bool
+}
+
+// A non-match during a roster drain waits for the drain (~3.5 s at ~420 stays, usually much less of it remains),
+// inside portald's 2.5 s guest budget with the grant still ahead.
+const (
+	drainWaitStep = 100 * time.Millisecond
+	drainWaitMax  = 1200 * time.Millisecond
+)
+
+const (
+	mirrorWaitStep = 150 * time.Millisecond
+	// mirrorWaitMax fits portald's 2.5 s guest budget with the grant and enforcement wait still ahead.
+	mirrorWaitMax     = 1100 * time.Millisecond
+	mirrorWaitReserve = 1100 * time.Millisecond // kept before a caller's deadline, when it sends one
+)
+
+// mirrorWaitAllowed: another mirror poll fits both the fixed cap and any caller deadline.
+func mirrorWaitAllowed(ctx context.Context, started time.Time) bool {
+	if ctx.Err() != nil || time.Since(started)+mirrorWaitStep > mirrorWaitMax {
+		return false
+	}
+	if dl, ok := ctx.Deadline(); ok {
+		return time.Until(dl) > mirrorWaitReserve+mirrorWaitStep
+	}
+	return true
 }
 
 // mirrorStateFor answers the site-wide question: can the local mirror authorise anybody right now?

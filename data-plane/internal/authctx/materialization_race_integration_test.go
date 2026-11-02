@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -93,8 +94,10 @@ func TestIntegration_Materialization_AbandonedGenerationDoesNotBlock(t *testing.
 	}
 }
 
-// A pending row at the published generation does block (the post-publish drain).
-func TestIntegration_Materialization_PublishedGenerationPendingBlocks(t *testing.T) {
+// The post-publish drain (0205): a pending row at the published generation no longer closes Room auth for a guest
+// who is found, and the drain is reported so scd holds back a NON-match until the rows are written in. Before 0205
+// this refused every guest for ~3.5 s after every complete sync, several times an hour.
+func TestIntegration_Materialization_PublishedGenerationDrainAdmitsAFoundGuest(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
 	s := seedCacheAge(t, p, "null")
@@ -117,12 +120,69 @@ func TestIntegration_Materialization_PublishedGenerationPendingBlocks(t *testing
 		}
 		published = 1
 	}
+	if draining(t, p, s) {
+		t.Fatal("setup: nothing is pending, so no drain may be reported")
+	}
 	admitPending(t, s, "RESYNC", published) // at the published generation: claimable
 
-	if authorizable(t, p, s) {
-		t.Fatal("a guest was authorised during the post-publish drain — the exact 3.5-second window measured " +
-			"on the appliance, where ~129 in-house guests did not yet exist in iam_v2.stays")
+	if !authorizable(t, p, s) {
+		t.Fatal("a materialized guest was refused during the post-publish drain: every complete sync closed Room " +
+			"sign-in for ~3.5 s although each stay row is either its previous or its refreshed state")
 	}
+	if !draining(t, p, s) {
+		t.Fatal("the drain was not reported, so scd would answer a guest still among the rows to come with " +
+			"'your details are wrong' (~129 in-house guests were unwritten after the first sync following a reset)")
+	}
+}
+
+// An abandoned (never published) generation is not a drain: the applier can never consume it.
+func TestIntegration_Materialization_AbandonedGenerationIsNotADrain(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	s := seedCacheAge(t, p, "null")
+	var published int64
+	if err := p.QueryRow(context.Background(),
+		`SELECT published_resync_generation FROM iam_v2.pms_interface_runtime WHERE pms_interface_id=$1`,
+		s.iface).Scan(&published); err != nil {
+		t.Fatal(err)
+	}
+	admitPending(t, s, "RESYNC", published+1)
+	if draining(t, p, s) {
+		t.Fatal("an unpublished generation was reported as a drain; non-matches would be held back forever")
+	}
+}
+
+// A LIVE event waiting during a drain still closes Room auth: it is newer than the roster and may be a checkout.
+func TestIntegration_Materialization_LivePendingBlocksDuringADrain(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	s := seedCacheAge(t, p, "null")
+	now := time.Now().UTC()
+	setFeed(t, p, s, "CONNECTED", "IN_SYNC", "CONTINUOUS", now)
+	setEvidenceAge(t, p, s, now.Add(-2*time.Hour))
+	if _, err := p.Exec(context.Background(), `UPDATE iam_v2.pms_interface_runtime
+		SET resync_generation_seq=GREATEST(resync_generation_seq,1), published_resync_generation=GREATEST(published_resync_generation,1)
+		WHERE pms_interface_id=$1`, s.iface); err != nil {
+		t.Fatal(err)
+	}
+	admitPending(t, s, "RESYNC", 1)
+	admitPending(t, s, "LIVE", 0)
+	if authorizable(t, p, s) {
+		t.Fatal("a guest was authorised with a LIVE event waiting behind a drain. If that event is a GO, this is a " +
+			"checked-out guest getting internet")
+	}
+}
+
+func draining(t *testing.T, p interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, s fixture) bool {
+	t.Helper()
+	var d bool
+	if err := p.QueryRow(context.Background(), `SELECT iam_v2.p3_interface_roster_draining($1,$2,$3)`,
+		s.tenant, s.site, s.iface).Scan(&d); err != nil {
+		t.Fatalf("p3_interface_roster_draining: %v", err)
+	}
+	return d
 }
 
 // Terminal rows (APPLIED, MANUAL_REVIEW, SKIPPED_DUPLICATE) never block.

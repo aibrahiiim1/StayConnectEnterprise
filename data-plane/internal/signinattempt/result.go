@@ -84,6 +84,9 @@ const (
 //     indistinguishable, or anyone in the lobby could enumerate occupied rooms and departures.
 //   - MIRROR_STALE_OR_MISSING_CHANGE is TECHNICAL and decided from feed state BEFORE any room lookup;
 //     deciding it only when a room is not found would leak what the previous bullet protects.
+//   - While a published refresh is written in (0205), EVERY non-match is held back and then answered as
+//     SERVICE_UNAVAILABLE (TECHNICAL) if the drain outlasts the wait: wrong room, wrong name and a departed stay
+//     stay indistinguishable from each other, so the drain discloses nothing about any room.
 //   - SPENT_REQUEST_ID is a client fault, so TECHNICAL.
 //   - VERIFIED_NO_ELIGIBLE_PACKAGE is TECHNICAL: the one accepted narrow distinguishability. Calling a
 //     correct guest wrong would be useless, at the cost that while a property's package configuration is

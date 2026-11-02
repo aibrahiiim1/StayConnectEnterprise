@@ -9,7 +9,7 @@ import Link from "next/link";
 import { api, ApiError } from "@/lib/api";
 import { canRead } from "@/lib/roles";
 import {
-  ANSWER_EFFECT_WORDS, ANSWER_NAMES, AnswerMeaning, OnboardingInterface, OnboardingResp, RESERVATION_TARGET, SiteModules,
+  ANSWER_EFFECT_WORDS, ANSWER_NAMES, AnswerMeaning, OnboardingInterface, OnboardingResp, SiteModules,
   postingTargetLabel, saveErrorMessage,
 } from "@/lib/payment-admin";
 import { formatDate } from "@/lib/utils";
@@ -33,8 +33,7 @@ import { RoomChargeLiveNotice } from "@/components/room-charge-live-notice";
 import { useOperatorRoles } from "@/lib/whoami-context";
 
 const FIAS = "protel-fias";
-const ATTESTATION_MIN = 20;
-const ATTESTATION_MAX = 2000;
+const DEFAULT_CURRENCY = "USD";
 const REASON_MIN = 4;
 const REASON_MAX = 500;
 const EVIDENCE_MIN = 20;
@@ -93,8 +92,8 @@ export default function RoomChargePage() {
             <HelpList
               items={[
                 <><strong>Posting target</strong> — always the guest&rsquo;s reservation: the room number and the reservation number together. Protel decides which folio receives the charge.</>,
-                <><strong>Base currency</strong> — the currency the PMS posts in. Packages charged to a room are priced in it.</>,
-                <><strong>Vendor confirmation</strong> — the PMS vendor&rsquo;s confirmation that reservation numbers are never reused. It is kept with the approval.</>,
+                <><strong>Base currency</strong> — the currency the PMS posts in, USD unless you change it. Packages charged to a room are priced in it.</>,
+                <><strong>Your confirmation</strong> — approving records that reservation numbers on this interface are unique and never reused.</>,
               ]}
             />
           </HelpSection>
@@ -364,28 +363,17 @@ function ApproveDialog({
   onConflict: (message: string) => Promise<void>;
 }) {
   const open = iface !== null;
-  const [currency, setCurrency] = useState("");
-  const [attestation, setAttestation] = useState("");
-  const [reason, setReason] = useState("");
-  const [password, setPassword] = useState("");
+  const [currency, setCurrency] = useState(DEFAULT_CURRENCY);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Prefill what is already recorded; clear everything, the password above all, on close.
+  // Prefill what is already recorded, USD otherwise; the admin may change it before confirming.
   useEffect(() => {
-    setCurrency(iface?.financial_base_currency ?? "");
-    setAttestation("");
-    setReason("");
-    setPassword("");
+    setCurrency(iface?.financial_base_currency || DEFAULT_CURRENCY);
     setError(null);
   }, [iface]);
 
-  const attLen = attestation.trim().length;
-  const ready =
-    /^[A-Z]{3}$/.test(currency) &&
-    attLen >= ATTESTATION_MIN && attLen <= ATTESTATION_MAX &&
-    reason.trim().length >= REASON_MIN && reason.trim().length <= REASON_MAX &&
-    password !== "";
+  const ready = /^[A-Z]{3}$/.test(currency);
 
   async function submit() {
     if (!iface || !ready) return;
@@ -395,9 +383,6 @@ function ApproveDialog({
         expected_revision_id: iface.current_revision_id,
         posting_target_model: "RESERVATION",
         currency,
-        attestation: attestation.trim(),
-        reason: reason.trim(),
-        password,
       });
       await onApproved();
     } catch (e) {
@@ -406,7 +391,6 @@ function ApproveDialog({
         return;
       }
       setError(saveErrorMessage(e));
-      setPassword("");
     } finally {
       setBusy(false);
     }
@@ -416,22 +400,17 @@ function ApproveDialog({
     <DialogForm
       open={open}
       onOpenChange={(v) => { if (!v) onClose(); }}
-      title={`Approve ${iface?.display_label || "interface"} for room charge`}
-      description="What you record here decides how charges are posted to guest reservations through this interface."
-      size="lg"
-      submitLabel="Approve for room charge"
+      title={`Approve ${iface?.display_label || "interface"} for room charge?`}
+      description="Charges will be posted to the guest's reservation (room + reservation number) through this interface."
+      submitLabel="Yes, approve"
+      cancelLabel="No"
       busyLabel="Approving…"
       busy={busy}
       error={error}
       disabled={!ready}
       onSubmit={submit}
     >
-      <div className="space-y-1 rounded-md border border-border bg-surface/40 px-3.5 py-2.5">
-        <div className="text-label">Posting target</div>
-        <div className="text-sm font-medium">{RESERVATION_TARGET.label}</div>
-        <p className="text-xs text-muted-foreground">{RESERVATION_TARGET.explanation}</p>
-      </div>
-      <Field label="Base currency" required hint="Three letters, the currency the PMS posts in. Two decimal places are fixed for FIAS.">
+      <Field label="Currency" hint="The currency the PMS posts in. USD unless you change it.">
         <Input
           value={currency}
           maxLength={3}
@@ -439,25 +418,6 @@ function ApproveDialog({
           className="w-28 font-mono uppercase"
           onChange={(e) => setCurrency(e.target.value.replace(/[^A-Za-z]/g, "").toUpperCase())}
         />
-      </Field>
-      <Field
-        label="Vendor confirmation"
-        required
-        hint={`The PMS vendor's confirmation that reservation numbers on this interface are unique and never reused: who confirmed it, when, and the document reference. ${attLen}/${ATTESTATION_MAX}, at least ${ATTESTATION_MIN}.`}
-      >
-        <Textarea
-          value={attestation}
-          maxLength={ATTESTATION_MAX}
-          rows={4}
-          placeholder="e.g. Protel support, 2026-09-20, ticket 48213: reservation numbers are unique in this database and never reused."
-          onChange={(e) => setAttestation(e.target.value)}
-        />
-      </Field>
-      <Field label="Reason" required hint={`Recorded in the activity log. ${reason.length}/${REASON_MAX}`}>
-        <Input value={reason} maxLength={REASON_MAX} onChange={(e) => setReason(e.target.value)} />
-      </Field>
-      <Field label="Confirm your password" required>
-        <Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
       </Field>
     </DialogForm>
   );

@@ -20,6 +20,7 @@ import (
 type scdOffer struct {
 	PackageRevisionID string   `json:"package_revision_id"`
 	Code              string   `json:"code"`
+	Name              string   `json:"name"`
 	DownKbps          int      `json:"down_kbps"`
 	UpKbps            int      `json:"up_kbps"`
 	PriceMinor        int64    `json:"price_minor"`
@@ -102,6 +103,7 @@ type phase3Out struct {
 type phase3Choice struct {
 	PackageRevisionID string `json:"package_revision_id"`
 	Code              string `json:"code"`
+	Name              string `json:"name"`
 	DownKbps          int    `json:"down_kbps"`
 	UpKbps            int    `json:"up_kbps"`
 	// Method and Price: one choice per (package, method) this stay may use; Price is display text.
@@ -154,7 +156,7 @@ func (h *handler) authPMSPhase3(w http.ResponseWriter, r *http.Request) {
 			ms = []string{"NOT_REQUIRED"}
 		}
 		for _, m := range ms {
-			choices = append(choices, phase3Choice{PackageRevisionID: o.PackageRevisionID, Code: o.Code,
+			choices = append(choices, phase3Choice{PackageRevisionID: o.PackageRevisionID, Code: o.Code, Name: o.Name,
 				DownKbps: o.DownKbps, UpKbps: o.UpKbps, Method: m,
 				Price: formatPrice(noWords, o.PriceMinor, o.Currency, o.CurrencyExponent)})
 		}
