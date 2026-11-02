@@ -1,5 +1,7 @@
 # PERMANENT RULE — GitHub Execution, Reporting and Delivery (project-wide, mandatory)
 
+> **CURRENT 2026-11-02 PO OVERRIDE — ZERO GITHUB CI.** GitHub Actions workflows and required status checks are retired; preserve protected PR-only merges, no bypass, no force push or deletion, resolved threads, merge commits only. PO approval remains mandatory before merge but is now procedural, not verified by a GitHub check. All required tests continue locally; full financial validation must be truthful. Earlier GH-MANDATORY-CI sections below are historical background, not active policy. Do not claim completion before the live Ruleset is updated.
+
 **Authoritative, permanent Product-Owner operating rule for the remainder of the StayConnect Enterprise project.** It governs how every future Phase and milestone is executed, verified, reported and delivered through GitHub. It is a companion to, and does not replace, the [Zero-Stale-Leftovers rule](ZERO_STALE_LEFTOVERS_RULE.md) or the machine-readable project-state governance (`governance/project-state.json`, `tools/project-state.py`). Where this rule and the project-state governance overlap, both must pass.
 
 <!-- MACHINE ASSERTION - validated by tools/project-state.py -->
