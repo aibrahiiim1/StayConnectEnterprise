@@ -1,4 +1,0 @@
-commit 0f35f13f7352db1c41c44b617ae2c697d65a52be
-Date:   Mon Nov 2 19:06:40 2026 +0200
-
-    Governance: the test appliance runs scd 0e6a972d (snapshot fix), read back
