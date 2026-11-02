@@ -1362,7 +1362,7 @@
       "dispositions": "docs/AUDIT_DECISION_DISPOSITIONS.md"
     }
   },
-  "latest_transition_id": "T0282",
+  "latest_transition_id": "T0283",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1864,10 +1864,10 @@
     "manifest": "docs/manifests/RoomSignInDrain20261102-change-manifest.md",
     "base": "0292089b64e375f820a776ac765ce748c70d24b8",
     "base_note": "Master after the merge of PR #289.",
-    "transition": "T0282",
-    "previous_delivery": "T0281",
-    "branch": "delivery/room-charge-confirm-only (deleted after the merge); records correction on governance/pr290-merge-records",
-    "note": "T0281 delivery, T0282 merge and acceptance records. Go-Live not authorised."
+    "transition": "T0283",
+    "previous_delivery": "T0282",
+    "branch": "delivery/room-charge-confirm-only (deleted after the merge); records on governance/pr290-merge-records (merged 13466865, deleted) and governance/t0282-timestamp-correction",
+    "note": "T0281 delivery, T0282 merge and acceptance records, T0283 forward correction of the T0281 and T0282 timestamps. Go-Live not authorised."
   },
   "onboarding_reconciliation": {
     "decision": "D37",

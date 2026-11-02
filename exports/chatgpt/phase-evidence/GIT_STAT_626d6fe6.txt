@@ -1,4 +1,0 @@
-commit 626d6fe6135c3fcbc94d10a63a1cce2dcbd33b6c
-Date:   Mon Nov 2 19:50:42 2026 +0200
-
-    Governance: T0282 records PR #290's merge (080f2b4f), clean Codex review, PO mobile acceptance and the acknowledged room-charge posting
