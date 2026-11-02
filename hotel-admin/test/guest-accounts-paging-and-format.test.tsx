@@ -155,12 +155,14 @@ describe("Client accounts — generated-password format", () => {
     const user = userEvent.setup();
     render(<Page />);
 
+    // The password format lives under Account settings.
+    await user.click(await screen.findByRole("button", { name: /account settings/i }));
     expect(await screen.findByText("Upper and lower case letters and digits")).toBeTruthy();
     expect(screen.getByTestId("password-format-example").textContent).toMatch(/^[A-HJ-NP-Za-km-z2-9]{14}$/);
     expect(screen.getByText(/keypad kiosk/)).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: /change format/i }));
-    const dialog = await screen.findByRole("dialog");
+    const dialog = (await screen.findByRole("button", { name: "Save format" })).closest("[role=dialog]") as HTMLElement;
     const lengths = () =>
       within(dialog).getAllByRole("option").map((o) => Number((o as HTMLOptionElement).value));
     expect(lengths()[0]).toBe(7);
@@ -191,9 +193,10 @@ describe("Client accounts — generated-password format", () => {
     wire(["front_office_operator"]);
     const { default: Page } = await import("@/app/(app)/guest-accounts/page");
     render(<Page />);
+    expect(await screen.findByRole("button", { name: /add account/i })).toBeTruthy();
+    await userEvent.click(await screen.findByRole("button", { name: /account settings/i }));
     expect(await screen.findByText("Upper and lower case letters and digits")).toBeTruthy();
     expect(screen.getByText(/can see the format but not change it/i)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /change format/i })).toBeNull();
-    expect(screen.getByRole("button", { name: /add account/i })).toBeTruthy();
   });
 });

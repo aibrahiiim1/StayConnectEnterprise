@@ -12,7 +12,8 @@ import {
   type AccountPasswordStyle,
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
+import { QuietDescription } from "@/components/ui/quiet";
 import { DialogForm } from "@/components/ui/dialog";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { Field, Input, Select } from "@/components/ui/input";
@@ -86,11 +87,11 @@ export function PasswordFormatCard({ canEdit }: { canEdit: boolean }) {
   return (
     <Card>
       <CardHeader>
-        <div className="space-y-0.5">
+        <div className="flex items-center gap-1">
           <CardTitle>Generated passwords</CardTitle>
-          <CardDescription>
+          <QuietDescription>
             What a password looks like when you choose &ldquo;Generate&rdquo;. Existing passwords are not changed.
-          </CardDescription>
+          </QuietDescription>
         </div>
         {canEdit && format && (
           <Button size="sm" variant="secondary" onClick={() => setEditing(true)}>

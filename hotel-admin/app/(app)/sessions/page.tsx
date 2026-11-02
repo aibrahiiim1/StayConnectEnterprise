@@ -25,7 +25,7 @@ import { DetailsDrawer } from "@/components/ui/details-drawer";
 import { PackageControls } from "@/components/package-controls";
 import { Explain } from "@/components/ui/tooltip";
 import { DList, Meter, MonoId, Metric, SkeletonRows } from "@/components/ui/misc";
-import { Pagination, ResultsCount, SearchInput } from "@/components/ui/data";
+import { Pagination, ResultsCount, SearchInput, FilterChips } from "@/components/ui/data";
 import { LiveStatus, ReadOnlyNotice, refreshingClass } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
@@ -252,19 +252,19 @@ export default function SessionsPage() {
           }
           actions={<ResultsCount count={rows?.length} noun="session" more={list.hasMore} />}
         >
-              <Select
-                value={kind}
-                onChange={(e) => setKind(e.target.value)}
-                aria-label="Filter by how the client signed in"
-                className="w-full sm:w-52"
-              >
-                <option value="">All sign-in types</option>
-                {rooms && <option value="room">Room ({kindCounts.room ?? 0})</option>}
-                <option value="account">Account ({kindCounts.account ?? 0})</option>
-                <option value="voucher">Voucher ({kindCounts.voucher ?? 0})</option>
-                {identity && <option value="guest">Email / social ({kindCounts.guest ?? 0})</option>}
-                <option value="open">Without sign-in ({kindCounts.open ?? 0})</option>
-              </Select>
+              <FilterChips<string>
+                label="How the client signed in"
+                value={kind || "all"}
+                onChange={(v) => setKind(v === "all" ? "" : v)}
+                options={[
+                  { value: "all", label: "All" },
+                  ...(rooms ? [{ value: "room", label: "Room", count: kindCounts.room ?? 0 }] : []),
+                  { value: "account", label: "Account", count: kindCounts.account ?? 0 },
+                  { value: "voucher", label: "Voucher", count: kindCounts.voucher ?? 0 },
+                  ...(identity ? [{ value: "guest", label: "Email / social", count: kindCounts.guest ?? 0 }] : []),
+                  { value: "open", label: "No sign-in", count: kindCounts.open ?? 0 },
+                ]}
+              />
               {tab !== "active" && (
                 <Select
                   value={history}
@@ -373,15 +373,7 @@ export default function SessionsPage() {
         open={confirm !== null}
         onOpenChange={(v) => !v && setConfirm(null)}
         title={confirm ? `Disconnect ${identifySession(confirm, multi).title}'s device?` : "Disconnect this device?"}
-        description={
-          confirm
-            ? `${identifySession(confirm, multi).title} will lose internet access on this device immediately. ${
-                typeof confirm.active_devices === "number" && confirm.active_devices > 1
-                  ? `Their ${confirm.active_devices - 1} other device${confirm.active_devices - 1 === 1 ? "" : "s"} stay online`
-                  : "They have no other device online"
-              }, and they can sign in again.`
-            : undefined
-        }
+        description="This device loses internet access now. The client can sign in again."
         confirmLabel="Disconnect"
         confirmVariant="danger"
         busy={busy}
@@ -439,18 +431,14 @@ const SessionRow = memo(function SessionRow({
                   ? "block truncate font-mono text-xs text-muted-foreground"
                   : "block truncate font-medium"
               }
-              title={id.title}
+              title={id.anonymous ? `${id.title} — no client record on this session` : id.title}
             >
               {id.title}
             </span>
             {id.subtitle && (
               <span className="block truncate text-xs text-muted-foreground" title={id.subtitle}>{id.subtitle}</span>
             )}
-            {id.anonymous && (
-              <span className="block text-2xs text-muted-foreground">
-                No client record on this session
-              </span>
-            )}
+            {id.anonymous && <span className="sr-only">No client record on this session</span>}
           </span>
         </div>
       </TD>

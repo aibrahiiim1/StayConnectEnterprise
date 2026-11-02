@@ -1,5 +1,7 @@
 "use client";
 
+import { InfoHint } from "@/components/ui/quiet";
+import { Explain } from "@/components/ui/tooltip";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   api, ApiError, GuestAccount, GuestAccountCreateResp,
@@ -15,7 +17,7 @@ import { HelpList, HelpSection } from "@/components/help";
 import { Card, CardBody, CardFooter } from "@/components/ui/card";
 import { Table, TBody, THead, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Input, Field } from "@/components/ui/input";
+import { Input, Field, QuietHints } from "@/components/ui/input";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
@@ -30,7 +32,7 @@ import { Switch, SkeletonRows } from "@/components/ui/misc";
 import { PasswordFormatCard } from "@/components/guest-accounts/password-format";
 import { OneTimeReveal, ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
-import { Plus, KeyRound, Eye, EyeOff, Pencil, Power, Users, Send, LogIn, Monitor } from "lucide-react";
+import { Plus, KeyRound, Eye, EyeOff, Pencil, Power, Users, Send, LogIn, Monitor, Settings2 } from "lucide-react";
 import { formatRelative } from "@/lib/utils";
 import { REASON_HINT, REASON_MAX_CHARS, reasonOk } from "@/lib/reason";
 import { isRemovedAccount, verificationStatus } from "@/lib/account-verification";
@@ -41,11 +43,12 @@ import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
 const PAGE_SIZES = [25, 50, 100, 200];
 // No "Locked out" filter or count: protection is per device, and guest_access_accounts.locked_until is never set, so it
 // would always read 0.
+// "Can sign in" first: the accounts in use are what the desk looks for; "All accounts" stays one tap away.
 const STATUS_FILTERS: { value: string; label: string }[] = [
-  { value: "", label: "All accounts" },
   { value: "enabled", label: "Can sign in" },
   { value: "disabled", label: "Disabled" },
   { value: "removed", label: "Removed" },
+  { value: "", label: "All accounts" },
 ];
 
 type GuestAccountToggleResp = GuestAccount & {
@@ -71,7 +74,8 @@ export default function GuestAccountsPage() {
   const [showNew, setShowNew] = useState(false);
   const [busy, setBusy] = useState(false);
   const [q, setQ] = useState("");
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useState("enabled");
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [pageSize, setPageSize] = useState(PAGE_SIZES[1]);
   const [offset, setOffset] = useState(0);
   const [resp, setResp] = useState<AccountsPageResp | null>(null);
@@ -345,6 +349,7 @@ export default function GuestAccountsPage() {
   const searching = q.trim() !== "" || status !== "";
 
   return (
+    <QuietHints>
     <PageShell width="wide">
       <PageHeader
         title="Client accounts"
@@ -376,11 +381,18 @@ export default function GuestAccountsPage() {
           </>
         }
         actions={
-          mayWrite ? (
-            <Button onClick={openNew}>
-              <Plus /> Add account
-            </Button>
-          ) : undefined
+          <>
+            {roles !== null && (
+              <Button variant="secondary" onClick={() => setSettingsOpen(true)}>
+                <Settings2 /> Account settings
+              </Button>
+            )}
+            {mayWrite && (
+              <Button onClick={openNew}>
+                <Plus /> Add account
+              </Button>
+            )}
+          </>
         }
       />
 
@@ -397,33 +409,36 @@ export default function GuestAccountsPage() {
         />
       </StatGrid>
 
-      <Card>
-        <CardBody className="flex flex-wrap items-center justify-between gap-4">
-          <div className="min-w-0 space-y-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <label htmlFor="portal-offer" className="text-emphasis">
-                Offer username-and-password sign-in on the Client Portal
-              </label>
-              <StatusBadge tone={portalOn ? "ok" : "default"}>{portalOn ? "Shown on the portal" : "Hidden"}</StatusBadge>
+      <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <DialogContent size="lg">
+          <DialogHeader>
+            <DialogTitle>Account settings</DialogTitle>
+            <DialogDescription className="sr-only">Whether clients see username-and-password sign-in, and the format of generated passwords.</DialogDescription>
+          </DialogHeader>
+          <DialogBody className="space-y-5">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <label htmlFor="portal-offer" className="text-emphasis">Show on the Client Portal</label>
+                <StatusBadge tone={portalOn ? "ok" : "default"}>{portalOn ? "Shown" : "Hidden"}</StatusBadge>
+                <InfoHint>
+                  {portalOn
+                    ? "Clients can sign in with the accounts staff created here, on every network that has not switched this method off."
+                    : "The tab is hidden, so accounts staff created cannot be used even though they exist."}
+                  {roles !== null && !mayOfferOnPortal && " Your role cannot change which sign-in methods are offered."}
+                </InfoHint>
+              </div>
+              <Switch
+                id="portal-offer"
+                checked={portalOn}
+                onCheckedChange={onTogglePortal}
+                disabled={!mayOfferOnPortal}
+                label="Offer username-and-password sign-in"
+              />
             </div>
-            <p className="text-caption text-muted-foreground">
-              {portalOn
-                ? "Clients can sign in with the accounts staff created here, on every network that has not switched this method off."
-                : "The tab is hidden, so accounts staff created cannot be used even though they exist."}
-              {roles !== null && !mayOfferOnPortal && " Your role cannot change which sign-in methods are offered."}
-            </p>
-          </div>
-          <Switch
-            id="portal-offer"
-            checked={portalOn}
-            onCheckedChange={onTogglePortal}
-            disabled={!mayOfferOnPortal}
-            label="Offer username-and-password sign-in"
-          />
-        </CardBody>
-      </Card>
-
-      <PasswordFormatCard canEdit={mayEditFormat} />
+            <PasswordFormatCard canEdit={mayEditFormat} />
+          </DialogBody>
+        </DialogContent>
+      </Dialog>
 
       <OneTimeReveal
         open={reveal !== null}
@@ -434,8 +449,9 @@ export default function GuestAccountsPage() {
         concealable
         onAcknowledge={() => setReveal(null)}
       >
-        <p className="text-caption text-muted-foreground">
-          If this is lost, there is no way to recover it — you would set a new password instead.
+        <p className="flex items-center gap-1 text-caption text-muted-foreground">
+          It cannot be recovered later.
+          <InfoHint>If this is lost, there is no way to recover it — you would set a new password instead.</InfoHint>
         </p>
       </OneTimeReveal>
 
@@ -591,10 +607,8 @@ export default function GuestAccountsPage() {
       <Dialog open={showNew} onOpenChange={(v) => !v && !busy && setShowNew(false)}>
         <DialogContent size="lg">
           <DialogHeader>
-            <DialogTitle>Add a client account</DialogTitle>
-            <DialogDescription>
-              The client signs in with this username and password. The password is shown once, after you save.
-            </DialogDescription>
+            <DialogTitle className="flex items-center gap-1">Add a client account<Explain>The client signs in with this username and password. The password is shown once, after you save.</Explain></DialogTitle>
+            <DialogDescription className="sr-only">The client signs in with this username and password. The password is shown once, after you save.</DialogDescription>
           </DialogHeader>
           <DialogBody>
             <ErrorBanner err={formErr} />
@@ -606,10 +620,8 @@ export default function GuestAccountsPage() {
       <Dialog open={editing !== null} onOpenChange={(v) => !v && !busy && setEditing(null)}>
         <DialogContent size="lg">
           <DialogHeader>
-            <DialogTitle>Edit {editing?.username}</DialogTitle>
-            <DialogDescription>
-              Changing the username does not disconnect anyone who is already online.
-            </DialogDescription>
+            <DialogTitle className="flex items-center gap-1">Edit {editing?.username}<Explain>Changing the username does not disconnect anyone who is already online.</Explain></DialogTitle>
+            <DialogDescription className="sr-only">Changing the username does not disconnect anyone who is already online.</DialogDescription>
           </DialogHeader>
           <DialogBody>
             <ErrorBanner err={formErr} />
@@ -629,10 +641,8 @@ export default function GuestAccountsPage() {
       <Dialog open={pwFor !== null} onOpenChange={(v) => !v && !busy && setPwFor(null)}>
         <DialogContent size="md">
           <DialogHeader>
-            <DialogTitle>Set a new password for {pwFor?.username}</DialogTitle>
-            <DialogDescription>
-              The new password is shown once, after you save. The old one stops working immediately.
-            </DialogDescription>
+            <DialogTitle className="flex items-center gap-1">Set a new password for {pwFor?.username}<Explain>The new password is shown once, after you save. The old one stops working immediately.</Explain></DialogTitle>
+            <DialogDescription className="sr-only">The new password is shown once, after you save. The old one stops working immediately.</DialogDescription>
           </DialogHeader>
           <DialogBody>
             <ErrorBanner err={formErr} />
@@ -717,6 +727,7 @@ export default function GuestAccountsPage() {
         onRemove={(acc, how) => { setActionErr(null); setRemoval(how); setDeleting(acc); }}
       />
     </PageShell>
+    </QuietHints>
   );
 }
 
@@ -797,8 +808,9 @@ function AccountForm({ account, onSubmit, busy, withPassword, onCancel }: {
         <Input name="notes" maxLength={ACCOUNT_NOTES_MAX} defaultValue={account?.notes ?? ""} placeholder="Optional" />
       </Field>
 
-      <p className="text-caption text-muted-foreground">
-        What this client can take is decided by the eligibility rules on each internet package.
+      <p className="flex items-center gap-1 text-caption text-muted-foreground">
+        Packages
+        <InfoHint>What this client can take is decided by the eligibility rules on each internet package.</InfoHint>
       </p>
       <div className="flex justify-end gap-2 border-t border-border pt-4">
         {onCancel && <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>}
