@@ -1,0 +1,4 @@
+commit 401138cb3bec12fd5de9dfa202897bc79399a08e
+Date:   Mon Nov 2 18:59:38 2026 +0200
+
+    Governance: change manifest for PR #290
