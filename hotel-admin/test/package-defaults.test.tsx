@@ -15,7 +15,7 @@ const modules = { modules: { paid_access: { ...on, id: "paid_access" }, card_pay
 const usdAccount = { currency: "USD", provider: "stripe", provider_converts: false };
 
 function ready() {
-  fireEvent.change(screen.getByTestId("code"), { target: { value: "X" } });
+  fireEvent.change(screen.getByTestId("name"), { target: { value: "X" } });
   fireEvent.change(screen.getByTestId("service-plan"), { target: { value: "plan-gold" } });
 }
 

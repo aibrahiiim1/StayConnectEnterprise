@@ -56,7 +56,7 @@ describe("PackageForm", () => {
   it("ADD refuses to save without a plan, and cannot create one", () => {
     const onSave = vi.fn();
     render(<PackageForm mode="add" plans={plans} onSave={onSave} />);
-    fireEvent.change(screen.getByTestId("code"), { target: { value: "X" } });
+    fireEvent.change(screen.getByTestId("name"), { target: { value: "X" } });
     fireEvent.click(screen.getByRole("button", { name: /add package/i }));
 
     expect(onSave).not.toHaveBeenCalled();
@@ -81,7 +81,35 @@ describe("PackageForm", () => {
     render(<PackageForm mode="edit" initial={initial} plans={plans} onSave={() => {}} />);
     expect((screen.getByTestId("service-plan") as HTMLSelectElement).value).toBe("plan-gold");
     expect(screen.getByTestId("plan-summary").textContent).toContain("10 Mbps down");
-    expect((screen.getByTestId("code") as HTMLInputElement).readOnly).toBe(true);
+    // The short code is internal: not shown, and kept unchanged by an edit.
+    expect(screen.queryByTestId("code")).toBeNull();
+  });
+
+  it("EDIT republishes the existing code; ADD generates one from the name and never shows it", () => {
+    const onEdit = vi.fn();
+    const { unmount } = render(<PackageForm mode="edit" initial={initial} plans={plans} onSave={onEdit} />);
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    expect(onEdit.mock.calls[0][0].payload.code).toBe("FREEWIFI");
+    unmount();
+
+    const onAdd = vi.fn();
+    render(<PackageForm mode="add" plans={plans} onSave={onAdd} />);
+    expect(screen.queryByTestId("code")).toBeNull();
+    expect(screen.queryByText(/short code/i)).toBeNull();
+    fireEvent.change(screen.getByTestId("service-plan"), { target: { value: "plan-gold" } });
+    fireEvent.click(screen.getByRole("button", { name: /add package/i }));
+    expect(onAdd).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toMatch(/enter a name/i);
+    fireEvent.change(screen.getByTestId("name"), { target: { value: "One Day Café" } });
+    fireEvent.click(screen.getByRole("button", { name: /add package/i }));
+    expect(onAdd.mock.calls[0][0].payload.code).toMatch(/^ONE-DAY-CAFE-[A-Z2-9]{4}$/);
+  });
+
+  it("names access lengths in one or two words and explains them in a hint", () => {
+    render(<PackageForm mode="add" plans={plans} onSave={() => {}} />);
+    const end = screen.getByTestId("end-mode") as HTMLSelectElement;
+    expect(Array.from(end.options).map((o) => o.textContent)).toEqual(["Until ended", "Fixed length", "Until a date"]);
+    expect(screen.getAllByRole("button", { name: "What this means" }).length).toBeGreaterThan(0);
   });
 
   it("EDIT lets the operator switch to another existing plan, and reports which", () => {
@@ -119,7 +147,7 @@ describe("PackageForm", () => {
       { id: "g-par", name: "Partners", enabled: true, priority: 50 },
     ];
     const ready = () => {
-      fireEvent.change(screen.getByTestId("code"), { target: { value: "X" } });
+      fireEvent.change(screen.getByTestId("name"), { target: { value: "X" } });
       fireEvent.change(screen.getByTestId("service-plan"), { target: { value: "plan-gold" } });
     };
 
@@ -203,7 +231,7 @@ describe("PackageForm", () => {
 
   describe("Free access", () => {
     const ready = () => {
-      fireEvent.change(screen.getByTestId("code"), { target: { value: "X" } });
+      fireEvent.change(screen.getByTestId("name"), { target: { value: "X" } });
       fireEvent.change(screen.getByTestId("service-plan"), { target: { value: "plan-gold" } });
     };
 
@@ -214,7 +242,7 @@ describe("PackageForm", () => {
       expect((screen.getByTestId("free-access") as HTMLSelectElement).value).toBe("once");
       fireEvent.change(screen.getByTestId("free-access"), { target: { value: "unlimited" } });
       fireEvent.change(screen.getByTestId("free-access"), { target: { value: "once" } });
-      expect(screen.getByRole("switch", { name: "Count the device too" })).toHaveAttribute("aria-checked", "true");
+      expect(screen.getByRole("switch", { name: "Device restricted" })).toHaveAttribute("aria-checked", "true");
       ready();
       fireEvent.click(screen.getByRole("button", { name: /add package/i }));
       expect(onSave.mock.calls[0][0].payload.eligibility_rules).toEqual([
@@ -228,7 +256,7 @@ describe("PackageForm", () => {
       fireEvent.change(screen.getByTestId("free-access"), { target: { value: "every" } });
       expect((screen.getByTestId("free-access-hours") as HTMLInputElement).value).toBe("24");
       fireEvent.change(screen.getByTestId("free-access-hours"), { target: { value: "12" } });
-      fireEvent.click(screen.getByRole("switch", { name: "Count the device too" }));
+      fireEvent.click(screen.getByRole("switch", { name: "Device restricted" }));
       ready();
       fireEvent.click(screen.getByRole("button", { name: /add package/i }));
       expect(onSave.mock.calls[0][0].payload.eligibility_rules).toEqual([
@@ -261,7 +289,7 @@ describe("PackageForm", () => {
       }} />);
       expect((screen.getByTestId("free-access") as HTMLSelectElement).value).toBe("every");
       expect((screen.getByTestId("free-access-hours") as HTMLInputElement).value).toBe("24");
-      expect(screen.getByRole("switch", { name: "Count the device too" })).toHaveAttribute("aria-checked", "false");
+      expect(screen.getByRole("switch", { name: "Device restricted" })).toHaveAttribute("aria-checked", "false");
       expect((screen.getByTestId("rule-mode-0") as HTMLSelectElement).value).toBe("requires_prior");
       expect(screen.queryByTestId("rule-type-1")).toBeNull();
       // "No earlier purchase" AND "only clients with one" offers the package to nobody: read back, but saving is
@@ -282,7 +310,7 @@ describe("PackageForm", () => {
         ...initial, rules: [{ type: "PRIOR_PURCHASE", mode: "forbids_prior" }],
       }} />);
       expect((screen.getByTestId("free-access") as HTMLSelectElement).value).toBe("once");
-      expect(screen.getByRole("switch", { name: "Count the device too" })).toHaveAttribute("aria-checked", "true");
+      expect(screen.getByRole("switch", { name: "Device restricted" })).toHaveAttribute("aria-checked", "true");
       fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
       expect(onSave.mock.calls[0][0].payload.eligibility_rules).toEqual([
         { type: "PRIOR_PURCHASE", value: { forbids_prior: true } },
@@ -306,7 +334,7 @@ describe("PackageForm", () => {
     render(<PackageForm mode="add" plans={plans} onSave={onSave} />);
     expect(screen.queryByLabelText("Price")).toBeNull();
     expect((screen.getByTestId("method-check-NOT_REQUIRED") as HTMLInputElement).checked).toBe(true);
-    fireEvent.change(screen.getByTestId("code"), { target: { value: "X" } });
+    fireEvent.change(screen.getByTestId("name"), { target: { value: "X" } });
     fireEvent.change(screen.getByTestId("service-plan"), { target: { value: "plan-gold" } });
     fireEvent.click(screen.getByRole("button", { name: /add package/i }));
     const payload = onSave.mock.calls[0][0].payload;

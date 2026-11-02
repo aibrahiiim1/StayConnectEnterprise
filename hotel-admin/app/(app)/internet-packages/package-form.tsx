@@ -9,7 +9,9 @@ import { PmsConnectionPicker } from "@/components/pms/pms-connection-picker";
 import { NetworkPicker } from "@/components/network/network-picker";
 import { useEffect, useId, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Field, Input, Select } from "@/components/ui/input";
+import { Field, Input, QuietHints, Select } from "@/components/ui/input";
+import { InfoHint } from "@/components/ui/quiet";
+import { generateShortCode } from "@/lib/short-code";
 import { Switch } from "@/components/ui/misc";
 import { Callout } from "@/components/ui/error-banner";
 import { Trash2, Plus, ChevronDown, ChevronRight } from "lucide-react";
@@ -49,6 +51,27 @@ import { moduleLicensedIn } from "@/lib/commerce-form";
 import { cardCurrencyProblem, type CardAccountView } from "@/lib/card-currency";
 import { AcquisitionSection } from "./acquisition-section";
 import { TravelAgentPicker } from "./travel-agent-picker";
+
+// One or two words per option; the full sentence is the hint beside the heading.
+const END_MODE_SHORT: Record<DurationForm["end_mode"], string> = {
+  MANUAL_END: "Until ended",
+  VALIDITY_WINDOW: "Fixed length",
+  FIXED_AT: "Until a date",
+};
+const ALLOCATION_SHORT: Record<AllocationForm["mode"], string> = {
+  FIXED: "Plan allowance",
+  PER_STAY_NIGHT: "Per stay night",
+};
+
+/** A section heading with its explanation as a hint. */
+function SectionHeading({ id, title, hint, testId }: { id: string; title: string; hint?: React.ReactNode; testId?: string }) {
+  return (
+    <div className="mb-1.5 flex items-center gap-1">
+      <h3 id={id} className="text-label">{title}</h3>
+      <InfoHint testId={testId}>{hint}</InfoHint>
+    </div>
+  );
+}
 
 export type PackageFormValue = {
   payload: PublishPayload;
@@ -143,7 +166,8 @@ export function PackageForm({
   cardAccount?: CardAccountView | "none" | null;
 }) {
   const hotel = moduleLicensedIn("hospitality", modules ?? null);
-  const [code, setCode] = useState(initial?.code ?? "");
+  // The short code is internal: generated from the name when the package is added, kept unchanged on Edit.
+  const code = initial?.code ?? "";
   const [name, setName] = useState(initial?.name ?? "");
   // A new Free package defaults to "once per client", or it would be handed out again whenever the allowance
   // runs out; an existing package keeps exactly its rules.
@@ -187,8 +211,9 @@ export function PackageForm({
       setError("Choose a service plan. It decides the speed and allowances this package gives.");
       return;
     }
+    if (!name.trim()) { setError("Enter a name. It is what the client sees on the portal."); return; }
     const res = buildPublishPayload({
-      code, name,
+      code: code || generateShortCode(name), name,
       // The caller replaces this with the revision resolved from the selected plan.
       service_plan_revision_id: selected.current_revision_id || "pending",
       rules, tiers, duration,
@@ -263,6 +288,7 @@ export function PackageForm({
 
 
   return (
+    <QuietHints>
     <form onSubmit={submit} className="space-y-6 [&>div+div]:border-t [&>div+div]:border-border [&>div+div]:pt-5" data-testid="package-form">
       {error && <div role="alert" className="text-sm text-destructive">{error}</div>}
 
@@ -271,17 +297,9 @@ export function PackageForm({
         <Field label="Name" hint="What the client sees on the portal.">
           <Input data-testid="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Free WiFi" />
         </Field>
-        <Field
-          label="Short code"
-          hint={mode === "edit" ? "The code identifies this package and cannot be changed." : "A short identifier. It cannot be changed later."}
-        >
-          <Input data-testid="code" value={code} onChange={(e) => setCode(e.target.value)}
-            readOnly={mode === "edit"} placeholder="FREEWIFI" />
-        </Field>
-      </div>
-
-      <div>
-        <h3 id={planHeadingID} className="mb-1.5 text-label">Service plan</h3>
+        <div>
+        <SectionHeading id={planHeadingID} title="Service plan"
+          hint="The plan decides the speed, data, time and devices this package gives. Change them on Service plans." />
         {plans.length === 0 ? (
           // Says what to do rather than showing an empty dropdown that looks like loading.
           <div className="text-sm rounded-md border border-border bg-surface px-3 py-2" role="status">
@@ -298,29 +316,29 @@ export function PackageForm({
                 <option key={p.plan_id} value={p.plan_id}>{p.name || p.code}</option>
               ))}
             </Select>
-            <p className="mt-1.5 text-xs text-muted-foreground" data-testid="plan-summary">
-              {selected
-                ? planSummary(selected)
-                : "Choose a plan to see the speed and allowances it gives."}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              <a href="/service-plans" className="underline">Change speed and limits on Service plans</a>.
-            </p>
+            {selected && (
+              <p className="mt-1.5 truncate text-xs text-muted-foreground" data-testid="plan-summary" title={planSummary(selected)}>
+                {planSummary(selected)}
+              </p>
+            )}
           </>
         )}
+        </div>
       </div>
 
       <div>
-        <h3 id={endHeadingID} className="mb-1.5 text-label">How long access lasts</h3>
+        <SectionHeading id={endHeadingID} title="How long access lasts" hint={
+          <>Until ended: {END_MODE_LABELS.MANUAL_END.toLowerCase()}. Fixed length: {END_MODE_LABELS.VALIDITY_WINDOW.toLowerCase()}. Until a date: {END_MODE_LABELS.FIXED_AT.toLowerCase()}.</>
+        } />
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <Select data-testid="end-mode" aria-labelledby={endHeadingID}
               value={duration.end_mode} onChange={(e) => setDuration({ end_mode: e.target.value as DurationForm["end_mode"] })}>
-              {SUPPORTED_END_MODES.map((m) => <option key={m} value={m}>{END_MODE_LABELS[m]}</option>)}
+              {SUPPORTED_END_MODES.map((m) => <option key={m} value={m}>{END_MODE_SHORT[m]}</option>)}
             </Select>
           </div>
           {duration.end_mode === "VALIDITY_WINDOW" && (
-            <Field label="Length of access (hours)">
+            <Field label="Hours">
               <Input data-testid="duration-hours" type="number" min={0} step="0.5" value={durationHours}
                 onChange={(e) => {
                   setDurationHours(e.target.value);
@@ -340,7 +358,9 @@ export function PackageForm({
 
       {/* The preview exists because the clamp order is not obvious and the published revision is immutable. */}
       <div>
-        <h3 id={allocHeadingID} className="mb-1.5 text-label">Data allowance</h3>
+        <SectionHeading id={allocHeadingID} title="Data allowance" hint={
+          <>Plan allowance: {ALLOCATION_MODE_LABELS.FIXED.toLowerCase()}.{hotel ? <> Per stay night: {ALLOCATION_MODE_LABELS.PER_STAY_NIGHT.toLowerCase()}.</> : null}</>
+        } />
         <Select data-testid="allocation-mode" aria-labelledby={allocHeadingID}
           value={alloc.mode}
           onChange={(e) => setAlloc((a) => ({ ...a, mode: e.target.value as AllocationForm["mode"] }))}>
@@ -348,7 +368,7 @@ export function PackageForm({
             // Per-night needs a stay: offered with Hospitality, and kept for a package that already uses it.
             .filter((m) => m !== "PER_STAY_NIGHT" || hotel || alloc.mode === "PER_STAY_NIGHT")
             .map((m) => (
-              <option key={m} value={m}>{ALLOCATION_MODE_LABELS[m]}</option>
+              <option key={m} value={m}>{ALLOCATION_SHORT[m]}</option>
             ))}
         </Select>
         {alloc.mode === "PER_STAY_NIGHT" && (
@@ -373,11 +393,14 @@ export function PackageForm({
                   .map((r) => `${r.nights} nights → ${r.gb} GB`).join(" · ")}
               </div>
             )}
-            <p className="text-xs text-muted-foreground" data-testid="per-night-audience-note">
-              This allowance is given only to clients who signed in with their room, because it is counted from
-              their stay. The package is not offered to clients who signed in with a voucher, an account, an email
-              or phone code, a social account or open access, and it cannot be issued as vouchers.
-            </p>
+            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+              Room sign-in only
+              <InfoHint testId="per-night-audience-note">
+                This allowance is given only to clients who signed in with their room, because it is counted from
+                their stay. The package is not offered to clients who signed in with a voucher, an account, an email
+                or phone code, a social account or open access, and it cannot be issued as vouchers.
+              </InfoHint>
+            </div>
             {acq.methods.includes("PREPAID") && (
               <p className="text-xs text-warning-subtle-foreground" role="status" data-testid="per-night-voucher-note">
                 Voucher is ticked below, but vouchers cannot be issued for a package with a per-night allowance.
@@ -389,51 +412,33 @@ export function PackageForm({
 
         {/* Says which allowance applies; informational only, never blocks Save. */}
         {notice && (
-          <div
-            data-testid="allowance-notice"
-            role="note"
-            className={
-              notice.emphasis
-                ? "mt-2 text-sm rounded-md border border-border bg-surface px-3 py-2 space-y-1"
-                : "mt-2 text-xs text-muted-foreground"
-            }
-          >
-            {notice.kind === "FIXED_USES_PLAN" && (
-              <p>This package uses the service plan&rsquo;s {notice.planQuotaGB} GB data allowance.</p>
-            )}
-            {notice.kind === "FIXED_PLAN_HAS_NO_QUOTA" && (
-              <p>
-                The selected service plan has no data-usage quota, so this package does not impose a
-                data-volume limit.
-              </p>
-            )}
-            {notice.kind === "PER_STAY_NIGHT_PLAN_HAS_NO_QUOTA" && (
-              <p>
-                The selected service plan sets no data allowance of its own, so this package&rsquo;s{" "}
-                {notice.gbPerNight} GB per stay night is the client&rsquo;s data allowance for this package.
-              </p>
-            )}
+          <div data-testid="allowance-notice" role="note" className="mt-2 flex items-center gap-1 text-xs text-muted-foreground">
+            {notice.kind === "FIXED_USES_PLAN" && <span>{notice.planQuotaGB} GB from the service plan</span>}
+            {notice.kind === "FIXED_PLAN_HAS_NO_QUOTA" && <span>No data limit</span>}
+            {notice.kind === "PER_STAY_NIGHT_PLAN_HAS_NO_QUOTA" && <span>{notice.gbPerNight} GB per stay night</span>}
             {notice.kind === "PER_STAY_NIGHT_OVERRIDES_PLAN" && (
-              <>
-                <p>Service plan allowance: <strong>{notice.planQuotaGB} GB</strong></p>
-                <p>
-                  This package gives <strong>{notice.gbPerNight} GB per stay night</strong> instead.
-                  {notice.minGB !== undefined && <> Minimum {notice.minGB} GB.</>}
-                  {notice.maxGB !== undefined && <> Maximum {notice.maxGB} GB.</>}
-                </p>
+              <span>
+                <strong>{notice.gbPerNight} GB per stay night</strong> instead of the plan&rsquo;s {notice.planQuotaGB} GB
                 {notice.exampleGB !== undefined && (
-                  <p data-testid="allowance-example">
-                    For a stay of {notice.exampleNights} nights, the client receives{" "}
-                    <strong>{notice.exampleGB} GB</strong>.
-                  </p>
+                  <span data-testid="allowance-example">
+                    {" "}· {notice.exampleNights} nights = <strong>{notice.exampleGB} GB</strong>
+                  </span>
                 )}
-                <p className="text-muted-foreground">
-                  For clients receiving this package, the stay-based allowance takes precedence over the
-                  service plan allowance. The service plan itself is unchanged, and its {notice.planQuotaGB} GB
-                  still applies to other packages that use the plan&rsquo;s own allowance.
-                </p>
-              </>
+              </span>
             )}
+            <InfoHint>
+              {notice.kind === "FIXED_USES_PLAN" && <>This package uses the service plan&rsquo;s {notice.planQuotaGB} GB data allowance.</>}
+              {notice.kind === "FIXED_PLAN_HAS_NO_QUOTA" && <>The selected service plan has no data-usage quota, so this package does not impose a data-volume limit.</>}
+              {notice.kind === "PER_STAY_NIGHT_PLAN_HAS_NO_QUOTA" && <>The selected service plan sets no data allowance of its own, so this package&rsquo;s {notice.gbPerNight} GB per stay night is the client&rsquo;s data allowance for this package.</>}
+              {notice.kind === "PER_STAY_NIGHT_OVERRIDES_PLAN" && <>
+                Service plan allowance: {notice.planQuotaGB} GB. This package gives {notice.gbPerNight} GB per stay night instead.
+                {notice.minGB !== undefined && <> Minimum {notice.minGB} GB.</>}
+                {notice.maxGB !== undefined && <> Maximum {notice.maxGB} GB.</>}
+                {" "}For clients receiving this package, the stay-based allowance takes precedence over the service plan
+                allowance. The service plan itself is unchanged, and its {notice.planQuotaGB} GB still applies to other
+                packages that use the plan&rsquo;s own allowance.
+              </>}
+            </InfoHint>
           </div>
         )}
       </div>
@@ -448,20 +453,19 @@ export function PackageForm({
 
       {/* The audience is about the client (employees, partners, public), never the sign-in method. */}
       <div>
-        <h3 id={`${ids}-audience`} className="mb-1.5 text-label">Audience</h3>
+        <SectionHeading id={`${ids}-audience`} title="Audience" hint={
+          audience === "everyone" ? "Offered to every client who is otherwise eligible."
+            : audience === "groups" ? "Offered only to clients who are in one of the groups ticked below."
+              : audience === "public" ? "Offered only to clients who are in no client group at all — the public, as opposed to employees or partners."
+                : "Offered to the groups ticked below and to clients who are in no group; other groups are not offered it."
+        } />
         <Select data-testid="audience" aria-labelledby={`${ids}-audience`} value={audience}
           onChange={(e) => setAudience(e.target.value as Audience)}>
           <option value="everyone">Everyone</option>
-          <option value="groups">Only these groups</option>
-          <option value="public">Public clients only</option>
-          <option value="groups_public">These groups and public clients</option>
+          <option value="groups">Chosen groups</option>
+          <option value="public">Public only</option>
+          <option value="groups_public">Groups and public</option>
         </Select>
-        <p className="mt-1.5 text-xs text-muted-foreground">
-          {audience === "everyone" && "Offered to every client who is otherwise eligible."}
-          {audience === "groups" && "Offered only to clients who are in one of the groups ticked below."}
-          {audience === "public" && "Offered only to clients who are in no client group at all — the public, as opposed to employees or partners."}
-          {audience === "groups_public" && "Offered to the groups ticked below and to clients who are in no group; other groups are not offered it."}
-        </p>
         {(audience === "groups" || audience === "groups_public") && (
           <div className="mt-2 space-y-1.5" role="group" aria-label="Client groups in the audience">
             {clientGroups === null && <p className="text-xs text-muted-foreground">Loading client groups…</p>}
@@ -502,13 +506,19 @@ export function PackageForm({
       {/* The free allowance is keyed on the package, not the revision, so a wording change does not reset it.
           It also applies to priced packages, but the device switch defaults ON only for Free ones. */}
       <div>
-        <h3 id={`${ids}-free`} className="mb-1.5 text-label">Free access</h3>
+        <SectionHeading id={`${ids}-free`} title="Free access" hint={
+          paid
+            ? (freeRule
+              ? "This package has a price. The limit still applies — a client may buy it the stated number of times."
+              : "A priced package may be bought again by the same client. Choose a limit if you want one.")
+            : "How often the same client may get this package."
+        } testId={paid ? (freeRule ? "free-access-paid-note" : "free-access-repeatable-note") : undefined} />
         <div className="grid gap-4 sm:grid-cols-2">
           <Select data-testid="free-access" aria-labelledby={`${ids}-free`} value={freeAccess}
             onChange={(e) => setFreeAccess(e.target.value as FreeAccess)}>
-            <option value="unlimited">No limit — a client may get this package again</option>
-            <option value="once">Once per client, ever</option>
-            <option value="every">Once per client every N hours</option>
+            <option value="unlimited">No limit</option>
+            <option value="once">Once per client</option>
+            <option value="every">Once every N hours</option>
           </Select>
           {freeAccess === "every" && freeRule && (
             <Field label="Every (hours)" hint={`Whole hours, ${WITHIN_HOURS_MIN}–${WITHIN_HOURS_MAX} (one year). Default 24.`}>
@@ -519,47 +529,43 @@ export function PackageForm({
           )}
         </div>
         {freeRule && (
-          <div className="mt-2 flex items-start justify-between gap-3 rounded-md border border-border bg-surface/50 px-3.5 py-2.5">
-            <div>
-              <div className="text-sm font-medium">Count the device too</div>
-              <div className="text-xs text-muted-foreground">
-                Prevents a second free allowance by signing in with another email on the same phone. Turn it off
-                for a shared device, such as a family tablet.
-              </div>
+          <div className="mt-2 flex items-center justify-between gap-3 rounded-md border border-border bg-surface/50 px-3.5 py-2">
+            <div className="flex items-center gap-1 text-sm font-medium">
+              Device restricted
+              <InfoHint>
+                The limit also counts the device, so signing in again with another email on the same phone does not
+                give a second allowance. Turn it off for a shared device, such as a family tablet.
+              </InfoHint>
             </div>
             <Switch
               checked={freeRule.also_by_device ?? true}
               onCheckedChange={(v) => setFreeRule({ ...freeRule, also_by_device: v })}
-              label="Count the device too"
+              label="Device restricted"
             />
           </div>
-        )}
-        {freeRule && paid && (
-          <p className="mt-1.5 text-xs text-muted-foreground" data-testid="free-access-paid-note">
-            This package has a price. The limit still applies — a client may buy it the stated number of times.
-          </p>
-        )}
-        {!freeRule && paid && (
-          <p className="mt-1.5 text-xs text-muted-foreground" data-testid="free-access-repeatable-note">
-            A priced package may be bought again by the same client. Choose a limit above if you want one.
-          </p>
         )}
       </div>
 
       <div>
         <div className="flex items-center justify-between mb-1">
-          <h3 className="text-label">More conditions</h3>
+          <div className="flex items-center gap-1">
+            <h3 className="text-label">More conditions</h3>
+            <InfoHint>Narrow who is offered this package by sign-in method, date, network or stay.</InfoHint>
+          </div>
           <Button type="button" variant="ghost" onClick={() => setRules((rs) => [...rs, emptyRule("AUTH_METHOD")])}>
             <Plus size={14} /> Add condition
           </Button>
         </div>
-        {rules.filter((r) => !isDedicatedRule(r)).length === 0 && <p className="text-xs text-muted-foreground">No further conditions. Add one to narrow the audience by sign-in method, date, network or stay.</p>}
+        {rules.filter((r) => !isDedicatedRule(r)).length === 0 && <p className="text-xs text-muted-foreground">None</p>}
         {/* A voucher guest has no Stay to test, so a PMS condition excludes them entirely rather than narrowing. */}
         {rules.some((r) => isPMSRuleType(r.type)) && (
-          <p className="mb-2 text-xs text-muted-foreground" data-testid="pms-rule-note">
-            Conditions about the stay only apply to clients who signed in with their room. Clients using a
-            voucher or an account are not offered this package while any of them is set.
-          </p>
+          <div className="mb-2 flex items-center gap-1 text-xs text-muted-foreground">
+            Room sign-in clients only
+            <InfoHint testId="pms-rule-note">
+              Conditions about the stay only apply to clients who signed in with their room. Clients using a
+              voucher or an account are not offered this package while any of them is set.
+            </InfoHint>
+          </div>
         )}
         {/* Rows have no visible labels, so each control is named for its row ("Condition 1: type"). */}
         {rules.map((r, i) => {
@@ -664,5 +670,6 @@ export function PackageForm({
         <Button type="submit" disabled={busy}>{busy ? "Saving…" : mode === "edit" ? "Save changes" : "Add package"}</Button>
       </div>
     </form>
+    </QuietHints>
   );
 }

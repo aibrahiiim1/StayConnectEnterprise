@@ -29,6 +29,9 @@ import {
 import { Sheet, SheetContent, SheetHeader, SheetBody, SheetFooter, SheetSection } from "@/components/ui/sheet";
 import { FilterChips, KeyValueGrid, MetricStrip, SearchInput } from "@/components/ui/data";
 import { MonoId, SkeletonRows } from "@/components/ui/misc";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Explain } from "@/components/ui/tooltip";
+import { InfoHint } from "@/components/ui/quiet";
 import { useToast } from "@/components/ui/toast";
 import { DeleteDialog } from "@/components/commerce/delete-dialog";
 import { focusSheetItself } from "@/components/commerce/sheet-focus";
@@ -70,7 +73,9 @@ export function PackagesTab({
   const [stayWarnings, setStayWarnings] = useState<string[]>([]);
   // Package id -> what ties it to a place (networks, PMS connections); null until read.
   const [eligibility, setEligibility] = useState<Record<string, string[]> | null>(null);
-  const [chip, setChip] = useState<Chip>("all");
+  // Active first: what clients are offered now is what an operator usually looks for.
+  const [chip, setChip] = useState<Chip>("active");
+  const [detailTab, setDetailTab] = useState<"details" | "versions">("details");
   const [q, setQ] = useState("");
 
   const [selected, setSelected] = useState<PackageSummary | null>(null);
@@ -389,13 +394,13 @@ export function PackagesTab({
               value={chip}
               onChange={setChip}
               options={[
-                { value: "all", label: "All", count: rows ? counts.all : undefined },
                 { value: "active", label: "Active", count: rows ? counts.active : undefined, tone: "ok" },
                 { value: "disabled", label: "Disabled", count: rows ? counts.disabled : undefined },
+                { value: "all", label: "All", count: rows ? counts.all : undefined },
               ]}
             />
           }
-          search={<SearchInput value={q} onChange={setQ} placeholder="Search packages" label="Search packages by name or code" />}
+          search={<SearchInput value={q} onChange={setQ} placeholder="Search packages" label="Search packages by name" />}
         />
         {rows === null ? (
           <SkeletonRows rows={4} cols={7} />
@@ -418,10 +423,9 @@ export function PackagesTab({
               {shown.map((p) => {
                 const name = p.name || p.code;
                 return (
-                  <TR key={p.package_id} onClick={() => setSelected(p)}>
+                  <TR key={p.package_id} onClick={() => { setDetailTab("details"); setSelected(p); }}>
                     <TD truncate title={name} className="max-w-[14rem]">
                       <span className="font-medium">{name}</span>
-                      {p.name && p.name !== p.code && <div className="truncate text-xs text-muted-foreground">{p.code}</div>}
                       {p.plan_has_newer_revision && (
                         <div className="mt-0.5 flex items-center gap-1 text-xs text-warning-subtle-foreground">
                           <AlertTriangle className="size-3" aria-hidden /> Plan has newer settings
@@ -478,10 +482,9 @@ export function PackagesTab({
                   icon={<Package />}
                   eyebrow="Internet package"
                   title={p.name || p.code}
-                  description={p.name && p.name !== p.code ? `Code ${p.code}` : undefined}
                   badges={<>
                     {!p.current_revision_id ? (
-                      <Badge tone="warn" dot>Not configured — not offered to clients</Badge>
+                      <Badge tone="warn" dot>Not configured</Badge>
                     ) : p.active ? (
                       <Badge tone="ok" dot>Offered to clients</Badge>
                     ) : (
@@ -491,63 +494,88 @@ export function PackagesTab({
                   </>}
                 />
                 <SheetBody>
-                  <MetricStrip items={[
-                    { label: "Price", value: priceText(p.price_minor, p.currency, p.currency_exponent) },
-                    { label: "Download", value: formatSpeed(p.down_kbps) },
-                    { label: "Data", value: formatData(p.data_quota_bytes) },
-                    { label: "Still valid", value: activeBy ? (activeBy[p.package_id] ?? 0) : "—" },
-                  ]} />
+                  <Tabs value={detailTab} onValueChange={(v) => setDetailTab(v as "details" | "versions")}>
+                    <TabsList>
+                      <TabsTrigger value="details">Details</TabsTrigger>
+                      <TabsTrigger value="versions">Versions{history ? ` (${history.length})` : ""}</TabsTrigger>
+                    </TabsList>
 
-                  {/* Saving keeps the pinned plan revision (decideSave): a rename must not apply an unapproved
-                      technical change, so the operator is sent to Service plans, never told to edit and save. */}
-                  {p.plan_has_newer_revision && (
-                    <Callout tone="warning" title="The service plan has newer settings">
-                      Saving this package will not move it to them: a package keeps the plan version it was pinned
-                      to. Open <Link href="/service-plans" className="font-medium underline">Service plans</Link>,
-                      choose <strong>{p.service_plan_code}</strong> and use <strong>Apply current settings</strong>.
-                      Clients already online keep what they have.
-                    </Callout>
-                  )}
+                    <TabsContent value="details" className="mt-4 space-y-5">
+                      <MetricStrip items={[
+                        { label: "Price", value: priceText(p.price_minor, p.currency, p.currency_exponent) },
+                        { label: "Speed", value: formatSpeedPair(p.down_kbps, p.up_kbps) },
+                        { label: "Data", value: formatData(p.data_quota_bytes) },
+                        { label: "Still valid", value: activeBy ? (activeBy[p.package_id] ?? 0) : "—" },
+                      ]} />
 
-                  <SheetSection title="What it gives">
-                    <KeyValueGrid items={[
-                      { label: "Service plan", value: plan?.name || p.service_plan_code || "—",
-                        hint: p.service_plan_revision_no ? `Using version ${p.service_plan_revision_no} of the plan` : undefined },
-                      { label: "Speed (down / up)", value: formatSpeedPair(p.down_kbps, p.up_kbps) },
-                      { label: "Data allowance", value: formatData(p.data_quota_bytes) },
-                      { label: "Time allowance", value: formatDuration(p.time_quota_seconds) },
-                      { label: "Devices", value: formatDevices(p.max_concurrent_devices),
-                        hint: DEVICE_LIMIT_POLICIES[p.device_limit_policy ?? ""] },
-                      { label: "Speed sharing", value: p.speed_allocation === "SHARED"
-                        ? "Shared by the client's devices" : "Full speed on every device" },
-                      { label: "Offered from", value: p.visible_from ? formatDate(p.visible_from) : "Always" },
-                      { label: "Offered until", value: p.visible_until ? formatDate(p.visible_until) : "No end date" },
-                    ]} />
-                  </SheetSection>
+                      {/* Saving keeps the pinned plan revision (decideSave): a rename must not apply an unapproved
+                          technical change, so the operator is sent to Service plans, never told to edit and save. */}
+                      {p.plan_has_newer_revision && (
+                        <Callout tone="warning" title="The service plan has newer settings">
+                          Open <Link href="/service-plans" className="font-medium underline">Service plans</Link>,
+                          choose <strong>{p.service_plan_code}</strong> and use <strong>Apply current settings</strong>.{" "}
+                          <InfoHint>
+                            Saving this package will not move it to them: a package keeps the plan version it was
+                            pinned to. Clients already online keep what they have.
+                          </InfoHint>
+                        </Callout>
+                      )}
 
-                  <SheetSection title="Saved versions">
-                    <ErrorBanner err={historyErr} />
-                    {history === null && !historyErr ? <SkeletonRows rows={2} cols={1} /> : (
-                      <HistoryList
-                        label="Saved versions"
-                        emptyLabel="No saved versions yet"
-                        className="rounded-md border border-border"
-                        items={(history ?? []).map((r) => ({
-                          id: r.revision_id,
-                          title: `Version ${r.revision_no}`,
-                          badge: r.is_current ? <Badge tone="accent">in force</Badge> : <span className="text-xs text-muted-foreground">superseded</span>,
-                          summary: priceText(r.price_minor, r.currency, r.currency_exponent),
-                          tone: r.is_current ? "ok" : "neutral",
-                        }))}
-                      />
-                    )}
-                  </SheetSection>
+                      <SheetSection title="What it gives">
+                        <KeyValueGrid items={[
+                          { label: "Service plan", value: plan?.name || p.service_plan_code || "—",
+                            hint: p.service_plan_revision_no ? `Version ${p.service_plan_revision_no}` : undefined },
+                          { label: "Speed share", value: p.speed_allocation === "SHARED" ? "Shared" : "Per device" },
+                          { label: "Data allowance", value: formatData(p.data_quota_bytes) },
+                          { label: "Time allowance", value: formatDuration(p.time_quota_seconds) },
+                          { label: "Devices", value: formatDevices(p.max_concurrent_devices),
+                            hint: DEVICE_LIMIT_POLICIES[p.device_limit_policy ?? ""] },
+                        ]} />
+                      </SheetSection>
 
-                  <SheetSection title="For support">
-                    <KeyValueGrid columns={1} items={[
-                      { label: "Package reference", value: <MonoId value={p.package_id} /> },
-                    ]} />
-                  </SheetSection>
+                      <SheetSection title="Who can get it">
+                        <KeyValueGrid items={[
+                          { label: "Conditions", value: eligibility === null || !(p.package_id in eligibility) ? "—"
+                            : eligibility[p.package_id].length === 0 ? "Any signed-in client"
+                              : eligibility[p.package_id].join(" · ") },
+                          { label: "Offered from", value: p.visible_from ? formatDate(p.visible_from) : "Always" },
+                          { label: "Offered until", value: p.visible_until ? formatDate(p.visible_until) : "No end date" },
+                        ]} />
+                      </SheetSection>
+
+                      <SheetSection title="For support">
+                        <KeyValueGrid columns={1} items={[
+                          { label: "Package reference", value: <MonoId value={p.package_id} /> },
+                        ]} />
+                      </SheetSection>
+                    </TabsContent>
+
+                    <TabsContent value="versions" className="mt-4 space-y-3">
+                      <ErrorBanner err={historyErr} />
+                      {history === null && !historyErr ? <SkeletonRows rows={3} cols={3} /> : (history ?? []).length === 0 ? (
+                        <EmptyState size="sm" icon={<Package />} title="No saved versions yet" />
+                      ) : (
+                        <div className="overflow-hidden rounded-md border border-border">
+                          <Table label="Saved versions">
+                            <THead><TR><TH>Version</TH><TH>Price</TH><TH>Status</TH></TR></THead>
+                            <TBody>
+                              {(history ?? []).slice().sort((x, y) => y.revision_no - x.revision_no).map((r) => (
+                                <TR key={r.revision_id}>
+                                  <TD className="font-medium">Version {r.revision_no}{r.label ? <span className="ms-1.5 text-xs text-muted-foreground">{r.label}</span> : null}</TD>
+                                  <TD>{priceText(r.price_minor, r.currency, r.currency_exponent)}</TD>
+                                  <TD>{r.is_current ? <Badge tone="accent">in force</Badge> : <span className="text-xs text-muted-foreground">superseded</span>}</TD>
+                                </TR>
+                              ))}
+                            </TBody>
+                          </Table>
+                        </div>
+                      )}
+                      <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                        Every save is a new version.
+                        <Explain>Versions are kept permanently. A client keeps the terms of the version they connected under.</Explain>
+                      </p>
+                    </TabsContent>
+                  </Tabs>
                 </SheetBody>
                 {writable && (
                   <SheetFooter>
@@ -571,8 +599,11 @@ export function PackagesTab({
       <Dialog open={adding} onOpenChange={(v) => !v && !busy && setAdding(false)}>
         <DialogContent size="xl">
           <DialogHeader>
-            <DialogTitle>Add an internet package</DialogTitle>
-            <DialogDescription>What the client is offered on the portal, and the service plan it hands out.</DialogDescription>
+            <DialogTitle className="flex items-center gap-1">
+              Add an internet package
+              <Explain>What the client is offered on the portal, and the service plan it hands out.</Explain>
+            </DialogTitle>
+            <DialogDescription className="sr-only">What the client is offered on the portal, and the service plan it hands out.</DialogDescription>
           </DialogHeader>
           <DialogBody className="space-y-4">
             <ErrorBanner err={formErr} />
@@ -585,8 +616,11 @@ export function PackagesTab({
       <Dialog open={editing !== null} onOpenChange={(v) => { if (!v && !busy) { setEditing(null); setEditBase(null); } }}>
         <DialogContent size="xl">
           <DialogHeader>
-            <DialogTitle>{editing ? `Edit ${editing.name || editing.code}` : "Edit package"}</DialogTitle>
-            <DialogDescription>
+            <DialogTitle className="flex items-center gap-1">
+              {editing ? `Edit ${editing.name || editing.code}` : "Edit package"}
+              <Explain>Saving records a new permanent version of this package. Clients already online keep the terms they connected under.</Explain>
+            </DialogTitle>
+            <DialogDescription className="sr-only">
               Saving records a new permanent version of this package. Clients already online keep the terms they
               connected under.
             </DialogDescription>
