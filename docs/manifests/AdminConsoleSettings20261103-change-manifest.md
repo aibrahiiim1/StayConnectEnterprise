@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `2e551b14795d4400d4f35ad4e0cab02a0ec5d379`
-- **HEAD commit:** `59a13d6c`
-- **Provenance (generation HEAD = inventory_head):** `59a13d6cf0db57516a772654852f162f45075dc0`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `e07d5bde`
+- **Provenance (generation HEAD = inventory_head):** `e07d5bde0dbad3d5f5de04e1f8cbad639d787185`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/admin-console-clients-sessions-2026-11-02`
 - **Remote branch:** `origin/delivery/admin-console-clients-sessions-2026-11-02`
 - **Changed files:** 41
@@ -22,8 +22,8 @@
 | `docs/manifests/AdminConsoleSettings20261103-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Governance: manifest regenerated for the delivery head |
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt after the console read-back |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt after the console read-back |
-| `exports/chatgpt/phase-evidence/GIT_STAT_33ae5228.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Packs rebuilt after the console read-back |
 | `exports/chatgpt/phase-evidence/GIT_STAT_e7b7f254.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Packs rebuilt for T0285 |
+| `exports/chatgpt/phase-evidence/GIT_STAT_ff4fbbe9.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Packs rebuilt after the console read-back |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt after the console read-back |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt after the console read-back |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0285 records the settings reorganisation delivery and its test-appliance read-back |
@@ -33,7 +33,7 @@
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt for T0285 |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt for T0285 |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt for T0285 |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: the test appliance runs the console from aae43c84 (Codex fix), read back |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: the test appliance runs the console from 36cbd203 (second Codex fix), read back |
 | `governance/transitions/T0285.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: T0285 records the settings reorganisation delivery and its test-appliance read-back |
 | `hotel-admin/app/(app)/after-checkout-access/page.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Devices: settings reorganised to where they belong; confirm-only daily limit |
 | `hotel-admin/app/(app)/devices/page.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Devices: settings reorganised to where they belong; confirm-only daily limit |
@@ -42,12 +42,12 @@
 | `hotel-admin/app/(app)/sessions/page.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Client accounts and Active sessions: quieter pages, settings behind a button |
 | `hotel-admin/app/(app)/sign-in-methods/page.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Devices: settings reorganised to where they belong; confirm-only daily limit |
 | `hotel-admin/components/after-checkout-access/after-checkout-access-screen.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Devices: settings reorganised to where they belong; confirm-only daily limit |
-| `hotel-admin/components/devices/signin-limits-card.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Devices: settings reorganised to where they belong; confirm-only daily limit |
+| `hotel-admin/components/devices/signin-limits-card.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Sign-in settings groups: the reason keeps the appliance's 4-character minimum |
 | `hotel-admin/components/guest-accounts/password-format.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Client accounts and Active sessions: quieter pages, settings behind a button |
 | `hotel-admin/components/ui/tooltip.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Hints open on hover or keyboard focus, never on a dialog's own focus |
 | `hotel-admin/test/admin-lists-paging.test.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Client accounts and Active sessions: quieter pages, settings behind a button |
 | `hotel-admin/test/client-accounts-disconnect.test.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Client accounts and Active sessions: quieter pages, settings behind a button |
-| `hotel-admin/test/device-settings-reorg.test.tsx` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Devices: settings reorganised to where they belong; confirm-only daily limit |
+| `hotel-admin/test/device-settings-reorg.test.tsx` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Sign-in settings groups: the reason keeps the appliance's 4-character minimum |
 | `hotel-admin/test/guest-accounts-manage.test.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Client accounts and Active sessions: quieter pages, settings behind a button |
 | `hotel-admin/test/guest-accounts-paging-and-format.test.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Client accounts and Active sessions: quieter pages, settings behind a button |
 | `hotel-admin/test/guests-and-pms-redesign.test.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Client accounts: a failed portal switch is shown inside Account settings |
@@ -63,11 +63,11 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   2 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   2 +-
  docs/context/StayConnect-IAM-Handoff.md            |   2 +-
- ...AdminConsoleSettings20261103-change-manifest.md | 116 +++++++++++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 354556 -> 354561 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 178020 -> 178004 bytes
- .../chatgpt/phase-evidence/GIT_STAT_33ae5228.txt   |   4 +
+ ...AdminConsoleSettings20261103-change-manifest.md | 120 ++++++++++++++++
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 354556 -> 354557 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 178020 -> 178009 bytes
  .../chatgpt/phase-evidence/GIT_STAT_e7b7f254.txt   |   4 -
+ .../chatgpt/phase-evidence/GIT_STAT_ff4fbbe9.txt   |   4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   4 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   4 +-
  .../chatgpt/stayconnectenterprise/00-START-HERE.md |   2 +-
@@ -86,18 +86,18 @@
  hotel-admin/app/(app)/sessions/page.tsx            |  46 +++---
  hotel-admin/app/(app)/sign-in-methods/page.tsx     |  10 ++
  .../after-checkout-access-screen.tsx               |  12 +-
- .../components/devices/signin-limits-card.tsx      | 157 +++++++++++++--------
+ .../components/devices/signin-limits-card.tsx      | 160 +++++++++++++--------
  .../components/guest-accounts/password-format.tsx  |   9 +-
  hotel-admin/components/ui/tooltip.tsx              |  22 ++-
  hotel-admin/test/admin-lists-paging.test.tsx       |   2 +-
  .../test/client-accounts-disconnect.test.tsx       |   4 +-
- hotel-admin/test/device-settings-reorg.test.tsx    | 105 ++++++++++++++
+ hotel-admin/test/device-settings-reorg.test.tsx    | 111 ++++++++++++++
  hotel-admin/test/guest-accounts-manage.test.tsx    |   9 +-
  .../test/guest-accounts-paging-and-format.test.tsx |   7 +-
  hotel-admin/test/guests-and-pms-redesign.test.tsx  |  21 ++-
  hotel-admin/test/quiet-hints-focus.test.tsx        |  40 ++++++
  hotel-admin/test/site-modules-wording.test.tsx     |  14 +-
- 41 files changed, 751 insertions(+), 263 deletions(-)
+ 41 files changed, 764 insertions(+), 263 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -107,6 +107,10 @@
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: e07d5bde Packs rebuilt after the console read-back
+HISTORICAL: ff4fbbe9 Governance: the test appliance runs the console from 36cbd203 (second Codex fix), read back
+HISTORICAL: 36cbd203 Sign-in settings groups: the reason keeps the appliance's 4-character minimum
+HISTORICAL: 9f1212cf Governance: manifest regenerated for the delivery head
 HISTORICAL: 59a13d6c Packs rebuilt after the console read-back
 HISTORICAL: 33ae5228 Governance: the test appliance runs the console from aae43c84 (Codex fix), read back
 HISTORICAL: aae43c84 Client accounts: a failed portal switch is shown inside Account settings
