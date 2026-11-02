@@ -398,8 +398,19 @@ func reauthNoteFrom(ctx context.Context) *reauthNote {
 	return n
 }
 
-// reauth re-verifies the operator's password before a high-risk change; throttled per operator and address, failures audited.
+// reauth is the step-up for ordinary settings changes. The operator's own confirmation in the dialog is the consent: a
+// signed-in session (CSRF-protected like every write) with no password supplied passes. A password that is supplied is
+// still verified, so a wrong one never passes. Account-takeover-class actions use reauthStrict.
 func (s *server) reauth(r *http.Request, password string) bool {
+	if password == "" {
+		return sessFrom(r.Context()) != nil
+	}
+	return s.reauthStrict(r, password)
+}
+
+// reauthStrict re-verifies the operator's password before an account-takeover-class change (own password, two-step
+// sign-in, backup download); throttled per operator and address, failures audited.
+func (s *server) reauthStrict(r *http.Request, password string) bool {
 	sess := sessFrom(r.Context())
 	if sess == nil || password == "" || len(password) > maxOperatorPasswordLen {
 		return false
@@ -505,7 +516,7 @@ func (s *server) changeOwnPassword(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "same_password", "The new password must be different from the current one.")
 		return
 	}
-	if !s.reauth(r, in.Current) {
+	if !s.reauthStrict(r, in.Current) {
 		s.reauthRefused(w, r, "Your current password is not correct.")
 		return
 	}

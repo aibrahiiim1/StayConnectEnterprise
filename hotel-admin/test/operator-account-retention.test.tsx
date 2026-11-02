@@ -26,17 +26,17 @@ beforeEach(() => {
 });
 
 describe("Disabled accounts", () => {
-  it("saves a new period with a reason and the password", async () => {
+  it("saves a new period after one confirmation, with no reason or password to retype", async () => {
     render(<OperatorAccountRetention writable />);
     await userEvent.click(await screen.findByText("Disabled accounts"));
     const field = screen.getByLabelText(/Keep disabled accounts for/);
     await userEvent.clear(field);
     await userEvent.type(field, "365");
-    await userEvent.type(screen.getByLabelText(/^Reason/), "staff contract terms");
-    await userEvent.type(screen.getByLabelText(/password/i), "admin-pass-1");
     await userEvent.click(screen.getByRole("button", { name: "Save disabled-account period" }));
-    await waitFor(() => expect(put).toHaveBeenCalledWith("/operators/account-retention",
-      { disabled_account_days: 365, reason: "staff contract terms", password: "admin-pass-1" }));
+    expect(screen.queryByLabelText(/password/i)).toBeNull();
+    expect(screen.queryByLabelText(/^Reason/)).toBeNull();
+    await userEvent.click(await screen.findByRole("button", { name: "Confirm" }));
+    await waitFor(() => expect(put).toHaveBeenCalledWith("/operators/account-retention", { disabled_account_days: 365 }));
   });
 
   it("is read-only for a role that cannot change operators", async () => {

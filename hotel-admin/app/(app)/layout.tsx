@@ -17,6 +17,7 @@ import { SurfaceNotEnabled } from "@/components/surface-not-enabled";
 import { NotPermitted } from "@/components/not-permitted";
 import { canRead } from "@/lib/roles";
 import { ToastProvider } from "@/components/ui/toast";
+import { ConfirmPolicyContext } from "@/components/ui/dialog";
 import { WhoamiProvider, useWhoamiSession } from "@/lib/whoami-context";
 import { ForcedPasswordChange } from "@/components/forced-password-change";
 
@@ -136,7 +137,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     // h-screen + overflow-hidden (not min-h-screen) bounds the container so the sidebar scrolls on its own and
     // keeps its position across navigation, while the content scrolls in its own pane.
     <WhoamiProvider value={me}>
-    <ToastProvider>
+    <ToastProvider><ConfirmPolicyContext.Provider value={{ confirmOnly: true }}>
     {/* Skip link (WCAG 2.4.1); focus is moved by hand because a hash link alone is unreliable across browsers. */}
     <a
       href="#content"
@@ -223,7 +224,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </DialogPrimitive.Root>
     </div>
-    </ToastProvider>
+    </ConfirmPolicyContext.Provider></ToastProvider>
     </WhoamiProvider>
   );
 }

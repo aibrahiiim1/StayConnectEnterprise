@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0203, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0204, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -24615,8 +24615,8 @@ CREATE TABLE public.operator_session_policy (
     config_version bigint DEFAULT 1 NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_by text,
-    CONSTRAINT osessp_idle CHECK (((idle_timeout_minutes >= 5) AND (idle_timeout_minutes <= 240))),
-    CONSTRAINT osessp_max CHECK (((max_session_hours >= 1) AND (max_session_hours <= 24))),
+    CONSTRAINT osessp_idle CHECK (((idle_timeout_minutes = 0) OR ((idle_timeout_minutes >= 5) AND (idle_timeout_minutes <= 240)))),
+    CONSTRAINT osessp_max CHECK (((max_session_hours = 0) OR ((max_session_hours >= 1) AND (max_session_hours <= 24)))),
     CONSTRAINT osessp_singleton CHECK (id),
     CONSTRAINT osessp_version CHECK ((config_version >= 1))
 );
@@ -24626,7 +24626,7 @@ CREATE TABLE public.operator_session_policy (
 -- Name: TABLE operator_session_policy; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON TABLE public.operator_session_policy IS 'Admin Console session limits (0132, GDPR plan C10): signed out after idle_timeout_minutes without activity and max_session_hours after signing in, whatever the activity. One row for the appliance; no row means the defaults (30 minutes, 12 hours). Written only through public.operator_session_policy_set.';
+COMMENT ON TABLE public.operator_session_policy IS 'Admin Console session limits (0132, 0204): signed out after idle_timeout_minutes without activity and max_session_hours after signing in, whatever the activity; 0 in either column means never. One row for the appliance; no row means the defaults (30 minutes, 12 hours).';
 
 
 --

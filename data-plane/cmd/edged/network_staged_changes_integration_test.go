@@ -173,7 +173,7 @@ func TestIntegration_Factory_ActivationIsStagedAppliedAndConfirmed(t *testing.T)
 		t.Fatalf("factory = %d %v", st, body)
 	}
 	tmpl := body["template"].(map[string]any)
-	if tmpl["subnet_cidr"] != "10.20.0.0/20" || tmpl["gateway_ip"] != "10.20.0.1" {
+	if tmpl["subnet_cidr"] != "10.20.0.0/19" || tmpl["gateway_ip"] != "10.20.0.1" {
 		t.Fatalf("template %v", tmpl)
 	}
 

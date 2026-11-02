@@ -307,7 +307,7 @@ export default function GuestDataPage() {
         confirmLabel="Download export"
         busy={busy}
         error={actionErr}
-        requireReason
+        requireReason reasonStrict
         reasonMinLength={4}
         reasonPlaceholder="e.g. written request received at reception"
         requirePassword
@@ -324,7 +324,7 @@ export default function GuestDataPage() {
         error={actionErr}
         confirmText="ERASE"
         consequences={eraseConsequences(erasing?.kind)}
-        requireReason
+        requireReason reasonStrict
         reasonMinLength={4}
         reasonPlaceholder="e.g. written erasure request received at reception"
         requirePassword

@@ -192,6 +192,13 @@ export function DialogForm({
   );
 }
 
+/**
+ * Whether confirmations are "confirm only": the popup is the consent, so no password to retype and no mandatory
+ * free-text reason. The Admin Console turns it on at its root; a console that does not wrap the app keeps the full
+ * prompts. Actions marked `strictPassword` / `reasonStrict` keep theirs either way.
+ */
+export const ConfirmPolicyContext = React.createContext<{ confirmOnly: boolean }>({ confirmOnly: false });
+
 /** Collect reasons and passwords together so cancellation cannot leave the action's state ambiguous. */
 export function ConfirmDialog({
   open,
@@ -207,6 +214,8 @@ export function ConfirmDialog({
   reasonLabel = "Reason",
   reasonPlaceholder,
   requirePassword = false,
+  strictPassword = false,
+  reasonStrict = false,
   passwordLabel = "Confirm your password",
   reasonMaxLength = 500,
   reasonOptions,
@@ -229,7 +238,14 @@ export function ConfirmDialog({
   reasonMinLength?: number;
   reasonLabel?: string;
   reasonPlaceholder?: string;
+  /**
+   * Kept so existing call sites compile: the confirm dialog is the consent, so the password field appears only when
+   * `strictPassword` is set (account-takeover-class actions: backup restore/download and keys, own password, two-step).
+   */
   requirePassword?: boolean;
+  strictPassword?: boolean;
+  /** The reason is mandatory (legal or compliance records). Otherwise it is optional and defaults to a standard note. */
+  reasonStrict?: boolean;
   passwordLabel?: string;
   reasonMaxLength?: number;
   reasonOptions?: { value: string; label: string }[];
@@ -257,12 +273,16 @@ export function ConfirmDialog({
     }
   }, [open]);
 
+  const { confirmOnly } = React.useContext(ConfirmPolicyContext);
+  const needPassword = requirePassword && (!confirmOnly || strictPassword);
+  // A reason chosen from a list stays mandatory (the list is the data); free text is optional unless reasonStrict.
+  const needReason = requireReason && (!confirmOnly || reasonStrict || !!reasonOptions);
   const ready =
-    (!requireReason || reason.trim().length >= Math.max(1, reasonMinLength)) &&
-    (!requirePassword || password !== "") &&
+    (!needReason || reason.trim().length >= Math.max(1, reasonMinLength)) &&
+    (!needPassword || password !== "") &&
     (!confirmText || typed === confirmText);
   const missing = [
-    requireReason && reason.trim().length < Math.max(1, reasonMinLength)
+    needReason && reason.trim().length < Math.max(1, reasonMinLength)
       ? reasonOptions
         ? "choose a reason"
         : reasonMinLength > 1
@@ -270,7 +290,7 @@ export function ConfirmDialog({
           : "enter a reason"
       : null,
     confirmText && typed !== confirmText ? `type ${confirmText} exactly` : null,
-    requirePassword && password === "" ? "enter your password" : null,
+    needPassword && password === "" ? "enter your password" : null,
   ].filter(Boolean) as string[];
   const notReady = missing.length
     ? `To continue, ${missing.length > 1 ? `${missing.slice(0, -1).join(", ")} and ${missing[missing.length - 1]}` : missing[0]}.`
@@ -289,7 +309,7 @@ export function ConfirmDialog({
       error={error}
       disabled={!ready}
       disabledReason={notReady}
-      onSubmit={() => onConfirm({ reason: reason.trim(), password })}
+      onSubmit={() => onConfirm({ reason: reason.trim() || (requireReason && confirmOnly ? "Confirmed in the console" : ""), password })}
     >
       {consequences && consequences.length > 0 && (
         <div className="rounded-md border border-destructive/30 bg-destructive-subtle px-3.5 py-3 text-sm text-destructive-subtle-foreground">
@@ -301,7 +321,7 @@ export function ConfirmDialog({
         </div>
       )}
       {children}
-      {requireReason && (
+      {needReason && (
         <Field label={reasonLabel} htmlFor={reasonId} required
           hint={reasonOptions ? "Recorded with the change." : `Recorded with the change. ${reason.length}/${reasonMaxLength}`}
         >
@@ -348,7 +368,7 @@ export function ConfirmDialog({
           />
         </Field>
       )}
-      {requirePassword && (
+      {needPassword && (
         <Field label={passwordLabel} htmlFor={passwordId} required>
           <Input
             id={passwordId}

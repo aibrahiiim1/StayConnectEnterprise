@@ -14,7 +14,6 @@ import (
 	"math/big"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -220,7 +219,7 @@ func (s *server) setAccountPasswordSettings(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	// A reason is required: this sets the strength of every future generated password.
-	reason := strings.TrimSpace(in.Reason)
+	reason := settingReason(in.Reason)
 	if !validReason(reason) {
 		jsonErr(w, http.StatusBadRequest, "reason_required", "a bounded reason (4-500 characters) is required")
 		return

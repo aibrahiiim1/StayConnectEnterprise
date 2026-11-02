@@ -563,7 +563,7 @@ func (s *server) restoreDatabaseBackup(w http.ResponseWriter, r *http.Request) {
 			"type the name of the backup you are restoring to confirm")
 		return
 	}
-	if !s.reauth(r, in.Password) {
+	if !s.reauthStrict(r, in.Password) {
 		s.reauthRefused(w, r,
 			"confirm your password. Restoring replaces this site's data with the contents of the backup.")
 		return

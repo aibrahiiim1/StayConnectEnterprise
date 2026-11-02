@@ -86,7 +86,7 @@ func (s *server) backupDownloadTicket(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusForbidden, "download_refused", why)
 		return
 	}
-	if !s.reauth(r, in.Password) {
+	if !s.reauthStrict(r, in.Password) {
 		s.reauthRefused(w, r, "Confirm your password to download a backup. It is a complete copy of this site's data.")
 		return
 	}

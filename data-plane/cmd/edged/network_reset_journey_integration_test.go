@@ -119,7 +119,7 @@ func TestIntegration_Reset_AHeavilyReconfiguredLANComesBackToTheApprovedAccessNe
 		FROM guest_networks g WHERE g.tenant_id=$1 AND g.enabled`, f.tenant).Scan(&typ, &parent, &subnet, &gw, &dhcp, &pool); err != nil {
 		t.Fatal(err)
 	}
-	if typ != "untagged" || parent != h.lan || subnet != "10.20.0.0/20" || gw != "10.20.0.1" || dhcp != "local" || pool != "10.20.0.10-10.20.15.254" {
+	if typ != "untagged" || parent != h.lan || subnet != "10.20.0.0/19" || gw != "10.20.0.1" || dhcp != "local" || pool != "10.20.0.10-10.20.31.254" {
 		t.Fatalf("the prepared network is %s on %s, %s via %s, DHCP %s, pool %s", typ, parent, subnet, gw, dhcp, pool)
 	}
 	_, ports = f.do(t, "GET", "/network/ports", nil)

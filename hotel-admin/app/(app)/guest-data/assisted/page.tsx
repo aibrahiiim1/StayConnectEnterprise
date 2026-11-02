@@ -538,26 +538,26 @@ function CasePanel({ id, onClose, onChanged }: { id: string; onClose: () => void
         open={acting === "export"} onOpenChange={(v) => { if (!v) { setActing(null); setActionErr(null); } }}
         title="Hand over the selected records?" description={ASSISTED_EXPORT_NOTE}
         confirmLabel="Download records" busy={busy} error={actionErr}
-        confirmText={c.ref} requireReason reasonMinLength={4} reasonPlaceholder="e.g. written request received at reception" requirePassword
+        confirmText={c.ref} requireReason reasonStrict reasonMinLength={4} reasonPlaceholder="e.g. written request received at reception" requirePassword
         onConfirm={(a) => confirmAct("export", a)}
       />
       <ConfirmDialog
         open={acting === "erase"} onOpenChange={(v) => { if (!v) { setActing(null); setActionErr(null); } }}
         title="Anonymise the selected records?" confirmLabel="Anonymise records" confirmVariant="danger" busy={busy} error={actionErr}
         confirmText={c.ref} consequences={ASSISTED_ERASE_CONSEQUENCES}
-        requireReason reasonMinLength={4} reasonPlaceholder="e.g. written erasure request received at reception" requirePassword
+        requireReason reasonStrict reasonMinLength={4} reasonPlaceholder="e.g. written erasure request received at reception" requirePassword
         onConfirm={(a) => confirmAct("erase", a)}
       />
       <ConfirmDialog
         open={acting === "complete"} onOpenChange={(v) => { if (!v) { setActing(null); setActionErr(null); } }}
         title="Mark this request completed?" description="The device addresses and notes are removed from the database. You will be offered the request file to save."
-        confirmLabel="Complete request" busy={busy} error={actionErr} requireReason reasonMinLength={4} reasonPlaceholder="e.g. records handed over in person"
+        confirmLabel="Complete request" busy={busy} error={actionErr} requireReason reasonStrict reasonMinLength={4} reasonPlaceholder="e.g. records handed over in person"
         onConfirm={(a) => confirmClose("COMPLETED", a)}
       />
       <ConfirmDialog
         open={acting === "cancel"} onOpenChange={(v) => { if (!v) { setActing(null); setActionErr(null); } }}
         title="Cancel this request?" description="Nothing is handed over or changed. The device addresses and notes are removed from the database."
-        confirmLabel="Cancel request" confirmVariant="danger" busy={busy} error={actionErr} requireReason reasonMinLength={4} reasonPlaceholder="e.g. the requester withdrew"
+        confirmLabel="Cancel request" confirmVariant="danger" busy={busy} error={actionErr} requireReason reasonStrict reasonMinLength={4} reasonPlaceholder="e.g. the requester withdrew"
         onConfirm={(a) => confirmClose("CANCELLED", a)}
       />
     </div>

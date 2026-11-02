@@ -355,6 +355,8 @@ export type PortalFleetRow = {
   customer_name?: string | null;
   site_name?: string | null;
   hostname: string;
+  /** The shared Client Portal name this appliance's Clients use; `hostname` is its own technical name. */
+  client_portal?: string | null;
   portal_ip?: string | null;
   dns_state: "PENDING" | "SYNCED" | "ERROR" | "RELEASED";
   dns_error?: string | null;
