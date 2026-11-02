@@ -78,13 +78,8 @@ governance checks need a manifest refresh, block re-render or pack rebuild to me
 Authoritative: [`docs/FAST_DELIVERY_AND_PARALLEL_AGENT_PROTOCOL.md`](docs/FAST_DELIVERY_AND_PARALLEL_AGENT_PROTOCOL.md)
 (enforced by `tools/validate-delivery-protocol.py`; that file wins).
 
-* Normal work does not run the preflight, governance suites or the four gates (D42). **FULL CHECK THE WHOLE CODE**
-  runs `python tools/full-check.py --ref <branch>` (the four gates, dispatched), `bash tools/preflight.sh` and the
-  full local suites.
-* **Master requires exactly one check, `po-merge-authorization`**: it passes only while the PR carries the label
-  `po-merge-approved` on its current head (any later push removes it). Apply the label only after the PO's explicit
-  merge instruction or a mission that authorized the merge. The four gates are `workflow_dispatch` only (they can
-  never satisfy a ruleset-required check); nothing merges automatically.
+* **PO decision 2026-11-02: GitHub CI and ALL GitHub Actions workflows are removed.** No required status checks, automatic workflows, or dispatched GitHub gate runs. Maintain relevant local tests, builds, code review, security gates and truthful reports. FULL CHECK uses real local preflight and integration suites, with no fabricated PASS.
+* **Master still requires protected PR merge** with no bypass actors, no direct or force push, no branch deletion, resolved threads, merge commits only. **No PO acceptance = no merge**, as a mandatory agent procedure documented in the PR discussion/mission (no GitHub Actions checker). A later commit after approval needs renewed authorization. Nothing merges automatically.
 * **Deployment order follows dependencies:** a backward-compatible API before the UI that needs it, or a verified
   atomic staged switch. Never expose a temporary 404.
 * **Guest data never enters delivery evidence** (PR bodies, commits, governance records, export packs are
@@ -155,10 +150,9 @@ REQUEST → SCOPE → IMPLEMENT → FOCUSED SELF-REVIEW → TARGETED TESTS → F
 Unrelated findings are follow-up. Review is focused, tests targeted; corrections continue on the same branch and PR
 with no new governance cycle. **NO PO ACCEPTANCE = NO MERGE:** merge only on an explicit instruction (*Approved*,
 *Merge it*, *Approved, merge*) or a mission that said "implement and merge"; completion or deployment never
-authorizes a merge. GitHub enforces it (`po-merge-authorization` + `po-merge-approved`,
-`tools/po_merge_authorization.py`); direct push, force push, deletion and bypass are prohibited; merge commits only;
-required approvals 0. **FULL CHECK THE WHOLE CODE** is opt-in only (full review, suites and browser suites,
-governance and stale-state validation, packs/manifests/evidence, the four gates, provenance, live verification where
+authorizes a merge. Under the 2026-11-02 no-CI decision, PO approval is mandatory in the mission/PR record, but NOT enforced by a status check; direct push, force push, deletion and bypass are prohibited; merge commits only;
+required approvals 0. **FULL CHECK THE WHOLE CODE** is opt-in and local (full review, suites and browser suites,
+governance and stale-state validation, packs/manifests/evidence, local integration matrix, provenance, live verification where
 deployment is authorized, a comprehensive report); it authorizes no merge, Go-Live, destructive DB change,
 PMS/financial traffic, networking change or unnamed environment. Nothing runs unattended: no schedule, no automatic
 merge, no session-start check.
