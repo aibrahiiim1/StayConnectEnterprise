@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0204, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0205, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -6608,25 +6608,21 @@ CREATE FUNCTION iam_v2.p3_feed_authorizes(p_tenant uuid, p_site uuid, p_interfac
               AND COALESCE(rt.last_heartbeat_at, rt.last_connected_at)
                     > now() - make_interval(secs => iam_v2.p3_cfg_secs(pr.config,'heartbeat_timeout_ms',300)))
              OR
-             -- THE LAST GOOD ROSTER, whenever the live branch is not satisfied because the guest list is not
-             -- IN_SYNC (a resync requested, running or failed) or the transport is down. Either way the roster
-             -- already published is untouched until a replacement completes, so it is exactly as trustworthy as
-             -- before the attempt began. A connected feed that is IN_SYNC but silent is NOT covered: that is a
-             -- hung link, not a resync, and stays refused.
              (    rt.last_complete_sync_at IS NOT NULL
               AND (rt.transport_status <> 'CONNECTED' OR rt.sync_status <> 'IN_SYNC'))
            )
        AND rt.continuity_status = 'CONTINUOUS'
        AND rt.pinned_revision_id = p_revision
-       -- (2) MATERIALIZATION READINESS, unchanged — and the reason the partial generation cannot leak in.
+       -- (2) NO LIVE EVENT WAITING. A claimable LIVE row is newer than everything materialized and may take access away
+       --     (a GO). The drain of a published refresh no longer blocks here (0205): positives stand, and scd holds back
+       --     negatives while p3_interface_roster_draining says rows are still to come.
        AND NOT EXISTS (
              SELECT 1 FROM iam_v2.stay_events se
               WHERE se.tenant_id = rt.tenant_id
                 AND se.site_id = rt.site_id
                 AND se.pms_interface_id = rt.pms_interface_id
                 AND se.processing_status = 'PENDING'
-                AND (se.admission_kind = 'LIVE'
-                     OR se.resync_generation <= rt.published_resync_generation))
+                AND se.admission_kind = 'LIVE')
        -- (3) the absolute freshness ceiling. For the offline branch this IS the seventy-two hours: the last
        --     good roster is usable until it ages out, and then nothing is.
        AND p_evidence_at > now() - make_interval(secs =>
@@ -6645,7 +6641,7 @@ $_$;
 -- Name: FUNCTION p3_feed_authorizes(p_tenant uuid, p_site uuid, p_interface uuid, p_revision uuid, p_evidence_at timestamp with time zone); Type: COMMENT; Schema: iam_v2; Owner: -
 --
 
-COMMENT ON FUNCTION iam_v2.p3_feed_authorizes(p_tenant uuid, p_site uuid, p_interface uuid, p_revision uuid, p_evidence_at timestamp with time zone) IS 'Single source of truth for the feed half of PMS Room sign-in eligibility. Authorises on EITHER a live feed (CONNECTED, IN_SYNC, heard within the heartbeat timeout) OR the LAST SUCCESSFULLY PUBLISHED roster whenever the transport is down or the guest list is not IN_SYNC (D39, D69), in both cases only when the materialized roster has caught up: no CLAIMABLE PENDING stay_event may exist, where claimable mirrors the applier''s own predicate (LIVE, or a generation at or below the published one). A resync in flight or failed does NOT invalidate the published roster; only the evidence age retires it. STABLE and therefore NOT sufficient on its own: callers take the interface runtime row lock first.';
+COMMENT ON FUNCTION iam_v2.p3_feed_authorizes(p_tenant uuid, p_site uuid, p_interface uuid, p_revision uuid, p_evidence_at timestamp with time zone) IS 'Single source of truth for the feed half of PMS Room sign-in eligibility. Authorises on EITHER a live feed (CONNECTED, IN_SYNC, heard within the heartbeat timeout) OR the LAST SUCCESSFULLY PUBLISHED roster whenever the transport is down or the guest list is not IN_SYNC (D39, D69), in both cases only when no claimable LIVE stay_event is pending. The drain of a published refresh does not block (0205): a found guest stands, and scd holds back a non-match while p3_interface_roster_draining is true. STABLE and therefore NOT sufficient on its own: callers take the interface runtime row lock first.';
 
 
 --
@@ -6771,6 +6767,26 @@ CREATE FUNCTION iam_v2.p3_interface_can_authorise(p_tenant uuid, p_site uuid, p_
     LEFT JOIN iam_v2.pms_interface_runtime rt
       ON rt.tenant_id = pi.tenant_id AND rt.site_id = pi.site_id AND rt.pms_interface_id = pi.id
    WHERE pi.tenant_id = p_tenant AND pi.site_id = p_site AND pi.id = p_interface AND pi.lifecycle_state = 'ACTIVE';
+$$;
+
+
+--
+-- Name: p3_interface_roster_draining(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p3_interface_roster_draining(p_tenant uuid, p_site uuid, p_interface uuid) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT EXISTS (
+    SELECT 1
+      FROM iam_v2.pms_interface_runtime rt
+      JOIN iam_v2.stay_events se
+        ON se.tenant_id = rt.tenant_id AND se.site_id = rt.site_id AND se.pms_interface_id = rt.pms_interface_id
+     WHERE rt.tenant_id = p_tenant AND rt.site_id = p_site AND rt.pms_interface_id = p_interface
+       AND se.processing_status = 'PENDING'
+       AND se.admission_kind = 'RESYNC'
+       AND se.resync_generation <= rt.published_resync_generation);
 $$;
 
 
@@ -33655,6 +33671,14 @@ REVOKE ALL ON FUNCTION iam_v2.p3_history_appendonly() FROM PUBLIC;
 
 REVOKE ALL ON FUNCTION iam_v2.p3_interface_can_authorise(p_tenant uuid, p_site uuid, p_interface uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.p3_interface_can_authorise(p_tenant uuid, p_site uuid, p_interface uuid) TO svc_scd;
+
+
+--
+-- Name: FUNCTION p3_interface_roster_draining(p_tenant uuid, p_site uuid, p_interface uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p3_interface_roster_draining(p_tenant uuid, p_site uuid, p_interface uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p3_interface_roster_draining(p_tenant uuid, p_site uuid, p_interface uuid) TO svc_scd;
 
 
 --
