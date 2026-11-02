@@ -12,7 +12,11 @@ import { deletePlan, getPlanDeletability, type RevisionInfo } from "@/lib/api/co
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Field, Input, InputGroup, Select } from "@/components/ui/input";
+import { Field, Input, InputGroup, QuietHints, Select } from "@/components/ui/input";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Explain } from "@/components/ui/tooltip";
+import { InfoHint } from "@/components/ui/quiet";
+import { generateShortCode } from "@/lib/short-code";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageShell, PageHeader, StatCard, StatGrid } from "@/components/ui/page";
@@ -75,7 +79,9 @@ export default function ServicePlansPage() {
   const [prefill, setPrefill] = useState<PlanSummary | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const [chip, setChip] = useState<Chip>("all");
+  // In use first, as Internet packages opens on Active.
+  const [chip, setChip] = useState<Chip>("used");
+  const [detailTab, setDetailTab] = useState<"details" | "versions">("details");
   const [q, setQ] = useState("");
   const [selected, setSelected] = useState<PlanSummary | null>(null);
   const [revs, setRevs] = useState<RevisionInfo[] | null>(null);
@@ -147,8 +153,9 @@ export default function ServicePlansPage() {
     const int = (k: string) => { const v = str(k); return v === "" ? undefined : Number(v); };
     const editingPlan = prefill;
     try {
+      if (!str("name")) { setFormErr(new Error("Enter a name for the plan.")); return; }
       const res = await api.post<{ current_revision_id: string }>("/commercial-packages/plans", {
-        code: str("code"),
+        code: editingPlan?.code ?? generateShortCode(str("name")),
         name: str("name"),
         down_kbps: mbpsToKbps(str("down_mbps")),
         up_kbps: mbpsToKbps(str("up_mbps")),
@@ -373,13 +380,13 @@ export default function ServicePlansPage() {
                 value={chip}
                 onChange={setChip}
                 options={[
-                  { value: "all", label: "All", count: rows ? stats.all : undefined },
                   { value: "used", label: "In use", count: rows ? stats.used : undefined, tone: "ok" },
                   { value: "unused", label: "Not used", count: rows ? stats.unused : undefined },
+                  { value: "all", label: "All", count: rows ? stats.all : undefined },
                 ]}
               />
             }
-            search={<SearchInput value={q} onChange={setQ} placeholder="Search plans" label="Search plans by name or code" />}
+            search={<SearchInput value={q} onChange={setQ} placeholder="Search plans" label="Search plans by name" />}
           />
           {rows === null ? (
             <SkeletonRows rows={4} cols={7} />
@@ -405,10 +412,9 @@ export default function ServicePlansPage() {
                   const name = p.name || p.code;
                   const used = p.used_by_active_packages ?? 0;
                   return (
-                    <TR key={p.plan_id} onClick={() => setSelected(p)}>
+                    <TR key={p.plan_id} onClick={() => { setDetailTab("details"); setSelected(p); }}>
                       <TD truncate title={name} className="max-w-[16rem]">
                         <span className="font-medium">{name}</span>
-                        <div className="truncate text-xs text-muted-foreground">{p.code}</div>
                       </TD>
                       <TD nowrap>
                         {formatSpeedPair(p.down_kbps, p.up_kbps)}
@@ -464,77 +470,95 @@ export default function ServicePlansPage() {
             return (
               <>
                 <SheetHeader icon={<Gauge />} eyebrow="Service plan" title={p.name || p.code}
-                  description={`Code ${p.code}`}
                   badges={(p.used_by_active_packages ?? 0) > 0
                     ? <Badge tone="ok" dot>Used by {p.used_by_active_packages} active package{p.used_by_active_packages === 1 ? "" : "s"}</Badge>
-                    : <Badge dot>Not used by an active package</Badge>} />
+                    : <Badge dot>Not used</Badge>} />
                 <SheetBody>
-                  <MetricStrip items={[
-                    { label: "Download", value: formatSpeed(p.down_kbps) },
-                    { label: "Upload", value: formatSpeed(p.up_kbps) },
-                    { label: "Data", value: formatData(p.data_quota_bytes) },
-                    { label: "Devices", value: formatDevices(p.max_concurrent_devices) },
-                  ]} />
-                  {stale.length > 0 && (
-                    <Callout tone="warning" title="Some packages still give older settings">
-                      {stale.length} package{stale.length === 1 ? "" : "s"} using this plan still
-                      {stale.length === 1 ? " gives" : " give"} clients an earlier version of it.
-                    </Callout>
-                  )}
-                  {!p.enabled && (
-                    <Callout tone="neutral" title="Marked inactive in its records">
-                      This mark does not change what clients receive: any active package using this plan still hands
-                      it out. To stop clients receiving it, disable or edit those packages.
-                    </Callout>
-                  )}
-                  <SheetSection title="What it grants">
-                    <KeyValueGrid items={[
-                      { label: "Speed (down / up)", value: formatSpeedPair(p.down_kbps, p.up_kbps) },
-                      { label: "Speed sharing", value: p.speed_allocation === "SHARED"
-                        ? "Shared by the client's devices" : "Full speed on every device" },
-                      { label: "Devices at once", value: formatDevices(p.max_concurrent_devices),
-                        hint: DEVICE_LIMIT_POLICIES[p.device_limit_policy ?? ""] },
-                      { label: "Time allowance", value: formatDuration(p.time_quota_seconds),
-                        hint: TIME_ACCOUNTING_MODES[p.time_accounting_mode ?? ""] },
-                      { label: "Data allowance", value: formatData(p.data_quota_bytes) },
-                      { label: "Disconnect after inactivity", value: p.idle_timeout_seconds ? formatDuration(p.idle_timeout_seconds) : "Never" },
-                      { label: "Longest single session", value: p.max_continuous_session_seconds ? formatDuration(p.max_continuous_session_seconds) : "No limit" },
-                    ]} />
-                  </SheetSection>
-                  <SheetSection title="Packages using it">
-                    {using.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">No package uses this plan.</p>
-                    ) : (
-                      <ul className="space-y-1.5">
-                        {using.map((k) => (
-                          <li key={k.package_id} className="flex items-center justify-between gap-2 text-sm">
-                            <span>{k.name || k.code}</span>
-                            <span className="flex gap-1.5">
-                              {k.active ? <Badge tone="ok" dot>Active</Badge> : <Badge dot>Disabled</Badge>}
-                              {stale.some((x) => x.package_id === k.package_id) && <Badge tone="warn">Older settings</Badge>}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </SheetSection>
-                  <SheetSection title="Saved versions">
-                    <ErrorBanner err={revsErr} />
-                    {revs === null && !revsErr ? <SkeletonRows rows={2} cols={1} /> : (
-                      <HistoryList label="Saved versions" emptyLabel="No saved versions yet"
-                        className="rounded-md border border-border"
-                        items={(revs ?? []).map((r) => ({
-                          id: r.revision_id,
-                          title: `Version ${r.revision_no}`,
-                          badge: r.is_current ? <Badge tone="accent">in force</Badge> : <span className="text-xs text-muted-foreground">superseded</span>,
-                          summary: r.label || undefined,
-                          tone: r.is_current ? "ok" : "neutral",
-                        }))} />
-                    )}
-                  </SheetSection>
-                  <SheetSection title="For support">
-                    <KeyValueGrid columns={1} items={[{ label: "Plan reference", value: <MonoId value={p.plan_id} /> }]} />
-                  </SheetSection>
+                  <Tabs value={detailTab} onValueChange={(v) => setDetailTab(v as "details" | "versions")}>
+                    <TabsList>
+                      <TabsTrigger value="details">Details</TabsTrigger>
+                      <TabsTrigger value="versions">Versions{revs ? ` (${revs.length})` : ""}</TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="details" className="mt-4 space-y-5">
+                      <MetricStrip items={[
+                        { label: "Download", value: formatSpeed(p.down_kbps) },
+                        { label: "Upload", value: formatSpeed(p.up_kbps) },
+                        { label: "Data", value: formatData(p.data_quota_bytes) },
+                        { label: "Devices", value: formatDevices(p.max_concurrent_devices) },
+                      ]} />
+                      {stale.length > 0 && (
+                        <Callout tone="warning" title="Some packages still give older settings">
+                          {stale.length} package{stale.length === 1 ? "" : "s"} using this plan still
+                          {stale.length === 1 ? " gives" : " give"} clients an earlier version of it.
+                        </Callout>
+                      )}
+                      {!p.enabled && (
+                        <Callout tone="neutral" title="Marked inactive in its records">
+                          No effect on clients.{" "}
+                          <InfoHint>
+                            This mark does not change what clients receive: any active package using this plan still hands
+                            it out. To stop clients receiving it, disable or edit those packages.
+                          </InfoHint>
+                        </Callout>
+                      )}
+                      <SheetSection title="What it grants">
+                        <KeyValueGrid items={[
+                          { label: "Speed (down / up)", value: formatSpeedPair(p.down_kbps, p.up_kbps) },
+                          { label: "Speed share", value: p.speed_allocation === "SHARED" ? "Shared" : "Per device" },
+                          { label: "Devices at once", value: formatDevices(p.max_concurrent_devices),
+                            hint: DEVICE_LIMIT_POLICIES[p.device_limit_policy ?? ""] },
+                          { label: "Time allowance", value: formatDuration(p.time_quota_seconds) },
+                          { label: "Data allowance", value: formatData(p.data_quota_bytes) },
+                          { label: "Idle disconnect", value: p.idle_timeout_seconds ? formatDuration(p.idle_timeout_seconds) : "Never" },
+                          { label: "Longest session", value: p.max_continuous_session_seconds ? formatDuration(p.max_continuous_session_seconds) : "No limit" },
+                        ]} />
+                      </SheetSection>
+                      <SheetSection title="Packages using it">
+                        {using.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">None</p>
+                        ) : (
+                          <ul className="space-y-1.5">
+                            {using.map((k) => (
+                              <li key={k.package_id} className="flex items-center justify-between gap-2 text-sm">
+                                <span>{k.name || k.code}</span>
+                                <span className="flex gap-1.5">
+                                  {k.active ? <Badge tone="ok" dot>Active</Badge> : <Badge dot>Disabled</Badge>}
+                                  {stale.some((x) => x.package_id === k.package_id) && <Badge tone="warn">Older settings</Badge>}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </SheetSection>
+                      <SheetSection title="For support">
+                        <KeyValueGrid columns={1} items={[{ label: "Plan reference", value: <MonoId value={p.plan_id} /> }]} />
+                      </SheetSection>
+                    </TabsContent>
+                    <TabsContent value="versions" className="mt-4 space-y-3">
+                      <ErrorBanner err={revsErr} />
+                      {revs === null && !revsErr ? <SkeletonRows rows={3} cols={2} /> : (revs ?? []).length === 0 ? (
+                        <EmptyState size="sm" icon={<Gauge />} title="No saved versions yet" />
+                      ) : (
+                        <div className="overflow-hidden rounded-md border border-border">
+                          <Table label="Saved versions">
+                            <THead><TR><TH>Version</TH><TH>Status</TH></TR></THead>
+                            <TBody>
+                              {(revs ?? []).slice().sort((x, y) => y.revision_no - x.revision_no).map((r) => (
+                                <TR key={r.revision_id}>
+                                  <TD className="font-medium">Version {r.revision_no}{r.label ? <span className="ms-1.5 text-xs text-muted-foreground">{r.label}</span> : null}</TD>
+                                  <TD>{r.is_current ? <Badge tone="accent">in force</Badge> : <span className="text-xs text-muted-foreground">superseded</span>}</TD>
+                                </TR>
+                              ))}
+                            </TBody>
+                          </Table>
+                        </div>
+                      )}
+                      <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                        Every save is a new version.
+                        <Explain>Versions are kept permanently. A client keeps the terms of the version they connected under; packages move to new settings only when you choose them.</Explain>
+                      </p>
+                    </TabsContent>
+                  </Tabs>
                 </SheetBody>
                 {writable && (
                   <SheetFooter>
@@ -569,8 +593,15 @@ export default function ServicePlansPage() {
       <Dialog open={showNew} onOpenChange={(v) => { if (!v && !busy) { setShowNew(false); setPrefill(null); } }}>
         <DialogContent size="lg">
           <DialogHeader>
-            <DialogTitle>{prefill ? `Edit ${prefill.name || prefill.code}` : "Add a service plan"}</DialogTitle>
-            <DialogDescription>
+            <DialogTitle className="flex items-center gap-1">
+              {prefill ? `Edit ${prefill.name || prefill.code}` : "Add a service plan"}
+              <Explain>
+                {prefill
+                  ? "Saving records these as the plan's current settings. Clients already connected keep the terms they were given, and packages using this plan are only updated if you choose them afterwards."
+                  : "This creates the plan and its first settings."}
+              </Explain>
+            </DialogTitle>
+            <DialogDescription className="sr-only">
               {prefill
                 ? "Saving records these as the plan's current settings. Clients already connected keep the terms they were given, and packages using this plan are only updated if you choose them afterwards."
                 : "This creates the plan and its first settings."}
@@ -579,14 +610,10 @@ export default function ServicePlansPage() {
           <DialogBody className="space-y-4">
             <ErrorBanner err={formErr} />
             {/* Keyed on the plan: uncontrolled inputs would otherwise keep the previous plan's numbers and publish them. */}
+            <QuietHints>
             <form id="service-plan-form" key={prefill?.plan_id ?? "new"} onSubmit={onPublish} className="grid gap-x-4 gap-y-4 sm:grid-cols-2">
-              <Field label="Plan code" required
-                hint={prefill ? "Identifies this plan; cannot be changed." : "A short identifier no other plan uses. It cannot be changed later."}>
-                <Input id="plan-code" name="code" required defaultValue={prefill?.code ?? ""} readOnly={!!prefill}
-                  placeholder="GOLD" />
-              </Field>
-              <Field label="Display name" optional>
-                <Input id="plan-name" name="name" defaultValue={prefill?.name ?? ""} placeholder="Premium Wi-Fi" />
+              <Field label="Name" required className="sm:col-span-2" hint="What operators see in lists and on packages.">
+                <Input id="plan-name" name="name" required defaultValue={prefill?.name || prefill?.code || ""} placeholder="Premium Wi-Fi" />
               </Field>
 
               <Field label="Download speed" htmlFor="plan-down" hint={`Empty for unlimited. Up to ${LIMITS.mbps} Mbps.`}>
@@ -606,7 +633,7 @@ export default function ServicePlansPage() {
                 <Input id="plan-devices" name="max_concurrent_devices" type="number" min={1}
                   defaultValue={prefill?.max_concurrent_devices ?? 1} required />
               </Field>
-              <Field label="When the device limit is reached"
+              <Field label="When devices are full"
                 hint="Disconnecting the oldest device frees its place for the new one.">
                 <Select id="plan-device-policy" name="device_limit_policy"
                   defaultValue={(SELECTABLE_DEVICE_LIMIT_POLICIES as readonly string[]).includes(prefill?.device_limit_policy ?? "")
@@ -618,7 +645,7 @@ export default function ServicePlansPage() {
               </Field>
 
               {/* Fields must be pre-filled: the form publishes a complete version from whatever they hold. */}
-              <Field label="Total time allowance" htmlFor="plan-time"
+              <Field label="Time allowance" htmlFor="plan-time"
                 hint={<>Time online, added up across the client&rsquo;s devices (two devices online for an hour use two
                   hours). Up to {LIMITS.timeQuotaDays} days.</>}>
                 <div className="flex gap-2">
@@ -638,14 +665,14 @@ export default function ServicePlansPage() {
                 </InputGroup>
               </Field>
 
-              <Field label="Disconnect after inactivity" htmlFor="plan-idle"
+              <Field label="Idle disconnect" htmlFor="plan-idle"
                 hint="The device can sign in again; the package is not used up.">
                 <InputGroup suffix="minutes">
                   <Input id="plan-idle" name="idle_timeout" type="number" min={0} max={LIMITS.idleMinutes} placeholder="Never"
                     defaultValue={secondsToDurationField(prefill?.idle_timeout_seconds, ["minutes"]).value} />
                 </InputGroup>
               </Field>
-              <Field label="Maximum single session" htmlFor="plan-session"
+              <Field label="Longest session" htmlFor="plan-session"
                 hint="The device can sign in again straight away.">
                 <InputGroup suffix="hours">
                   <Input id="plan-session" name="max_session" type="number" min={0} max={LIMITS.sessionHours} placeholder="No limit"
@@ -653,28 +680,13 @@ export default function ServicePlansPage() {
                 </InputGroup>
               </Field>
 
-              <Field label="How the speed is shared" className="sm:col-span-2" hint="Shared needs a download and upload speed to share.">
+              <Field label="Speed share" className="sm:col-span-2"
+                hint="Per device: every device gets the full speed. Shared: all the client's devices share one speed (needs a download and upload speed).">
                 <Select id="plan-sharing" name="speed_allocation" defaultValue={prefill?.speed_allocation ?? "PER_DEVICE"}>
-                  <option value="PER_DEVICE">Per device — every device gets the full speed</option>
-                  <option value="SHARED">Shared — all the client&rsquo;s devices share the speed</option>
+                  <option value="PER_DEVICE">Per device</option>
+                  <option value="SHARED">Shared</option>
                 </Select>
               </Field>
-
-              {prefill ? (
-                <Field label="How time is counted" className="sm:col-span-2" hint="Kept as this plan has it. Saving does not change how time is counted.">
-                  <Select id="plan-time-mode" disabled value={prefill.time_accounting_mode || "VALIDITY_WINDOW"} onChange={() => {}}>
-                    <option value={prefill.time_accounting_mode || "VALIDITY_WINDOW"}>
-                      {TIME_ACCOUNTING_MODES[prefill.time_accounting_mode || "VALIDITY_WINDOW"] ?? prefill.time_accounting_mode}
-                    </option>
-                  </Select>
-                </Field>
-              ) : (
-                <Field label="How time is counted" className="sm:col-span-2">
-                  <Select id="plan-time-mode" name="time_accounting_mode" defaultValue="VALIDITY_WINDOW">
-                    <option value="VALIDITY_WINDOW">{TIME_ACCOUNTING_MODES.VALIDITY_WINDOW}</option>
-                  </Select>
-                </Field>
-              )}
 
               {prefill && (
                 <Field label="Confirm your password" required className="sm:col-span-2"
@@ -684,6 +696,7 @@ export default function ServicePlansPage() {
               )}
 
             </form>
+            </QuietHints>
           </DialogBody>
           <DialogFooter>
             <Button type="button" variant="secondary" disabled={busy} onClick={() => { setShowNew(false); setPrefill(null); }}>Cancel</Button>

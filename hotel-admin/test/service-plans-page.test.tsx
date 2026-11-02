@@ -250,7 +250,9 @@ describe("ServicePlansPage — editing an existing plan", () => {
     fireEvent.click(await screen.findByRole("button", { name: /^edit\b/i }));
 
     const v = fieldsOf(container);
-    expect(v("code")).toBe("OneDay");
+    // The code is internal: not a field, kept unchanged by the save.
+    expect(v("code")).toBeUndefined();
+    expect(v("name")).toBe("OneDay");
     expect(v("down_mbps")).toBe("10000");
     expect(v("up_mbps")).toBe("10000");
     expect(v("max_concurrent_devices")).toBe("5");
@@ -289,9 +291,8 @@ describe("ServicePlansPage — editing an existing plan", () => {
     p.mockResolvedValue({ current_revision_id: "rev-od-2" });
     render(<ServicePlansPage />);
     fireEvent.click(await screen.findByRole("button", { name: /^edit\b/i }));
-    const mode = document.getElementById("plan-time-mode") as HTMLSelectElement;
-    expect(mode.disabled).toBe(true);
-    expect(mode.value).toBe("AGGREGATE_ONLINE_TIME");
+    // There is one way to count time for a new plan, so the form does not ask; an edit keeps the plan's own mode.
+    expect(document.getElementById("plan-time-mode")).toBeNull();
     fireEvent.change(document.querySelector('[name="password"]')!, { target: { value: "pw-op" } });
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
     await waitFor(() => expect(p).toHaveBeenCalledTimes(1));
@@ -327,6 +328,17 @@ if (!("ResizeObserver" in globalThis)) {
 }
 
 describe("ServicePlansPage — add, record and delete", () => {
+  it("names the speed share Per device or Shared and keeps the explanation as a hint", async () => {
+    mockLoad([], [ONEDAY]);
+    render(<ServicePlansPage />);
+    await screen.findByText("OneDay", { selector: "span" });
+    fireEvent.click(screen.getByRole("button", { name: /add plan/i }));
+    const share = document.querySelector('[name="speed_allocation"]') as HTMLSelectElement;
+    expect(Array.from(share.options).map((o) => o.textContent)).toEqual(["Per device", "Shared"]);
+    expect(screen.getByText("Speed share")).toBeInTheDocument();
+    expect(screen.queryByText(/how the speed is shared/i)).toBeNull();
+  });
+
   it("Add sends create_only so a taken code is refused rather than revised; Edit does not", async () => {
     mockLoad([], [ONEDAY]);
     p.mockResolvedValue({ current_revision_id: "new" });
@@ -334,10 +346,13 @@ describe("ServicePlansPage — add, record and delete", () => {
     await screen.findByText("OneDay", { selector: "span" });
 
     fireEvent.click(screen.getByRole("button", { name: /add plan/i }));
-    fireEvent.change(document.querySelector('[name="code"]')!, { target: { value: "NEWPLAN" } });
+    expect(document.querySelector('[name="code"]')).toBeNull();
+    fireEvent.change(document.querySelector('[name="name"]')!, { target: { value: "New plan" } });
     fireEvent.click(screen.getByRole("button", { name: /^add plan$/i }));
     await waitFor(() => expect(p).toHaveBeenCalledTimes(1));
     expect(p.mock.calls[0][1].create_only).toBe(true);
+    expect(p.mock.calls[0][1].code).toMatch(/^NEW-PLAN-[A-Z2-9]{4}$/);
+    expect(p.mock.calls[0][1].time_accounting_mode).toBe("VALIDITY_WINDOW");
 
     fireEvent.click(await screen.findByRole("button", { name: /^edit\b/i }));
     fireEvent.change(document.querySelector('[name="password"]')!, { target: { value: "pw-op" } });
@@ -366,7 +381,7 @@ describe("ServicePlansPage — add, record and delete", () => {
     render(<ServicePlansPage />);
     await screen.findByText("OneDay", { selector: "span" });
     fireEvent.click(screen.getByRole("button", { name: /add plan/i }));
-    fireEvent.change(document.querySelector('[name="code"]')!, { target: { value: "OneDay" } });
+    fireEvent.change(document.querySelector('[name="name"]')!, { target: { value: "OneDay" } });
     fireEvent.click(screen.getByRole("button", { name: /^add plan$/i }));
     const dialog = await screen.findByRole("dialog");
     expect(await within(dialog).findByText(/code_exists/)).toBeInTheDocument();
@@ -399,6 +414,8 @@ describe("ServicePlansPage — add, record and delete", () => {
     const sheet = await screen.findByRole("dialog");
     expect(within(sheet).getByText("Freee")).toBeInTheDocument();
     expect(within(sheet).getByText("Older settings")).toBeInTheDocument();
+    fireEvent.mouseDown(within(sheet).getByRole("tab", { name: /versions/i }));
+    fireEvent.click(within(sheet).getByRole("tab", { name: /versions/i }));
     expect(await within(sheet).findByText(/Version 4/)).toBeInTheDocument();
     expect(within(sheet).getByText(/in force/)).toBeInTheDocument();
   });
