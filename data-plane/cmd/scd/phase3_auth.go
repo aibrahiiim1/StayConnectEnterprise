@@ -592,7 +592,45 @@ func validRequestID(s string) bool {
 //
 // The full multi-word given name ("MARIA DEL CARMEN") must match as a whole; accepting single words would
 // admit anyone who guessed a common first name for a room.
+// probeInterface answers for one interface's roster. While a refreshed roster is still being written in (the drain after a
+// complete sync), a match is a match: every stay row is either its previous or its refreshed state, both true PMS facts, the
+// same trust D39 gives the published roster while a resync is in flight. A non-match is not yet an answer, since the guest may
+// be in the rows still to come: wait for the drain and ask again, and if it outlasts the wait the answer is STALE (technical,
+// never "your details are wrong", never counted against the guest).
 func (p *phase3Auth) probeInterface(ctx context.Context, seen *observations, ifaceID, room, last, first, res string) (pmsresolve.CandidateOutcome, string, error) {
+	started := time.Now()
+	for {
+		var one observations
+		out, stay, err := p.probeRoster(ctx, &one, ifaceID, room, last, first, res)
+		if err != nil || (out != pmsresolve.NoMatch && out != pmsresolve.AmbiguousLocal) {
+			seen.merge(&one)
+			return out, stay, err
+		}
+		draining, derr := p.rosterDraining(ctx, ifaceID)
+		if derr == nil && !draining {
+			seen.merge(&one)
+			return out, stay, nil
+		}
+		if derr != nil || ctx.Err() != nil || time.Since(started)+drainWaitStep > drainWaitMax {
+			seen.add(probeObservation{InterfaceID: ifaceID, Failed: true})
+			return pmsresolve.Stale, "", nil
+		}
+		select {
+		case <-ctx.Done():
+		case <-time.After(drainWaitStep):
+		}
+	}
+}
+
+// rosterDraining: rows of a published refresh are still waiting to be written into the stays (0205).
+func (p *phase3Auth) rosterDraining(ctx context.Context, ifaceID string) (bool, error) {
+	var draining bool
+	err := p.srv.db.QueryRow(ctx, `SELECT iam_v2.p3_interface_roster_draining($1::uuid,$2::uuid,$3::uuid)`,
+		p.srv.tenID, p.srv.siteID, ifaceID).Scan(&draining)
+	return draining, err
+}
+
+func (p *phase3Auth) probeRoster(ctx context.Context, seen *observations, ifaceID, room, last, first, res string) (pmsresolve.CandidateOutcome, string, error) {
 	obs := probeObservation{InterfaceID: ifaceID}
 	// Each candidate answers for its own mirror. A candidate whose feed cannot be trusted is STALE, never NO_MATCH: on a shared network "this PMS has no such guest"
 	// is only worth something when this PMS was actually in a position to say so.

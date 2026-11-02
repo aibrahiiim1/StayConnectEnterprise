@@ -1717,6 +1717,56 @@ const landingHTML = `<!doctype html>
       return false;
     }
 
+    // phase3Choose sends ONE grant for the chosen package. Every control is disabled first, so a double tap cannot
+    // send two; the grant itself is idempotent per Auth Context and a stay takes a package revision once. Every
+    // outcome is visible: success navigates, any refusal or failure takes the choices down with the message.
+    async function phase3Choose(box, c, errEl) {
+      box.querySelectorAll('button').forEach(function(x){ x.disabled = true; });
+      errEl.textContent = '';
+      let ok = false;
+      try {
+        ok = await submitPhase3({ auth_context_id: PMS_AUTH_CONTEXT, package_revision_id: c.package_revision_id, method: c.method || '' }, errEl);
+      } catch (e) { ok = false; }
+      // On success submitPhase3 has already navigated away. On failure the offer set can no longer be
+      // trusted, so it is taken down rather than re-enabled.
+      if (!ok) resetPhase3ToSignIn(errEl);
+    }
+
+    // phase3ConfirmRoomCharge shows the exact package and amount with two buttons. Cancel sends nothing at all and
+    // returns to the list; only "Yes" sends the grant that leads to the posting.
+    function phase3ConfirmRoomCharge(box, c, errEl) {
+      const list = Array.prototype.slice.call(box.children);
+      list.forEach(function(el){ el.style.display = 'none'; });
+      const panel = document.createElement('div');
+      panel.className = 'room-confirm';
+      panel.setAttribute('role', 'alertdialog');
+      panel.setAttribute('aria-live', 'assertive');
+      const msg = document.createElement('p');
+      msg.className = 'choices-title';
+      msg.dir = 'auto';
+      msg.textContent = t('room.confirm').split('{price}').join(c.price || '').split('{name}').join(c.name || c.code);
+      panel.appendChild(msg);
+      const yes = document.createElement('button');
+      yes.type = 'button';
+      yes.className = 'btn';
+      yes.textContent = t('room.confirm.yes');
+      const no = document.createElement('button');
+      no.type = 'button';
+      no.className = 'btn btn--outline';
+      no.textContent = t('room.confirm.no');
+      panel.appendChild(yes);
+      panel.appendChild(no);
+      box.appendChild(panel);
+      no.addEventListener('click', function() {
+        panel.remove();
+        list.forEach(function(el){ el.style.display = ''; });
+        const again = box.querySelector('button.choice');
+        if (again) again.focus();
+      });
+      yes.addEventListener('click', function() { phase3Choose(box, c, errEl); });
+      yes.focus();
+    }
+
     // RETURNING TO SIGN-IN AFTER A FAILED SELECTION. The refused choices are taken down rather than left on
     // screen to be pressed again; signing in again is safe under every reading of the uniform answer.
     function resetPhase3ToSignIn(errEl) {
@@ -1771,16 +1821,12 @@ const landingHTML = `<!doctype html>
         }
         b.appendChild(text);
         b.insertAdjacentHTML('beforeend', ICON_CHEV);
-        b.addEventListener('click', async function() {
-          // A room charge posts to the guest's bill in the PMS: the guest confirms the amount first.
-          if (c.method === 'PMS_POSTING' &&
-              !window.confirm(t('room.confirm').split('{price}').join(c.price || '').split('{name}').join(c.name || c.code))) return;
-          box.querySelectorAll('button').forEach(function(x){ x.disabled = true; });
-          errEl.textContent = '';
-          const ok = await submitPhase3({ auth_context_id: PMS_AUTH_CONTEXT, package_revision_id: c.package_revision_id, method: c.method || '' }, errEl);
-          // On success submitPhase3 has already navigated away. On failure the offer set can no longer be
-          // trusted, so it is taken down rather than re-enabled.
-          if (!ok) resetPhase3ToSignIn(errEl);
+        b.addEventListener('click', function() {
+          // A room charge posts to the guest's bill in the PMS: the guest confirms the exact package and amount
+          // first, IN THE PAGE. window.confirm is suppressed by the captive-portal windows of iOS and Android, where it
+          // returns false at once, so every room-charge tap silently did nothing (2026-11-02).
+          if (c.method === 'PMS_POSTING') { phase3ConfirmRoomCharge(box, c, errEl); return; }
+          phase3Choose(box, c, errEl);
         });
         box.appendChild(b);
       });

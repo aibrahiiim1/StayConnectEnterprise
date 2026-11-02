@@ -200,6 +200,7 @@ GRANT EXECUTE ON FUNCTION iam_v2.complete_sign_in_attempt(uuid,uuid,uuid,text,uu
 -- and the Gate-P privilege suite caught it refusing every guest on the property.
 GRANT EXECUTE ON FUNCTION iam_v2.p3_guest_network_mirror_state(uuid,uuid,uuid) TO svc_scd;
 GRANT EXECUTE ON FUNCTION iam_v2.p3_interface_can_authorise(uuid,uuid,uuid) TO svc_scd; -- one candidate's feed verdict for a shared network (0155)
+GRANT EXECUTE ON FUNCTION iam_v2.p3_interface_roster_draining(uuid,uuid,uuid) TO svc_scd; -- a refresh is still being written in: hold back a non-match (0205)
 
 -- GUEST SIGN-IN PROTECTION (migration 0068) — THREE FUNCTIONS, AND NOT ONE TABLE PRIVILEGE.
 --
