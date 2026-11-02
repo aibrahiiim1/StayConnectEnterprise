@@ -20,7 +20,7 @@ var strictStepUpHandlers = []string{
 	"addBackupKeyHolder", "removeBackupKeyHolder",
 	"guestDataAction", "assistedAction",
 	"savePaymentAccount", "savePaymentDomains", "putCardSettings", "setPaymentAccountConversion",
-	"approveFinancialOnboarding", "setFinancialMirrorMaxAge", "recordAnswerConfirmation", "stayAdminBlock",
+	"setFinancialMirrorMaxAge", "recordAnswerConfirmation", "stayAdminBlock",
 	"putCardRecheckSettings", "resolveCardCase", "resolveRecoveryHold", "releaseRecovery",
 	"authorizeZeroAttemptRetry", "requeueParkedCharge", "putPostingLaneSettings",
 	"hotelAdminCertRotate", "portalHTTPSPutAddress", "portalHTTPSPutDomain", "portalHTTPSDeleteDomain", "portalHTTPSRenew",

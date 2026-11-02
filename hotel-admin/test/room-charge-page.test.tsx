@@ -56,7 +56,6 @@ function routes(roles: string[], readiness: string[] = []) {
   });
 }
 
-const ATTESTATION = "Protel support, 2026-09-20, ticket 48213: reservation numbers are never reused.";
 
 async function openApproval() {
   fireEvent.click(await screen.findByRole("button", { name: /approve for room charge: protel main/i }));
@@ -110,58 +109,43 @@ describe("Hotel → Room charge", () => {
     expect(screen.queryByText(/folio identity/i)).not.toBeInTheDocument();
   });
 
-  it("shows the fixed reservation target instead of a folio choice, and sends RESERVATION with the approval", async () => {
+  it("approves with a Yes/No confirmation, USD by default, and sends RESERVATION", async () => {
     routes(["site_admin"]);
     post.mockResolvedValue({ revision_id: "rev-8" });
     render(<RoomChargePage />);
     const dialog = await openApproval();
-    expect(within(dialog).getByText("Reservation (room + reservation number)")).toBeInTheDocument();
-    expect(within(dialog).getByText(/protel decides which folio or window/i)).toBeInTheDocument();
-    expect(within(dialog).getByText(/room number alone is never sent/i)).toBeInTheDocument();
     expect(within(dialog).queryByRole("radio")).not.toBeInTheDocument();
-    expect(within(dialog).getByText(/unique and never reused/i)).toBeInTheDocument();
-
-    fireEvent.change(screen.getByLabelText(/^Base currency/), { target: { value: "usd" } });
-    fireEvent.change(screen.getByLabelText(/^Vendor confirmation/), { target: { value: ATTESTATION } });
-    fireEvent.change(screen.getByLabelText(/^Reason/), { target: { value: "Enable room charge" } });
-    const submit = screen.getAllByRole("button", { name: "Approve for room charge" }).at(-1)!;
-    expect(submit).toBeDisabled();
-    fireEvent.change(screen.getByLabelText(/^Confirm your password/), { target: { value: "pw" } });
-    expect(submit).toBeEnabled();
-    fireEvent.click(submit);
+    expect(within(dialog).queryByLabelText(/^Vendor confirmation/)).not.toBeInTheDocument();
+    expect(within(dialog).queryByLabelText(/^Reason/)).not.toBeInTheDocument();
+    expect(within(dialog).queryByLabelText(/password/i)).not.toBeInTheDocument();
+    expect(within(dialog).getByLabelText(/^Currency/)).toHaveValue("USD");
+    expect(within(dialog).getByRole("button", { name: "No" })).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Yes, approve" }));
     await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
     expect(post).toHaveBeenCalledWith("/pms-financial-onboarding/if-fias", {
       expected_revision_id: "rev-7",
       posting_target_model: "RESERVATION",
       currency: "USD",
-      attestation: ATTESTATION,
-      reason: "Enable room charge",
-      password: "pw",
     });
     await waitFor(() => expect(g.mock.calls.filter((c) => c[0] === "/pms-financial-onboarding")).toHaveLength(2));
   });
 
-  it("keeps the approve button disabled for a vendor confirmation shorter than 20 characters", async () => {
+  it("lets the admin change the currency and refuses an incomplete one", async () => {
     routes(["site_admin"]);
     render(<RoomChargePage />);
-    await openApproval();
-    fireEvent.change(screen.getByLabelText(/^Base currency/), { target: { value: "EUR" } });
-    fireEvent.change(screen.getByLabelText(/^Vendor confirmation/), { target: { value: "too short" } });
-    fireEvent.change(screen.getByLabelText(/^Reason/), { target: { value: "Enable" } });
-    fireEvent.change(screen.getByLabelText(/^Confirm your password/), { target: { value: "pw" } });
-    expect(screen.getAllByRole("button", { name: "Approve for room charge" }).at(-1)).toBeDisabled();
+    const dialog = await openApproval();
+    fireEvent.change(within(dialog).getByLabelText(/^Currency/), { target: { value: "eu" } });
+    expect(within(dialog).getByRole("button", { name: "Yes, approve" })).toBeDisabled();
+    fireEvent.change(within(dialog).getByLabelText(/^Currency/), { target: { value: "eur" } });
+    expect(within(dialog).getByRole("button", { name: "Yes, approve" })).toBeEnabled();
   });
 
   it("reloads and explains a revision conflict", async () => {
     routes(["site_admin"]);
     post.mockRejectedValue(new ApiError(409, { error: "revision_conflict" }));
     render(<RoomChargePage />);
-    await openApproval();
-    fireEvent.change(screen.getByLabelText(/^Base currency/), { target: { value: "EUR" } });
-    fireEvent.change(screen.getByLabelText(/^Vendor confirmation/), { target: { value: ATTESTATION } });
-    fireEvent.change(screen.getByLabelText(/^Reason/), { target: { value: "Enable" } });
-    fireEvent.change(screen.getByLabelText(/^Confirm your password/), { target: { value: "pw" } });
-    fireEvent.click(screen.getAllByRole("button", { name: "Approve for room charge" }).at(-1)!);
+    const dialog = await openApproval();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Yes, approve" }));
     expect(await screen.findByText(/changed since the page was loaded/i)).toBeInTheDocument();
     await waitFor(() => expect(g.mock.calls.filter((c) => c[0] === "/pms-financial-onboarding")).toHaveLength(2));
   });
