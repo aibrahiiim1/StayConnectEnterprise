@@ -180,6 +180,18 @@ describe("the overview", () => {
     expect(dhcp).toHaveAttribute("href", "/network/dhcp");
     expect(within(list).getByText("Opera is not ready for room sign-in")).toBeInTheDocument();
     expect(screen.queryByTestId("all-normal")).toBeNull();
+    // Closed by default, an error included: the operator opens the list with the arrow.
+    expect(list.closest("details")).not.toHaveAttribute("open");
+  });
+
+  it("puts the appliance first and keeps network details off the overview", async () => {
+    route(() => healthy());
+    render(<DashboardPage />);
+    const strip = await screen.findByTestId("appliance-strip");
+    const cards = Array.from(document.querySelectorAll("[data-testid='appliance-strip'], [data-testid='services-grid']"));
+    expect(cards[0]).toBe(strip);
+    expect(screen.queryByText(/untagged \(native\)/)).toBeNull();
+    expect(screen.queryByText(/\(tagged\)/)).toBeNull();
   });
 
   it("lists unacknowledged operational alerts with a link to them", async () => {

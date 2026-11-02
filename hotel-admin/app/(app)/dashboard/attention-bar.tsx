@@ -45,7 +45,7 @@ export function AttentionBar({
         "group rounded-lg border bg-card shadow-card",
         rows.length === 0 ? "border-border" : err ? "border-destructive/40" : "border-warning/40",
       )}
-      open={err}
+      // Closed by default, errors included: the one line names the count and the first item; the arrow opens the list.
     >
       <summary className="flex h-10 cursor-pointer list-none items-center gap-2.5 rounded-lg px-3.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
         <Icon className={cn("size-4 shrink-0", tone)} aria-hidden />

@@ -4,7 +4,9 @@
 
 import Link from "next/link";
 import { ChevronRight, Cpu, Gauge, HardDrive, Hotel, Info, MemoryStick, Network, Package, Router, Wifi } from "lucide-react";
-import { Card, CardBody, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
+import { QuietDescription } from "@/components/ui/quiet";
+import { Tooltip } from "@/components/ui/tooltip";
 import { Badge, StatusDot } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -60,9 +62,9 @@ function BlockCard({
   return (
     <Card className={cn("min-w-0", className)}>
       <CardHeader>
-        <div className="min-w-0">
+        <div className="flex min-w-0 items-center gap-1">
           <CardTitle>{title}</CardTitle>
-          {description && <CardDescription>{description}</CardDescription>}
+          <QuietDescription>{description}</QuietDescription>
         </div>
         {href && <BlockLink href={href} label={linkLabel ?? "Open"} />}
       </CardHeader>
@@ -353,12 +355,17 @@ export function PmsCard({ snap, canCharges }: { snap: OverviewSnapshot | null; c
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-2">
                     <StatusDot tone={words.tone === "default" ? "default" : words.tone} />
-                    <span className="truncate text-sm font-medium">{i.display_label || "PMS connection"}</span>
+                    {/* The readiness explanation is read on hover or focus of the name, not printed under it. */}
+                    <Tooltip content={words.summary}>
+                      <span tabIndex={0} className="cursor-help truncate text-sm font-medium underline decoration-dotted decoration-muted-foreground/50 underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                        {i.display_label || "PMS connection"}
+                      </span>
+                    </Tooltip>
+                    <span className="sr-only">{words.summary}</span>
                     {i.lifecycle_state !== "ACTIVE" && <Badge tone="default">Not in use</Badge>}
                   </div>
                   <Badge tone={words.tone === "default" ? "default" : words.tone} dot>{words.headline}</Badge>
                 </div>
-                <p className="mt-1.5 text-xs text-muted-foreground">{words.summary}</p>
                 <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-4">
                   <Metric label="In house" value={fmtInt(i.in_house_stays)} />
                   <Metric label="Waiting to apply" value={fmtInt(i.pending_events)} tone={i.pending_events > 0 ? "warn" : "default"} />
@@ -389,10 +396,13 @@ export function PmsCard({ snap, canCharges }: { snap: OverviewSnapshot | null; c
               ]}
             />
           )}
-          <p className="text-xs text-muted-foreground">
-            Today: {fmtInt(pms.events_today)} PMS messages received, {fmtInt(pms.events_applied_today)} applied automatically
-            {pms.events_needing_review > 0 && <>, {fmtInt(pms.events_needing_review)} waiting for a decision</>}.
-          </p>
+          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+            <span>{fmtInt(pms.events_today)} PMS messages today</span>
+            <QuietDescription>
+              {fmtInt(pms.events_applied_today)} applied automatically
+              {pms.events_needing_review > 0 ? `, ${fmtInt(pms.events_needing_review)} waiting for a decision` : ""}.
+            </QuietDescription>
+          </div>
           {pms.postings.available && (
             <div className="space-y-2 border-t border-border pt-3">
               <div className="flex items-center justify-between gap-2">
@@ -415,14 +425,6 @@ export function PmsCard({ snap, canCharges }: { snap: OverviewSnapshot | null; c
   );
 }
 
-function Chip({ on, label }: { on: boolean; label: string }) {
-  return (
-    <Badge tone={on ? "info" : "default"} className="px-1.5 text-2xs">
-      {label} {on ? "on" : "off"}
-    </Badge>
-  );
-}
-
 const dhcpWords: Record<string, string> = {
   local: "DHCP by this appliance", relay: "DHCP relayed", external: "DHCP elsewhere", disabled: "No DHCP",
 };
@@ -432,11 +434,12 @@ export function NetworksCard({ snap }: { snap: OverviewSnapshot | null }) {
   return (
     <Card className="min-w-0">
       <CardHeader>
-        <div className="min-w-0">
+        <div className="flex min-w-0 items-center gap-1">
           <CardTitle>Client networks</CardTitle>
-          <CardDescription className="mt-0.5 text-xs">
-            Address pool use comes from the DHCP server&rsquo;s live leases; devices online from active sessions.
-          </CardDescription>
+          <QuietDescription>
+            Address use comes from the DHCP server&rsquo;s live leases; devices online from active sessions. Subnets and
+            VLANs are on the Networking page.
+          </QuietDescription>
         </div>
         <Link href="/network" className="shrink-0 text-xs text-muted-foreground hover:text-foreground">Networking →</Link>
       </CardHeader>
@@ -464,10 +467,10 @@ export function NetworksCard({ snap }: { snap: OverviewSnapshot | null }) {
             <THead>
               <TR>
                 <TH>Network</TH>
-                <TH className="min-w-44">Address pool</TH>
+                <TH>Room sign-in</TH>
+                <TH className="min-w-44">Address use</TH>
                 <TH numeric>Devices online</TH>
                 <TH numeric>Traffic</TH>
-                <TH>Services</TH>
               </TR>
             </THead>
             <TBody>
@@ -478,11 +481,14 @@ export function NetworksCard({ snap }: { snap: OverviewSnapshot | null }) {
                       <span className="font-medium">{n.name}</span>
                       {!n.enabled && <Badge tone="default">Switched off</Badge>}
                     </div>
-                    <div className="mt-0.5 font-mono text-2xs text-muted-foreground">
-                      {n.subnet_cidr} · {n.network_type === "vlan" ? `VLAN ${n.vlan_id ?? "?"} (tagged)` : "untagged (native)"}
-                    </div>
-                    {n.room_sign_in_policy && n.room_sign_in_policy !== "NONE" && (n.room_sign_in_connections?.length ?? 0) > 0 && (
-                      <div className="mt-0.5 text-2xs text-muted-foreground">Room sign-in: {n.room_sign_in_connections!.join(", ")}</div>
+                  </TD>
+                  <TD>
+                    {n.room_sign_in_policy && n.room_sign_in_policy !== "NONE" && (n.room_sign_in_connections?.length ?? 0) > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {n.room_sign_in_connections!.map((c) => <Badge key={c} tone="info" className="px-1.5 text-2xs">{c}</Badge>)}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
                     )}
                   </TD>
                   <TD>
@@ -511,13 +517,6 @@ export function NetworksCard({ snap }: { snap: OverviewSnapshot | null }) {
                       <span className="text-muted-foreground">—</span>
                     )}
                   </TD>
-                  <TD>
-                    <div className="flex flex-wrap gap-1">
-                      <Chip on={n.captive_portal_enabled} label="Portal" />
-                      <Chip on={n.internet_access_enabled} label="Internet" />
-                      <Badge tone="default" className="px-1.5 text-2xs">DNS {n.dns_mode === "custom" ? "custom" : "appliance"}</Badge>
-                    </div>
-                  </TD>
                 </TR>
               ))}
             </TBody>
@@ -532,150 +531,126 @@ export function DhcpDnsCard({ snap }: { snap: OverviewSnapshot | null }) {
   const d = snap?.dhcp;
   const dns = snap?.dns;
   return (
-    <BlockCard title="Addresses and names" description="The DHCP server and the DNS resolver clients use." href="/network/dhcp" linkLabel="DHCP">
+    <BlockCard title="Addresses and names" description="The DHCP server that hands out addresses and the DNS resolver clients use." href="/network/dhcp" linkLabel="DHCP">
       {!snap || !d || !dns ? (
-        <Skeleton className="h-48" />
+        <Skeleton className="h-24" />
       ) : (
-        <div className="space-y-5">
-          <section className="space-y-2">
-            <h3 className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground"><Router className="size-3.5" aria-hidden /> DHCP</h3>
-            {!d.available ? (
-              <Unavailable block={d} />
-            ) : (
-              <>
-                <div className="flex flex-wrap items-center gap-2">
-                  {d.server_healthy == null ? (
-                    <Badge tone="default">Server state unknown</Badge>
-                  ) : !d.server_configured ? (
-                    <Badge tone="default">Not needed yet</Badge>
-                  ) : (
-                    <Badge tone={d.server_healthy ? "ok" : "err"} dot>{d.server_healthy ? "Server healthy" : "Server not healthy"}</Badge>
-                  )}
-                  {d.leases_available && <Badge tone="neutral">{fmtInt(d.active_leases)} active leases</Badge>}
-                  {d.leases_available && d.expiring_soon > 0 && (
-                    <Badge tone="neutral">{fmtInt(d.expiring_soon)} expiring within {Math.round(d.expiring_within_seconds / 60)} min</Badge>
-                  )}
-                </div>
-                {!d.leases_available && d.leases_reason && (
-                  <p className="text-xs text-muted-foreground">Leases: {reasonText(d.leases_reason)}</p>
-                )}
-                {d.server_detail && d.server_healthy === false && <p className="text-xs text-muted-foreground">{d.server_detail}</p>}
-                <p className="text-xs text-muted-foreground">
+        <ul className="divide-y divide-border">
+          <li className="flex min-h-11 items-center justify-between gap-3 py-2">
+            <span className="flex items-center gap-1.5 text-sm font-medium">
+              <Router className="size-4 text-muted-foreground" aria-hidden /> DHCP
+              {d.available && (
+                <QuietDescription>
                   {d.captive_option_networks.length > 0
-                    ? <>Sign-in page advertised to devices by DHCP (option 114) on: {d.captive_option_networks.join(", ")}.</>
+                    ? `Sign-in page advertised by DHCP on: ${d.captive_option_networks.join(", ")}.`
                     : d.local_dhcp_networks > 0
-                      ? "No network advertises the sign-in page through DHCP (option 114)."
+                      ? "No network advertises the sign-in page through DHCP."
                       : "No client network gets its addresses from this appliance."}
-                </p>
-              </>
-            )}
-          </section>
-          <section className="space-y-2">
-            <h3 className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground"><Wifi className="size-3.5" aria-hidden /> DNS</h3>
-            {!dns.available ? (
-              <Unavailable block={dns} />
+                  {d.leases_available && d.expiring_soon > 0 ? ` ${fmtInt(d.expiring_soon)} leases expire within ${Math.round(d.expiring_within_seconds / 60)} min.` : ""}
+                  {d.server_healthy === false && d.server_detail ? ` ${d.server_detail}` : ""}
+                </QuietDescription>
+              )}
+            </span>
+            {!d.available ? (
+              <span className="text-xs text-muted-foreground">{reasonText(d.reason)}</span>
             ) : (
-              <>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge tone={serviceState(dns.resolver_state).tone} dot>Resolver: {serviceState(dns.resolver_state).label}</Badge>
-                  {dns.last_healthy_at && (
-                    <span className="text-xs text-muted-foreground" title={new Date(dns.last_healthy_at).toLocaleString()}>
-                      last answered {formatRelative(dns.last_healthy_at)}
-                    </span>
-                  )}
-                </div>
-                {dns.networks.length > 0 && (
-                  <ul className="space-y-1 text-xs">
-                    {dns.networks.map((n) => (
-                      <li key={n.network} className="flex flex-wrap gap-x-2">
-                        <span className="font-medium">{n.network}</span>
-                        <span className="text-muted-foreground">
-                          {n.mode === "custom" ? `custom servers ${n.servers.join(", ") || "(none listed)"}` : "this appliance's resolver"}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
+              <span className="flex flex-wrap items-center justify-end gap-2">
+                {d.leases_available && <span className="text-xs text-muted-foreground tabular">{fmtInt(d.active_leases)} leases</span>}
+                {d.server_healthy == null ? (
+                  <Badge tone="default">Unknown</Badge>
+                ) : !d.server_configured ? (
+                  <Badge tone="default">Not needed yet</Badge>
+                ) : (
+                  <Badge tone={d.server_healthy ? "ok" : "err"} dot>{d.server_healthy ? "Healthy" : "Not healthy"}</Badge>
                 )}
-                {!dns.statistics_collected && (
-                  <p className="text-xs text-muted-foreground">Query and cache statistics are not collected on this appliance.</p>
-                )}
-              </>
+              </span>
             )}
-          </section>
-        </div>
+          </li>
+          <li className="flex min-h-11 items-center justify-between gap-3 py-2">
+            <span className="flex items-center gap-1.5 text-sm font-medium">
+              <Wifi className="size-4 text-muted-foreground" aria-hidden /> DNS
+              {dns.available && (
+                <QuietDescription>
+                  {dns.networks.length > 0
+                    ? dns.networks.map((n) => `${n.network}: ${n.mode === "custom" ? `custom servers ${n.servers.join(", ") || "(none listed)"}` : "this appliance's resolver"}`).join("; ") + "."
+                    : "Clients use this appliance's resolver."}
+                  {dns.last_healthy_at ? ` Last answered ${formatRelative(dns.last_healthy_at)}.` : ""}
+                  {!dns.statistics_collected ? " Query and cache statistics are not collected on this appliance." : ""}
+                </QuietDescription>
+              )}
+            </span>
+            {!dns.available ? (
+              <span className="text-xs text-muted-foreground">{reasonText(dns.reason)}</span>
+            ) : (
+              <Badge tone={serviceState(dns.resolver_state).tone} dot>{serviceState(dns.resolver_state).label}</Badge>
+            )}
+          </li>
+        </ul>
       )}
     </BlockCard>
   );
 }
 
+/** The appliance at a glance: one strip at the top of the Overview. */
 export function ApplianceCard({ snap, licenseHeadline }: { snap: OverviewSnapshot | null; licenseHeadline?: string }) {
   const a = snap?.appliance;
   const res = a?.resources;
   const net = a?.network;
-  const rev = a?.revisions;
   const lic = a?.license;
   const licWords = lic?.available ? describeLicense(lic.state) : null;
+  const disk = res?.available ? res.disks.find((d) => !d.same_filesystem_as) : undefined;
   return (
-    <BlockCard title="Appliance" description="Its configuration, licence and resources." href="/appliance" linkLabel="Appliance">
-      {!snap || !a ? (
-        <Skeleton className="h-48" />
-      ) : (
-        <div className="space-y-5">
-          <KeyValueGrid
-            items={[
-              {
-                label: "Licence",
-                value: licWords ? (
-                  <Badge tone={licWords.tone === "default" ? "default" : licWords.tone} dot>{licWords.headline}</Badge>
-                ) : (
-                  <span className="text-muted-foreground">{licenseHeadline ?? reasonText(lic?.reason)}</span>
-                ),
-                hint: lic?.valid_until ? `Valid until ${new Date(lic.valid_until).toLocaleDateString()}` : undefined,
-              },
-              { label: "Admin service version", value: <span className="font-mono text-xs">{a.version || "—"}</span> },
-              {
-                label: "Internet (WAN)",
-                value: !net?.available ? (
+    <Card className="min-w-0" data-testid="appliance-strip">
+      <CardHeader>
+        <div className="flex min-w-0 items-center gap-2">
+          <CardTitle>Appliance</CardTitle>
+          {licWords ? (
+            <Badge tone={licWords.tone === "default" ? "default" : licWords.tone} dot>{licWords.headline}</Badge>
+          ) : (
+            licenseHeadline && <Badge tone="default">{licenseHeadline}</Badge>
+          )}
+          {lic?.valid_until && (
+            <span className="hidden text-xs text-muted-foreground sm:inline">until {new Date(lic.valid_until).toLocaleDateString()}</span>
+          )}
+        </div>
+        <BlockLink href="/appliance" label="Appliance" />
+      </CardHeader>
+      <CardBody>
+        {!snap || !a ? (
+          <Skeleton className="h-16" />
+        ) : (
+          <div className="grid gap-x-8 gap-y-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+            <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
+              <Fact label="Internet (WAN)">
+                {!net?.available ? (
                   <span className="text-muted-foreground">{reasonText(net?.reason)}</span>
                 ) : (
-                  <span className="font-mono text-xs">{net.wan_address || "no address"}{net.wan_mode ? ` · ${net.wan_mode}` : ""}</span>
-                ),
-                hint: net?.available
-                  ? net.internet_reachable == null ? undefined : net.internet_reachable ? "Internet reachable" : "Internet not reachable"
-                  : undefined,
-              },
-              {
-                label: "Local network (LAN)",
-                value: !net?.available ? "—" : <span className="font-mono text-xs">{net.lan_address || "no address"}</span>,
-              },
-              {
-                label: "Network configuration",
-                value: !rev?.available ? (
-                  <span className="text-muted-foreground">{reasonText(rev?.reason)}</span>
-                ) : rev.latest_active ? (
-                  <span>Change #{rev.latest_active.seq} in force</span>
-                ) : (
-                  <span className="text-muted-foreground">No change applied yet</span>
-                ),
-                hint: rev?.available && rev.latest_active?.confirmed_at
-                  ? `Confirmed ${formatRelative(rev.latest_active.confirmed_at)}`
-                  : rev?.pending ? `Change #${rev.pending.seq} waiting to be confirmed` : undefined,
-              },
-              { label: "Up for", value: res?.available ? formatDuration(res.uptime_seconds) : "—" },
-            ]}
-          />
-          <section className="space-y-3">
-            <h3 className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground"><Gauge className="size-3.5" aria-hidden /> Resources</h3>
+                  <span className="inline-flex items-center gap-1.5">
+                    {net.internet_reachable != null && (
+                      <Tooltip content={net.internet_reachable ? "Internet reachable" : "Internet not reachable"}>
+                        <span tabIndex={0} className="inline-flex"><StatusDot tone={net.internet_reachable ? "ok" : "err"} /></span>
+                      </Tooltip>
+                    )}
+                    <span className="font-mono text-xs">{net.wan_address || "no address"}</span>
+                  </span>
+                )}
+              </Fact>
+              <Fact label="Local network (LAN)">
+                <span className="font-mono text-xs">{net?.available ? net.lan_address || "no address" : "—"}</span>
+              </Fact>
+              <Fact label="Version"><span className="font-mono text-xs">{a.version || "—"}</span></Fact>
+              <Fact label="Up for">{res?.available ? formatDuration(res.uptime_seconds) : "—"}</Fact>
+            </dl>
             {!res || !res.available ? (
               <Unavailable block={res ?? { available: false }} />
             ) : (
-              <div className="space-y-3" data-testid="resources">
+              <div className="grid grid-cols-3 gap-4" data-testid="resources">
                 {res.load && (
                   <Meter
                     value={res.load.one_per_cpu}
                     max={1}
-                    label={<span className="inline-flex items-center gap-1"><Cpu className="size-3" aria-hidden /> Load ({res.load.cpus} CPU{res.load.cpus === 1 ? "" : "s"})</span>}
-                    caption={`${res.load.one.toFixed(2)} · ${res.load.five.toFixed(2)} · ${res.load.fifteen.toFixed(2)}`}
+                    label={<span className="inline-flex items-center gap-1"><Cpu className="size-3" aria-hidden /> CPU</span>}
+                    caption={`load ${res.load.one.toFixed(2)}`}
                   />
                 )}
                 {res.memory && (
@@ -683,27 +658,32 @@ export function ApplianceCard({ snap, licenseHeadline }: { snap: OverviewSnapsho
                     value={res.memory.used_pct}
                     max={100}
                     label={<span className="inline-flex items-center gap-1"><MemoryStick className="size-3" aria-hidden /> Memory</span>}
-                    caption={`${formatBytes(res.memory.used_bytes)} of ${formatBytes(res.memory.total_bytes)} · ${res.memory.used_pct}%`}
+                    caption={`${res.memory.used_pct}%`}
                   />
                 )}
-                {res.disks.filter((d) => !d.same_filesystem_as).map((d) => (
+                {disk && (
                   <Meter
-                    key={d.path}
-                    value={d.used_pct}
+                    value={disk.used_pct}
                     max={100}
-                    label={<span className="inline-flex items-center gap-1"><HardDrive className="size-3" aria-hidden /> Disk {d.path}{res.disks.some((x) => x.same_filesystem_as === d.path) ? " (includes the install directory)" : ""}</span>}
-                    caption={`${formatBytes(d.available_bytes)} free · ${d.used_pct}%`}
+                    label={<span className="inline-flex items-center gap-1"><HardDrive className="size-3" aria-hidden /> Disk</span>}
+                    caption={`${formatBytes(disk.available_bytes)} free`}
                   />
-                ))}
-                {res.errors && res.errors.length > 0 && (
-                  <p className="text-xs text-muted-foreground">Not read: {res.errors.join("; ")}.</p>
                 )}
               </div>
             )}
-          </section>
-        </div>
-      )}
-    </BlockCard>
+          </div>
+        )}
+      </CardBody>
+    </Card>
+  );
+}
+
+function Fact({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <dt className="truncate text-xs font-medium text-muted-foreground">{label}</dt>
+      <dd className="mt-1 truncate text-sm">{children}</dd>
+    </div>
   );
 }
 
@@ -712,11 +692,11 @@ export function ServicesGrid({ snap }: { snap: OverviewSnapshot | null }) {
   if (!snap || !sv) return <Skeleton className="h-32" />;
   if (!sv.available) return <Unavailable block={sv} />;
   return (
-    <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2" data-testid="services-grid">
+    <ul className="grid grid-cols-1 gap-x-6 sm:grid-cols-2" data-testid="services-grid">
       {sv.services.map((s) => {
         const st = serviceState(s.state);
         return (
-          <li key={s.name} className="flex min-w-0 items-center justify-between gap-2 rounded-md border border-border px-3 py-2">
+          <li key={s.name} className="flex min-h-9 min-w-0 items-center justify-between gap-2 border-b border-border/60 py-1.5">
             <div className="flex min-w-0 items-center gap-2">
               <StatusDot tone={st.tone} />
               <span className="min-w-0 text-sm leading-snug [overflow-wrap:anywhere]">{s.label}</span>
