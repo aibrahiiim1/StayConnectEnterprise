@@ -426,56 +426,25 @@ def cmd_validate(deep=True, manifest_equality=True):
     if dmap.get("D1", {}).get("status") != "ACTIVE": fail("D1 must be ACTIVE")
     if dmap.get("D9", {}).get("status") != "ACTIVE": fail("D9 (Phase 1A accepted) must be ACTIVE")
 
-    # GitHub execution & delivery governance (permanent rule)
-    remote = st.get("authoritative_remote","")
+    # GitHub delivery authority remains, but PO removed ALL GitHub Actions (2026-11-02).
+    # Protect local validators and PR-only master delivery; do not require deleted CI files.
+    remote = st.get("authoritative_remote", "")
     if "aibrahiiim1/StayConnectEnterprise" not in remote:
         fail(f"authoritative_remote must point to aibrahiiim1/StayConnectEnterprise (got: {remote!r})")
     dg = st.get("delivery_governance", {})
-    for key, want in [("rule_doc","docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md"),
-                      ("manifest_tool","tools/generate-change-manifest.py"),
-                      ("report_template","docs/templates/PHASE_FINAL_REPORT_TEMPLATE.md"),
-                      ("ci_workflow",".github/workflows/project-governance.yml")]:
+    for key, want in [("rule_doc", "docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md"),
+                      ("manifest_tool", "tools/generate-change-manifest.py"),
+                      ("report_template", "docs/templates/PHASE_FINAL_REPORT_TEMPLATE.md")]:
         got = dg.get(key)
-        if got != want: fail(f"delivery_governance.{key} must be '{want}' (got: {got!r})")
-        elif not os.path.isfile(os.path.join(ROOT, want)): fail(f"delivery_governance {key} file missing on disk: {want}")
-
-    # mandatory GitHub Actions governance CI must exist, be dispatchable for FULL CHECK, run every required
-    # command, and not be weakened (GH-MANDATORY-CI). Text checks only (stdlib; no YAML dependency).
-    wf = os.path.join(ROOT, ".github/workflows/project-governance.yml")
-    if not os.path.isfile(wf):
-        fail("mandatory governance CI missing: .github/workflows/project-governance.yml (GH-MANDATORY-CI)")
-    else:
-        w = open(wf, encoding="utf-8").read()
-        # THE TRIGGER THIS DEMANDS, AND WHY IT WENT AWAY AND CAME BACK (T0182 -> T0183, T0184).
-        #
-        # T0183 briefly required `workflow_dispatch` here instead, because the nightly model dispatched the
-        # gates at the delivery ref and the daytime pull_request run was the 29-31 minute interruption the
-        # Product Owner removed. That was wrong about a fact, and the fact was measured, not argued:
-        # a dispatched run's check runs do NOT satisfy a ruleset-required status check. See
-        # tools/nightly_delivery.py for the verbatim refusal GitHub returned with all four green.
-        #
-        # So `pull_request:` was required again -- and the cost was removed by the sentinel attempt.
-        #
-        # D42 (T0196) RETIRED THAT MODEL. The comprehensive gates are no longer required status checks: they
-        # run only when the Product Owner asks for "FULL CHECK THE WHOLE CODE", by workflow_dispatch, and the
-        # only required context is po-merge-authorization. The dispatch finding above still stands -- it is
-        # exactly why the merge requirement is a pull_request check and the gates are not. Which EVENTS each
-        # workflow may and may not carry is asserted in ONE place, validate-delivery-protocol.py; this check
-        # owns only the substance below.
-        if not re.search(r"(?m)^\s{2}workflow_dispatch:\s*$", w):
-            fail("governance CI must be dispatchable (workflow_dispatch): it is the FULL CHECK THE WHOLE CODE "
-                 "governance gate (D42)")
-        if not os.path.isfile(os.path.join(ROOT, ".github/workflows/po-merge-authorization.yml")):
-            fail("the Product Owner merge-authorization workflow is missing: nothing would stop a merge "
-                 "before Product Owner acceptance (D42)")
-        if "master" not in w: fail("governance CI must target the master branch")
-        for cmd in ["tools/project-state.py validate", "tools/project-state.py check-generated",
-                    "tools/tests/project_state_validator/run_mutations.py", "tools/validate-project-state.sh"]:
-            if cmd not in w: fail(f"governance CI missing required validation command: {cmd}")
-        if re.search(r"continue-on-error:\s*true", w): fail("governance CI must not ignore failures (continue-on-error: true)")
-        if "git status --porcelain" not in w: fail("governance CI must assert a clean working tree")
-        if "Project Governance" not in w: fail("governance CI workflow name must be 'Project Governance'")
-        if not re.search(r"(?m)^\s{2,}governance:\s*$", w): fail("governance CI must define the job id 'governance'")
+        if got != want:
+            fail(f"delivery_governance.{key} must be '{want}' (got: {got!r})")
+        elif not os.path.isfile(os.path.join(ROOT, want)):
+            fail(f"delivery_governance {key} file missing on disk: {want}")
+    if dg.get("ci_workflow") is not None or dg.get("ci_check_name") is not None:
+        fail("GitHub CI was removed by PO decision; no ci_workflow or ci_check_name may remain")
+    wf_dir = os.path.join(ROOT, ".github", "workflows")
+    if os.path.isdir(wf_dir) and any(p.endswith((".yml", ".yaml")) for p in os.listdir(wf_dir)):
+        fail("GitHub Actions workflow files must remain absent under PO no-CI decision")
 
     # cross-platform LF consistency: a committed .gitattributes pins text to LF and marks ZIP binary
     # (GH-LF-CONSISTENCY) so Windows/Linux/CI produce byte-identical, checksum-stable pack files.
