@@ -161,7 +161,9 @@ describe("Client accounts — no account-lockout fiction", () => {
     expect(screen.queryByText("Locked out")).toBeNull();
     const filter = screen.getByRole("combobox", { name: "Filter by status" });
     expect(Array.from(filter.querySelectorAll("option")).map((o) => o.textContent))
-      .toEqual(["All accounts", "Can sign in", "Disabled", "Removed"]); // Removed: accounts retired with history kept
+      .toEqual(["Can sign in", "Disabled", "Removed", "All accounts"]); // Removed: accounts retired with history kept
+    // The list opens on the accounts in use.
+    expect((filter as HTMLSelectElement).value).toBe("enabled");
     expect(screen.getByText("Devices online")).toBeTruthy();
     expect(screen.getByText("Able to sign in")).toBeTruthy();
   });

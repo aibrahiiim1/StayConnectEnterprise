@@ -1,0 +1,34 @@
+{
+  "transition_id": "T0285",
+  "seq": 285,
+  "timestamp": "2026-11-02T23:14:44+02:00",
+  "timestamp_derivation": "Read from the workstation clock (UTC+02:00) by the script that wrote this receipt, immediately before the commit that introduces it.",
+  "record_type": "ADMIN_CONSOLE_SETTINGS_REORGANISATION_DELIVERY",
+  "authorisation": "The Product Owner's requests of 2026-11-02 and 2026-11-03 (fix hints opening by themselves; Client accounts and Active sessions; reorganise the Devices page settings; confirm-only daily device-change limit; merge and deploy), under the standing test-appliance deployment authority (D79).",
+  "delivery": "Tooltips open on hover or keyboard focus, never on a dialog's own focus. Sign-in and capacity settings (one endpoint, values and permissions unchanged) shown where they belong: One-time codes and Sign-in protection under Sign-in methods, After check-out sign-in limits on After check-out access, Uploaded images under Portal settings, Device retention and Daily device changes behind Devices > Device settings; every group keeps its reason and password except the daily device-change limit, which by the PO's explicit decision is confirmed by a warning (Cancel / Confirm) with no reason or password: edged records the default console reason, the operator, old and new values and the time; the auth-methods role check is unchanged. Client accounts opens on Can sign in, with the portal switch and password format under Account settings; Active sessions has one-tap sign-in filters and a one-line disconnect confirmation.",
+  "deployment": {
+    "test_appliance": "172.21.96.97: edged replaced by 9c3612f9748769d8806973270b683baa77ee1ae8 (read back vcs.revision 9c3612f97487, -tags=stayconnect_production, vcs.modified=false; DEPLOYED_BINARIES.sha256 updated; previous binary kept as edged.bak-pre-console2-*); Admin Console release 20261102-211346 reads source_commit 9c3612f9 and BUILD_ID avqyBend0HwCmUS1MLe2q, served; previous release 20261102-202535 kept; all eight units active.",
+    "central": "Not changed."
+  },
+  "verification": "Admin Console full suite 1072/1072 PASS; Central console 261/261 PASS; eslint clean (two pre-existing warnings in portal-branding); edged integration (device settings, sign-in capacity, step-up) 25/25 PASS including the confirm-only test; edged step-up unit tests PASS. Live on the test appliance: a daily-limit change with no reason or password returned 200 and was recorded with the operator, old and new values and 'Confirmed in the console'; a wrong supplied password is refused 401; the value was restored to 3. Not verified: the screens by eye.",
+  "not_touched": "Rate-limit enforcement, OTP, lockout, licensing, device entitlement protection, policy defaults, APIs, schema, PMS, payments, networking, the production Central.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "2e551b14795d4400d4f35ad4e0cab02a0ec5d379",
+  "previous_delivery": "T0284",
+  "decision": "none (FAST Admin Console change; the confirm-only daily device-change limit is the PO's explicit decision of 2026-11-03, scoped to that policy)",
+  "go_live": "NOT authorised."
+}

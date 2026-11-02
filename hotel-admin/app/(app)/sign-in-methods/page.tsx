@@ -11,6 +11,7 @@ import { typedSignInOn } from "@/lib/sign-in-methods";
 import { canRead, canWrite } from "@/lib/roles";
 import { GuestSignInProtectionCard } from "@/components/guest-signin-protection";
 import { NetworkPauseSettingsCard, NetworkPausesNotice } from "@/components/guest-signin-network-pause";
+import { SIGNIN_SETTING_GROUPS, SigninSettingsGroup } from "@/components/devices/signin-limits-card";
 import { CodeRequestsCard } from "@/components/code-requests";
 import { EmailAccountsSettingsCard } from "@/components/email-accounts-settings";
 import { roomSignInImpaired, useRoomSignInReadiness } from "@/components/room-sign-in-readiness";
@@ -403,6 +404,11 @@ export default function SignInMethodsPage() {
 
       {(smsMod || whatsappMod) && roles !== null && canRead("code-requests", roles) && <CodeRequestsCard roles={roles} />}
 
+      {roles !== null && canRead("auth-methods", roles) && (
+        <SigninSettingsGroup title="One-time codes" keys={SIGNIN_SETTING_GROUPS.oneTimeCodes} canEdit={writable}
+          hint="How long a code sent by email, text or WhatsApp lasts, how many wrong guesses it allows, and how many codes may be requested per hour." />
+      )}
+
       <ClientJourneyCard
         cfg={cfg}
         writable={writable}
@@ -414,6 +420,10 @@ export default function SignInMethodsPage() {
       {/* Sign-in protection counts wrong ROOM details (Room sign-in only), so it needs Hospitality. */}
       {hospitality && <GuestSignInProtectionCard canWrite={mayChangeProtection} />}
       {hospitality && <NetworkPauseSettingsCard canWrite={mayChangeProtection} />}
+      {roles !== null && canRead("auth-methods", roles) && (
+        <SigninSettingsGroup title="Sign-in protection" keys={SIGNIN_SETTING_GROUPS.protection} canEdit={writable}
+          hint="The most sign-ins the whole appliance accepts per minute, and how long recent room guests are exempt from a room sign-in pause." />
+      )}
     </PageShell>
   );
 }

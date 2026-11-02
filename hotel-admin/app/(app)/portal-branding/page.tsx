@@ -21,7 +21,8 @@ import { Skeleton } from "@/components/ui/misc";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { buttonVariants } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
-import { canWrite } from "@/lib/roles";
+import { canRead, canWrite } from "@/lib/roles";
+import { SIGNIN_SETTING_GROUPS, SigninSettingsGroup } from "@/components/devices/signin-limits-card";
 import { cn, errMsg } from "@/lib/utils";
 import { Upload, Trash2, Check, AlertTriangle } from "lucide-react";
 import {
@@ -597,6 +598,11 @@ export default function PortalSettingsPage() {
                   </Field>
                 </CardBody>
               </Card>
+              {roles !== null && canRead("auth-methods", roles) && (
+                <SigninSettingsGroup title="Uploaded images" keys={SIGNIN_SETTING_GROUPS.portalImages}
+                  canEdit={canWrite("auth-methods", roles)}
+                  hint="Uploaded logos and backgrounds are resized to this longest side and saved at this quality." />
+              )}
             </>
           )}
 

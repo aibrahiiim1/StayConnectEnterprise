@@ -142,4 +142,24 @@ func TestIntegration_ClientDevices_TheDailyChangeLimitSetting(t *testing.T) {
 	if st, _ := desk.do(t, "PUT", "/device-settings/", map[string]any{"client_device_changes_per_day": 2, "reason": "desk try", "password": desk.password}); st != 403 {
 		t.Fatalf("the desk changed the setting: %d", st)
 	}
+	if st, _ := desk.do(t, "PUT", "/device-settings/", map[string]any{"client_device_changes_per_day": 2}); st != 403 {
+		t.Fatalf("the desk changed the setting by confirming: %d", st)
+	}
+
+	// Confirm-only (PO, 2026-11-02): the console's warning is the confirmation; no reason or password is asked. The
+	// change is still attributed and recorded with the old and new values.
+	st, body = f.do(t, "PUT", "/device-settings/", map[string]any{"client_device_changes_per_day": 4})
+	if st != 200 || body["config_version"] != float64(2) {
+		t.Fatalf("a confirmed change without reason or password = %d %v", st, body)
+	}
+	var by, why string
+	var oldN, newN int
+	if err := f.pool.QueryRow(context.Background(), `SELECT changed_by, change_reason, old_client_device_changes_per_day,
+		new_client_device_changes_per_day FROM iam_v2.device_settings_changes WHERE site_id=$1 ORDER BY changed_at DESC LIMIT 1`,
+		f.site).Scan(&by, &why, &oldN, &newN); err != nil {
+		t.Fatal(err)
+	}
+	if by == "" || why != defaultSettingReason || oldN != 5 || newN != 4 {
+		t.Fatalf("the confirmed change was recorded as by=%q reason=%q %d->%d", by, why, oldN, newN)
+	}
 }

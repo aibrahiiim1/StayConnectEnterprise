@@ -3,6 +3,7 @@
 // The one place to configure what a guest keeps after a verified check-out. Contract:
 // docs/architecture/ONEGATE_AFTER_CHECKOUT_ACCESS.md.
 
+import { SIGNIN_SETTING_GROUPS, SigninSettingsGroup } from "@/components/devices/signin-limits-card";
 import * as React from "react";
 import { History, Pencil, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
@@ -37,7 +38,12 @@ import { AccessEditorSheet } from "./access-editor-sheet";
 import { AccessHistory } from "./access-history";
 import { PostStayView } from "@/components/phase5/post-stay-view";
 
-export function AfterCheckoutAccessScreen({ canWrite = true, canActOnReconnections = false, rolesKnown = true }: {
+export function AfterCheckoutAccessScreen({
+  canWrite = true, canActOnReconnections = false, rolesKnown = true, canReadLimits = false, canEditLimits = false,
+}: {
+  /** The After check-out sign-in limits (rate limits and lockout) live on the sign-in settings endpoint (auth-methods). */
+  canReadLimits?: boolean;
+  canEditLimits?: boolean;
   canWrite?: boolean;
   canActOnReconnections?: boolean;
   rolesKnown?: boolean;
@@ -290,6 +296,10 @@ export function AfterCheckoutAccessScreen({ canWrite = true, canActOnReconnectio
       )}
 
       <PostStayView embedded canAct={canActOnReconnections} rolesKnown={rolesKnown} />
+      {canReadLimits && (
+        <SigninSettingsGroup title="Sign-in limits" keys={SIGNIN_SETTING_GROUPS.afterCheckout} canEdit={canEditLimits}
+          hint="How many After check-out sign-in attempts are allowed per device, network address, room and appliance, and the lockout after wrong answers." />
+      )}
     </PageShell>
   );
 }

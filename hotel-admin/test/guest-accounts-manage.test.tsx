@@ -121,7 +121,10 @@ describe("Client accounts — what each role is offered (C-3, C-4, C-18)", () =>
   it("the voucher station cannot vouch for an address, act on a device, or flip the portal switch", async () => {
     wire(["voucher_operator"]);
     await renderPage();
-    expect(screen.getByRole("switch", { name: /offer username-and-password sign-in/i })).toBeDisabled();
+    // The portal switch lives under Account settings.
+    await userEvent.click(screen.getByRole("button", { name: /account settings/i }));
+    expect(await screen.findByRole("switch", { name: /offer username-and-password sign-in/i })).toBeDisabled();
+    await userEvent.keyboard("{Escape}");
     await userEvent.click(within(row("late@example.com")).getByRole("button", { name: /manage/i }));
     const dialog = await screen.findByRole("dialog");
     await within(dialog).findByText("Day pass");
@@ -132,8 +135,10 @@ describe("Client accounts — what each role is offered (C-3, C-4, C-18)", () =>
   it("the desk may vouch for an address but not flip a sign-in method", async () => {
     wire(["front_office_operator"]);
     await renderPage();
-    expect(screen.getByRole("switch", { name: /offer username-and-password sign-in/i })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: /account settings/i }));
+    expect(await screen.findByRole("switch", { name: /offer username-and-password sign-in/i })).toBeDisabled();
     expect(screen.getByText(/your role cannot change which sign-in methods are offered/i)).toBeTruthy();
+    await userEvent.keyboard("{Escape}");
     await userEvent.click(within(row("late@example.com")).getByRole("button", { name: /manage/i }));
     const dialog = await screen.findByRole("dialog");
     await within(dialog).findByText("Day pass");

@@ -727,7 +727,10 @@ func (s *server) setDeviceSettings(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "invalid_setting", "client_device_changes_per_day must be 1-10")
 		return
 	}
-	reason := strings.TrimSpace(in.Reason)
+	// Confirm-only (PO, 2026-11-02): the console shows a warning and the operator confirms; no reason or password is asked.
+	// A typed reason is still bounded; none is recorded as the console confirmation. The actor, old and new values and
+	// the time are recorded below and by device_settings_set, exactly as before.
+	reason := settingReason(in.Reason)
 	if !validReason(reason) {
 		jsonErr(w, http.StatusBadRequest, "reason_required", "a bounded reason (4-500 characters) is required")
 		return

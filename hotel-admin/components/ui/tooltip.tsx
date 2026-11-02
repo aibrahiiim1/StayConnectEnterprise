@@ -7,6 +7,23 @@ import { cn } from "@/lib/utils";
 
 export const TooltipProvider = TooltipPrimitive.Provider;
 
+/**
+ * A tooltip opens on hover, and on focus only when the focus came from the keyboard. A dialog moves focus to its first
+ * focusable element when it opens, and in a form whose hints are icons that element is a hint: without this, every such
+ * form opened with a hint already showing. Preventing the event's default skips Radix's own focus handler.
+ */
+let lastInputWasKeyboard = false;
+if (typeof window !== "undefined") {
+  // Capture phase: recorded before any handler moves focus in response to the same key or click.
+  window.addEventListener("keydown", (e) => { if (e.key === "Tab" || e.key.startsWith("Arrow")) lastInputWasKeyboard = true; }, true);
+  window.addEventListener("pointerdown", () => { lastInputWasKeyboard = false; }, true);
+  window.addEventListener("mousedown", () => { lastInputWasKeyboard = false; }, true);
+}
+
+export function openOnlyOnKeyboardFocus(e: React.FocusEvent<HTMLElement>) {
+  if (!lastInputWasKeyboard) e.preventDefault();
+}
+
 export function Tooltip({
   content,
   side = "top",
@@ -27,7 +44,7 @@ export function Tooltip({
     // A local provider lets tooltips work when tests render components without the app layout.
     <TooltipPrimitive.Provider delayDuration={delay}>
       <TooltipPrimitive.Root delayDuration={delay}>
-        <TooltipPrimitive.Trigger asChild>{children}</TooltipPrimitive.Trigger>
+        <TooltipPrimitive.Trigger asChild onFocus={openOnlyOnKeyboardFocus}>{children}</TooltipPrimitive.Trigger>
         <TooltipPrimitive.Portal>
           <TooltipPrimitive.Content
             side={side}
@@ -55,7 +72,8 @@ export function Tooltip({
 
 export function Explain({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <Tooltip content={children}>
+    // A short wait, so a hint opens when the pointer rests on the icon, not as it passes over.
+    <Tooltip content={children} delay={300}>
       <button
         type="button"
         // Avoid announcing visible help text twice.

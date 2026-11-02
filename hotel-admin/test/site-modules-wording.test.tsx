@@ -59,6 +59,14 @@ afterEach(() => { cleanup(); vi.resetModules(); });
 const options = (label: RegExp) =>
   Array.from((screen.getByLabelText(label) as HTMLSelectElement).options).map((o) => o.textContent ?? "");
 
+// The sessions sign-in filter is a set of one-tap chips; each reads "Label (count)" here, as the old options did.
+const chips = (label: RegExp) =>
+  Array.from(screen.getByRole("radiogroup", { name: label }).querySelectorAll("[role=radio]")).map((b) => {
+    const count = b.querySelector("span.tabular")?.textContent;
+    const text = Array.from(b.childNodes).filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent).join("").trim();
+    return count != null ? `${text} (${count})` : text;
+  });
+
 const VOUCHER_SESSION = {
   id: "s1", tenant_id: "t", site_id: "s", appliance_id: "a", guest_id: "g", ip: "10.0.0.5", mac: "02:00:00:00:00:05",
   state: "active", started_at: new Date().toISOString(), bytes_down: 1, bytes_up: 1, subject_kind: "voucher",
@@ -70,7 +78,7 @@ describe("Active sessions", () => {
     const { default: Page } = await import("@/app/(app)/sessions/page");
     render(<Page />);
     await screen.findAllByText(/Voucher/);
-    const opts = options(/Filter by how the client signed in/);
+    const opts = chips(/How the client signed in/);
     expect(opts.some((o) => o.startsWith("Room"))).toBe(false);
     expect(opts.some((o) => o.startsWith("Email / social"))).toBe(false);
     expect(screen.getByPlaceholderText("Name, username, IP or MAC…")).toBeTruthy();
@@ -82,7 +90,7 @@ describe("Active sessions", () => {
     const { default: Page } = await import("@/app/(app)/sessions/page");
     render(<Page />);
     await screen.findAllByText(/Voucher/);
-    const opts = options(/Filter by how the client signed in/);
+    const opts = chips(/How the client signed in/);
     expect(opts).toContain("Room (0)");
     expect(opts).toContain("Email / social (0)");
     expect(screen.getByPlaceholderText("Room, name, username, IP or MAC…")).toBeTruthy();
@@ -94,7 +102,7 @@ describe("Active sessions", () => {
     const { default: Page } = await import("@/app/(app)/sessions/page");
     render(<Page />);
     await screen.findByText("Room 318");
-    expect(options(/Filter by how the client signed in/)).toContain("Room (1)");
+    expect(chips(/How the client signed in/)).toContain("Room (1)");
   });
 });
 

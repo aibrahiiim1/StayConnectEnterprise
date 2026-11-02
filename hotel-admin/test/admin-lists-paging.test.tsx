@@ -127,7 +127,7 @@ describe("Active sessions — server paging", () => {
     await userEvent.click(screen.getByRole("button", { name: /Next/ }));
     await screen.findByText("Showing 51–100 of 130");
 
-    await userEvent.selectOptions(screen.getByLabelText(/Filter by how the client signed in/), "voucher");
+    await userEvent.click(screen.getByRole("radio", { name: /^Voucher/ }));
     await waitFor(() => {
       const [path] = lastCall("/sessions");
       expect(param(path, "kind")).toBe("voucher");
