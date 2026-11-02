@@ -1,0 +1,4 @@
+commit e7b7f25424093f7c82ba13faebbe18cf1a3522fe
+Date:   Mon Nov 2 22:26:35 2026 +0200
+
+    Governance: T0284 records the Admin Console simplification delivery and its test-appliance read-back
