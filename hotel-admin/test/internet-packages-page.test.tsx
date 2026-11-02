@@ -110,7 +110,14 @@ describe("InternetPackagesPage — packages", () => {
     expect(screen.getByText("2.50 USD (assumed 2 decimals)")).toBeInTheDocument();
   });
 
-  it("opens the package record with its saved versions as a timeline", async () => {
+  it("opens on Active packages, not All", async () => {
+    routes({ "/commercial-packages": list([PKG, { ...PKG, package_id: "pk2", code: "OLD", name: "Old offer", active: false }]) });
+    render(<InternetPackagesPage />);
+    expect(await screen.findByText("Free WiFi")).toBeInTheDocument();
+    expect(screen.queryByText("Old offer")).toBeNull();
+  });
+
+  it("opens the package record, with its saved versions on their own tab", async () => {
     routes({
       "/commercial-packages": list([{ ...PKG, name: null, code: "FREEWIFI", price_minor: 500, currency: "USD", currency_exponent: 2 }]),
       "/commercial-packages/pk1/revisions": list([
@@ -121,6 +128,9 @@ describe("InternetPackagesPage — packages", () => {
     render(<InternetPackagesPage />);
     fireEvent.click(await screen.findByText("FREEWIFI"));
     const sheet = await screen.findByRole("dialog");
+    expect(within(sheet).queryByText(/in force/i)).toBeNull();
+    fireEvent.mouseDown(within(sheet).getByRole("tab", { name: /versions/i }));
+    fireEvent.click(within(sheet).getByRole("tab", { name: /versions/i }));
     expect(await within(sheet).findByText(/in force/i)).toBeInTheDocument();
     expect(within(sheet).getByText(/Version 1/)).toBeInTheDocument();
     expect(within(sheet).getAllByText("5.00 USD").length).toBeGreaterThan(0);
@@ -211,11 +221,11 @@ describe("InternetPackagesPage — packages", () => {
     p.mockRejectedValue(new ApiError(400, { error: "invalid_grant_tier" }));
     render(<InternetPackagesPage />);
     fireEvent.click(await screen.findByRole("button", { name: /add package/i }));
-    fireEvent.change(await screen.findByTestId("code"), { target: { value: "X" } });
+    fireEvent.change(await screen.findByTestId("name"), { target: { value: "X" } });
     fireEvent.change(screen.getByTestId("service-plan"), { target: { value: "p1" } });
     fireEvent.click(screen.getByRole("button", { name: /^add package$/i }));
     expect(await screen.findByText(/invalid_grant_tier/i)).toBeInTheDocument();
-    expect(screen.getByTestId("code")).toBeInTheDocument();
+    expect(screen.getByTestId("name")).toBeInTheDocument();
   });
 
   it("Add sends create_only, and a taken code is shown as the server's refusal inside the form", async () => {
@@ -226,7 +236,7 @@ describe("InternetPackagesPage — packages", () => {
     render(<InternetPackagesPage />);
     await screen.findByText("Free WiFi");
     fireEvent.click(screen.getByRole("button", { name: /add package/i }));
-    fireEvent.change(await screen.findByTestId("code"), { target: { value: "FREEWIFI" } });
+    fireEvent.change(await screen.findByTestId("name"), { target: { value: "Free WiFi" } });
     fireEvent.change(screen.getByTestId("service-plan"), { target: { value: "p1" } });
     fireEvent.click(screen.getByRole("button", { name: /^add package$/i }));
 
@@ -234,7 +244,7 @@ describe("InternetPackagesPage — packages", () => {
     expect(p.mock.calls[0][1].create_only).toBe(true);
     const dialog = screen.getByRole("dialog");
     expect(await within(dialog).findByText(/already exists/i)).toBeInTheDocument();
-    expect(within(dialog).getByTestId("code")).toBeInTheDocument();
+    expect(within(dialog).getByTestId("name")).toBeInTheDocument();
   });
 
   it("Edit publishes a new version without create_only", async () => {
@@ -383,6 +393,8 @@ describe("InternetPackagesPage — packages", () => {
     routes({ "/commercial-packages": list([{ ...PKG, active: false }]), "/commercial-packages/plans": list([PLAN]) });
     p.mockResolvedValue({});
     render(<InternetPackagesPage />);
+    // The list opens on Active; a disabled package is under Disabled.
+    fireEvent.click(await screen.findByRole("radio", { name: /disabled/i }));
     await screen.findByText("Free WiFi");
     await chooseRowAction("Free WiFi", /^enable/i);
     const dlg = await screen.findByRole("dialog", { name: /offer free wifi again/i });

@@ -2,6 +2,7 @@
 
 // Code-format changes require a preview, reason, and confirmation before saving.
 
+import { InfoHint } from "@/components/ui/quiet";
 import * as React from "react";
 import { KeyRound, Pencil, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
@@ -302,9 +303,9 @@ export function CodeSecurityTab({ canEditFormat }: { canEditFormat: boolean }) {
         onConfirm={retire}
       >
         {retiring && (
-          <p className="text-sm text-muted-foreground">
-            The <strong>{retiring.unused_vouchers.toLocaleString()} unused cards</strong> made with this key keep
-            working: each card stays tied to the key that made it, so nothing in circulation stops.
+          <p className="flex items-center gap-1 text-sm text-muted-foreground">
+            <span><strong>{retiring.unused_vouchers.toLocaleString()} unused cards</strong> keep working.</span>
+            <InfoHint>Each card stays tied to the key that made it, so nothing in circulation stops.</InfoHint>
           </p>
         )}
       </ConfirmDialog>

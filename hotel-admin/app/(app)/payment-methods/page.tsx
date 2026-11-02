@@ -11,7 +11,8 @@ import Link from "next/link";
 import { api } from "@/lib/api";
 import { canRead, canWrite } from "@/lib/roles";
 import { SiteModule, SiteModules } from "@/lib/payment-admin";
-import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
+import { InfoHint } from "@/components/ui/quiet";
 import { StatusBadge } from "@/components/ui/badge";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { PageHeader, PageShell } from "@/components/ui/page";
@@ -29,29 +30,26 @@ type Tone = "ok" | "warn" | "err" | "default" | "info";
 type MethodState = {
   tone: Tone;
   label: string;
+  /** Why it is in this state: read as a hint. */
   detail?: React.ReactNode;
+  /** What to do about it, shown in the row. */
+  action?: { href: string; label: string };
 };
 
 // States are checked in the order an operator has to fix them.
 function moduleState(m: SiteModule | undefined): MethodState {
   if (!m) {
-    return { tone: "default", label: "Not available", detail: <p className="text-xs text-muted-foreground">This appliance does not report this method.</p> };
+    return { tone: "default", label: "Not available", detail: "This appliance does not report this method." };
   }
   if (!m.licensed) {
-    return { tone: "default", label: "Not licensed", detail: <p className="text-xs text-muted-foreground">Not included in this site&rsquo;s licence.</p> };
+    return { tone: "default", label: "Not licensed", detail: "Not included in this site's licence." };
   }
   if (!m.enabled) {
     return {
       tone: "default",
       label: "Switched off",
-      detail: (
-        <p className="text-xs text-muted-foreground">
-          Licensed but switched off for this site.{" "}
-          <Link href="/modules" className="inline-flex items-center gap-0.5 text-primary underline-offset-4 hover:underline">
-            Modules <ArrowUpRight className="size-3.5" aria-hidden />
-          </Link>
-        </p>
-      ),
+      detail: "Licensed but switched off for this site.",
+      action: { href: "/modules", label: "Modules" },
     };
   }
   if (!m.ready) {
@@ -158,51 +156,51 @@ export default function PaymentMethodsPage() {
       {!writable && <ReadOnlyNotice>Your role can see how payments are configured but not change it.</ReadOnlyNotice>}
       <ErrorBanner err={err} className="mb-0" />
 
-      <section aria-label="Payment methods" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MethodCard
-          icon={<Gift />}
-          title="Free"
-          state={{ tone: "ok", label: "Always available" }}
-          description="A package priced at 0 is free: the client chooses it and is online, with no payment step."
-          link={{ href: "/internet-packages", label: "Internet packages" }}
-        />
-        <MethodCard
-          icon={<Ticket />}
-          title="Voucher"
-          state={{ tone: "ok", label: "Always available" }}
-          description="The client types a code the property issued, on a printed card or by email."
-          link={{ href: "/vouchers", label: "Vouchers" }}
-        />
-        {cardLicensed && (
-          <MethodCard
-            icon={<CreditCard />}
-            title="Card payment"
-            state={cardState}
-            description="The client pays on the payment provider's hosted page."
-          />
-        )}
-        {roomLicensed && (
-          <MethodCard
-            icon={<BedDouble />}
-            title="Room charge"
-            state={roomState}
-            description="A verified hotel guest charges the package to their room, posted to the folio in the PMS."
-            link={{ href: "/room-charge", label: "Room charge — under Hotel" }}
-          />
-        )}
-      </section>
-
-      {cardLicensed && (
-        <section aria-labelledby="card-config-heading" className="space-y-4">
-          <h2 id="card-config-heading" className="text-subtitle">Card payment configuration</h2>
-          <CardPaymentConfig writable={writable} />
-        </section>
-      )}
+      {(() => {
+        const methods = (
+          <Card className="overflow-hidden">
+            <ul aria-label="Payment methods" className="divide-y divide-border">
+              <MethodRow
+                icon={<Gift />}
+                title="Free"
+                state={{ tone: "ok", label: "Always available" }}
+                description="A package priced at 0 is free: the client chooses it and is online, with no payment step."
+                link={{ href: "/internet-packages", label: "Internet packages" }}
+              />
+              <MethodRow
+                icon={<Ticket />}
+                title="Voucher"
+                state={{ tone: "ok", label: "Always available" }}
+                description="The client types a code the property issued, on a printed card or by email."
+                link={{ href: "/vouchers", label: "Vouchers" }}
+              />
+              {cardLicensed && (
+                <MethodRow
+                  icon={<CreditCard />}
+                  title="Card payment"
+                  state={cardState}
+                  description="The client pays on the payment provider's hosted page. OneGate never sees the card number."
+                />
+              )}
+              {roomLicensed && (
+                <MethodRow
+                  icon={<BedDouble />}
+                  title="Room charge"
+                  state={roomState}
+                  description="A verified hotel guest charges the package to their room, posted to the folio in the PMS."
+                  link={{ href: "/room-charge", label: "Room charge" }}
+                />
+              )}
+            </ul>
+          </Card>
+        );
+        return cardLicensed ? <CardPaymentConfig writable={writable} methods={methods} /> : methods;
+      })()}
     </PageShell>
   );
 }
 
-function MethodCard({
+function MethodRow({
   icon, title, state, description, link,
 }: {
   icon: React.ReactNode;
@@ -211,29 +209,28 @@ function MethodCard({
   description: string;
   link?: { href: string; label: string };
 }) {
+  const go = state.action ?? link;
   return (
-    <Card className={cn("flex flex-col", state.tone === "default" && "bg-surface/60")} data-testid={`method-${title}`}>
-      <CardHeader className="items-start border-b-0 pb-2">
-        <div className="min-w-0 space-y-1.5">
-          <CardTitle className="flex items-center gap-2 [&_svg]:size-4">
-            <span className="text-muted-foreground" aria-hidden>{icon}</span>
-            {title}
-          </CardTitle>
-          <StatusBadge tone={state.tone}>{state.label}</StatusBadge>
-        </div>
-      </CardHeader>
-      <CardBody className="flex flex-1 flex-col gap-2 pt-0">
-        <CardDescription>{description}</CardDescription>
-        {state.detail}
-        {link && (
-          <Link
-            href={link.href}
-            className="mt-auto inline-flex w-fit items-center gap-0.5 pt-1 text-xs text-primary underline-offset-4 hover:underline"
-          >
-            {link.label} <ArrowUpRight className="size-3.5" aria-hidden />
+    <li className={cn("flex min-h-14 flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3", state.tone === "default" && "bg-surface/50")}
+      data-testid={`method-${title}`}>
+      <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-surface text-muted-foreground [&_svg]:size-4" aria-hidden>
+        {icon}
+      </span>
+      <div className="flex min-w-0 flex-1 items-center gap-1">
+        <span className="text-sm font-medium">{title}</span>
+        <InfoHint>{description}</InfoHint>
+      </div>
+      <div className="flex items-center gap-1.5">
+        <StatusBadge tone={state.tone}>{state.label}</StatusBadge>
+        {state.detail && <InfoHint>{state.detail}</InfoHint>}
+      </div>
+      <div className="w-36 text-end">
+        {go && (
+          <Link href={go.href} className="inline-flex items-center gap-0.5 text-xs text-primary underline-offset-4 hover:underline">
+            {go.label} <ArrowUpRight className="size-3.5" aria-hidden />
           </Link>
         )}
-      </CardBody>
-    </Card>
+      </div>
+    </li>
   );
 }

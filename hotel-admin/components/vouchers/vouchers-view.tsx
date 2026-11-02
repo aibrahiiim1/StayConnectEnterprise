@@ -13,7 +13,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { FilterChips, Pagination, SearchInput } from "@/components/ui/data";
 import { Explain } from "@/components/ui/tooltip";
-import { Select } from "@/components/ui/input";
+import { QuietHints, Select } from "@/components/ui/input";
 import { SkeletonRows } from "@/components/ui/misc";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { PageHeader, PageShell, StatCard, StatGrid } from "@/components/ui/page";
@@ -22,6 +22,7 @@ import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   batchLabel,
+  batchName,
   effectiveStatus,
   maskedCode,
   validityWords,
@@ -86,7 +87,8 @@ export function VouchersView(props: {
       .catch(setSummaryErr);
   }, [reloadKey]);
 
-  const [status, setStatus] = React.useState<StatusFilter>("all");
+  // Available first: the cards that can still be handed out are what the desk looks for.
+  const [status, setStatus] = React.useState<StatusFilter>("available");
   const [search, setSearch] = React.useState("");
   const [pkg, setPkg] = React.useState("");
   const [batch, setBatch] = React.useState("");
@@ -201,6 +203,7 @@ export function VouchersView(props: {
   }
 
   return (
+    <QuietHints>
     <PageShell width="wide">
       <PageHeader
         title="Vouchers"
@@ -353,12 +356,12 @@ export function VouchersView(props: {
                     value={status}
                     onChange={setStatus}
                     options={[
-                      { value: "all", label: "All", count: counts.all },
                       { value: "available", label: "Available", count: counts.available, tone: "ok" },
                       { value: "not_yet_valid", label: "Not yet valid", count: counts.not_yet_valid, tone: "info" },
                       { value: "expired", label: "Expired (never used)", count: counts.expired, tone: "warn" },
                       { value: "redeemed", label: "Used", count: counts.redeemed },
                       { value: "cancelled", label: "Cancelled", count: counts.cancelled, tone: "err" },
+                      { value: "all", label: "All", count: counts.all },
                     ]}
                   />
                   <Explain>
@@ -418,9 +421,12 @@ export function VouchersView(props: {
                           {validityWords(r.redemption_valid_from, r.redemption_valid_until)}
                         </TD>
                         <TD className="hidden md:table-cell">
-                          {r.batch_id ? (
-                            <span className="font-mono text-xs text-muted-foreground">{r.batch_id.slice(0, 8)}</span>
-                          ) : (
+                          {r.batch_id ? (() => {
+                            const b = batches.find((x) => x.batch_id === r.batch_id);
+                            return b && batchName(b)
+                              ? <span className="text-sm">{batchName(b)}</span>
+                              : <span className="font-mono text-xs text-muted-foreground">{r.batch_id.slice(0, 8)}</span>;
+                          })() : (
                             <span className="text-muted-foreground">—</span>
                           )}
                         </TD>
@@ -481,5 +487,6 @@ export function VouchersView(props: {
 
       <IssueDialog open={issueOpen} onOpenChange={setIssueOpen} onIssued={reload} hotelName={hotelName} />
     </PageShell>
+    </QuietHints>
   );
 }

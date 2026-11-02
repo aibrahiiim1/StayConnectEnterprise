@@ -2,6 +2,7 @@
 
 // Server aggregates count the whole batch, matching the number of codes exported.
 
+import { InfoHint } from "@/components/ui/quiet";
 import * as React from "react";
 import { Ban, Download, Layers, List } from "lucide-react";
 import { api } from "@/lib/api";
@@ -19,6 +20,7 @@ import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import {
   batchLabel,
+  batchName,
   validityWords,
   type ExportedBatch,
   type VoucherBatch,
@@ -102,17 +104,18 @@ export function BatchesTab({
                   <TH numeric>Cards</TH>
                   <TH>Status</TH>
                   <TH className="hidden md:table-cell">Issued by</TH>
-                  <TH className="hidden lg:table-cell">Note</TH>
                 </TR>
               </THead>
               <TBody>
                 {rows.map((b) => (
                   <TR key={b.batch_id} onClick={() => setOpen(b)}>
-                    <TD nowrap>
-                      <div className="font-medium">
+                    <TD truncate title={b.notes ?? undefined} className="max-w-[16rem]">
+                      <div className="font-medium" data-testid="batch-name">
+                        {batchName(b) ?? <span className="text-muted-foreground">Unnamed batch</span>}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
                         <When iso={b.created_at} />
                       </div>
-                      <div className="font-mono text-2xs text-muted-foreground">{b.batch_id.slice(0, 8)}</div>
                     </TD>
                     <TD truncate title={b.package_name ?? undefined} className="max-w-[14rem]">{b.package_name ?? "Earlier package version"}</TD>
                     <TD numeric>{b.count.toLocaleString()}</TD>
@@ -126,7 +129,6 @@ export function BatchesTab({
                       </div>
                     </TD>
                     <TD truncate title={b.issued_by_label ?? undefined} className="hidden max-w-[12rem] md:table-cell">{b.issued_by_label ?? "—"}</TD>
-                    <TD truncate muted title={b.notes ?? undefined} className="hidden max-w-[16rem] lg:table-cell">{b.notes ?? ""}</TD>
                   </TR>
                 ))}
               </TBody>
@@ -392,9 +394,12 @@ function BatchDetail({
           />
         )}
         {scope === "unused" && batch.expired > 0 && (
-          <p className="text-xs text-muted-foreground">
-            “Not used yet” includes {batch.expired.toLocaleString()} expired card{batch.expired === 1 ? "" : "s"}, which
-            sign-in will refuse.
+          <p className="flex items-center gap-1 text-xs text-muted-foreground">
+            Includes {batch.expired.toLocaleString()} expired
+            <InfoHint>
+              “Not used yet” includes {batch.expired.toLocaleString()} expired card{batch.expired === 1 ? "" : "s"}, which
+              sign-in will refuse.
+            </InfoHint>
           </p>
         )}
       </ConfirmDialog>

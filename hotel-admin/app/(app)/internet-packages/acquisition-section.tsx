@@ -16,6 +16,7 @@ import {
   type RoomChargeMappingForm,
 } from "@/lib/commerce-form";
 import { RoomChargeLiveNotice } from "@/components/room-charge-live-notice";
+import { InfoHint } from "@/components/ui/quiet";
 
 const emptyMapping = (pms_interface_id = ""): RoomChargeMappingForm =>
   ({ pms_interface_id, posting_code: "", tax_code: "", tax_rate_pct: "" });
@@ -70,7 +71,10 @@ export function AcquisitionSection({
 
   return (
     <div role="group" aria-labelledby={headingID} data-testid="acquisition-section">
-      <h3 id={headingID} className="text-sm font-medium mb-2">Price and how clients get it</h3>
+      <div className="mb-2 flex items-center gap-1">
+        <h3 id={headingID} className="text-label">Price and payment</h3>
+        <InfoHint>A price of 0 is Free. Card payment and Room charge need a price above 0.</InfoHint>
+      </div>
 
       {showPrice && <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Price" hint={exponent === null ? undefined
@@ -118,14 +122,17 @@ export function AcquisitionSection({
                     checked={checked} disabled={disabled}
                     onChange={(e) => toggle(m, e.target.checked)} />
                   <span>{ACQUISITION_METHOD_LABELS[m]}</span>
-                  {why && <span className="text-xs text-muted-foreground">— {why}</span>}
+                  {why && <InfoHint>{why}</InfoHint>}
+                  {avail.selectable && avail.notReady && (
+                    <>
+                      <span className="text-xs text-warning-subtle-foreground">not ready</span>
+                      <InfoHint testId={`method-not-ready-${m}`}>
+                        Clients are not offered {ACQUISITION_METHOD_LABELS[m].toLowerCase()} until it is ready:{" "}
+                        {avail.notReady.join("; ")}.
+                      </InfoHint>
+                    </>
+                  )}
                 </label>
-                {avail.selectable && avail.notReady && (
-                  <p className="ms-6 text-xs text-muted-foreground" data-testid={`method-not-ready-${m}`}>
-                    Clients are not offered {ACQUISITION_METHOD_LABELS[m].toLowerCase()} until it is ready:{" "}
-                    {avail.notReady.join("; ")}.
-                  </p>
-                )}
               </div>
             );
           })}

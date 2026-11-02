@@ -1362,7 +1362,7 @@
       "dispositions": "docs/AUDIT_DECISION_DISPOSITIONS.md"
     }
   },
-  "latest_transition_id": "T0283",
+  "latest_transition_id": "T0284",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1858,16 +1858,16 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "ROOM_SIGN_IN_DRAIN_AND_ROOM_CHARGE_CONFIRMATION",
-    "decision": "D90 (Product-Owner mission of 2026-11-02: fix PMS sign-in blocking and unresponsive package selection).",
-    "decision_note": "PR #290 MERGED by the Product Owner as 080f2b4f9e63665614fbde81d26687b6892cd160 (head 5977c259, Codex review clean); installed on the test appliance as onegate-appliance-caf74104392c with scd 0e6a972d, the same code as the merge; migration 0205 applied; PO-accepted on a mobile device; a room-charge posting acknowledged by Protel (T0282).",
-    "manifest": "docs/manifests/RoomSignInDrain20261102-change-manifest.md",
-    "base": "0292089b64e375f820a776ac765ce748c70d24b8",
-    "base_note": "Master after the merge of PR #289.",
-    "transition": "T0283",
-    "previous_delivery": "T0282",
-    "branch": "delivery/room-charge-confirm-only (deleted after the merge); records on governance/pr290-merge-records (merged 13466865, deleted) and governance/t0282-timestamp-correction",
-    "note": "T0281 delivery, T0282 merge and acceptance records, T0283 forward correction of the T0281 and T0282 timestamps. Go-Live not authorised."
+    "kind": "ADMIN_CONSOLE_SIMPLIFICATION_2026_11_02",
+    "decision": "Product Owner request of 2026-11-02 (Admin Console enhancement; merge and deploy authorised). No new decision record.",
+    "decision_note": "Admin Console only; installed on the test appliance as release 20261102-202535 (source_commit 0892d043, BUILD_ID QI3hQD7j0UI5CGWBgLkcM), read back.",
+    "manifest": "docs/manifests/AdminConsoleSimplify20261102-change-manifest.md",
+    "base": "3e3c6ad6f10b9740b9565df6b8f9a90bd39a727a",
+    "base_note": "Master after the merge of PR #293.",
+    "transition": "T0284",
+    "previous_delivery": "T0283",
+    "branch": "delivery/admin-console-simplify-2026-11-02",
+    "note": "T0284. Go-Live not authorised."
   },
   "onboarding_reconciliation": {
     "decision": "D37",

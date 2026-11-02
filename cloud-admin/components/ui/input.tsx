@@ -1,5 +1,21 @@
 import * as React from "react";
+import { Explain } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+
+/**
+ * Inside QuietHints, a Field's hint and a Checkbox's description are an info icon beside the label, read on hover or
+ * focus, instead of a paragraph under the control. The words stay in the page for assistive technology and stay bound to
+ * the control (aria-describedby); errors are always shown in full.
+ */
+const QuietHintsContext = React.createContext(false);
+
+export function QuietHints({ children }: { children: React.ReactNode }) {
+  return <QuietHintsContext.Provider value={true}>{children}</QuietHintsContext.Provider>;
+}
+
+export function useQuietHints() {
+  return React.useContext(QuietHintsContext);
+}
 
 const CONTROL = cn(
   "w-full rounded-md border border-input/70 bg-card text-foreground shadow-control",
@@ -46,6 +62,7 @@ export const Checkbox = React.forwardRef<
   HTMLInputElement,
   Omit<React.InputHTMLAttributes<HTMLInputElement>, "type"> & { label?: React.ReactNode; description?: React.ReactNode }
 >(function Checkbox({ className, label, description, id, ...p }, ref) {
+  const quiet = React.useContext(QuietHintsContext);
   const generated = React.useId();
   const cid = id ?? generated;
   const box = (
@@ -68,7 +85,14 @@ export const Checkbox = React.forwardRef<
       <span className="flex h-5 items-center">{box}</span>
       <div className="min-w-0">
         <label htmlFor={cid} className="cursor-pointer text-sm text-foreground">{label}</label>
-        {description && <p id={`${cid}-desc`} className="text-xs text-muted-foreground">{description}</p>}
+        {description && quiet ? (
+          <>
+            <Explain className="ms-1">{description}</Explain>
+            <span id={`${cid}-desc`} className="sr-only">{description}</span>
+          </>
+        ) : (
+          description && <p id={`${cid}-desc`} className="text-xs text-muted-foreground">{description}</p>
+        )}
       </div>
     </div>
   );
@@ -160,9 +184,11 @@ export function Field({
   className?: string;
   children: React.ReactNode;
 }) {
+  const quiet = React.useContext(QuietHintsContext);
   const generated = React.useId();
   const describedBy = `${generated}-desc`;
   const hasDescription = Boolean(error ?? hint);
+  const quietHint = quiet && Boolean(hint) && !error && Boolean(label);
 
   // Only a single element can receive the generated id; groups need an explicit htmlFor.
   let control = children;
@@ -189,15 +215,20 @@ export function Field({
   return (
     <div className={cn("min-w-0", className)}>
       {label && (
-        <Label htmlFor={controlId}>
-          {label}
-          {required && <span aria-hidden="true" className="ms-0.5 text-destructive">*</span>}
-          {optional && <span className="ms-1 font-normal text-muted-foreground">(optional)</span>}
-        </Label>
+        <div className={cn(quietHint && "mb-1.5 flex items-center gap-1 [&>label]:mb-0")}>
+          <Label htmlFor={controlId}>
+            {label}
+            {required && <span aria-hidden="true" className="ms-0.5 text-destructive">*</span>}
+            {optional && <span className="ms-1 font-normal text-muted-foreground">(optional)</span>}
+          </Label>
+          {quietHint && <Explain>{hint}</Explain>}
+        </div>
       )}
       {control}
       {error ? (
         <p id={describedBy} className="mt-1.5 text-xs text-destructive">{error}</p>
+      ) : quietHint ? (
+        <span id={describedBy} className="sr-only">{hint}</span>
       ) : (
         hint && <Hint id={describedBy}>{hint}</Hint>
       )}

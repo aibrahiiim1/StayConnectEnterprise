@@ -265,7 +265,7 @@ describe("issuing vouchers", () => {
     const pad = (n: number) => String(n).padStart(2, "0");
     const local = `${untilLocal.getFullYear()}-${pad(untilLocal.getMonth() + 1)}-${pad(untilLocal.getDate())}T10:00`;
     await user.type(until, local);
-    await user.type(within(dlg).getByLabelText(/Note/), "Conference desk");
+    await user.type(within(dlg).getByLabelText(/Batch name/), "Conference desk");
     await user.click(within(dlg).getByRole("button", { name: "Review" }));
 
     expect(within(dlg).getByRole("button", { name: "Issue 25 vouchers" })).toBeDisabled();
@@ -340,13 +340,23 @@ describe("issuing vouchers", () => {
 });
 
 describe("batches", () => {
+  it("opens on Available cards, and names each batch in the Batches table", async () => {
+    wire();
+    const { user } = renderView();
+    await screen.findByText("•••• AV11");
+    expect(screen.getByRole("radio", { name: /available/i })).toHaveAttribute("aria-checked", "true");
+    await user.click(screen.getByRole("tab", { name: "Batches" }));
+    const names = await screen.findAllByTestId("batch-name");
+    expect(names.length).toBeGreaterThan(0);
+  });
+
   it("states the true number of codes an export will recover, and sends the selection", async () => {
     wire();
     const { user } = renderView();
     await screen.findByText("•••• AV11");
     await user.click(screen.getByRole("tab", { name: "Batches" }));
     await user.click(await screen.findByText("120"));
-    const sheet = await screen.findByRole("dialog", { name: /Batch|·/ });
+    const sheet = await screen.findByRole("dialog");
     await user.click(within(sheet).getByRole("button", { name: /Export codes/ }));
 
     const confirm = await screen.findByRole("dialog", { name: /Export the codes/ });

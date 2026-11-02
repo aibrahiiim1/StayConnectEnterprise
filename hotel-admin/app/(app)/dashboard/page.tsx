@@ -11,7 +11,8 @@ import {
 } from "@/lib/api/dashboard";
 import { PageShell, PageHeader, StatCard, StatGrid } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
-import { Card, CardBody, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
+import { QuietDescription } from "@/components/ui/quiet";
 import { Badge, StatusDot } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ErrorBanner } from "@/components/ui/error-banner";
@@ -186,6 +187,8 @@ export default function DashboardPage() {
       <AttentionBar rows={attention} notes={notes} ready={!!snap && !!health} />
 
       <div className={cn("space-y-5 transition-opacity", stale && "opacity-60")} aria-busy={busy || undefined}>
+        <ApplianceCard snap={snap} licenseHeadline={health ? license.headline : undefined} />
+
         {!snap || !g || !t || !pms || !so ? (
           <StatGrid cols={hotel ? 4 : 3}>
             {Array.from({ length: hotel ? 4 : 3 }).map((_, i) => <Skeleton key={i} className="h-32" />)}
@@ -282,12 +285,12 @@ export default function DashboardPage() {
 
         <NetworksCard snap={snap} />
 
-        <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+        <div className="grid gap-4 lg:grid-cols-2">
           <Card className="min-w-0">
             <CardHeader>
-              <div className="min-w-0">
+              <div className="flex min-w-0 items-center gap-1">
                 <CardTitle>Services</CardTitle>
-                <CardDescription>As the health monitor last saw them.</CardDescription>
+                <QuietDescription>As the health monitor last saw them.</QuietDescription>
               </div>
               <BlockLink href="/health" label="Diagnostics" />
             </CardHeader>
@@ -305,7 +308,6 @@ export default function DashboardPage() {
             </CardBody>
           </Card>
           <DhcpDnsCard snap={snap} />
-          <ApplianceCard snap={snap} licenseHeadline={health ? license.headline : undefined} />
         </div>
       </div>
     </PageShell>
@@ -320,13 +322,11 @@ function ServiceRow({
   href?: string;
 }) {
   const body = (
-    <div className="flex items-start justify-between gap-4 rounded-md px-1 py-0.5">
-      <div className="min-w-0">
-        <div className="flex items-center gap-2">
-          <StatusDot tone={info.tone} />
-          <span className="text-sm font-medium">{title}</span>
-        </div>
-        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{info.summary}</p>
+    <div className="flex items-center justify-between gap-4 rounded-md px-1 py-0.5">
+      <div className="flex min-w-0 items-center gap-2">
+        <StatusDot tone={info.tone} />
+        <span className="text-sm font-medium">{title}</span>
+        <QuietDescription>{info.summary}</QuietDescription>
       </div>
       <Badge tone={info.tone === "default" ? "default" : info.tone} className="shrink-0">
         {info.headline}

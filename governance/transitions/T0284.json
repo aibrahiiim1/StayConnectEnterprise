@@ -1,0 +1,34 @@
+{
+  "transition_id": "T0284",
+  "seq": 284,
+  "timestamp": "2026-11-02T22:26:35+02:00",
+  "timestamp_derivation": "Read from the workstation clock (UTC+02:00) by the script that wrote this receipt, immediately before the commit that introduces it.",
+  "record_type": "ADMIN_CONSOLE_SIMPLIFICATION_DELIVERY",
+  "authorisation": "The Product Owner's request of 2026-11-02 (Admin Console enhancement of Overview, Internet packages, Service plans, Vouchers and Payment methods; merge and deploy), under the standing test-appliance deployment authority (D79).",
+  "delivery": "Admin Console only: Overview (alerts closed by default, appliance strip first, quieter PMS/network/services/addresses cards), Internet packages (Active by default, generated hidden code, hint-only form, Details/Versions tabs), Service plans (In use by default, generated hidden code, Speed share, no time-counting field, Details/Versions tabs), Vouchers (Available by default, batch names), Payment methods (Methods/Accounts/Settings/Change history tabs, one methods list). Shared input.tsx, quiet.tsx and patterns.tsx (QuietHints, InfoHint) kept byte-identical in cloud-admin. No backend, schema, PMS, payment or network change.",
+  "deployment": {
+    "test_appliance": "172.21.96.97: Admin Console only, by deploy-hotel-admin.sh install (verified bundle, scratch-port boot, atomic switch; previous release 20261102-164836 kept); release 20261102-202535 reads source_commit 0892d0430861c1929efc9f33e34344dd7f64e922 and BUILD_ID QI3hQD7j0UI5CGWBgLkcM, the console serves that BUILD_ID, 0 unit restarts, all appliance units active. Service binaries unchanged.",
+    "central": "Not changed (the cloud-admin shared UI files carry no behaviour change there and were not deployed)."
+  },
+  "verification": "Admin Console full suite 1068/1068 PASS (123 files), Central console full suite 261/261 PASS, eslint clean on every changed file, typecheck clean. Not verified: the new screens by eye in a browser (left to the Product Owner's review).",
+  "not_touched": "Service binaries, database schema, PMS configuration and traffic, financial execution, payment providers, networking, PKI, the production Central.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "3e3c6ad6f10b9740b9565df6b8f9a90bd39a727a",
+  "previous_delivery": "T0283",
+  "decision": "none (FAST Admin Console change under the PO's request; D90 unchanged)",
+  "go_live": "NOT authorised."
+}
