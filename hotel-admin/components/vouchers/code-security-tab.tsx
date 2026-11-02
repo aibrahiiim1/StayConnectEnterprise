@@ -298,7 +298,7 @@ export function CodeSecurityTab({ canEditFormat }: { canEditFormat: boolean }) {
         requireReason
         reasonLabel="Reason (recorded)"
         reasonPlaceholder="Scheduled rotation"
-        requirePassword
+        requirePassword strictPassword
         onConfirm={retire}
       >
         {retiring && (

@@ -123,7 +123,7 @@ func (s *server) setPMSInterfaceLifecycle(w http.ResponseWriter, r *http.Request
 			"a bounded reason code is required: this decides whether a live PMS connection exists")
 		return
 	}
-	if !s.reauth(r, in.Password) {
+	if !s.reauthStrict(r, in.Password) {
 		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
@@ -493,7 +493,7 @@ func (s *server) publishPMSInterfaceRevision(w http.ResponseWriter, r *http.Requ
 			"a bounded reason code is required: publishing changes what every subsequent guest is resolved against")
 		return
 	}
-	if !s.reauth(r, in.Password) {
+	if !s.reauthStrict(r, in.Password) {
 		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
@@ -640,7 +640,7 @@ func (s *server) rotatePMSInterfaceSecret(w http.ResponseWriter, r *http.Request
 		jsonErr(w, http.StatusBadRequest, "reason_required", "a bounded reason code is required to rotate a credential")
 		return
 	}
-	if !s.reauth(r, in.Password) {
+	if !s.reauthStrict(r, in.Password) {
 		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}

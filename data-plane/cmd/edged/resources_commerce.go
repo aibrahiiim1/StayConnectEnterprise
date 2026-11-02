@@ -101,7 +101,7 @@ func (s *server) publishServicePlan(w http.ResponseWriter, r *http.Request) {
 				if strings.TrimSpace(in.TimeAccountingMode) == "" && p.TimeAccountingMode != nil {
 					in.TimeAccountingMode = *p.TimeAccountingMode
 				}
-				if !s.reauth(r, in.Password) {
+				if !s.reauthStrict(r, in.Password) {
 					jsonErr(w, http.StatusUnauthorized, "reauth_required",
 						"Confirm your password: changing a service plan changes what its packages give")
 					return
@@ -227,7 +227,7 @@ func (s *server) setGraceConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Step-up: publishing changes what every departing guest receives.
-	if !s.reauth(r, in.Password) {
+	if !s.reauthStrict(r, in.Password) {
 		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
@@ -545,7 +545,7 @@ func (s *server) publishCommercialPackage(w http.ResponseWriter, r *http.Request
 				spec.MaxPurchasesPerStay = cur.MaxPurchasesPerStay
 			}
 			spec.PriorDurationPolicy = cur.DurationPolicy
-			if commercialTermsChanged(cur, spec) && !s.reauth(r, in.Password) {
+			if commercialTermsChanged(cur, spec) && !s.reauthStrict(r, in.Password) {
 				jsonErr(w, http.StatusUnauthorized, "reauth_required",
 					"Confirm your password: this change alters the package's price, how it is paid for or its service plan")
 				return
@@ -698,11 +698,11 @@ func (s *server) setCommercialPackageActive(w http.ResponseWriter, r *http.Reque
 			jsonErr(w, http.StatusBadRequest, "reason_required", "a reason is required to deactivate a package")
 			return
 		}
-		if !s.reauth(r, in.Password) {
+		if !s.reauthStrict(r, in.Password) {
 			s.reauthRefused(w, r, "password confirmation required")
 			return
 		}
-	} else if !s.reauth(r, in.Password) {
+	} else if !s.reauthStrict(r, in.Password) {
 		// Reactivation re-offers the package at its price and plan, so it needs step-up too.
 		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
 		return

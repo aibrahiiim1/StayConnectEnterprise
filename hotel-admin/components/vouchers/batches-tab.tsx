@@ -377,7 +377,7 @@ function BatchDetail({
         requireReason
         reasonLabel="Reason (recorded)"
         reasonPlaceholder="Reprinting the conference batch"
-        requirePassword
+        requirePassword strictPassword
         onConfirm={doExport}
       >
         {batch.unused > 0 && batch.unused < batch.count && (

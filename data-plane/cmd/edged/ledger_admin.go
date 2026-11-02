@@ -66,7 +66,7 @@ func (s *server) readLedgerBody(w http.ResponseWriter, r *http.Request, needPass
 	}
 	pw, _ := in["password"].(string)
 	delete(in, "password")
-	if needPassword && !s.reauth(r, pw) {
+	if needPassword && !s.reauthStrict(r, pw) {
 		s.reauthRefused(w, r, "password confirmation required")
 		return nil, false
 	}

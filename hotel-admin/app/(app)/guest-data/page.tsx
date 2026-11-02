@@ -310,7 +310,7 @@ export default function GuestDataPage() {
         requireReason reasonStrict
         reasonMinLength={4}
         reasonPlaceholder="e.g. written request received at reception"
-        requirePassword
+        requirePassword strictPassword
         onConfirm={doExport}
       />
 
@@ -327,7 +327,7 @@ export default function GuestDataPage() {
         requireReason reasonStrict
         reasonMinLength={4}
         reasonPlaceholder="e.g. written erasure request received at reception"
-        requirePassword
+        requirePassword strictPassword
         onConfirm={doErase}
       />
     </PageShell>

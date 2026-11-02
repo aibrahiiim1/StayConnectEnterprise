@@ -302,7 +302,7 @@ export function ScheduledBackupsCard({ writable }: { writable: boolean }) {
           : "Scheduled backups will stop. Manual backups, and the backups taken before a restore, a migration or a deployment, are unaffected. Changing these is recorded against your account."}
         confirmLabel="Save"
         error={saveErr}
-        requirePassword
+        requirePassword strictPassword
         onConfirm={save}
       />
       <ConfirmDialog
@@ -312,7 +312,7 @@ export function ScheduledBackupsCard({ writable }: { writable: boolean }) {
         description="It is encrypted and checked like a scheduled one, and counts among the backups kept. It takes a few minutes; clients are not affected."
         confirmLabel="Take a backup"
         error={runErr}
-        requirePassword
+        requirePassword strictPassword
         onConfirm={run}
       />
       <ConfirmDialog
@@ -324,7 +324,7 @@ export function ScheduledBackupsCard({ writable }: { writable: boolean }) {
         confirmVariant="danger"
         confirmText={EARLIER_CONFIRMATION}
         error={earlierErr}
-        requirePassword
+        requirePassword strictPassword
         onConfirm={removeEarlier}
       />
     </SectionCard>

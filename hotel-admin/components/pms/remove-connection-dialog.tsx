@@ -111,7 +111,7 @@ export function RemoveConnectionDialog({
       consequences={assessment.consequences}
       confirmLabel={deleting ? "Delete connection" : "Retire connection"}
       confirmVariant="danger"
-      requirePassword
+      requirePassword strictPassword
       confirmText={label}
       confirmTextLabel="Type the connection's name to confirm"
       requireReason

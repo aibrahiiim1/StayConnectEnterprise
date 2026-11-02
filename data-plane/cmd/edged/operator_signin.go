@@ -346,8 +346,8 @@ func (s *server) setSessionCookie(w http.ResponseWriter, tok string) {
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookie, Value: tok, Path: "/", HttpOnly: true,
 		SameSite: http.SameSiteLaxMode, Secure: s.secure,
-		// The browser's bound only; requireAuth enforces the session limits.
-		Expires: time.Now().Add(sessionStoreCap),
+		// The browser's bound only; requireAuth enforces the session limits, including Never.
+		Expires: time.Now().Add(sessionCookieLifetime),
 	})
 }
 

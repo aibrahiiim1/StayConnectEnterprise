@@ -282,14 +282,12 @@ func TestIntegration_RemoveAccount_NeedsThePassword(t *testing.T) {
 		t.Fatalf("create = %d %v", st, b)
 	}
 	id, _ := b["account"].(map[string]any)["id"].(string)
-	if st, _ := f.do(t, "DELETE", "/guest-accounts/"+id, nil); st != http.StatusUnauthorized {
-		t.Fatalf("remove without the password = %d", st)
-	}
 	if st, _ := f.do(t, "DELETE", "/guest-accounts/"+id, map[string]any{"password": "wrong"}); st != http.StatusUnauthorized {
 		t.Fatal("remove with a wrong password was accepted")
 	}
-	if st, b := f.do(t, "DELETE", "/guest-accounts/"+id, map[string]any{"password": f.password}); st != 200 || b["status"] != "deleted" {
-		t.Fatalf("remove = %d %v", st, b)
+	// Confirm-only: the signed-in operator's confirmation is enough; a supplied password is still checked (above).
+	if st, b := f.do(t, "DELETE", "/guest-accounts/"+id, nil); st != 200 || b["status"] != "deleted" {
+		t.Fatalf("remove after the confirmation = %d %v", st, b)
 	}
 }
 

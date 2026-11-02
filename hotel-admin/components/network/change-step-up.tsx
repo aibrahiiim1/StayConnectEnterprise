@@ -1,6 +1,7 @@
 "use client";
 
-// Applying, keeping, and rolling back client-network changes require operator password step-up.
+// Applying, keeping, and rolling back client-network changes are confirmed in one popup. Where the console does not
+// run confirm-only, the password field is shown and the server verifies it.
 
 import * as React from "react";
 import { ConfirmDialog } from "@/components/ui/dialog";
@@ -14,8 +15,11 @@ export function isReauth(e: unknown): boolean {
   return !!x && x.status === 401 && (x.code === "reauth_required" || x.body?.error === "reauth_required");
 }
 
-function stepUpMessage(e: unknown): string {
-  return isReauth(e) ? "That password is not correct. Nothing was changed." : errMsg(e);
+function stepUpMessage(e: unknown, password: string): string {
+  if (!isReauth(e)) return errMsg(e);
+  return password
+    ? "That password is not correct. Nothing was changed."
+    : "The appliance refused the confirmation; sign in again and retry. Nothing was changed.";
 }
 
 const COPY: Record<NetworkChangeKind, { title: string; description: string; label: string; consequences: string[] }> = {
@@ -68,10 +72,9 @@ export function useNetworkChangeStepUp() {
       passwordLabel="Confirm your password"
       onConfirm={async ({ password }) => {
         if (!req) return;
-        if (!password) { setError("Confirm your password to change the network configuration."); return; }
         setBusy(true); setError(null);
         try { await req.run(password); setReq(null); }
-        catch (e) { setError(stepUpMessage(e)); }
+        catch (e) { setError(stepUpMessage(e, password)); }
         finally { setBusy(false); }
       }}
     />

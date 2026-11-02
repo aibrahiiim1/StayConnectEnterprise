@@ -262,7 +262,7 @@ func (s *server) removePMSInterface(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "reason_required", "a bounded reason code is required to remove a connection")
 		return
 	}
-	if !s.reauth(r, in.Password) {
+	if !s.reauthStrict(r, in.Password) {
 		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}

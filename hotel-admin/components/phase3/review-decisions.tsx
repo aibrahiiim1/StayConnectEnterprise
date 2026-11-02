@@ -87,7 +87,7 @@ export function ReviewDecisionActions({ eventId, onDecided }: { eventId: string;
         requireReason
         reasonMinLength={3}
         reasonPlaceholder="For example: a test message the PMS vendor sent"
-        requirePassword
+        requirePassword strictPassword
         onConfirm={({ reason, password }) => decide("acknowledge", reason, password)}
       />
       <ConfirmDialog
@@ -100,7 +100,7 @@ export function ReviewDecisionActions({ eventId, onDecided }: { eventId: string;
         error={err}
         requireReason
         reasonMinLength={3}
-        requirePassword
+        requirePassword strictPassword
         onConfirm={({ reason, password }) => (stay ? decide("link", reason, password) : undefined)}
       >
         {candidates === null ? (

@@ -40,11 +40,24 @@ func (s *server) paymentProvidersRoutes() http.Handler {
 
 // stepUp is the password step-up shared by every protected change: the operator's password again, and an actor
 // the change can be attributed to (audit P9 CC2: payment and portal changes each had an identical copy).
+// stepUpStrict is stepUp with the password always verified: secrets, money, personal data, keys and trust.
+func (s *server) stepUpStrict(w http.ResponseWriter, r *http.Request, password string) (string, bool) {
+	if !s.reauthStrict(r, password) {
+		s.reauthRefused(w, r, "Confirm your password. This action needs it.")
+		return "", false
+	}
+	return s.stepUpAttributed(w, r)
+}
+
 func (s *server) stepUp(w http.ResponseWriter, r *http.Request, password string) (string, bool) {
 	if !s.reauth(r, password) {
 		s.reauthRefused(w, r, "password confirmation required")
 		return "", false
 	}
+	return s.stepUpAttributed(w, r)
+}
+
+func (s *server) stepUpAttributed(w http.ResponseWriter, r *http.Request) (string, bool) {
 	actor := protectionActor(sessFrom(r.Context()))
 	if actor == "" {
 		jsonErr(w, http.StatusForbidden, "forbidden", "the change could not be attributed to an operator")
@@ -75,7 +88,7 @@ func (s *server) savePaymentAccount(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "too many credential fields or reason too long")
 		return
 	}
-	actor, ok := s.stepUp(w, r, in.Password)
+	actor, ok := s.stepUpStrict(w, r, in.Password)
 	if !ok {
 		return
 	}
@@ -130,7 +143,7 @@ func (s *server) savePaymentDomains(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
 		return
 	}
-	actor, ok := s.stepUp(w, r, in.Password)
+	actor, ok := s.stepUpStrict(w, r, in.Password)
 	if !ok {
 		return
 	}
@@ -201,7 +214,7 @@ func (s *server) putCardSettings(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "out_of_range", "Reconciliation grace must be between 15 and 1440 minutes.")
 		return
 	}
-	actor, ok := s.stepUp(w, r, in.Password)
+	actor, ok := s.stepUpStrict(w, r, in.Password)
 	if !ok {
 		return
 	}
@@ -436,7 +449,7 @@ func (s *server) recordAnswerConfirmation(w http.ResponseWriter, r *http.Request
 		jsonErr(w, http.StatusBadRequest, "bad_request", "interface, status, action, evidence and reason are required")
 		return
 	}
-	if !s.reauth(r, in.Password) {
+	if !s.reauthStrict(r, in.Password) {
 		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
@@ -472,7 +485,7 @@ func (s *server) stayAdminBlock(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "stay, action and reason are required")
 		return
 	}
-	if !s.reauth(r, in.Password) {
+	if !s.reauthStrict(r, in.Password) {
 		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
@@ -507,7 +520,7 @@ func (s *server) setFinancialMirrorMaxAge(w http.ResponseWriter, r *http.Request
 		jsonErr(w, http.StatusBadRequest, "bad_request", "interface, maximum age and reason are required")
 		return
 	}
-	if !s.reauth(r, in.Password) {
+	if !s.reauthStrict(r, in.Password) {
 		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
@@ -547,7 +560,7 @@ func (s *server) approveFinancialOnboarding(w http.ResponseWriter, r *http.Reque
 		jsonErr(w, http.StatusBadRequest, "bad_request", "interface and expected revision are required")
 		return
 	}
-	if !s.reauth(r, in.Password) {
+	if !s.reauthStrict(r, in.Password) {
 		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
@@ -593,7 +606,7 @@ func (s *server) setPaymentAccountConversion(w http.ResponseWriter, r *http.Requ
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
 		return
 	}
-	actor, ok := s.stepUp(w, r, in.Password)
+	actor, ok := s.stepUpStrict(w, r, in.Password)
 	if !ok {
 		return
 	}

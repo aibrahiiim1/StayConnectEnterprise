@@ -538,14 +538,14 @@ function CasePanel({ id, onClose, onChanged }: { id: string; onClose: () => void
         open={acting === "export"} onOpenChange={(v) => { if (!v) { setActing(null); setActionErr(null); } }}
         title="Hand over the selected records?" description={ASSISTED_EXPORT_NOTE}
         confirmLabel="Download records" busy={busy} error={actionErr}
-        confirmText={c.ref} requireReason reasonStrict reasonMinLength={4} reasonPlaceholder="e.g. written request received at reception" requirePassword
+        confirmText={c.ref} requireReason reasonStrict reasonMinLength={4} reasonPlaceholder="e.g. written request received at reception" requirePassword strictPassword
         onConfirm={(a) => confirmAct("export", a)}
       />
       <ConfirmDialog
         open={acting === "erase"} onOpenChange={(v) => { if (!v) { setActing(null); setActionErr(null); } }}
         title="Anonymise the selected records?" confirmLabel="Anonymise records" confirmVariant="danger" busy={busy} error={actionErr}
         confirmText={c.ref} consequences={ASSISTED_ERASE_CONSEQUENCES}
-        requireReason reasonStrict reasonMinLength={4} reasonPlaceholder="e.g. written erasure request received at reception" requirePassword
+        requireReason reasonStrict reasonMinLength={4} reasonPlaceholder="e.g. written erasure request received at reception" requirePassword strictPassword
         onConfirm={(a) => confirmAct("erase", a)}
       />
       <ConfirmDialog

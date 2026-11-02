@@ -544,7 +544,7 @@ export default function NotificationsPage() {
         confirmVariant="danger"
         busy={busy}
         error={formErr}
-        requirePassword
+        requirePassword strictPassword
         onConfirm={onDelete}
       />
     </PageShell>

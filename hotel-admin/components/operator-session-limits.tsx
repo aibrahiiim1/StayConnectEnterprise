@@ -10,7 +10,11 @@ export function OperatorSessionLimits({ writable }: { writable: boolean }) {
     <OperatorPolicyPanel<SessionPolicy>
       endpoint="/operators/session-policy"
       title="Session limits"
-      summary={(s) => `Signed out after ${s.idle_timeout_minutes} min idle, ${s.max_session_hours} h at most`}
+      summary={(s) => {
+        const idle = s.idle_timeout_minutes === 0 ? "never signed out for inactivity" : `signed out after ${s.idle_timeout_minutes} min idle`;
+        const most = s.max_session_hours === 0 ? "no longest-session limit" : `${s.max_session_hours} h at most`;
+        return `${idle[0].toUpperCase()}${idle.slice(1)}, ${most}`;
+      }}
       description={
         <>
           A session ends after the idle limit, and any session ends at the maximum, however active. A tab that is only

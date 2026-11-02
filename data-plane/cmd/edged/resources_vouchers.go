@@ -536,7 +536,7 @@ func (s *server) voucherCodeStepUp(w http.ResponseWriter, r *http.Request) (vouc
 				"afterwards from an unauthorized one")
 		return in, "", "", false
 	}
-	actor, ok := s.stepUpActor(w, r, in.Password)
+	actor, ok := s.stepUpActorStrict(w, r, in.Password)
 	if !ok {
 		return in, "", "", false
 	}
@@ -624,7 +624,7 @@ func (s *server) rotateVoucherKeyGeneration(w http.ResponseWriter, r *http.Reque
 			"a bounded reason (4-500 characters) is required")
 		return
 	}
-	actor, ok := s.stepUpActor(w, r, in.Password)
+	actor, ok := s.stepUpActorStrict(w, r, in.Password)
 	if !ok {
 		return
 	}

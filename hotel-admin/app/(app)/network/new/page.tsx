@@ -25,7 +25,7 @@ import { HelpList, HelpSection } from "@/components/help";
 import { HealthCheckList, SwitchRow, ValidationIssueList, useNetworkAccess } from "@/components/network/shared";
 import { isReauth, useNetworkChangeStepUp } from "@/components/network/change-step-up";
 import { SUBNET_SIZE_HINT, subnetSizeProblem } from "@/lib/network-subnet";
-import { addressingFor, suggestSubnet } from "@/lib/network-trunk";
+import { addressingFor, overlapping, suggestSubnet } from "@/lib/network-trunk";
 import {
   VlanAddressingTable, VlanIdList, newVlanRow, vlanPlanProblems, withSuggestedAddressing, type VlanRow,
 } from "@/components/network/vlan-plan";
@@ -108,7 +108,7 @@ export default function NewGuestNetworkPage() {
   // A native network starts from the same /19 suggestion as a VLAN does; the operator may change every value.
   useEffect(() => {
     if (step !== 2 || vlanTagged || subnetCidr.trim()) return;
-    const s = suggestSubnet(20, new Set(existing.filter((n) => n.enabled).map((n) => n.subnet_cidr)));
+    const s = suggestSubnet(20, existing.map((n) => n.subnet_cidr));
     const a = addressingFor(s);
     if (!s || !a.gateway) return;
     setSubnetCidr(s);
@@ -126,7 +126,7 @@ export default function NewGuestNetworkPage() {
 
   /** Preserve operator-chosen addressing rather than replacing it with an automatic range. */
   function setVlanRows(rows: VlanRow[]) {
-    const taken = new Set(usedSubnets);
+    const taken = new Set(existing.map((n) => n.subnet_cidr));
     setVlans(rows.map((r) => {
       const next = withSuggestedAddressing(r, taken);
       if (next.subnet) taken.add(next.subnet);
@@ -159,7 +159,10 @@ export default function NewGuestNetworkPage() {
         if (!subnetCidr.trim()) return "Subnet CIDR is required (e.g. 10.20.0.0/19).";
         if (subnetSizeProblem(subnetCidr)) return subnetSizeProblem(subnetCidr);
         if (!gatewayIp.trim()) return "Gateway IP is required.";
-        if (usedSubnets.has(subnetCidr.trim())) return "That subnet is already used by another client network.";
+        {
+          const clash = overlapping(subnetCidr, usedSubnets);
+          if (clash) return `That subnet overlaps ${clash}, which another client network uses.`;
+        }
         return null;
       case 3:
         if (separate) return null; // each VLAN carries its own, checked on the addressing step

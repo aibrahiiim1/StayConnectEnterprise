@@ -57,7 +57,7 @@ func (s *server) operatorsRoutes() http.Handler {
 // Step-up for changing a staff account: the administrator's own password goes in your_password, because
 // "password" in these bodies is the colleague's new one.
 func (s *server) confirmYourPassword(w http.ResponseWriter, r *http.Request, yours string) bool {
-	if !s.reauth(r, yours) {
+	if !s.reauthStrict(r, yours) {
 		s.reauthRefused(w, r, "your password is required to change a staff account")
 		return false
 	}

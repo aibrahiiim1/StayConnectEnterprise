@@ -86,7 +86,7 @@ func (s *server) backupSettingsSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Step-up: retention decides how far back the appliance can recover.
-	if !s.reauth(r, in.Password) {
+	if !s.reauthStrict(r, in.Password) {
 		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
@@ -419,7 +419,7 @@ func (s *server) runDatabaseBackup(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "malformed request body")
 		return
 	}
-	if !s.reauth(r, in.Password) {
+	if !s.reauthStrict(r, in.Password) {
 		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}

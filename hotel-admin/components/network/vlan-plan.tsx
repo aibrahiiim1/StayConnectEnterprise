@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Trash2, Plus, ChevronDown, ChevronRight } from "lucide-react";
-import { addressingFor, suggestSubnet } from "@/lib/network-trunk";
+import { addressingFor, overlapping, suggestSubnet } from "@/lib/network-trunk";
 import { subnetSizeProblem } from "@/lib/network-subnet";
 
 export type VlanRow = {
@@ -54,7 +54,7 @@ export function vlanPlanProblems(
 ): Record<number, string> {
   const out: Record<number, string> = {};
   const seenVLAN = new Map<number, number>();
-  const seenSubnet = new Map<string, number>();
+  const seenSubnets: string[] = [];
   for (const r of rows) {
     const v = Number(r.vlan);
     if (!Number.isInteger(v) || v < 1 || v > 4094) out[r.key] = "A VLAN id is 1 to 4094.";
@@ -63,11 +63,11 @@ export function vlanPlanProblems(
     else if (!r.name.trim()) out[r.key] = "Name it.";
     else if (!r.subnet || !r.gateway || !r.poolStart || !r.poolEnd) out[r.key] = "Subnet, gateway and pool are needed.";
     else if (subnetSizeProblem(r.subnet)) out[r.key] = subnetSizeProblem(r.subnet)!;
-    else if (usedSubnets.has(r.subnet)) out[r.key] = "That subnet is already used by another client network.";
-    else if (seenSubnet.has(r.subnet)) out[r.key] = "Each VLAN needs its own subnet.";
+    else if (overlapping(r.subnet, usedSubnets)) out[r.key] = `That subnet overlaps ${overlapping(r.subnet, usedSubnets)}, which another client network uses.`;
+    else if (overlapping(r.subnet, seenSubnets)) out[r.key] = "Each VLAN needs its own subnet; this one overlaps another row.";
     else if (r.dnsMode === "custom" && !r.dnsServers.trim()) out[r.key] = "Give at least one DNS server.";
     seenVLAN.set(v, r.key);
-    seenSubnet.set(r.subnet, r.key);
+    if (r.subnet) seenSubnets.push(r.subnet);
   }
   return out;
 }

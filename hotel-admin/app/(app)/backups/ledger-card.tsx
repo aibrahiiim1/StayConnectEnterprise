@@ -303,7 +303,7 @@ export function LedgerCard({ writable }: { writable: boolean }) {
         confirmLabel="Save and copy the ledger"
         busy={saving}
         error={saveErr}
-        requirePassword
+        requirePassword strictPassword
         onConfirm={save}
       />
       <ConfirmDialog
@@ -314,7 +314,7 @@ export function LedgerCard({ writable }: { writable: boolean }) {
         confirmLabel="Remove the setting"
         confirmVariant="danger"
         error={removeErr}
-        requirePassword
+        requirePassword strictPassword
         confirmText={REMOVE_CONFIRMATION}
         onConfirm={remove}
       />
@@ -325,7 +325,7 @@ export function LedgerCard({ writable }: { writable: boolean }) {
         description="The secondary storage holds erasures this appliance does not have. They are read with a backup key holder’s key, checked, and applied here."
         confirmLabel="Recover"
         error={recoverErr}
-        requirePassword
+        requirePassword strictPassword
         onConfirm={recover}
       >
         <BackupKeyInput value={identity} onChange={setIdentity} />
