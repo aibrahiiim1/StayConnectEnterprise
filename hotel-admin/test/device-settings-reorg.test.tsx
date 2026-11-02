@@ -100,6 +100,12 @@ describe("the sign-in and capacity groups", () => {
     const confirm = await screen.findByRole("dialog", { name: /save device retention/i });
     expect(within(confirm).getByLabelText(/reason/i)).toBeInTheDocument();
     expect(within(confirm).getByLabelText(/password/i)).toBeInTheDocument();
+    // The appliance's 4-character minimum holds in the dialog, as it did in the form before the move.
+    fireEvent.change(within(confirm).getByLabelText(/reason/i), { target: { value: "abc" } });
+    fireEvent.change(within(confirm).getByLabelText(/password/i), { target: { value: "pw" } });
+    expect(within(confirm).getByRole("button", { name: "Save" })).toBeDisabled();
+    fireEvent.change(within(confirm).getByLabelText(/reason/i), { target: { value: "abcd" } });
+    expect(within(confirm).getByRole("button", { name: "Save" })).toBeEnabled();
     expect(put).not.toHaveBeenCalled();
   });
 });

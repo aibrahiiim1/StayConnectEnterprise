@@ -17,6 +17,7 @@ import { ConfirmDialog } from "@/components/ui/dialog";
 import { InfoHint } from "@/components/ui/quiet";
 import { useToast } from "@/components/ui/toast";
 import { useEditFocus } from "@/lib/use-edit-focus";
+import { REASON_MAX_CHARS, REASON_MIN_CHARS } from "@/lib/reason";
 
 type Bound = { min: number; max: number; default: number | null; unit: string; help: string };
 type Payload = { settings: Record<string, number | null>; bounds: Record<string, Bound> };
@@ -189,6 +190,8 @@ export function SigninSettingsGroup({
           error={saveErr}
           // Unchanged from before the move: these are rate limits and lockouts, so a reason and the password are asked.
           requireReason reasonStrict
+          // The appliance's bound (validReason, 4-500 characters), as the inline form before the move enforced it.
+          reasonMinLength={REASON_MIN_CHARS} reasonMaxLength={REASON_MAX_CHARS}
           requirePassword strictPassword
           onConfirm={save}
         />
