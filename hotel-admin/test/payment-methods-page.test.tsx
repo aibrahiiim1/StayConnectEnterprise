@@ -89,6 +89,13 @@ function routes(roles: string[], modules: Record<string, unknown>) {
   });
 }
 
+// Accounts, Settings and Change history are tabs; the page opens on the methods list.
+async function openTab(name: RegExp) {
+  const tab = await screen.findByRole("tab", { name });
+  fireEvent.mouseDown(tab);
+  fireEvent.click(tab);
+}
+
 beforeEach(() => { vi.clearAllMocks(); });
 
 describe("Payment methods — the four methods", () => {
@@ -139,10 +146,22 @@ describe("Payment methods — the four methods", () => {
 });
 
 describe("Payment methods — Card payment configuration", () => {
+  it("opens on the methods, with Accounts, Settings and Change history on their own tabs", async () => {
+    routes(["site_admin"], { card_payment: mod("card_payment"), room_charge: mod("room_charge") });
+    render(<PaymentMethodsPage />);
+    expect(await screen.findByTestId("method-Free")).toBeInTheDocument();
+    for (const t of [/^methods$/i, /^accounts$/i, /^settings$/i, /^change history$/i]) {
+      expect(await screen.findByRole("tab", { name: t })).toBeInTheDocument();
+    }
+    expect(screen.queryByText("Longer checkout")).toBeNull();
+    expect(screen.queryByText("Main Stripe")).toBeNull();
+  });
+
   it("never renders a stored credential, opens every credential input empty, and sends only what was typed", async () => {
     routes(["site_admin"], { card_payment: mod("card_payment"), room_charge: mod("room_charge") });
     post.mockResolvedValue({ ...ACCOUNT });
     render(<PaymentMethodsPage />);
+    await openTab(/accounts/i);
     fireEvent.click(await screen.findByRole("button", { name: "Edit: Main Stripe" }));
 
     const secret = await screen.findByLabelText(/^Secret key/);
@@ -174,6 +193,7 @@ describe("Payment methods — Card payment configuration", () => {
   it("disables LIVE where the provider does not allow it, and allows it where it does", async () => {
     routes(["site_admin"], { card_payment: mod("card_payment"), room_charge: mod("room_charge") });
     render(<PaymentMethodsPage />);
+    await openTab(/accounts/i);
     fireEvent.click(await screen.findByRole("button", { name: /add account/i }));
     const mode = await screen.findByLabelText(/^Mode/);
     const live = within(mode).getByRole("option", { name: /LIVE/ }) as HTMLOptionElement;
@@ -190,6 +210,7 @@ describe("Payment methods — Card payment configuration", () => {
     routes(["site_admin"], { card_payment: mod("card_payment"), room_charge: mod("room_charge") });
     post.mockResolvedValue({});
     render(<PaymentMethodsPage />);
+    await openTab(/accounts/i);
     fireEvent.click(await screen.findByRole("button", { name: /add account/i }));
     fireEvent.change(await screen.findByLabelText(/^Provider/), { target: { value: "paymob" } });
     fireEvent.change(screen.getByLabelText(/^Region/), { target: { value: "egypt" } });
@@ -212,6 +233,7 @@ describe("Payment methods — Card payment configuration", () => {
     const { ApiError } = await import("@/lib/api");
     post.mockRejectedValue(new ApiError(409, { error: "live_not_authorised", message: "LIVE is not authorised here." }));
     render(<PaymentMethodsPage />);
+    await openTab(/accounts/i);
     fireEvent.click(await screen.findByRole("button", { name: "Edit: Main Stripe" }));
     fireEvent.change(await screen.findByLabelText(/^Reason/), { target: { value: "Try it" } });
     fireEvent.change(screen.getByLabelText(/^Confirm your password/), { target: { value: "pw" } });
@@ -223,6 +245,7 @@ describe("Payment methods — Card payment configuration", () => {
     routes(["site_admin"], { card_payment: mod("card_payment"), room_charge: mod("room_charge") });
     post.mockResolvedValue({ ok: false, error: "auth_failed", message: "Invalid API key" });
     render(<PaymentMethodsPage />);
+    await openTab(/accounts/i);
     await screen.findByText("Main Stripe");
     await chooseRowAction("Main Stripe", /test connection/i);
     expect(await screen.findByText(/connection failed: invalid api key/i)).toBeInTheDocument();
@@ -234,6 +257,7 @@ describe("Payment methods — Card payment configuration", () => {
     post.mockResolvedValue({ ok: false, error: "provider_calls_not_authorised",
       message: "This appliance is not authorised to contact a payment provider, so the connection cannot be tested." });
     render(<PaymentMethodsPage />);
+    await openTab(/accounts/i);
     await screen.findByText("Main Stripe");
     await chooseRowAction("Main Stripe", /test connection/i);
     expect(await screen.findByText(/not tested: this appliance is not authorised/i)).toBeInTheDocument();
@@ -244,6 +268,7 @@ describe("Payment methods — Card payment configuration", () => {
     routes(["site_admin"], { card_payment: mod("card_payment"), room_charge: mod("room_charge") });
     put.mockResolvedValue({ ...SETTINGS, settings: { ...SETTINGS.settings, checkout_expiry_minutes: 45, is_default: false } });
     render(<PaymentMethodsPage />);
+    await openTab(/settings/i);
     fireEvent.change(await screen.findByLabelText("Checkout expiry"), { target: { value: "45" } });
     fireEvent.click(screen.getByRole("button", { name: "Save timings" }));
     fireEvent.change(await screen.findByLabelText(/^Reason/), { target: { value: "Slow guests" } });
@@ -259,13 +284,16 @@ describe("Payment methods — Card payment configuration", () => {
     routes(["payments_reader"], { card_payment: mod("card_payment"), room_charge: mod("room_charge") });
     render(<PaymentMethodsPage />);
     expect(await screen.findByText(/can see how payments are configured but not change it/i)).toBeInTheDocument();
+    await openTab(/accounts/i);
     expect(await screen.findByText("Main Stripe")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /add account/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^edit/i })).not.toBeInTheDocument();
+    await openTab(/settings/i);
+    expect(await screen.findByText("pay.example.com")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save domains" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save timings" })).not.toBeInTheDocument();
-    expect(screen.getByText("pay.example.com")).toBeInTheDocument();
-    expect(screen.getByText("Longer checkout")).toBeInTheDocument();
+    await openTab(/change history/i);
+    expect(await screen.findByText("Longer checkout")).toBeInTheDocument();
   });
 
   it("tells a role without read access so, and asks for nothing", async () => {
@@ -297,6 +325,7 @@ describe("Payment methods — the default account decides", () => {
   it("offers provider conversion only on the default account, and says why on the others", async () => {
     withAccounts([{ ...ACCOUNT, conversion_supported: true, provider_converts: false }, SECOND]);
     render(<PaymentMethodsPage />);
+    await openTab(/accounts/i);
     const note = await screen.findByTestId("convert-default-only-acc-2");
     expect(note.textContent).toBe("Applies only to the default account, which every card checkout uses.");
     const buttons = screen.getAllByRole("button", { name: "Let the provider convert" });
@@ -314,6 +343,7 @@ describe("Payment methods — the default account decides", () => {
         "/commercial-packages/pk-usd/current": { settlement_methods: ["ONLINE_PAYMENT"], currency: "USD" },
       });
     render(<PaymentMethodsPage />);
+    await openTab(/accounts/i);
     const notice = await screen.findByTestId("card-currency-mismatch");
     expect(notice.textContent).toContain("Euro day (EUR)");
     expect(notice.textContent).not.toContain("Dollar day");
@@ -325,6 +355,7 @@ describe("Payment methods — the default account decides", () => {
       [{ package_id: "pk-eur", code: "EURDAY", name: "Euro day", active: true, current_revision_id: "r1", price_minor: 900, currency: "EUR" }],
       { "/commercial-packages/pk-eur/current": { settlement_methods: ["ONLINE_PAYMENT"], currency: "EUR" } });
     render(<PaymentMethodsPage />);
+    await openTab(/accounts/i);
     await screen.findByText("Main Stripe");
     await waitFor(() => expect(g).toHaveBeenCalledWith("/commercial-packages/pk-eur/current"));
     expect(screen.queryByTestId("card-currency-mismatch")).toBeNull();

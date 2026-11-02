@@ -6,6 +6,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "./button";
+import { useQuietHints } from "./input";
+import { Explain } from "./tooltip";
 import {
   Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "./dialog";
@@ -417,11 +419,16 @@ export function SettingField({
   const fid = id ?? gen;
   const n = Number(value);
   const out = value !== "" && (!Number.isFinite(n) || n < min || n > max);
+  // Inside QuietHints the explanation is a hint beside the label; the default and range stay on the line below.
+  const quiet = useQuietHints() && !!explanation;
   return (
     <div className="min-w-0 space-y-1.5">
-      <label htmlFor={fid} className="block text-label">
-        {label}
-      </label>
+      <div className="flex items-center gap-1">
+        <label htmlFor={fid} className="block text-label">
+          {label}
+        </label>
+        {quiet && <Explain>{explanation}</Explain>}
+      </div>
       <div className="flex items-stretch">
         <input
           id={fid}
@@ -449,7 +456,7 @@ export function SettingField({
             ? `Must be between ${min} and ${max} ${unit}.`
             : (
                 <>
-                  {explanation} {explanation ? " " : ""}
+                  {quiet ? <span className="sr-only">{explanation} </span> : <>{explanation} {explanation ? " " : ""}</>}
                   Default {defaultValue} {unit}; allowed {min}–{max}.
                 </>
               ))}

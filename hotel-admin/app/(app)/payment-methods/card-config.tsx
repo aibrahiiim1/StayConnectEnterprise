@@ -10,7 +10,7 @@ import {
   saveErrorMessage,
 } from "@/lib/payment-admin";
 import { formatDate } from "@/lib/utils";
-import { Card, CardBody, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardBody, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { DescriptionList } from "@/components/ui/data";
 import { DetailsDrawer, DetailsSection } from "@/components/ui/details-drawer";
@@ -20,7 +20,9 @@ import { RowActions } from "@/components/ui/row-actions";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { ErrorBanner, Callout } from "@/components/ui/error-banner";
-import { Field, Input } from "@/components/ui/input";
+import { Field, Input, QuietHints } from "@/components/ui/input";
+import { QuietDescription, InfoHint } from "@/components/ui/quiet";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SkeletonRows } from "@/components/ui/misc";
 import { SettingField } from "@/components/ui/patterns";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
@@ -119,7 +121,14 @@ function summariseDetail(detail: unknown): string {
   return String(detail);
 }
 
-export function CardPaymentConfig({ writable }: { writable: boolean }) {
+type ConfigTab = "methods" | "accounts" | "settings" | "history";
+
+/**
+ * The page's tabs: the methods list, then the card payment Accounts, Settings (payment domains and timings) and
+ * Change history, each on its own tab so the page is never a wall of cards. Data is read once and refreshed after a save.
+ */
+export function CardPaymentConfig({ writable, methods }: { writable: boolean; methods?: React.ReactNode }) {
+  const [tab, setTab] = useState<ConfigTab>(methods ? "methods" : "accounts");
   const toast = useToast();
   const [providers, setProviders] = useState<ProvidersResp | null>(null);
   const [accounts, setAccounts] = useState<AccountsResp | null>(null);
@@ -151,8 +160,17 @@ export function CardPaymentConfig({ writable }: { writable: boolean }) {
   }, []);
 
   return (
-    <div className="space-y-5">
-      <ErrorBanner err={err} className="mb-0" />
+    <QuietHints>
+    <Tabs value={tab} onValueChange={(v) => setTab(v as ConfigTab)}>
+      <TabsList>
+        {methods && <TabsTrigger value="methods">Methods</TabsTrigger>}
+        <TabsTrigger value="accounts">Accounts</TabsTrigger>
+        <TabsTrigger value="settings">Settings</TabsTrigger>
+        <TabsTrigger value="history">Change history</TabsTrigger>
+      </TabsList>
+      <ErrorBanner err={err} className="mb-0 mt-4" />
+      {methods && <TabsContent value="methods" className="mt-4">{methods}</TabsContent>}
+      <TabsContent value="accounts" className="mt-4 space-y-4">
       {providers?.engine_unready && (
         <Callout tone={providers.engine_unready === "PROVIDER_CALLS_NOT_AUTHORISED" ? "info" : "warning"} title={providers.engine_unready === "PROVIDER_CALLS_NOT_AUTHORISED" ? "Card payment can be configured here, not run" : "The card payment engine is not ready on this appliance"}>
           <CodeText code={providers.engine_unready} />
@@ -168,6 +186,8 @@ export function CardPaymentConfig({ writable }: { writable: boolean }) {
         }}
         toastSuccess={toast.success}
       />
+      </TabsContent>
+      <TabsContent value="settings" className="mt-4 space-y-4">
       <DomainsCard
         providers={providers?.providers ?? null}
         extra={accounts?.extra_domains ?? null}
@@ -187,8 +207,12 @@ export function CardPaymentConfig({ writable }: { writable: boolean }) {
           await reloadHistory();
         }}
       />
-      <HistoryCard changes={changes} />
-    </div>
+      </TabsContent>
+      <TabsContent value="history" className="mt-4">
+        <HistoryCard changes={changes} />
+      </TabsContent>
+    </Tabs>
+    </QuietHints>
   );
 }
 
@@ -229,8 +253,8 @@ function AccountsCard({
     <Card className="overflow-hidden">
       <CardHeader>
         <div className="min-w-0">
-          <CardTitle>Provider accounts</CardTitle>
-          <CardDescription>The default account takes every new card payment.</CardDescription>
+          <CardTitle className="flex items-center gap-1">Provider accounts
+            <QuietDescription>The default account takes every new card payment.</QuietDescription></CardTitle>
         </div>
         {writable && (
           <Button
@@ -413,8 +437,8 @@ function DomainsCard({
     <Card>
       <CardHeader>
         <div className="min-w-0">
-          <CardTitle>Hosted payment domains</CardTitle>
-          <CardDescription>Reachable before sign-in only while Card payment is in use.</CardDescription>
+          <CardTitle className="flex items-center gap-1">Hosted payment domains
+            <QuietDescription>Reachable before sign-in only while Card payment is in use.</QuietDescription></CardTitle>
         </div>
       </CardHeader>
       <CardBody className="space-y-5">
@@ -443,11 +467,13 @@ function DomainsCard({
         </div>
 
         <div className="space-y-2">
-          <div className="text-label">Additional domains</div>
-          <p className="text-xs text-muted-foreground">
-            Only when your provider account uses a payment page on another domain. Domain names only — no IP
-            addresses and no wildcards: list each host name. Up to {MAX_EXTRA_DOMAINS}.
-          </p>
+          <div className="flex items-center gap-1 text-label">
+            Additional domains
+            <InfoHint>
+              Only when your provider account uses a payment page on another domain. Domain names only — no IP
+              addresses and no wildcards: list each host name. Up to {MAX_EXTRA_DOMAINS}.
+            </InfoHint>
+          </div>
           {extra === null ? (
             <SkeletonRows rows={1} cols={2} />
           ) : draft.length === 0 ? (
@@ -575,14 +601,14 @@ function SettingsCard({
     <Card>
       <CardHeader>
         <div className="min-w-0">
-          <CardTitle>Card payment timings</CardTitle>
-          <CardDescription>
-            {settings.settings.is_default
-              ? "Using the defaults. Nobody has changed these for this site."
-              : settings.settings.updated_at
-                ? `Last changed ${formatDate(settings.settings.updated_at)}.`
-                : "Set for this site."}
-          </CardDescription>
+          <CardTitle className="flex items-center gap-1">Card payment timings
+            <QuietDescription>
+              {settings.settings.is_default
+                ? "Using the defaults. Nobody has changed these for this site."
+                : settings.settings.updated_at
+                  ? `Last changed ${formatDate(settings.settings.updated_at)}.`
+                  : "Set for this site."}
+            </QuietDescription></CardTitle>
         </div>
       </CardHeader>
       <CardBody className="space-y-4">
@@ -645,8 +671,8 @@ function HistoryCard({ changes }: { changes: PaymentChange[] | null }) {
     <Card className="overflow-hidden">
       <CardHeader>
         <div className="min-w-0">
-          <CardTitle>Change history</CardTitle>
-          <CardDescription>Accounts, payment domains and timings: who changed what, and why.</CardDescription>
+          <CardTitle className="flex items-center gap-1">Change history
+            <QuietDescription>Accounts, payment domains and timings: who changed what, and why.</QuietDescription></CardTitle>
         </div>
         {changes && changes.length > HISTORY_SHOWN && (
           <Button size="sm" variant="ghost" onClick={() => setAll((v) => !v)}>
