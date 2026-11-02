@@ -149,35 +149,16 @@ def main():
     else:
         ok("branch deletion is blocked")
 
-    # required status checks
-    rsc = (by_type.get("required_status_checks") or [None])[0]
-    e = exp["required_status_checks"]
-    if rsc is None:
-        fail("no required_status_checks rule: a pull request could merge with no gate green at all")
+    # PO decision 2026-11-02: no GitHub CI and no required status checks.
+    # Preserve every other protected-delivery rule below.
+    rsc = by_type.get("required_status_checks") or []
+    expected_checks = (exp.get("required_status_checks") or {}).get("contexts", [])
+    if expected_checks:
+        fail("recorded model still requires CI contexts: %r" % expected_checks)
+    if rsc:
+        fail("live ruleset still requires GitHub status checks; remove ONLY this rule and keep PR, deletion, force-push and no-bypass protection")
     else:
-        if bool(rsc.get("strict_required_status_checks_policy")) != bool(e["strict"]):
-            fail("strict (branch must be current with %s) is %r, expected %r"
-                 % (branch, rsc.get("strict_required_status_checks_policy"), e["strict"]))
-        else:
-            ok("strict policy: a branch must be up to date with %s before merging" % branch)
-        live = {c.get("context"): c.get("integration_id") for c in rsc.get("required_status_checks", [])}
-        want = set(e["contexts"])
-        missing = want - set(live)
-        extra = set(live) - want
-        if missing:
-            fail("required contexts MISSING from the live ruleset: %s -- those gates would not block a merge"
-                 % sorted(missing))
-        if extra:
-            fail("the live ruleset requires contexts this project does not record: %s. An unrecorded "
-                 "requirement is as much a drift as a missing one." % sorted(extra))
-        if not missing and not extra:
-            ok("all %d recorded required contexts are required: %s" % (len(want), sorted(want)))
-        bad_app = sorted(c for c, iid in live.items() if c in want and iid != e["integration_id"])
-        if bad_app:
-            fail("these contexts are not pinned to the GitHub Actions app (%s): %s -- a check of the same "
-                 "name from another source could satisfy them" % (e["integration_id"], bad_app))
-        elif not missing:
-            ok("every required context is pinned to the GitHub Actions app (%s)" % e["integration_id"])
+        ok("no required status checks; PR protection remains separately verified")
 
     # pull request rule
     pr = (by_type.get("pull_request") or [None])[0]
