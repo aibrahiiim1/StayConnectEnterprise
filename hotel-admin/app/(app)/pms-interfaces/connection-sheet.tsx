@@ -356,7 +356,7 @@ function PublishDialog({
       confirmVariant={resetWarning ? "danger" : "primary"}
       busy={busy}
       error={resetWarning ? null : pmsErrorText(err)}
-      requirePassword
+      requirePassword strictPassword
       onConfirm={async ({ password }) => {
         if (!target) return;
         if (resetWarning && !resetAck) return;
@@ -803,7 +803,7 @@ function CredentialsTab({
         confirmLabel={stored ? "Replace credential" : "Store credential"}
         busy={busy}
         error={pmsErrorText(err)}
-        requirePassword
+        requirePassword strictPassword
         onConfirm={async ({ password }) => {
           if (missing) { setErr("Fill in every required field."); return; }
           setBusy(true); setErr(null);
@@ -1087,7 +1087,7 @@ function ActionsTab({
         confirmVariant={move?.variant === "danger" ? "danger" : "primary"}
         busy={busy}
         error={pmsErrorText(err)}
-        requirePassword
+        requirePassword strictPassword
         onConfirm={async ({ password }) => {
           if (!move) return;
           setBusy(true); setErr(null);
@@ -1160,7 +1160,7 @@ function TestConnectionButton({
         confirmLabel="Run test"
         busy={busy}
         error={pmsErrorText(err)}
-        requirePassword
+        requirePassword strictPassword
         onConfirm={async ({ password }) => {
           setBusy(true); setErr(null);
           try {

@@ -199,10 +199,24 @@ var httpExempt = map[string]bool{
 	"/healthz": true, "/livez": true, "/readyz": true, "/captive-portal/api": true,
 }
 
+// isAdminLoopback reports whether the request is the Admin Console's own read of the portal: from this machine, with no
+// forwarding header. Clients reach portald only through the gateway's DNAT, so their source is never loopback, and a
+// proxy in front would add a forwarding header, which disqualifies the request.
+func isAdminLoopback(r *http.Request) bool {
+	if r.Header.Get("X-Forwarded-For") != "" || r.Header.Get("X-Real-Ip") != "" || r.Header.Get("Forwarded") != "" {
+		return false
+	}
+	ip := clientIP(r)
+	return ip != nil && ip.IsLoopback()
+}
+
 func (h *handler) httpFront(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		st := h.tlsState()
-		if httpExempt[r.URL.Path] {
+		// The Admin Console's preview and wording reads (edged on loopback) are answered directly, whatever the portal's
+		// HTTPS state. Redirecting them to the canonical name made the template preview fail every time that state, or
+		// the portal's address, changed (2026-11-02; earlier too): the console depends on the page, not on how clients reach it.
+		if httpExempt[r.URL.Path] || isAdminLoopback(r) {
 			next.ServeHTTP(w, r)
 			return
 		}

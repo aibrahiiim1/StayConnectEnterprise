@@ -71,7 +71,7 @@ func (s *server) setGuestDeviceSetting(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusUnauthorized, "unauthorized", "no operator session")
 		return
 	}
-	if !s.reauth(r, in.Password) {
+	if !s.reauthStrict(r, in.Password) {
 		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}

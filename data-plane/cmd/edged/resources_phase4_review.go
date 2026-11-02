@@ -350,7 +350,7 @@ func (s *server) postReviewAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Step-up applies to every action including ESCALATE, so the audit record cannot be written from a stolen cookie.
-	if !s.reauth(r, in.Password) {
+	if !s.reauthStrict(r, in.Password) {
 		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}

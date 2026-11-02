@@ -534,7 +534,7 @@ export default function StaysPage() {
           error={blockErr}
           requireReason
           reasonMinLength={4}
-          requirePassword
+          requirePassword strictPassword
           reasonPlaceholder={blockAction === "SET" ? "e.g. Guest asked to settle in cash" : "e.g. Guest cleared with Front Office"}
           onConfirm={({ reason, password }) => { if (blockAction) return changeAdminBlock(blockAction, reason, password); }}
         />

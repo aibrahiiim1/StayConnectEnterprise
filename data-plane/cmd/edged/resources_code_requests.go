@@ -118,7 +118,7 @@ func (s *server) revealCode(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad id")
 		return
 	}
-	actor, ok := s.stepUp(w, r, in.Password)
+	actor, ok := s.stepUpStrict(w, r, in.Password)
 	if !ok {
 		return
 	}

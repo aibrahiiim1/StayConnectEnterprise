@@ -286,7 +286,7 @@ func TestIntegration_Recovery_FactoryResetKeepsEveryNetworkAndNeedsTheSiteName(t
 	}
 	var subnet string
 	_ = f.pool.QueryRow(ctx, `SELECT text(subnet_cidr) FROM guest_networks WHERE id=$1`, factory).Scan(&subnet)
-	if subnet != "10.20.0.0/20" {
+	if subnet != "10.20.0.0/19" {
 		t.Fatalf("the factory network is at %s", subnet)
 	}
 }

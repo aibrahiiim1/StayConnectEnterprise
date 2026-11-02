@@ -397,6 +397,7 @@ export function SettingField({
   explanation,
   readOnly,
   error,
+  extra,
 }: {
   id?: string;
   label: React.ReactNode;
@@ -409,6 +410,8 @@ export function SettingField({
   explanation?: React.ReactNode;
   readOnly?: boolean;
   error?: React.ReactNode;
+  /** Rendered under the hint, e.g. a Never switch. */
+  extra?: React.ReactNode;
 }) {
   const gen = React.useId();
   const fid = id ?? gen;
@@ -451,6 +454,7 @@ export function SettingField({
                 </>
               ))}
       </p>
+      {extra}
     </div>
   );
 }

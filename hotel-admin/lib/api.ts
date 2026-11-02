@@ -573,6 +573,8 @@ export type SessionPolicy = {
 export type SessionPolicyBound = {
   key: keyof Pick<SessionPolicy, "idle_timeout_minutes" | "max_session_hours">;
   label: string; unit: string; min: number; max: number; default: number; explains: string;
+  /** 0 means never: the limit is switched off. */
+  allow_never?: boolean;
 };
 
 export type AccountRetention = {

@@ -210,7 +210,7 @@ export function SynchronizationCard({
         confirmLabel="Request refresh"
         busy={busy}
         error={err}
-        requirePassword
+        requirePassword strictPassword
         onConfirm={({ password }) => request(password)}
       >
         <Field label="Why are you refreshing?" hint="Recorded with the request.">

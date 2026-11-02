@@ -162,10 +162,10 @@ func TestIntegration_PackageRevisionStatesItsTermsAndChangesNeedThePassword(t *t
 		t.Fatalf("reactivation with the password: %d %v", code, out)
 	}
 
-	// Issuing vouchers needs the password, checked before anything reaches scd.
-	if code, out := f.do(t, "POST", "/vouchers/issue", map[string]any{"package_revision_id": planRev, "count": 1}); code != 401 ||
+	// Issuing vouchers is confirmed in the console; a password that is supplied is checked before anything reaches scd.
+	if code, out := f.do(t, "POST", "/vouchers/issue", map[string]any{"package_revision_id": planRev, "count": 1, "password": "wrong"}); code != 401 ||
 		out["error"] != "reauth_required" {
-		t.Fatalf("voucher issue without the password: %d %v", code, out)
+		t.Fatalf("voucher issue with a wrong password: %d %v", code, out)
 	}
 }
 

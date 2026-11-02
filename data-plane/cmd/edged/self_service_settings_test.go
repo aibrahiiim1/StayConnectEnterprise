@@ -136,16 +136,23 @@ func TestSelfServicePutRefusals(t *testing.T) {
 		{"four graces", validSelfServiceBody(map[string]any{"max_grace_extensions": 4}), 400, "invalid_setting"},
 		{"eleven registrations", validSelfServiceBody(map[string]any{"registrations_per_device_per_day": 11}), 400, "invalid_setting"},
 		{"bad policy", validSelfServiceBody(map[string]any{"suspension_policy": "NEVER"}), 400, "invalid_setting"},
-		{"no reason", validSelfServiceBody(map[string]any{"reason": nil}), 400, "reason_required"},
+		// A typed reason must still be a real one; an empty one becomes the standard confirm-only note (settingReason).
 		{"short reason", validSelfServiceBody(map[string]any{"reason": "no"}), 400, "reason_required"},
 		{"unknown field", validSelfServiceBody(map[string]any{"tenant_id": "x"}), 400, "invalid"},
-		{"no password", validSelfServiceBody(nil), 401, "reauth_required"},
+		// No password is the confirm-only path: a session is enough, so it reaches the database and is proven there
+		// (integration), not here.
 	} {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, withSession(httptest.NewRequest(http.MethodPut, "/", strings.NewReader(c.body)), "site_admin"))
 		if rec.Code != c.status || !strings.Contains(rec.Body.String(), `"`+c.code+`"`) {
 			t.Errorf("%s: got %d %s, want %d %s", c.name, rec.Code, rec.Body.String(), c.status, c.code)
 		}
+	}
+	if got := settingReason("   "); got != defaultSettingReason || !validReason(got) {
+		t.Fatalf("an empty reason becomes the standard note: %q", got)
+	}
+	if got := settingReason(" guest feedback "); got != "guest feedback" {
+		t.Fatalf("a typed reason is kept: %q", got)
 	}
 }
 

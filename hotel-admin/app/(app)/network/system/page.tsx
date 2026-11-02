@@ -534,7 +534,7 @@ export default function NetworkSettingsPage() {
         confirmLabel="Apply change"
         busy={busy}
         error={applyErr}
-        requirePassword
+        requirePassword strictPassword
         passwordLabel="Confirm your password to apply"
         onConfirm={doApply}
       />
@@ -551,7 +551,7 @@ export default function NetworkSettingsPage() {
         confirmVariant="danger"
         busy={busy}
         error={rollbackErr}
-        requirePassword
+        requirePassword strictPassword
         onConfirm={doRollback}
       />
     </PageShell>

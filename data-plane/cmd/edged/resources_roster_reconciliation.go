@@ -311,7 +311,7 @@ func (s *server) updateReconciliationSettings(w http.ResponseWriter, r *http.Req
 		jsonErr(w, http.StatusBadRequest, "reason_required", "a reason of 3 to 500 characters is required")
 		return
 	}
-	if !s.reauth(r, in.Password) {
+	if !s.reauthStrict(r, in.Password) {
 		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
 		return
 	}

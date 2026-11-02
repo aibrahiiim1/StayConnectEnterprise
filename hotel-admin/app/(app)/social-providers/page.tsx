@@ -450,7 +450,7 @@ export default function SocialProvidersPage() {
         confirmVariant="danger"
         busy={busy}
         error={formErr}
-        requirePassword
+        requirePassword strictPassword
         onConfirm={onDelete}
       />
     </PageShell>

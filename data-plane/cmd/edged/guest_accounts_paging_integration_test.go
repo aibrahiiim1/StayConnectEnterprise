@@ -58,8 +58,7 @@ func TestIntegration_AccountPasswordFormat_DefaultsBoundsAndRefusals(t *testing.
 		{"password_style": "digits", "password_length": 13, "reason": "keypad"},
 		{"password_style": "mixed", "password_length": 33, "reason": "long"},
 		{"password_style": "numbers", "password_length": 14, "reason": "nope"},
-		{"password_style": "digits", "password_length": 16},
-		{"password_style": "digits", "password_length": 16, "reason": "no"},
+		{"password_style": "digits", "password_length": 16, "reason": "no"}, // a typed reason must be real; none = the standard note
 	} {
 		if st, b := f.do(t, "PUT", "/account-password-settings/", bad); st != 400 {
 			t.Fatalf("%v accepted: %d %v", bad, st, b)

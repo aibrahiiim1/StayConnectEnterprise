@@ -610,7 +610,7 @@ export function PackagesTab({
         confirmLabel="Save changes"
         busy={busy}
         error={pendingErr}
-        requirePassword
+        requirePassword strictPassword
         onConfirm={confirmPendingSave}
       />
 
@@ -622,7 +622,7 @@ export function PackagesTab({
         confirmLabel="Offer it again"
         busy={busy}
         error={actionErr}
-        requirePassword
+        requirePassword strictPassword
         onConfirm={enable}
       />
 
@@ -638,7 +638,7 @@ export function PackagesTab({
         requireReason
         reasonLabel="Why are you disabling it?"
         reasonPlaceholder="Replaced by the new summer package"
-        requirePassword
+        requirePassword strictPassword
         onConfirm={disable}
       />
 

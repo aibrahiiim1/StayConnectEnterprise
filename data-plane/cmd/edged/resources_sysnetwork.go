@@ -33,7 +33,7 @@ func (s *server) sysNetApply(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "proposal required")
 		return
 	}
-	if !s.reauth(r, in.Password) {
+	if !s.reauthStrict(r, in.Password) {
 		s.reauthRefused(w, r, "password confirmation failed")
 		return
 	}
@@ -108,7 +108,7 @@ func (s *server) sysNetRollback(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&in)
-	if !s.reauth(r, in.Password) {
+	if !s.reauthStrict(r, in.Password) {
 		s.reauthRefused(w, r, "password confirmation failed")
 		return
 	}

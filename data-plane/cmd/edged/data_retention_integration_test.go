@@ -52,8 +52,8 @@ func TestIntegration_DataRetention_TheSetting(t *testing.T) {
 			t.Fatalf("accepted %s (%d)", name, st)
 		}
 	}
-	if st, _ := f.do(t, "PUT", "/data-retention/", map[string]any{"settings": good(), "reason": "", "password": f.password}); st != 400 {
-		t.Fatal("saved without a reason")
+	if st, _ := f.do(t, "PUT", "/data-retention/", map[string]any{"settings": good(), "reason": "no", "password": f.password}); st != 400 {
+		t.Fatal("saved with a two-letter reason")
 	}
 	if st, _ := f.do(t, "PUT", "/data-retention/", map[string]any{"settings": good(), "reason": "a change", "password": "wrong"}); st != 401 {
 		t.Fatal("a wrong step-up password changed the retention")

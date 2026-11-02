@@ -31,28 +31,34 @@ export function DefaultNetworkCard({ reloadKey }: { reloadKey: number }) {
   const room = info.room_sign_in;
   const undecided = room?.state === "UNDECIDED" || room?.state === "NOT_SET";
 
+  const items = info.items ?? [];
+  const worst = items.some((i) => i.state === "unresolved") ? "unresolved" : items.some((i) => i.state === "attention") ? "attention" : "ok";
+  const notReady = items.filter((i) => i.state !== "ok");
   return (
     <SectionCard title={`Default Network: ${info.name}`} description="The entry point guests meet. Each check says what was found; nothing here is changed for you.">
-      <ul className="space-y-2 text-sm">
-        {(info.items ?? []).map((i) => (
-          <li key={i.id} className="flex flex-wrap items-baseline gap-2">
-            <Badge tone={STATE_TONE[i.state]}>{STATE_LABEL[i.state]}</Badge>
-            <strong>{i.label}</strong>
-            <span className="text-muted-foreground">{i.detail}</span>
-          </li>
-        ))}
-      </ul>
-
-      {canRoute && room && (
-        <div className="mt-3 flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <Badge tone={STATE_TONE[worst]}>{worst === "ok" ? "All ready" : `${notReady.length} to check`}</Badge>
+        <span className="min-w-0 flex-1 truncate text-muted-foreground">
+          {worst === "ok" ? `${items.length} checks passed` : notReady.map((i) => i.label).join(", ")}
+        </span>
+        {canRoute && room && (
           <Button size="sm" variant={undecided ? "primary" : "secondary"} onClick={() => setEditing(true)}>
-            {undecided ? "Configure room sign-in…" : "Change room sign-in…"}
+            {undecided ? "Configure room sign-in…" : "Room sign-in…"}
           </Button>
-          <span className="text-xs text-muted-foreground">
-            Choose none, one dedicated PMS or a shared strict set. You see what it affects first; nothing is copied from an archived network.
-          </span>
-        </div>
-      )}
+        )}
+      </div>
+      <details className="mt-2 text-sm">
+        <summary className="cursor-pointer text-muted-foreground hover:text-foreground">Show all checks</summary>
+        <ul className="mt-2 space-y-1.5">
+          {items.map((i) => (
+            <li key={i.id} className="flex flex-wrap items-baseline gap-2">
+              <Badge tone={STATE_TONE[i.state]}>{STATE_LABEL[i.state]}</Badge>
+              <strong>{i.label}</strong>
+              <span className="text-muted-foreground">{i.detail}</span>
+            </li>
+          ))}
+        </ul>
+      </details>
 
       {(info.packages_pinned_to_other_networks ?? []).length > 0 && (
         <Callout tone="warning" title="Packages limited to other networks">

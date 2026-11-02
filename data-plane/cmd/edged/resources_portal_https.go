@@ -398,7 +398,7 @@ func (s *server) portalHTTPSPutAddress(w http.ResponseWriter, r *http.Request) {
 			"issues": []portalIPIssue{{Code: "invalid_address", Message: msg}}})
 		return
 	}
-	actor, ok := s.stepUp(w, r, in.Password)
+	actor, ok := s.stepUpStrict(w, r, in.Password)
 	if !ok {
 		return
 	}
@@ -448,7 +448,7 @@ func (s *server) portalHTTPSPutDomain(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusUnprocessableEntity, "validation", msg)
 		return
 	}
-	actor, ok := s.stepUp(w, r, in.Password)
+	actor, ok := s.stepUpStrict(w, r, in.Password)
 	if !ok {
 		return
 	}
@@ -464,7 +464,7 @@ func (s *server) portalHTTPSDeleteDomain(w http.ResponseWriter, r *http.Request)
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
 		return
 	}
-	actor, ok := s.stepUp(w, r, in.Password)
+	actor, ok := s.stepUpStrict(w, r, in.Password)
 	if !ok {
 		return
 	}
@@ -620,7 +620,7 @@ func (s *server) portalHTTPSRenew(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
 		return
 	}
-	if _, ok := s.stepUp(w, r, in.Password); !ok {
+	if _, ok := s.stepUpStrict(w, r, in.Password); !ok {
 		return
 	}
 	if s.scd == nil {

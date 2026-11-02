@@ -44,7 +44,7 @@ func (s *server) requestFullResync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Step-up as for publishing a revision: a fresh roster loads the hotel's PMS and changes what every sign-in resolves against.
-	if !s.reauth(r, in.Password) {
+	if !s.reauthStrict(r, in.Password) {
 		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}

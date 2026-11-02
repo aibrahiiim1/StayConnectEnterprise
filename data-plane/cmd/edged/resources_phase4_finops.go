@@ -358,7 +358,7 @@ func (s *server) resolveRecoveryHold(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The actor is the authenticated session, never a body field; a self-named author makes the audit worthless.
-	actor, ok := s.stepUpActor(w, r, req.Password)
+	actor, ok := s.stepUpActorStrict(w, r, req.Password)
 	if !ok {
 		return
 	}
@@ -389,7 +389,7 @@ func (s *server) releaseRecovery(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "malformed body")
 		return
 	}
-	actor, ok := s.stepUpActor(w, r, req.Password)
+	actor, ok := s.stepUpActorStrict(w, r, req.Password)
 	if !ok {
 		return
 	}
@@ -410,11 +410,24 @@ func (s *server) releaseRecovery(w http.ResponseWriter, r *http.Request) {
 
 // Re-authenticates the operator and returns their id from the SESSION. No request type carries an actor: the
 // password proves the person at the keyboard still owns the session, which a stolen cookie alone does not.
+// stepUpActorStrict is stepUpActor with the password always verified.
+func (s *server) stepUpActorStrict(w http.ResponseWriter, r *http.Request, password string) (string, bool) {
+	if !s.reauthStrict(r, password) {
+		s.reauthRefused(w, r, "Confirm your password. This action needs it.")
+		return "", false
+	}
+	return s.sessionActor(w, r)
+}
+
 func (s *server) stepUpActor(w http.ResponseWriter, r *http.Request, password string) (string, bool) {
 	if !s.reauth(r, password) {
 		s.reauthRefused(w, r, "password confirmation required")
 		return "", false
 	}
+	return s.sessionActor(w, r)
+}
+
+func (s *server) sessionActor(w http.ResponseWriter, r *http.Request) (string, bool) {
 	sess := sessFrom(r.Context())
 	if sess == nil || sess.OperatorID == "" {
 		jsonErr(w, http.StatusUnauthorized, "unauthorized", "no operator session")
@@ -547,7 +560,7 @@ func (s *server) authorizeZeroAttemptRetry(w http.ResponseWriter, r *http.Reques
 		jsonErr(w, http.StatusBadRequest, "evidence_invalid", everr.Error())
 		return
 	}
-	actor, ok := s.stepUpActor(w, r, in.Password)
+	actor, ok := s.stepUpActorStrict(w, r, in.Password)
 	if !ok {
 		return
 	}

@@ -14,7 +14,8 @@ import { HelpList, HelpSection } from "@/components/help";
 import { Card, CardBody, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge, StatusDot } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { ErrorBanner } from "@/components/ui/error-banner";
+import { AttentionBar, type AttentionRow } from "./attention-bar";
 import { Explain } from "@/components/ui/tooltip";
 import { Separator, Skeleton } from "@/components/ui/misc";
 import { Sparkline } from "@/components/ui/chart";
@@ -22,15 +23,13 @@ import { Segmented } from "@/components/ui/tabs";
 import { moduleLicensed, useCapabilities, surfaceAvailable } from "@/lib/capabilities";
 import { cn, formatBytes, formatRelative } from "@/lib/utils";
 import { describeDatabase, describeSessionController, describeLicense } from "@/lib/health-words";
-import { ArrowDownUp, CheckCircle2, Hotel, LogIn, RefreshCw, Users } from "lucide-react";
+import { ArrowDownUp, Hotel, LogIn, RefreshCw, Users } from "lucide-react";
 import {
   ApplianceCard, BlockLink, ConcurrencyCard, DhcpDnsCard, NetworksCard, PackagesCard, PmsCard, ServicesGrid, SignInOutcomesCard,
   SignInPatternCard, TrafficCard,
 } from "./overview-blocks";
 import { usePoll } from "@/lib/use-poll";
 import { getSharedHealth } from "@/lib/shared-health";
-
-type AttentionRow = { text: string; detail?: string; href?: string; action?: string; tone: "warn" | "err" };
 
 export default function DashboardPage() {
   const [range, setRange] = useState<OverviewRange>("24h");
@@ -184,41 +183,7 @@ export default function DashboardPage() {
 
       <ErrorBanner err={err} />
 
-      {attention.length > 0 ? (
-        <Callout tone={attention.some((a) => a.tone === "err") ? "danger" : "warning"} title="Needs attention">
-          <ul className="space-y-1.5" data-testid="attention">
-            {attention.map((a, i) => (
-              <li key={i} className="flex flex-wrap items-baseline gap-x-2">
-                <span className="font-medium">{a.text}</span>
-                {a.detail && <span className="text-muted-foreground">{a.detail}</span>}
-                {a.href && (
-                  <Link href={a.href} className="font-medium underline underline-offset-2">
-                    {a.action ?? "Open"}
-                  </Link>
-                )}
-              </li>
-            ))}
-          </ul>
-        </Callout>
-      ) : snap && health ? (
-        <div className="flex items-center gap-2 rounded-md border border-border bg-card px-3.5 py-2.5 text-sm text-muted-foreground shadow-card" data-testid="all-normal">
-          <CheckCircle2 className="size-4 text-success" aria-hidden />
-          All systems normal — nothing needs attention right now.
-        </div>
-      ) : null}
-
-      {notes.length > 0 && (
-        <Callout tone="info" title="For information">
-          <ul className="space-y-1">
-            {notes.map((n, i) => (
-              <li key={i}>
-                {n.text}{" "}
-                <Link href={n.href} className="font-medium underline underline-offset-2">See details</Link>
-              </li>
-            ))}
-          </ul>
-        </Callout>
-      )}
+      <AttentionBar rows={attention} notes={notes} ready={!!snap && !!health} />
 
       <div className={cn("space-y-5 transition-opacity", stale && "opacity-60")} aria-busy={busy || undefined}>
         {!snap || !g || !t || !pms || !so ? (
@@ -240,7 +205,7 @@ export default function DashboardPage() {
                   devices online at once in each interval.
                 </Explain>
               }
-              footer={g.available && g.concurrency.available ? <Sparkline values={g.concurrency.peak} width={120} /> : undefined}
+              footer={g.available && g.concurrency.available ? <Sparkline values={g.concurrency.peak} width={96} height={24} /> : undefined}
             />
             <StatCard
               label="Sign-ins"
@@ -254,7 +219,7 @@ export default function DashboardPage() {
                   signal is counted again.
                 </Explain>
               }
-              footer={g.available ? <Sparkline values={g.sign_ins_series} width={120} token="chart-2" /> : undefined}
+              footer={g.available ? <Sparkline values={g.sign_ins_series} width={96} height={24} token="chart-2" /> : undefined}
             />
             <StatCard
               label="Data used"
@@ -268,7 +233,7 @@ export default function DashboardPage() {
                   not in the interval the session started.
                 </Explain>
               }
-              footer={t.available ? <Sparkline values={t.series_down.map((d, i) => d + (t.series_up[i] ?? 0))} width={120} token="chart-3" /> : undefined}
+              footer={t.available ? <Sparkline values={t.series_down.map((d, i) => d + (t.series_up[i] ?? 0))} width={96} height={24} token="chart-3" /> : undefined}
             />
             {hotel && <StatCard
               label="Room sign-in"
@@ -295,7 +260,7 @@ export default function DashboardPage() {
                       ? "No room sign-in attempted"
                       : reasonText(so.reason)
               }
-              footer={pms.available && so.available && so.total > 0 ? <Sparkline values={so.series_verified} width={120} token="chart-4" /> : undefined}
+              footer={pms.available && so.available && so.total > 0 ? <Sparkline values={so.series_verified} width={96} height={24} token="chart-4" /> : undefined}
             />}
           </StatGrid>
         )}

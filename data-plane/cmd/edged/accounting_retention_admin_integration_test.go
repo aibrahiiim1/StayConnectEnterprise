@@ -16,7 +16,7 @@ func TestIntegration_AccountingRetention_TheSetting(t *testing.T) {
 		{"detail_retention_days": 4000, "reason": "too long", "password": f.password},
 		{"reason": "neither", "password": f.password},
 		{"detail_retention_days": 90, "unlimited": true, "reason": "both", "password": f.password},
-		{"detail_retention_days": 90, "reason": "", "password": f.password},
+		{"detail_retention_days": 90, "reason": "no", "password": f.password}, // typed, too short (empty = the standard note)
 	} {
 		if st, _ := f.do(t, "PUT", "/accounting-retention/", bad); st != 400 {
 			t.Fatalf("accepted %v (%d)", bad, st)

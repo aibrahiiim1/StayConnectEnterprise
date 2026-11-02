@@ -9,7 +9,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -258,7 +257,7 @@ func (s *server) setDataRetention(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, code, msg)
 		return
 	}
-	reason := strings.TrimSpace(in.Reason)
+	reason := settingReason(in.Reason)
 	if !validReason(reason) {
 		jsonErr(w, http.StatusBadRequest, "reason_required", "a bounded reason (4-500 characters) is required")
 		return

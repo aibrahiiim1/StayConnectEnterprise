@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { QuietDescription } from "@/components/ui/quiet";
 
 export function Card({ className, ...p }: React.HTMLAttributes<HTMLDivElement>) {
   return (
@@ -22,11 +23,12 @@ export function CardHeader({ className, ...p }: React.HTMLAttributes<HTMLDivElem
 }
 
 export function CardTitle({ className, children, ...p }: React.HTMLAttributes<HTMLHeadingElement>) {
-  return <h2 className={cn("text-emphasis text-foreground", className)} {...p}>{children}</h2>;
+  return <h2 className={cn("inline-block align-middle text-emphasis text-foreground", className)} {...p}>{children}</h2>;
 }
 
-export function CardDescription({ className, ...p }: React.HTMLAttributes<HTMLParagraphElement>) {
-  return <p className={cn("mt-0.5 text-caption text-muted-foreground", className)} {...p} />;
+/** An info icon beside the card title (its words stay in the page for assistive technology), not a line under it. */
+export function CardDescription({ className, children }: React.HTMLAttributes<HTMLParagraphElement>) {
+  return <QuietDescription className={cn("ms-1", className)}>{children}</QuietDescription>;
 }
 
 export function CardBody({ className, ...p }: React.HTMLAttributes<HTMLDivElement>) {
@@ -59,8 +61,10 @@ export function Section({
     <div className={cn("space-y-3", className)}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-0.5">
-          <h3 className="text-emphasis">{title}</h3>
-          {description && <p className="max-w-3xl text-caption text-muted-foreground">{description}</p>}
+          <div className="flex flex-wrap items-center gap-1">
+            <h3 className="text-emphasis">{title}</h3>
+            <QuietDescription>{description}</QuietDescription>
+          </div>
         </div>
         {actions && <div className="flex items-center gap-2">{actions}</div>}
       </div>

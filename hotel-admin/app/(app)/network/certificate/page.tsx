@@ -248,7 +248,7 @@ export default function CertificatePage() {
         requireReason
         reasonPlaceholder="Why are you rotating?"
         confirmText="ROTATE"
-        requirePassword
+        requirePassword strictPassword
         onConfirm={rotate}
       />
     </PageShell>

@@ -452,7 +452,7 @@ export default function PortalHTTPSPage() {
         confirmLabel="Save address"
         busy={busy === "address"}
         error={addressErr}
-        requirePassword
+        requirePassword strictPassword
         onConfirm={saveAddress}
       >
         <Field label="Portal address" required hint="An address in 10.0.0.0/8, 172.16.0.0/12 or 192.168.0.0/16 that no network here uses.">
@@ -474,7 +474,7 @@ export default function PortalHTTPSPage() {
         confirmLabel="Use this domain"
         busy={busy === "domain"}
         error={dialogErr}
-        requirePassword
+        requirePassword strictPassword
         onConfirm={saveDomain}
       />
 
@@ -490,7 +490,7 @@ export default function PortalHTTPSPage() {
         confirmVariant="danger"
         busy={busy === "remove"}
         error={dialogErr}
-        requirePassword
+        requirePassword strictPassword
         onConfirm={removeDomain}
       />
 
@@ -502,7 +502,7 @@ export default function PortalHTTPSPage() {
         confirmLabel="Renew now"
         busy={busy === "renew"}
         error={dialogErr}
-        requirePassword
+        requirePassword strictPassword
         onConfirm={renew}
       />
     </PageShell>

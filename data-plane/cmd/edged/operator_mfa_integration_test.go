@@ -251,7 +251,7 @@ func TestIntegrationMFA_SessionLimitsAreAnAuditedSetting(t *testing.T) {
 	for _, bad := range []map[string]any{
 		{"idle_timeout_minutes": 4, "max_session_hours": 12, "reason": "too short", "password": sf.password},
 		{"idle_timeout_minutes": 30, "max_session_hours": 25, "reason": "too long", "password": sf.password},
-		{"idle_timeout_minutes": 30, "max_session_hours": 12, "reason": "", "password": sf.password},
+		{"idle_timeout_minutes": 30, "max_session_hours": 12, "reason": "no", "password": sf.password},
 	} {
 		if w := sf.call(t, "PUT", "/operators/session-policy", ip, r.cookie, bad, nil); w.code != 400 {
 			t.Fatalf("accepted %v: %d", bad, w.code)

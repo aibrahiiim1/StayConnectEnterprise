@@ -485,8 +485,10 @@ export default function PortalCertificatesPage() {
                       </div>
                     </TD>
                     <TD>
-                      <div className="break-all font-mono text-xs">{r.hostname}</div>
-                      <div className="text-xs text-muted-foreground">{r.portal_ip ?? "no address yet"}</div>
+                      <div className="break-all font-mono text-xs">{r.client_portal ?? r.hostname}</div>
+                      <div className="break-all text-xs text-muted-foreground">
+                        {r.client_portal ? `technical name ${r.hostname} · ` : ""}{r.portal_ip ?? "no address yet"}
+                      </div>
                     </TD>
                     <TD nowrap className="hidden md:table-cell"><StateBadge info={portalDNSInfo(r.dns_state)} /></TD>
                     <TD className="hidden lg:table-cell">
@@ -556,7 +558,8 @@ export default function PortalCertificatesPage() {
               <DescriptionList
                 items={[
                   { label: "Customer · site", value: [selected.customer_name, selected.site_name].filter(Boolean).join(" · ") || null },
-                  { label: "Hostname", value: <span className="break-all font-mono text-xs">{selected.hostname}</span> },
+                  { label: "Client Portal address", value: <span className="break-all font-mono text-xs">{selected.client_portal}</span>, hidden: !selected.client_portal },
+                  { label: "Technical name", value: <span className="break-all font-mono text-xs">{selected.hostname}</span> },
                   { label: "Portal address", value: selected.portal_ip ? <span className="font-mono text-xs">{selected.portal_ip}</span> : null },
                   { label: "DNS error", value: selected.dns_error ?? null, hidden: !selected.dns_error },
                   {
@@ -582,7 +585,7 @@ export default function PortalCertificatesPage() {
                   {selected.certificates.map((c) => (
                     <div key={c.order_id} className="space-y-2 px-3 py-2.5">
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="text-sm font-medium">{c.kind === "CUSTOM" ? "Custom domain" : "OneGate hostname"}</span>
+                        <span className="text-sm font-medium">{c.kind === "CUSTOM" ? "Site's own domain" : c.hostname === selected.client_portal ? "Client Portal address" : "Technical name"}</span>
                         <StateBadge info={portalCertInfo(c.status, c.revoked)} />
                         {dirBadge(c)}
                       </div>

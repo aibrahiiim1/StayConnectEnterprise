@@ -143,7 +143,7 @@ func (s *server) revokePostStayProfile(w http.ResponseWriter, r *http.Request) {
 			"a bounded reason (4-500 characters) is required")
 		return
 	}
-	actor, ok := s.stepUpActor(w, r, in.Password)
+	actor, ok := s.stepUpActorStrict(w, r, in.Password)
 	if !ok {
 		return
 	}

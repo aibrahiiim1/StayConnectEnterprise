@@ -508,7 +508,7 @@ function DomainsCard({
         busy={busy}
         error={saveErr}
         requireReason
-        requirePassword
+        requirePassword strictPassword
         onConfirm={save}
       />
     </Card>
@@ -627,7 +627,7 @@ function SettingsCard({
         busy={busy}
         error={saveErr}
         requireReason
-        requirePassword
+        requirePassword strictPassword
         onConfirm={save}
       />
     </Card>

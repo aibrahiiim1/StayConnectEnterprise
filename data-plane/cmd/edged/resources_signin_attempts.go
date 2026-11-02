@@ -258,7 +258,7 @@ func (s *server) getSignInAttemptCredentials(w http.ResponseWriter, r *http.Requ
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
 		return
 	}
-	if !s.reauth(r, in.Password) {
+	if !s.reauthStrict(r, in.Password) {
 		s.reauthRefused(w, r, "your password is required to see what a client typed")
 		return
 	}

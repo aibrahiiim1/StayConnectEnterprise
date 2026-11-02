@@ -31,7 +31,6 @@ type session struct {
 	Email       string
 	DisplayName string
 	Roles       []string
-	Expires     time.Time
 	// Session limits are measured from these: LastSeen moves with activity, CreatedAt never does.
 	CreatedAt time.Time
 	LastSeen  time.Time
@@ -39,38 +38,52 @@ type session struct {
 	MustChangePassword bool
 }
 
+// The store has no lifetime of its own: the session-limit setting is the only thing that ends a session (besides
+// signing out, and an edged restart). It remembers the limits the last request was checked against, so the sweep and
+// peek apply the same rule as active() between requests; with both limits at Never a session lasts until signed out.
 type sessionStore struct {
-	mu  sync.Mutex
-	m   map[string]*session
-	ttl time.Duration
+	mu          sync.Mutex
+	m           map[string]*session
+	idle, limit time.Duration
 }
 
-func newSessionStore(ttl time.Duration) *sessionStore {
-	s := &sessionStore{m: map[string]*session{}, ttl: ttl}
+// newSessionStore starts with initial as both limits, until the first request brings the setting's values.
+func newSessionStore(initial time.Duration) *sessionStore {
+	s := &sessionStore{m: map[string]*session{}, idle: initial, limit: initial}
 	go func() {
 		for range time.Tick(10 * time.Minute) {
-			now := time.Now()
-			s.mu.Lock()
-			for k, v := range s.m {
-				if now.After(v.Expires) {
-					delete(s.m, k)
-				}
-			}
-			s.mu.Unlock()
+			s.sweep(time.Now())
 		}
 	}()
 	return s
 }
 
-// sessionStoreCap is the longest session the setting allows; active() enforces the idle and absolute limits.
+func (s *sessionStore) sweep(now time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for k, v := range s.m {
+		if v.ended(now, s.idle, s.limit) {
+			delete(s.m, k)
+		}
+	}
+}
+
+func (v *session) ended(now time.Time, idle, maxAge time.Duration) bool {
+	return now.Sub(v.LastSeen) > idle || now.Sub(v.CreatedAt) > maxAge
+}
+
+// sessionStoreCap is the store's starting limit, until the setting is read (its default longest session is 12 h).
 const sessionStoreCap = 24 * time.Hour
+
+// sessionCookieLifetime is the browser's bound only, the longest a browser keeps a cookie (400 days in current
+// browsers): requireAuth enforces the session limits, so a cookie that outlives its session is just refused.
+const sessionCookieLifetime = 400 * 24 * time.Hour
 
 func (s *sessionStore) create(sess *session) string {
 	b := make([]byte, 32)
 	_, _ = rand.Read(b)
 	tok := base64.RawURLEncoding.EncodeToString(b)
 	now := time.Now()
-	sess.Expires = now.Add(s.ttl)
 	// A replacement session keeps the original sign-in time so a password change cannot extend the absolute limit.
 	if sess.CreatedAt.IsZero() {
 		sess.CreatedAt = now
@@ -87,9 +100,10 @@ func (s *sessionStore) create(sess *session) string {
 func (s *sessionStore) active(tok string, idle, maxAge time.Duration, touch bool) *session {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.idle, s.limit = idle, maxAge
 	sess, ok := s.m[tok]
 	now := time.Now()
-	if !ok || now.After(sess.Expires) || now.Sub(sess.LastSeen) > idle || now.Sub(sess.CreatedAt) > maxAge {
+	if !ok || sess.ended(now, idle, maxAge) {
 		delete(s.m, tok)
 		return nil
 	}
@@ -104,7 +118,7 @@ func (s *sessionStore) peek(tok string) *session {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sess, ok := s.m[tok]
-	if !ok || time.Now().After(sess.Expires) {
+	if !ok || sess.ended(time.Now(), s.idle, s.limit) {
 		return nil
 	}
 	return sess

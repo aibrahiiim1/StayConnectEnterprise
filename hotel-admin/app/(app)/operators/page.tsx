@@ -550,7 +550,7 @@ export default function OperatorsPage() {
         }
         confirmLabel="Disable account"
         confirmVariant="danger"
-        requirePassword
+        requirePassword strictPassword
         passwordLabel="Your password"
         busy={busy}
         error={formErr}
@@ -567,7 +567,7 @@ export default function OperatorsPage() {
             : undefined
         }
         confirmLabel="Add role"
-        requirePassword
+        requirePassword strictPassword
         passwordLabel="Your password"
         busy={busy}
         error={formErr}
@@ -585,7 +585,7 @@ export default function OperatorsPage() {
         }
         confirmLabel="Remove role"
         confirmVariant="danger"
-        requirePassword
+        requirePassword strictPassword
         passwordLabel="Your password"
         busy={busy}
         error={formErr}

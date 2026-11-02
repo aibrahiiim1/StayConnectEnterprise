@@ -57,7 +57,7 @@ func (s *server) putCardRecheckSettings(w http.ResponseWriter, r *http.Request) 
 		jsonErr(w, http.StatusBadRequest, "reason_required", "a reason of 3 to 500 characters is required")
 		return
 	}
-	actor, ok := s.stepUp(w, r, in.Password)
+	actor, ok := s.stepUpStrict(w, r, in.Password)
 	if !ok {
 		return
 	}

@@ -283,7 +283,7 @@ func diffEnforcementPatch(cur enforcementPolicy, in enforcementPatch) ([]enforce
 // enforcementStepUp asks for the operator's password again before the policy changes.
 func (s *server) enforcementStepUp(w http.ResponseWriter, r *http.Request, password string) (string, bool) {
 	if s.enforcementPasswordOK == nil {
-		return s.stepUp(w, r, password)
+		return s.stepUpStrict(w, r, password)
 	}
 	if !s.enforcementPasswordOK(password) {
 		s.reauthRefused(w, r, "password confirmation required")

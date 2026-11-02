@@ -143,7 +143,7 @@ describe("New client network: one wizard for one network or a whole trunk", () =
     const s1 = (await screen.findByLabelText("VLAN 1 subnet")) as HTMLInputElement;
     const s2 = screen.getByLabelText("VLAN 2 subnet") as HTMLInputElement;
     expect(s1.value).not.toBe("10.111.0.0/24");
-    expect(s2.value).toBe("10.112.0.0/24");
+    expect(s2.value).toBe("10.112.0.0/19");
     expect(s1.value).not.toBe(s2.value);
     expect(screen.getByRole("radio", { name: /Configure each VLAN separately/i })).toBeTruthy();
 
@@ -168,8 +168,8 @@ describe("New client network: one wizard for one network or a whole trunk", () =
     expect(body.networks).toHaveLength(2);
     expect(body.networks[1]).toMatchObject({
       network_type: "vlan", parent_interface: "ens192", vlan_id: 112,
-      subnet_cidr: "10.112.0.0/24", gateway_ip: "10.112.0.1",
-      pools: [{ start_ip: "10.112.0.100", end_ip: "10.112.0.250" }],
+      subnet_cidr: "10.112.0.0/19", gateway_ip: "10.112.0.1",
+      pools: [{ start_ip: "10.112.0.10", end_ip: "10.112.31.250" }],
     });
   });
 
@@ -187,9 +187,12 @@ describe("New client network: one wizard for one network or a whole trunk", () =
   });
 
   it("addressing helpers", () => {
-    expect(suggestSubnet(20, new Set())).toBe("10.20.0.0/24");
-    expect(suggestSubnet(20, new Set(["10.20.0.0/24"]))).toBe("10.1.0.0/24");
+    expect(suggestSubnet(20, new Set())).toBe("10.20.0.0/19");
+    expect(suggestSubnet(20, new Set(["10.20.0.0/19"]))).toBe("10.1.0.0/19");
+    expect(addressingFor("10.7.0.0/19")).toEqual({ gateway: "10.7.0.1", poolStart: "10.7.0.10", poolEnd: "10.7.31.250" });
+    expect(addressingFor("10.7.64.0/19")).toEqual({ gateway: "10.7.64.1", poolStart: "10.7.64.10", poolEnd: "10.7.95.250" });
     expect(addressingFor("10.7.0.0/24")).toEqual({ gateway: "10.7.0.1", poolStart: "10.7.0.100", poolEnd: "10.7.0.250" });
+    expect(addressingFor("10.7.5.0/19")).toEqual({ gateway: "", poolStart: "", poolEnd: "" });
     expect(addressingFor("10.7.0.0/22")).toEqual({ gateway: "", poolStart: "", poolEnd: "" });
   });
 });

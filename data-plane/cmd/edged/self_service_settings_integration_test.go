@@ -41,7 +41,7 @@ func TestIntegration_SelfServiceSettings_DefaultsStepUpHistoryAndAudit(t *testin
 		"deadline 0":    selfServiceBody(f, map[string]any{"verification_deadline_hours": 0}),
 		"grace 241":     selfServiceBody(f, map[string]any{"grace_minutes": 241}),
 		"reminder late": selfServiceBody(f, map[string]any{"reminder_hours_before": 48}),
-		"no reason":     selfServiceBody(f, map[string]any{"reason": nil}),
+		"short reason":  selfServiceBody(f, map[string]any{"reason": "no"}),
 	} {
 		if st, b := f.do(t, "PUT", "/self-service-settings/", bad); st != 400 {
 			t.Fatalf("%s accepted: %d %v", name, st, b)

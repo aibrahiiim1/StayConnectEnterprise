@@ -224,6 +224,9 @@ func (a *applier) createNetwork(ctx context.Context, n netcfg.GuestNetwork) erro
 			slog.Warn("netd could not mark the bridge it created", "bridge", n.BridgeName, "err", merr)
 		}
 	}
+	if _, err := a.reconcileBridgeMAC(ctx, n); err != nil {
+		return err
+	}
 	if err := a.run(ctx, "ip", "link", "set", member, "master", n.BridgeName); err != nil {
 		return err
 	}
@@ -241,13 +244,50 @@ func (a *applier) createNetwork(ctx context.Context, n netcfg.GuestNetwork) erro
 	return nil
 }
 
+// reconcileBridgeMAC gives the bridge of a TAGGED client network its parent interface's MAC address, live. The kernel gives
+// a new bridge a random locally administered MAC, and behind a virtual switch the unicast frames of clients on a tagged
+// VLAN reach the appliance only when addressed to the NIC's own MAC: a phone got its lease by broadcast and then sent
+// nothing the appliance could see, so no portal page ever opened (VLAN 90 and VLAN 3, 2026-11-01 and 2026-11-02). The
+// netplan file carries the same MAC for reboot persistence, but netd builds the bridges itself, so the live bridge has
+// to be corrected here, for a new bridge and for every existing one (apply and boot reconcile).
+func (a *applier) reconcileBridgeMAC(ctx context.Context, n netcfg.GuestNetwork) (bool, error) {
+	if a.dryRun || n.NetworkType != "vlan" {
+		return false, nil
+	}
+	want := strings.ToLower(strings.TrimSpace(parentMACOf(n.ParentInterface)))
+	have := strings.ToLower(strings.TrimSpace(bridgeMACOf(n.BridgeName)))
+	if !usableBridgeMAC(want) || have == "" || have == want {
+		return false, nil
+	}
+	if err := a.run(ctx, "ip", "link", "set", "dev", n.BridgeName, "address", want); err != nil {
+		return false, fmt.Errorf("give %s the MAC address of %s: %w", n.BridgeName, n.ParentInterface, err)
+	}
+	slog.Info("netd gave a tagged client network's bridge its parent's MAC address", "bridge", n.BridgeName, "from", have, "to", want)
+	return true, nil
+}
+
+// usableBridgeMAC: a unicast, non-zero, well-formed lower-case colon MAC.
+func usableBridgeMAC(m string) bool {
+	if len(m) != 17 || m == "00:00:00:00:00:00" {
+		return false
+	}
+	var b [6]byte
+	if n, err := fmt.Sscanf(m, "%02x:%02x:%02x:%02x:%02x:%02x", &b[0], &b[1], &b[2], &b[3], &b[4], &b[5]); err != nil || n != 6 {
+		return false
+	}
+	return b[0]&1 == 0
+}
+
 // reconcileAddress makes an EXISTING managed bridge carry exactly the gateway address its intent asks for, and reports whether it changed anything.
 // createNetwork (where `ip addr add` lives) only runs for missing bridges, so an edited subnet or gateway would otherwise never reach the live bridge.
 // Only bridges in the desired managed set are touched; liveGuestBridges() returns br-g* only.
 func (a *applier) reconcileAddress(ctx context.Context, n netcfg.GuestNetwork) (bool, error) {
 	want := fmt.Sprintf("%s/%d", n.GatewayIP, n.PrefixLen)
 	have := a.ifaceAddrsOf(n.BridgeName)
-	changed := false
+	changed, merr := a.reconcileBridgeMAC(ctx, n)
+	if merr != nil {
+		return changed, merr
+	}
 	found := false
 	for _, c := range have {
 		if c == want {

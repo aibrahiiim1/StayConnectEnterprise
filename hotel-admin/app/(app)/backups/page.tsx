@@ -425,7 +425,7 @@ export default function BackupsPage() {
         confirmLabel="Back up now"
         busy={backupBusy}
         error={backupErr}
-        requirePassword
+        requirePassword strictPassword
         onConfirm={backupNow}
       />
 
@@ -437,7 +437,7 @@ export default function BackupsPage() {
         confirmLabel="Download"
         busy={downloadBusy}
         error={downloadErr}
-        requirePassword
+        requirePassword strictPassword
         onConfirm={download}
       />
 
@@ -562,7 +562,7 @@ function RestoreDialog({ backup, onClose, onDone }: {
       busy={busy}
       error={err}
       confirmText={backup.name}
-      requirePassword
+      requirePassword strictPassword
       onConfirm={({ password }) => go({ password, confirm: backup.name })}
     >
       <ConsequenceList

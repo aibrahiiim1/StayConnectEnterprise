@@ -433,7 +433,7 @@ func (s *server) setupOwnMFA(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "password required")
 		return
 	}
-	if !s.reauth(r, in.Password) {
+	if !s.reauthStrict(r, in.Password) {
 		s.reauthRefused(w, r, "Your password is not correct.")
 		return
 	}
@@ -522,7 +522,7 @@ func (s *server) disableOwnMFA(w http.ResponseWriter, r *http.Request) {
 			"Enter the 6-digit code your authenticator app shows now, or one of your recovery codes.")
 		return
 	}
-	if !s.reauth(r, in.Password) {
+	if !s.reauthStrict(r, in.Password) {
 		s.reauthRefused(w, r, "Your password is not correct.")
 		return
 	}
@@ -583,7 +583,7 @@ func (s *server) newOwnRecoveryCodes(w http.ResponseWriter, r *http.Request) {
 			"Enter the 6-digit code your authenticator app shows now. A recovery code cannot be used to make new ones.")
 		return
 	}
-	if !s.reauth(r, in.Password) {
+	if !s.reauthStrict(r, in.Password) {
 		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
@@ -657,7 +657,7 @@ func (s *server) resetEdgeOperatorMFA(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "reason_required", "a bounded reason (4-500 characters) is required")
 		return
 	}
-	if !s.reauth(r, in.Password) {
+	if !s.reauthStrict(r, in.Password) {
 		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
@@ -695,18 +695,38 @@ type sessionPolicy struct {
 	UpdatedBy          *string    `json:"updated_by,omitempty"`
 }
 
-func (p sessionPolicy) idle() time.Duration { return time.Duration(p.IdleTimeoutMinutes) * time.Minute }
-func (p sessionPolicy) max() time.Duration  { return time.Duration(p.MaxSessionHours) * time.Hour }
+// neverLimit stands for "never": long enough that it cannot be reached, short enough that adding it to a time cannot overflow.
+const neverLimit = 100 * 365 * 24 * time.Hour
+
+// 0 means never (migration 0204).
+func (p sessionPolicy) idle() time.Duration {
+	if p.IdleTimeoutMinutes == 0 {
+		return neverLimit
+	}
+	return time.Duration(p.IdleTimeoutMinutes) * time.Minute
+}
+func (p sessionPolicy) max() time.Duration {
+	if p.MaxSessionHours == 0 {
+		return neverLimit
+	}
+	return time.Duration(p.MaxSessionHours) * time.Hour
+}
+
+// sessionBound is a bound that also accepts 0, meaning never.
+type sessionBound struct {
+	signinBound
+	AllowNever bool `json:"allow_never"`
+}
 
 // defaultSessionPolicy applies if the setting cannot be read.
 var defaultSessionPolicy = sessionPolicy{IdleTimeoutMinutes: 30, MaxSessionHours: 12}
 
 // sessionBounds mirror the table CHECKs exactly; the API sends them so the form cannot drift.
-var sessionBounds = []signinBound{
-	{"idle_timeout_minutes", "Sign out after inactivity", "minutes", 5, 240, 30,
-		"An Admin Console session with no activity for this long ends, and the next screen asks to sign in again. An open tab that is only being looked at counts as inactive."},
-	{"max_session_hours", "Longest session", "hours", 1, 24, 12,
-		"However active, a session ends this long after signing in."},
+var sessionBounds = []sessionBound{
+	{signinBound{"idle_timeout_minutes", "Sign out after inactivity", "minutes", 5, 240, 30,
+		"An Admin Console session with no activity for this long ends, and the next screen asks to sign in again. An open tab that is only being looked at counts as inactive. Never keeps a session open until it is signed out by hand."}, true},
+	{signinBound{"max_session_hours", "Longest session", "hours", 1, 24, 12,
+		"However active, a session ends this long after signing in. Never removes the limit."}, true},
 }
 
 func (s *server) readSessionPolicy(ctx context.Context) (sessionPolicy, error) {
@@ -760,17 +780,20 @@ func (s *server) setSessionPolicy(w http.ResponseWriter, r *http.Request) {
 		if b.Key == "max_session_hours" {
 			v = in.MaxSessionHours
 		}
+		if b.AllowNever && v == 0 {
+			continue
+		}
 		if v < b.Min || v > b.Max {
 			jsonErr(w, http.StatusBadRequest, "invalid_setting",
-				b.Label+" must be between "+itoa(b.Min)+" and "+itoa(b.Max)+" "+b.Unit+".")
+				b.Label+" must be between "+itoa(b.Min)+" and "+itoa(b.Max)+" "+b.Unit+", or never.")
 			return
 		}
 	}
-	if in.IdleTimeoutMinutes > in.MaxSessionHours*60 {
+	if in.IdleTimeoutMinutes != 0 && in.MaxSessionHours != 0 && in.IdleTimeoutMinutes > in.MaxSessionHours*60 {
 		jsonErr(w, http.StatusBadRequest, "invalid_setting", "Sign out after inactivity cannot be longer than the longest session.")
 		return
 	}
-	reason := strings.TrimSpace(in.Reason)
+	reason := settingReason(in.Reason)
 	if !validReason(reason) {
 		jsonErr(w, http.StatusBadRequest, "reason_required", "a bounded reason (4-500 characters) is required")
 		return

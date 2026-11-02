@@ -248,7 +248,7 @@ function RemoveHolderDialog({ holder, onClose, onDone }: { holder: Holder | null
       title={`Remove ${holder?.label ?? "this key holder"}?`}
       description="New backups will no longer be encrypted to this key. Backups taken while it was a holder still open with it — they age out under the retention settings."
       confirmLabel="Remove key holder" confirmVariant="danger" busy={busy} error={err}
-      requireReason reasonMinLength={4} requirePassword
+      requireReason reasonMinLength={4} requirePassword strictPassword
       onConfirm={async ({ reason, password }) => {
         if (!holder) return;
         setBusy(true); setErr(null);

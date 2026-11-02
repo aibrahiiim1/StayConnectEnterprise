@@ -328,7 +328,7 @@ function VoucherDetail({
         requireReason
         reasonLabel="Reason (recorded)"
         reasonPlaceholder="Client asked the site team, card unreadable"
-        requirePassword
+        requirePassword strictPassword
         onConfirm={reveal}
       >
         {spent && (

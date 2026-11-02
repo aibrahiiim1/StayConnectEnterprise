@@ -58,7 +58,7 @@ func (s *server) hotelAdminCertRotate(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "type ROTATE to confirm")
 		return
 	}
-	if !s.reauth(r, in.Password) {
+	if !s.reauthStrict(r, in.Password) {
 		s.reauthRefused(w, r, "password confirmation failed")
 		return
 	}

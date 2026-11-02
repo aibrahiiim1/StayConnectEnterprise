@@ -106,7 +106,7 @@ The network pause (migration 0136) follows the same pattern next to it:
   scd); defaults 30 / 365 / 365 / 7 / 730 / 30 / 14 days; reason + password, change log and run record;
   Backups → Guest data kept for.
 * Admin Console session limits (`public.operator_session_policy`, migration 0132) — sign out after inactivity
-  (5-240 minutes, default 30) and the longest session (1-24 hours, default 12); reason + password, change log;
-  System → Operators → Session limits.
+  (5-240 minutes or Never, default 30) and the longest session (1-24 hours or Never, default 12; Never = 0,
+  migration 0204); confirmed in one popup, change log; System → Operators → Session limits.
 
 When you add the next one, add it to this list.
