@@ -11,22 +11,22 @@ import { PageShell, PageHeader } from "@/components/ui/page";
 import { FilterBar } from "@/components/ui/toolbar";
 import { RowActions } from "@/components/ui/row-actions";
 import { HelpList, HelpSection } from "@/components/help";
-import { Card, CardBody, CardFooter } from "@/components/ui/card";
+import { Card, CardFooter } from "@/components/ui/card";
 import { Table, TBody, THead, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Badge, StatusBadge } from "@/components/ui/badge";
-import { Field, Input } from "@/components/ui/input";
+import { Field, Input, QuietHints } from "@/components/ui/input";
+import { ConfirmDialog, Dialog, DialogBody, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { InfoHint } from "@/components/ui/quiet";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { ResultsCount, SearchInput } from "@/components/ui/data";
 import { SkeletonRows } from "@/components/ui/misc";
 import { useToast } from "@/components/ui/toast";
-import { Smartphone } from "lucide-react";
+import { Settings2, Smartphone } from "lucide-react";
 import { formatRelative } from "@/lib/utils";
 import { DeviceDetailDialog } from "@/components/devices/device-detail";
-import { SigninLimitsCard } from "@/components/devices/signin-limits-card";
-import { REASON_HINT, REASON_MAX_CHARS, reasonOk } from "@/lib/reason";
-import { useEditFocus } from "@/lib/use-edit-focus";
+import { SIGNIN_SETTING_GROUPS, SigninSettingsGroup } from "@/components/devices/signin-limits-card";
 
 // Online means signed in with a live session; a device on Wi-Fi without one is not "Offline".
 function DeviceStatus({ r }: { r: ClientDeviceRow }) {
@@ -60,6 +60,7 @@ export default function DevicesPage() {
   const [more, setMore] = useState(false);
   const [err, setErr] = useState<unknown>(null);
   const [open, setOpen] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => { setPage(1); }, [q]);
   const latest = useRef(0);
@@ -86,6 +87,11 @@ export default function DevicesPage() {
       <PageHeader
         title="Devices"
         description="Every device that has used the Wi-Fi, and the package places it holds."
+        actions={maySeeSettings ? (
+          <Button variant="secondary" onClick={() => setSettingsOpen(true)}>
+            <Settings2 /> Device settings
+          </Button>
+        ) : undefined}
         help={
           <>
             <HelpSection title="Places on a package">
@@ -107,9 +113,6 @@ export default function DevicesPage() {
           </>
         }
       />
-
-      {maySeeSettings && <DeviceChangesCard canEdit={mayConfigure} />}
-      {maySeeSettings && <SigninLimitsCard canEdit={mayConfigure} />}
 
       <Card className="overflow-hidden">
         <FilterBar
@@ -197,19 +200,40 @@ export default function DevicesPage() {
       </Card>
 
       <DeviceDetailDialog deviceId={open} mayWrite={mayWrite} onClose={() => setOpen(null)} onChanged={() => void load()} />
+
+      {maySeeSettings && (
+        <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+          <DialogContent size="lg">
+            <DialogHeader>
+              <DialogTitle>Device settings</DialogTitle>
+              <DialogDescription className="sr-only">How often clients may change their devices, and how long unused devices are kept.</DialogDescription>
+            </DialogHeader>
+            <DialogBody className="space-y-5 divide-y divide-border [&>*+*]:pt-5">
+              <DeviceChangesSetting canEdit={mayConfigure} />
+              <SigninSettingsGroup bare title="Device retention" keys={SIGNIN_SETTING_GROUPS.devices} canEdit={mayConfigure}
+                hint="Devices that have not been seen for this long are removed from the list." />
+            </DialogBody>
+          </DialogContent>
+        </Dialog>
+      )}
     </PageShell>
   );
 }
 
-function DeviceChangesCard({ canEdit }: { canEdit: boolean }) {
+/**
+ * How many times a day a client may replace or remove a device on a package from the portal. Confirm-only by the Product
+ * Owner's decision of 2026-11-02: Save opens a warning with the old and new values; Confirm applies it. No reason or
+ * password is asked; the appliance records the administrator, the old and new values and the time, and the role check
+ * (auth-methods write) is unchanged.
+ */
+function DeviceChangesSetting({ canEdit }: { canEdit: boolean }) {
   const toast = useToast();
   const [value, setValue] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
-  const [reason, setReason] = useState("");
-  const [password, setPassword] = useState("");
   const [editing, setEditing] = useState(false);
-  const { triggerRef, panelRef } = useEditFocus(editing);
+  const [confirming, setConfirming] = useState(false);
   const [err, setErr] = useState<unknown>(null);
+  const [saveErr, setSaveErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -220,56 +244,60 @@ function DeviceChangesCard({ canEdit }: { canEdit: boolean }) {
   }, []);
   useEffect(() => { void load(); }, [load]);
 
-  async function save() {
-    setBusy(true); setErr(null);
+  async function confirm() {
+    setBusy(true); setSaveErr(null);
     try {
-      await api.put("/device-settings/", { client_device_changes_per_day: Number(draft), reason: reason.trim(), password });
-      toast.success("Saved.");
-      setEditing(false); setPassword(""); setReason("");
+      await api.put("/device-settings/", { client_device_changes_per_day: Number(draft) });
+      toast.success("Daily device changes saved.");
+      setConfirming(false); setEditing(false);
       await load();
     } catch (e) {
-      setErr(e instanceof ApiError && e.code === "reauth_required" ? new Error("Your password was not accepted.") : e);
+      setSaveErr(e instanceof ApiError && e.code === "reauth_required" ? new Error("Your session needs you to sign in again.") : e);
     } finally { setBusy(false); }
   }
 
   const n = Number(draft);
-  const valid = Number.isInteger(n) && n >= 1 && n <= 10 && reasonOk(reason) && password !== "";
+  const valid = Number.isInteger(n) && n >= 1 && n <= 10 && n !== value;
   return (
-    <Card>
-      <CardBody className="space-y-3">
+    <QuietHints>
+      <div className="space-y-3" data-testid="device-changes-setting">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="min-w-0 space-y-1">
-            <div className="text-emphasis">Device changes a client may make per day</div>
-            <p className="text-caption text-muted-foreground">
-              Replacing or removing a device on a package from the portal. Default 3; from 1 to 10.
-            </p>
+          <div className="flex min-w-0 items-center gap-1">
+            <span className="text-emphasis">Daily device changes</span>
+            <InfoHint>
+              How many times a day a client may replace or remove a device on a package from the portal. Default 3; from 1 to 10.
+            </InfoHint>
           </div>
           <div className="flex items-center gap-2">
             <Badge tone="neutral">{value === null ? "—" : `${value} per day`}</Badge>
             {canEdit && !editing && (
-              <Button ref={triggerRef} size="sm" variant="secondary" onClick={() => { setDraft(String(value ?? 3)); setEditing(true); }}>Change</Button>
+              <Button size="sm" variant="secondary" onClick={() => { setDraft(String(value ?? 3)); setEditing(true); }}>Change</Button>
             )}
           </div>
         </div>
         <ErrorBanner err={err} />
         {editing && (
-          <div ref={panelRef} className="grid gap-3 sm:grid-cols-3">
-            <Field label="Changes per day" hint="1 to 10">
+          <div className="flex flex-wrap items-end gap-3">
+            <Field label="Changes per day" hint="1 to 10" className="w-40">
               <Input type="number" min={1} max={10} value={draft} onChange={(e) => setDraft(e.target.value)} />
             </Field>
-            <Field label="Reason" required hint={REASON_HINT}>
-              <Input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={REASON_MAX_CHARS} />
-            </Field>
-            <Field label="Your password" required hint="Confirms the change.">
-              <Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
-            </Field>
-            <div className="flex justify-end gap-2 sm:col-span-3">
+            <div className="ms-auto flex gap-2">
               <Button size="sm" variant="secondary" disabled={busy} onClick={() => setEditing(false)}>Cancel</Button>
-              <Button size="sm" variant="primary" disabled={busy || !valid} onClick={() => void save()}>{busy ? "Saving…" : "Save"}</Button>
+              <Button size="sm" variant="primary" disabled={busy || !valid} onClick={() => { setSaveErr(null); setConfirming(true); }}>Save</Button>
             </div>
           </div>
         )}
-      </CardBody>
-    </Card>
+        <ConfirmDialog
+          open={confirming}
+          onOpenChange={(v) => !busy && setConfirming(v)}
+          title="Change the daily device limit?"
+          description={`Every client will be able to replace or remove ${n} device${n === 1 ? "" : "s"} a day from the portal (now ${value ?? "—"}). It applies immediately and is recorded with your name.`}
+          confirmLabel="Confirm"
+          busy={busy}
+          error={saveErr}
+          onConfirm={confirm}
+        />
+      </div>
+    </QuietHints>
   );
 }
