@@ -76,6 +76,7 @@ export default function GuestAccountsPage() {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("enabled");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [portalErr, setPortalErr] = useState<string | null>(null);
   const [pageSize, setPageSize] = useState(PAGE_SIZES[1]);
   const [offset, setOffset] = useState(0);
   const [resp, setResp] = useState<AccountsPageResp | null>(null);
@@ -143,13 +144,14 @@ export default function GuestAccountsPage() {
 
   const filtered = rows ?? [];
 
+  // Its failure is shown inside Account settings, where the switch is (Codex P2 on PR #295).
   async function onTogglePortal() {
-    setErr(null);
+    setPortalErr(null);
     try {
       await api.post("/guest-accounts/portal", { enabled: !portalOn });
       setPortalOn((v) => !v);
       toast.success(`Username & Password sign-in ${!portalOn ? "shown on" : "hidden from"} the captive portal.`);
-    } catch (e: any) { setErr(e?.message ?? "Toggle failed"); }
+    } catch (e: any) { setPortalErr(e?.message ?? "Toggle failed"); }
   }
 
   function openNew() { setFormErr(null); setShowNew(true); setEditing(null); setPwFor(null); }
@@ -409,13 +411,14 @@ export default function GuestAccountsPage() {
         />
       </StatGrid>
 
-      <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+      <Dialog open={settingsOpen} onOpenChange={(v) => { setSettingsOpen(v); if (!v) setPortalErr(null); }}>
         <DialogContent size="lg">
           <DialogHeader>
             <DialogTitle>Account settings</DialogTitle>
             <DialogDescription className="sr-only">Whether clients see username-and-password sign-in, and the format of generated passwords.</DialogDescription>
           </DialogHeader>
           <DialogBody className="space-y-5">
+            <ErrorBanner err={portalErr} />
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <label htmlFor="portal-offer" className="text-emphasis">Show on the Client Portal</label>

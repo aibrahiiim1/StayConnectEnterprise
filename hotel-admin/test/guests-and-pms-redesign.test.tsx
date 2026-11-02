@@ -182,6 +182,18 @@ describe("Guest accounts", () => {
     expect(screen.getByText("Shown")).toBeTruthy();
   });
 
+  it("shows a failed portal switch inside Account settings, where the switch is", async () => {
+    wireAccounts(["site_admin"]);
+    post.mockRejectedValue(new Error("The appliance refused the change."));
+    const { default: Page } = await import("@/app/(app)/guest-accounts/page");
+    render(<Page />);
+    await screen.findByText("room101");
+    await userEvent.click(screen.getByRole("button", { name: /account settings/i }));
+    const dialog = await screen.findByRole("dialog", { name: "Account settings" });
+    await userEvent.click(within(dialog).getByRole("switch", { name: /offer username-and-password sign-in/i }));
+    expect(await within(dialog).findByText(/the appliance refused the change/i)).toBeTruthy();
+  });
+
   it("reveals a generated password once, in the one-time reveal", async () => {
     wireAccounts(["front_office_operator"]);
     post.mockResolvedValue({ status: "ok", generated_password: "Kx7-pq2-Zr9" });
