@@ -1860,7 +1860,7 @@
   "current_delivery": {
     "kind": "ADMIN_CONSOLE_SETTINGS_REORGANISATION_2026_11_03",
     "decision": "Product Owner requests of 2026-11-02/03 (merge and deploy authorised); the confirm-only daily device-change limit is the PO's explicit decision for that policy only.",
-    "decision_note": "edged and the Admin Console installed on the test appliance from 9c3612f9, read back.",
+    "decision_note": "edged installed on the test appliance from 9c3612f9 (T0285, read back). The Admin Console was then replaced by release 20261102-212254 from aae43c84cc2dabd245a391943d2969e016d9f2d8 (BUILD_ID f0H0yv6bpVP2NHtiQqcPE, served, read back), which adds the Codex P2 fix on PR #295 (a failed portal switch is shown inside Account settings); the earlier console release 20261102-211346 is kept as the previous one.",
     "manifest": "docs/manifests/AdminConsoleSettings20261103-change-manifest.md",
     "base": "2e551b14795d4400d4f35ad4e0cab02a0ec5d379",
     "base_note": "Master after the merge of PR #294.",
