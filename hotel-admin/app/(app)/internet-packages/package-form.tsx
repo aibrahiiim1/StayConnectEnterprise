@@ -421,7 +421,7 @@ export function PackageForm({
                 <strong>{notice.gbPerNight} GB per stay night</strong> instead of the plan&rsquo;s {notice.planQuotaGB} GB
                 {notice.exampleGB !== undefined && (
                   <span data-testid="allowance-example">
-                    {" "}· {notice.exampleNights} nights = <strong>{notice.exampleGB} GB</strong>
+                    {" "}· For a stay of {notice.exampleNights} nights, the client receives <strong>{notice.exampleGB} GB</strong>
                   </span>
                 )}
               </span>

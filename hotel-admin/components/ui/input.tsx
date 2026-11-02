@@ -215,8 +215,8 @@ export function Field({
   return (
     <div className={cn("min-w-0", className)}>
       {label && (
-        <div className={cn(quietHint && "mb-1.5 flex items-center gap-1")}>
-          <Label htmlFor={controlId} className={cn(quietHint && "mb-0")}>
+        <div className={cn(quietHint && "mb-1.5 flex items-center gap-1 [&>label]:mb-0")}>
+          <Label htmlFor={controlId}>
             {label}
             {required && <span aria-hidden="true" className="ms-0.5 text-destructive">*</span>}
             {optional && <span className="ms-1 font-normal text-muted-foreground">(optional)</span>}

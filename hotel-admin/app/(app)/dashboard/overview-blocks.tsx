@@ -357,9 +357,9 @@ export function PmsCard({ snap, canCharges }: { snap: OverviewSnapshot | null; c
                     <StatusDot tone={words.tone === "default" ? "default" : words.tone} />
                     {/* The readiness explanation is read on hover or focus of the name, not printed under it. */}
                     <Tooltip content={words.summary}>
-                      <span tabIndex={0} className="cursor-help truncate text-sm font-medium underline decoration-dotted decoration-muted-foreground/50 underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                      <button type="button" className="cursor-help truncate rounded-sm text-start text-sm font-medium underline decoration-dotted decoration-muted-foreground/50 underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                         {i.display_label || "PMS connection"}
-                      </span>
+                      </button>
                     </Tooltip>
                     <span className="sr-only">{words.summary}</span>
                     {i.lifecycle_state !== "ACTIVE" && <Badge tone="default">Not in use</Badge>}
@@ -628,7 +628,10 @@ export function ApplianceCard({ snap, licenseHeadline }: { snap: OverviewSnapsho
                   <span className="inline-flex items-center gap-1.5">
                     {net.internet_reachable != null && (
                       <Tooltip content={net.internet_reachable ? "Internet reachable" : "Internet not reachable"}>
-                        <span tabIndex={0} className="inline-flex"><StatusDot tone={net.internet_reachable ? "ok" : "err"} /></span>
+                        <button type="button" aria-label={net.internet_reachable ? "Internet reachable" : "Internet not reachable"}
+                          className="inline-flex rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                          <StatusDot tone={net.internet_reachable ? "ok" : "err"} />
+                        </button>
                       </Tooltip>
                     )}
                     <span className="font-mono text-xs">{net.wan_address || "no address"}</span>
