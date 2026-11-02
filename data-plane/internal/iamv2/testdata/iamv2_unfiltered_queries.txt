@@ -5,6 +5,7 @@ cmd/edged/client_devices_admin.go	2f7500771a07	SELECT count(*)::int FROM iam_v2.
 cmd/edged/client_devices_admin.go	b000ffc8963e	SELECT count(*)::int FROM iam_v2.entitlement_devices ed JOIN iam_v2.entitlements e ON e.id
 cmd/edged/guest_accounts_iamv2_lifecycle.go	40c4feebcefb	FROM iam_v2.guest_access_accounts a LEFT JOIN LATERAL ( SELECT count(DISTINCT s.device_id)
 cmd/edged/guest_accounts_iamv2_lifecycle.go	5cb41ff3e026	SELECT count(DISTINCT s.device_id) FROM iam_v2.sessions s JOIN iam_v2.entitlements e ON e.
+cmd/edged/pms_attention.go	648173daa9d2	EXISTS (SELECT 1 FROM iam_v2.pms_roster_reconciliation_runs rr WHERE rr.pms_interface_id =
 cmd/edged/resources_network.go	475d76649a90	SELECT count(*) FROM iam_v2.sessions se JOIN guest_networks g ON g.id = $1 WHERE se.state 
 cmd/edged/resources_network.go	836479de099b	DELETE FROM iam_v2.guest_network_pms_policy WHERE guest_network_id=$1::uuid
 cmd/edged/resources_network.go	ffb15517fad2	UPDATE iam_v2.guest_network_replacements SET revision_id=$2::uuid WHERE id = ANY($1::uuid[
