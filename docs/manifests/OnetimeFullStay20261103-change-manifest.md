@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `6e3a88a048f77f388a2969197d279bfa1f5d4e6b`
-- **HEAD commit:** `862c650b`
-- **Provenance (generation HEAD = inventory_head):** `862c650b251f34cdd9b6d351ead7ac4d38de6185`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `a503be92`
+- **Provenance (generation HEAD = inventory_head):** `a503be92736444c72f43e0d578a5c086b1703ef7`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/fullstay-migration-2026-11-03`
 - **Remote branch:** `origin/delivery/fullstay-migration-2026-11-03`
 - **Changed files:** 27
@@ -16,7 +16,7 @@
 | `data-plane/cmd/netd/phase3_shaping.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | netd rebuilds at most eight moved classes per pass |
 | `data-plane/cmd/netd/phase3_shaping_test.go` | MODIFIED | `M` | tests/tooling | RUNTIME | rollback RESTORES prior content | netd rebuilds a shared-speed class left under another entitlement's group |
 | `data-plane/cmd/netd/phase3_speed_allocation_test.go` | MODIFIED | `M` | tests/tooling | RUNTIME | rollback RESTORES prior content | netd denies a device before rebuilding its class under another group |
-| `data-plane/cmd/scd/onetime_fullstay_grant_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | One-time Full Stay grant for stays that paid on the previous system |
+| `data-plane/cmd/scd/onetime_fullstay_grant_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | One-time Full Stay grant declares its entitlement row with the table's type |
 | `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0292 records the one-time Full Stay migration and the netd regroup fix |
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0292 records the one-time Full Stay migration and the netd regroup fix |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0292 records the one-time Full Stay migration and the netd regroup fix |
@@ -37,21 +37,21 @@
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt after the T0292 receipt |
 | `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: current delivery names the deployed fail-closed netd |
 | `governance/transitions/T0292.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: T0292 records the one-time Full Stay migration and the netd regroup fix |
-| `scripts/sql/onetime-fullstay-grant.sql` | CREATED | `A` | other | OTHER | rollback REMOVES it | One-time Full Stay grant for stays that paid on the previous system |
+| `scripts/sql/onetime-fullstay-grant.sql` | CREATED | `A` | other | OTHER | rollback REMOVES it | One-time Full Stay grant declares its entitlement row with the table's type |
 | `scripts/sql/onetime-fullstay-run.sql` | CREATED | `A` | other | OTHER | rollback REMOVES it | One-time Full Stay grant for stays that paid on the previous system |
 
 ## Total diff statistics (`git diff --stat`)
 ```text
- data-plane/cmd/netd/phase3_provision.go            |  43 +++++
+ data-plane/cmd/netd/phase3_provision.go            |  43 ++++
  data-plane/cmd/netd/phase3_shaping.go              |   3 +
  data-plane/cmd/netd/phase3_shaping_test.go         |  15 ++
- .../cmd/netd/phase3_speed_allocation_test.go       | 139 ++++++++++++++
- .../scd/onetime_fullstay_grant_integration_test.go | 201 +++++++++++++++++++++
+ .../cmd/netd/phase3_speed_allocation_test.go       | 139 +++++++++++++
+ .../scd/onetime_fullstay_grant_integration_test.go | 216 +++++++++++++++++++++
  .../StayConnect-IAM-Phase0-Contract.md             |   2 +-
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   2 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   2 +-
  docs/context/StayConnect-IAM-Handoff.md            |   2 +-
- .../OnetimeFullStay20261103-change-manifest.md     |  90 +++++++++
+ .../OnetimeFullStay20261103-change-manifest.md     |  92 +++++++++
  .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 354560 -> 354557 bytes
  .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 178001 -> 177991 bytes
  .../chatgpt/phase-evidence/GIT_STAT_502e02c0.txt   |   4 -
@@ -67,9 +67,9 @@
  .../StayConnect-IAM-Phase1B-Plan.md                |   2 +-
  governance/project-state.json                      |  22 +--
  governance/transitions/T0292.json                  |  36 ++++
- scripts/sql/onetime-fullstay-grant.sql             | 148 +++++++++++++++
+ scripts/sql/onetime-fullstay-grant.sql             | 148 ++++++++++++++
  scripts/sql/onetime-fullstay-run.sql               |  49 +++++
- 27 files changed, 783 insertions(+), 59 deletions(-)
+ 27 files changed, 800 insertions(+), 59 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -79,6 +79,8 @@ M  docs/manifests/OnetimeFullStay20261103-change-manifest.md
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: a503be92 One-time Full Stay grant declares its entitlement row with the table's type
+HISTORICAL: e3c574b3 Governance: manifest regenerated for the delivery head
 HISTORICAL: 862c650b Packs rebuilt for the fail-closed netd head
 HISTORICAL: 8af69d9c Governance: current delivery names the deployed fail-closed netd
 HISTORICAL: 395af38a netd denies a device before rebuilding its class under another group
