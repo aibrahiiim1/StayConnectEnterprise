@@ -1,0 +1,35 @@
+{
+  "transition_id": "T0286",
+  "seq": 286,
+  "timestamp": "2026-11-03T07:38:36+02:00",
+  "timestamp_derivation": "Read from the workstation clock (UTC+02:00) by the script that wrote this receipt, immediately before the commit that introduces it.",
+  "record_type": "ADMIN_CONSOLE_SIGNIN_UX_DELIVERY",
+  "authorisation": "The Product Owner's mission of 2026-11-03 (UX overhaul of Sign-in methods, Client groups, Identity providers and Delivery; investigate the After Check-out emergency fallback warning), under the standing test-appliance deployment authority (D79). The mission did not authorise a merge: the PR waits for the PO's approval.",
+  "delivery": "Sign-in methods is split into tabs (Methods, By network, Email accounts, One-time codes, Protection), linkable by URL hash; method descriptions are hints, warnings stay visible. Client groups, Identity providers and Delivery dialogs use quiet hints, titled sections and a closed disclosure for advanced fields (scopes, SMTP timeout) and long registration instructions. Email accounts asks for the reason and password only once a value changed. After Check-out Access showed the built-in emergency terms wrongly ('no time', 'Up to 0 devices'): the appliance sends them in the grant's shape (duration_seconds, device_limit_policy, device_limit 0); the console now normalises them (1 hour, no separate device limit, new devices refused). The fallback warning, its critical alerts and the safeguards are unchanged; the warning offers 'Set this site's terms' to roles that can publish.",
+  "finding": "The fallback warning is correct: the site has no published After Check-out terms (config_version 0, configured false, empty history, policy null, enabled true), so the effective source is EMERGENCY_FALLBACK. Not a persistence or status defect. Nothing was published.",
+  "deployment": {
+    "test_appliance": "172.21.96.97: Admin Console release 20261103-053741 reads source_commit 464aa3d9f144a2589b51be2025c5569ff25e29f8 and BUILD_ID nenZp0uTNku09FSuiN7EP, served; previous release 20261103-052743 kept. edged unchanged.",
+    "central": "Not changed."
+  },
+  "verification": "Admin Console full suite 1075/1075 PASS (before two layout fixes; their files re-run 33/33 PASS); Central console 261/261 PASS (shared quiet.tsx); eslint and tsc clean. Live on the test appliance, desktop and phone width: every tab, the three dialogs and the After Check-out page inspected; no dialog opens a hint by itself; no horizontal page scroll at 390 px.",
+  "not_touched": "Authentication semantics, Client Group membership and priority, provider ownership and OAuth credentials, notification delivery, permissions, validation, audit, APIs, schema, edged, the emergency fallback, PMS, payments, networking, the production Central.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "ba028616cb74558056b44af6a05ffc45e80ad270",
+  "previous_delivery": "T0285",
+  "decision": "none (FAST Admin Console change)",
+  "go_live": "NOT authorised."
+}

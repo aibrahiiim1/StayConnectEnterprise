@@ -1362,7 +1362,7 @@
       "dispositions": "docs/AUDIT_DECISION_DISPOSITIONS.md"
     }
   },
-  "latest_transition_id": "T0285",
+  "latest_transition_id": "T0286",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1858,16 +1858,16 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "ADMIN_CONSOLE_SETTINGS_REORGANISATION_2026_11_03",
-    "decision": "Product Owner requests of 2026-11-02/03 (merge and deploy authorised); the confirm-only daily device-change limit is the PO's explicit decision for that policy only.",
-    "decision_note": "edged installed on the test appliance from 9c3612f9 (T0285, read back). The Admin Console was then replaced twice for the two Codex P2 fixes on PR #295 (a failed portal switch shown inside Account settings; the 4-character reason minimum kept in the moved settings groups); it now runs release 20261102-213029 from 36cbd2031fe92d99a9321b31be24ed3df5953bcd (BUILD_ID QrEGH9ppizZSlbzTEpVe3, served, read back), previous release 20261102-212254 kept.",
-    "manifest": "docs/manifests/AdminConsoleSettings20261103-change-manifest.md",
-    "base": "2e551b14795d4400d4f35ad4e0cab02a0ec5d379",
-    "base_note": "Master after the merge of PR #294.",
-    "transition": "T0285",
-    "previous_delivery": "T0284",
-    "branch": "delivery/admin-console-clients-sessions-2026-11-02",
-    "note": "T0285. Go-Live not authorised."
+    "kind": "ADMIN_CONSOLE_SIGNIN_UX_2026_11_03",
+    "decision": "Product Owner mission of 2026-11-03 (UX overhaul and After Check-out warning investigation). No new decision record; merge awaits PO approval.",
+    "decision_note": "Admin Console only; installed on the test appliance as release 20261103-053741 (source_commit 464aa3d9, BUILD_ID nenZp0uTNku09FSuiN7EP), read back.",
+    "manifest": "docs/manifests/AdminConsoleSigninUX20261103-change-manifest.md",
+    "base": "ba028616cb74558056b44af6a05ffc45e80ad270",
+    "base_note": "Master after the merge of PR #295.",
+    "transition": "T0286",
+    "previous_delivery": "T0285",
+    "branch": "delivery/admin-console-signin-ux-2026-11-03",
+    "note": "T0286. Go-Live not authorised."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
