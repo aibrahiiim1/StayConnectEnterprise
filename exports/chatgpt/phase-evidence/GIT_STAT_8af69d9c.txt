@@ -1,4 +1,0 @@
-commit 8af69d9c58ebf30085b3e54d143ca116179f68c3
-Date:   Tue Nov 3 23:48:24 2026 +0200
-
-    Governance: current delivery names the deployed fail-closed netd
