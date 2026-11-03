@@ -1,7 +1,6 @@
 "use client";
 
-// The options mirror edged's pmsSignInModes (data-plane/cmd/edged/resources_site.go); "either" is honoured
-// only if already stored, because it guesses surname vs reservation from the typed shape and rejects surnames with digits.
+// "either" is kept only if already stored: it rejects surnames containing digits.
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
@@ -48,7 +47,6 @@ const ROOM_SIGN_IN_OPTIONS: { value: string; label: string; hint: string }[] = [
   },
 ];
 const LEGACY_EITHER = "either";
-// Portal and resolver fallback when nothing is stored.
 const DEFAULT_MODE = "room_lastname";
 
 export default function RoomSignInPage() {

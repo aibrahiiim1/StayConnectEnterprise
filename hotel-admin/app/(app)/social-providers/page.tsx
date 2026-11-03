@@ -1,7 +1,6 @@
 "use client";
 
-// On Edit a blank client secret means "keep the existing one": the secret is write-only, so it is omitted, never sent empty (which would erase it).
-// A provider is offered only while HTTPS is active and the portal's current host name's callback is ticked.
+// A blank secret on Edit is omitted, never sent empty: that would erase it.
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -73,7 +72,6 @@ const STEP_STATE: Record<SocialSetupStep["state"], { mark: string; label: string
   manual: { mark: "?", label: "Only Google can confirm this", className: "text-muted-foreground" },
 };
 
-/** Google needs the Site's own project, domain and certificate. This says which parts this appliance verified. */
 function GoogleSetupChecklist({ steps }: { steps: SocialSetupStep[] }) {
   return (
     <fieldset className="space-y-2" aria-label="Google setup checklist">
@@ -113,7 +111,7 @@ export default function SocialProvidersPage() {
   const roles = useOperatorRoles();
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
-  // The operator's own password confirms adding, changing or removing a provider (audit P9 M2). It is never kept.
+  // Step-up password; never stored.
   const [pw, setPw] = useState("");
   const [formErr, setFormErr] = useState<unknown>(null);
 
@@ -427,7 +425,6 @@ export default function SocialProvidersPage() {
           <Switch checked={f.enabled} onCheckedChange={(v) => set("enabled", v)} label="Offer this provider" />
         </div>
 
-        {/* Advanced: opened when the entry already asks for extra scopes, so a stored choice is never hidden. */}
         <Disclosure title="Advanced: scopes" defaultOpen={f.scopes.trim() !== ""}>
           <Field label="Scopes" hint="Leave empty to ask only for what sign-in needs. Space separated.">
             <Input value={f.scopes} onChange={(e) => set("scopes", e.target.value)} placeholder={DEFAULT_SCOPES[f.provider] ?? ""} />

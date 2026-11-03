@@ -1,0 +1,35 @@
+{
+  "transition_id": "T0288",
+  "seq": 288,
+  "timestamp": "2026-11-03T10:30:15+02:00",
+  "timestamp_derivation": "Read from the workstation clock (UTC+02:00) by the script that wrote this receipt, immediately before the commit that introduces it.",
+  "record_type": "ADMIN_CONSOLE_UX_CLOSURE",
+  "authorisation": "The Product Owner's closure request of 2026-11-03 for the already authorised Admin Console UX mission (comment policy, final visual review, privacy-safe evidence, regression, protected merge, test deployment).",
+  "delivery": "Comments in every file PR #296 and #297 touched cut to security, privacy and data-integrity ones, one line each (108 comment lines removed or merged). Final review fixes: a dialog opens with focus on its first field, not a hint icon; stat card labels and hints wrap instead of truncating on phones; PMS connection no longer repeats the last-heard time; any key press marks keyboard use so a tooltip opens on keyboard focus (sidebar-collapse.spec failed on master since PR #295). Privacy-masked before/after evidence in docs/evidence/admin-console-ux-2026-11-03.",
+  "finding": "Evidence images contain no guest names, room or reservation numbers, IP or MAC addresses, operator e-mails or appliance gateway host names: masked before capture or blurred afterwards. The repository is public.",
+  "deployment": {
+    "test_appliance": "172.21.96.97: Admin Console release 20261103-082555 reads source_commit 981969843428c65d5d32f7635577e7c70d634e17 and BUILD_ID dcssK6rq0MRtPkrV4ijN6, served; previous release 20261103-072127 kept. edged unchanged.",
+    "central": "Not changed."
+  },
+  "verification": "Admin Console full suite 1079/1079 PASS; Central console 261/261 PASS (shared dialog, page, tooltip, error-banner, quiet); tsc clean; browser E2E for every Client access and Hotel page 70/70 PASS plus focus-related specs 33/33 PASS. Live on the test appliance: every page modified by PR #296 and #297 reviewed at 1440 px and 390 px; no horizontal scroll; dialogs open on their first field with no hint showing.",
+  "not_touched": "PMS behaviour and configuration, financial operations, networking, authentication security, After Check-out terms (not published), edged, schema, the production Central.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "577463f7842065e4d36480b3e79f44e9a6715d70",
+  "previous_delivery": "T0287",
+  "decision": "none (FAST Admin Console change)",
+  "go_live": "NOT authorised."
+}

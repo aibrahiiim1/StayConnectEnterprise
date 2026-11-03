@@ -1,8 +1,7 @@
 import { clsx, type ClassValue } from "clsx";
 import { extendTailwindMerge } from "tailwind-merge";
 
-// tailwind-merge reads unknown `text-*` as a colour, so the type roles are registered as font sizes or `cn` drops the
-// size.
+// tailwind-merge must know the type roles as font sizes, or `cn` drops the size.
 const twMerge = extendTailwindMerge({
   extend: {
     classGroups: {
@@ -34,7 +33,6 @@ export function formatDate(s: string): string {
   }
 }
 
-// errMsg turns any thrown value into a string, appending the ApiError trace id when present.
 import type { ApiError } from "./api";
 export function errMsg(e: unknown): string {
   if (!e) return "";

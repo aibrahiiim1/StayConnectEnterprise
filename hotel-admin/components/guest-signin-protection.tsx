@@ -1,7 +1,5 @@
 "use client";
 
-// Sign-in protection is always on; sites without saved policy use approved defaults.
-
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError, GuestSignInProtection } from "@/lib/api";
 import { ConfirmDialog } from "@/components/ui/dialog";
@@ -18,7 +16,6 @@ import { formatDate } from "@/lib/utils";
 
 type Draft = { max: string; window: string; restriction: string };
 
-// Read allowed ranges from the server so the form matches enforcement.
 const STANDARD = { max: 5, window: 60, restriction: 60 } as const;
 
 function draftOf(p: GuestSignInProtection): Draft {
@@ -42,7 +39,6 @@ export function GuestSignInProtectionCard({ canWrite }: { canWrite: boolean }) {
   const [err, setErr] = useState<unknown>(null);
   const [saving, setSaving] = useState(false);
   const [note, setNote] = useState("");
-  // Site-wide changes require reason and operator password.
   const [confirming, setConfirming] = useState(false);
   const [saveErr, setSaveErr] = useState<unknown>(null);
 
@@ -121,7 +117,6 @@ export function GuestSignInProtectionCard({ canWrite }: { canWrite: boolean }) {
             </HelpTip>
             {policy.is_default && <Badge tone="default">Using the standard settings</Badge>}
           </CardTitle>
-          {/* Make clear that default settings still protect sign-in. */}
           <CardDescription>
             It is always on — these settings decide how strict it is, not whether it runs.
           </CardDescription>
@@ -177,7 +172,6 @@ export function GuestSignInProtectionCard({ canWrite }: { canWrite: boolean }) {
           />
         </div>
 
-        {/* New wait settings do not shorten a restriction already running. */}
         <div className="space-y-1 rounded-md border border-border bg-surface px-3.5 py-2.5 text-xs text-muted-foreground">
           <p>
             New settings apply to <strong>what happens next</strong>. A device already waiting keeps the time it

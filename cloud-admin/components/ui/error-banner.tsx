@@ -17,7 +17,6 @@ export function ErrorBanner({ err, className }: { err: unknown; className?: stri
     message = String(err);
   }
   return (
-    // Announce errors to screen readers as they appear.
     <div
       role="alert"
       aria-live="assertive"
@@ -71,7 +70,6 @@ const CALLOUT_TONES = {
   },
 } as const;
 
-/** A one-line, severity-aware status: what is wrong, where, and the action that fixes it. */
 export function Notice({
   tone = "warning",
   title,

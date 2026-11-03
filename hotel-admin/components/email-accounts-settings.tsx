@@ -1,8 +1,5 @@
 "use client";
 
-// Read ranges, units, and defaults from the appliance so the form cannot offer invalid settings.
-// Saving site-wide terms requires a reason and operator password.
-
 import * as React from "react";
 import { RefreshCw } from "lucide-react";
 import {
@@ -162,7 +159,6 @@ function ChangeHistory({ changes }: { changes: SelfServiceChange[] }) {
   );
 }
 
-/** Server reasons require 4–500 characters. */
 function reasonProblem(reason: string): string | null {
   const n = reason.trim().length;
   if (n < 4) return "Give a reason of at least 4 characters. It is recorded with your name.";
@@ -342,7 +338,6 @@ export function EmailAccountsSettingsCard({ canEdit }: { canEdit: boolean }) {
 
             {problem && <p className="text-xs text-destructive" role="alert">{problem}</p>}
 
-            {/* Asked only once something changed: a reason and the password confirm a change, not a visit. */}
             {canEdit && !data.awaiting_assignment && dirty && (
               <div className="grid gap-4 md:grid-cols-2">
                 <Field label="Reason for the change" error={reasonErr ?? undefined} hint="Recorded in the history below." required>

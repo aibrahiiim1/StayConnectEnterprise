@@ -1,7 +1,6 @@
 "use client";
 
-// Privacy invariant: no guest, room number or reservation appears on this page. A list of failed sign-ins would let
-// any read-only admin session enumerate who is staying at the property; the per-guest view is a separate, role-gated screen.
+// Privacy: no guest, room or reservation here, so read-only sessions cannot enumerate guests.
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -292,7 +291,6 @@ export default function PMSResolutionsPage() {
             />
           ) : (
             <Table label="Recent attempts">
-              {/* No prose here: a test asserts the table contains no "room", "reservation", "stay" or "folio" text. */}
               <THead>
                 <TR>
                   <TH>When</TH>

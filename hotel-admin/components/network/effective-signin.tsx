@@ -1,8 +1,5 @@
 "use client";
 
-// What each client network actually offers at sign-in. The switches on this page are site-wide; a network can narrow them, and room sign-in depends on that network's PMS
-// routing. This card puts the result in one place so an administrator never has to work it out from four screens.
-
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Check, Minus, TriangleAlert } from "lucide-react";

@@ -1,8 +1,5 @@
 "use client";
 
-// Never-configured connections are kept in a folded group so a half-finished setup is not read as a PMS link that is down.
-// Readiness is the server's verdict (`room_auth_ready`, `roomSignInReadiness`); this page words it and does not re-derive it.
-
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { api, type PmsInterfaceHealth, type Whoami } from "@/lib/api";
@@ -37,9 +34,8 @@ type Filter = "all" | "attention" | "working";
 export default function PMSInterfacesPage() {
   const [rows, setRows] = useState<PmsConnection[] | null>(null);
   const [health, setHealth] = useState<Record<string, PmsInterfaceHealth>>({});
-  // Health arrives after the list; until it does the summary must not announce "not working".
+  // Until health loads, never announce "not working".
   const [healthLoaded, setHealthLoaded] = useState(false);
-  // The one network-aware room sign-in assessment; null = it could not be read (unknown, never an outage).
   const { readiness: signIn, assessment, reload: reloadReadiness } = useRoomSignInReadiness();
   const [err, setErr] = useState<unknown>(null);
 
@@ -107,7 +103,6 @@ export default function PMSInterfacesPage() {
   const routingFor = useCallback((i: PmsConnection): AssessmentInterfaceSummary | null =>
     assessment?.interfaces.find((x) => x.pms_interface_id === i.id) ?? null, [assessment]);
 
-  // A connection needs attention for room sign-in only when it is serving a client network and cannot answer; one that serves no active network is not a fault.
   const needsAttention = (i: PmsConnection) => routingFor(i)?.state === "IMPAIRED" || (health[i.id]?.review_events ?? 0) > 0;
   const working = (i: PmsConnection) => i.lifecycle_state === "ACTIVE" && routingFor(i)?.state === "SERVING";
   const shown = live.filter((i) => filter === "all" || (filter === "attention" ? needsAttention(i) : working(i)));
@@ -197,7 +192,7 @@ export default function PMSInterfacesPage() {
                 ? <time dateTime={heard} title={formatDate(heard)}>{formatRelative(heard)}</time>
                 : <span className="text-muted-foreground">Never</span>
             }
-            hint={heard ? formatDate(heard) : "No PMS heard from yet"}
+            hint={heard ? undefined : "No PMS heard from yet"}
           />
         </StatGrid>
       )}

@@ -53,7 +53,6 @@ const PAGE_SIZES = [25, 50, 100, 200];
 
 const label = (s: string) => STATUS_LABELS[s] ?? s.replace(/_/g, " ").toLowerCase();
 
-/** Arrival/departure are dates in the PMS, not instants. */
 function shortDate(v?: string | null): string {
   if (!v) return "—";
   const d = new Date(v);
@@ -77,7 +76,7 @@ export default function StaysPage() {
   const toast = useToast();
   const roles = useOperatorRoles();
   const caps = useCapabilities();
-  // Site administrator only, and only where room charge is licensed and served; unknown fails closed.
+  // Fails closed while unknown.
   const canManageRoomCharge =
     (roles?.includes("site_admin") ?? false) &&
     surfaceAvailable(caps, "pms-financial-onboarding") &&
@@ -88,8 +87,8 @@ export default function StaysPage() {
 
   useEffect(() => { setOffset(0); }, [status, q, vipOnly, pms, pageSize]);
 
-  // The search text goes in a header, not the URL: it is often a guest's name, and edged logs request lines.
-  // Responses can arrive out of order, so only the newest request's response is applied.
+  // Search goes in a header: it may be a guest name, and edged logs request lines.
+  // Apply only the newest response.
   const latest = useRef(0);
   const load = useCallback(async () => {
     const mine = ++latest.current;
@@ -574,7 +573,6 @@ function RoomChargeSection({
   const active = blocks.filter((b) => !b.cleared_at);
   const cleared = blocks.filter((b) => b.cleared_at);
   const adminBlocked = active.some((b) => b.reason === "ADMIN_BLOCK");
-  // A reason with no matching block row (NOT_IN_HOUSE, NO_RESERVATION) comes from the PMS feed itself.
   const reason = stay.posting_block_reason ?? null;
   const reasonHasBlock = reason !== null && active.some((b) => b.reason === reason);
   return (
@@ -675,7 +673,6 @@ function AccessCell({ stay }: { stay: Stay }) {
   );
 }
 
-// The device limit counts places, not sessions: a device keeps its place after signing out. Older appliances fall back to the online count.
 function placesHeld(s: Stay): number {
   return s.access_authorized_devices ?? s.access_active_devices ?? 0;
 }

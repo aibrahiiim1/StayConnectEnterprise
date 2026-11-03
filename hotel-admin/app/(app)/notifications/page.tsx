@@ -47,10 +47,8 @@ const KIND_LABELS: Record<string, string> = {
 const CHANNEL_LABELS: Record<Channel, string> = { email: "Email", sms: "Text message", whatsapp: "WhatsApp" };
 const CHANNEL_MODULE: Record<Channel, string> = { email: "email_otp", sms: "sms_otp", whatsapp: "whatsapp_otp" };
 
-// The server fills the port in when left blank.
 const IMPLIED_PORT: Record<Security, string> = { starttls: "587", tls: "465", none: "25" };
 
-// edged validates the same range.
 const SMTP_TIMEOUT_DEFAULT = 10;
 const SMTP_TIMEOUT_MIN = 1;
 const SMTP_TIMEOUT_MAX = 120;
@@ -74,7 +72,6 @@ type FormState = {
   template_name: string;
   language: string;
   content_sid: string;
-  // SMTP only; the password travels as api_key, write-only.
   host: string;
   port: string;
   security: Security;
@@ -109,7 +106,7 @@ export default function NotificationsPage() {
   const roles = useOperatorRoles();
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
-  // The operator's own password confirms adding, changing or removing a sender (audit P9 M2). It is never kept.
+  // Step-up password; never stored.
   const [pw, setPw] = useState("");
   const [formErr, setFormErr] = useState<unknown>(null);
 

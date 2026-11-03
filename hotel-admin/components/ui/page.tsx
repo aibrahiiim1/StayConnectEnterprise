@@ -117,7 +117,7 @@ export function StatCard({
     <>
       <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
         {icon && <span className="inline-flex shrink-0 [&_svg]:size-3.5" aria-hidden>{icon}</span>}
-        <span className="truncate">{label}</span>
+        <span className="line-clamp-2">{label}</span>
         {explain}
       </div>
       <div className="mt-1.5 flex items-baseline gap-2">
@@ -137,7 +137,7 @@ export function StatCard({
           </span>
         )}
       </div>
-      {hint && <div className="mt-1 line-clamp-1 text-xs text-muted-foreground">{hint}</div>}
+      {hint && <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{hint}</div>}
       {footer && <div className="mt-3">{footer}</div>}
     </>
   );

@@ -1,7 +1,6 @@
 "use client";
 
 // Ambiguous sign-in signals are not evidence of transfer; require a preview before confirmation.
-// Transfer ends access at the source property and re-establishes it at the destination.
 
 import { useCallback, useEffect, useState } from "react";
 import { ArrowLeftRight, ArrowRight, History, Radar } from "lucide-react";
@@ -53,7 +52,6 @@ type TransferRow = {
   created_at: string;
 };
 
-// Show unknown outcome codes instead of hiding signals the UI does not recognize.
 const OUTCOME_WORDS: Record<string, string> = {
   AMBIGUOUS: "More than one match",
   AMBIGUOUS_ROOM: "Room matched twice",
@@ -72,7 +70,6 @@ function StayLabel({ room, reservation, pms }: { room: string; reservation: stri
   );
 }
 
-/** Wait for role loading before showing a read-only notice. */
 export function StayTransferView({ canAct, rolesKnown = true }: { canAct: boolean; rolesKnown?: boolean }) {
   const toast = useToast();
   const [signals, setSignals] = useState<Signal[] | null>(null);
@@ -80,7 +77,6 @@ export function StayTransferView({ canAct, rolesKnown = true }: { canAct: boolea
   const [rows, setRows] = useState<TransferRow[] | null>(null);
   const [fromStay, setFromStay] = useState("");
   const [toStay, setToStay] = useState("");
-  // Empty = any connection. With several PMS connections the same reservation number can exist in more than one, so the connection can be named.
   const [fromPms, setFromPms] = useState("");
   const [toPms, setToPms] = useState("");
   const { connections, multi, labelOf } = usePmsConnections();
