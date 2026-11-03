@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -142,8 +143,9 @@ func (s *server) createEdgeOperator(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.Email = strings.TrimSpace(strings.ToLower(in.Email))
-	if in.Email == "" || !strings.Contains(in.Email, "@") {
-		jsonErr(w, http.StatusBadRequest, "bad_request", "valid email required")
+	if !validOperatorAccountName(in.Email) {
+		jsonErr(w, http.StatusBadRequest, "bad_request",
+			"Enter an email address, or a username of 3 to 64 letters, digits, dots, dashes or underscores.")
 		return
 	}
 	if msg := operatorPasswordProblem(in.Password, in.Email); msg != "" {
@@ -407,4 +409,17 @@ func (s *server) removeEdgeOperatorRole(w http.ResponseWriter, r *http.Request) 
 	s.pending.dropOperator(id) // a password step taken before the change must not complete after it
 	s.audit(r, "operator.role_removed", "operator", id, map[string]any{"role": role})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+var operatorUsername = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{2,63}$`)
+
+// validOperatorAccountName accepts the sign-in name the login page asks for: an email address or a username.
+func validOperatorAccountName(name string) bool {
+	if name == "" || len(name) > maxOperatorEmailLen || strings.ContainsAny(name, " \t\r\n") {
+		return false
+	}
+	if at := strings.Index(name, "@"); at >= 0 {
+		return at > 0 && at < len(name)-1 && strings.Count(name, "@") == 1
+	}
+	return operatorUsername.MatchString(name)
 }

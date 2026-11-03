@@ -272,12 +272,29 @@ describe("Concurrency contracts in the UI", () => {
       }],
       meta: { has_more: false },
     });
-    post.mockRejectedValue(Object.assign(new Error("state conflict"), { status: 409 }));
+    post.mockRejectedValue(Object.assign(new Error("state conflict"), { status: 409, code: "state_conflict" }));
     const { OperationalAlertsView: AlertsPage } = await import("@/components/phase3/operational-alerts-view");
     render(<AlertsPage />);
     await userEvent.click(await screen.findByRole("button", { name: /^Acknowledge: alert/ }));
     // Reload after conflict instead of retrying a stale decision.
     expect(await screen.findByRole("status")).toBeTruthy();
     await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+  });
+
+  it("a refusal that is not a state conflict is shown as an error, not as someone else's change", async () => {
+    get.mockResolvedValue({
+      data: [{
+        audit_id: "a1", stay_id: "s1", lifecycle_version: 1, alert_code: "EMERGENCY_GRACE_USED",
+        trigger: "EMERGENCY_GRACE", boundary_at: new Date().toISOString(),
+        boundary_clock_suspect: false, created_at: new Date().toISOString(), state: "OPEN", seq: 1,
+      }],
+      meta: { has_more: false },
+    });
+    post.mockRejectedValue(Object.assign(new Error("the alert action was refused"), { status: 409, code: "conflict" }));
+    const { OperationalAlertsView: AlertsPage } = await import("@/components/phase3/operational-alerts-view");
+    render(<AlertsPage />);
+    await userEvent.click(await screen.findByRole("button", { name: /^Acknowledge: alert/ }));
+    expect(await screen.findByText(/the alert action was refused/i)).toBeInTheDocument();
+    expect(screen.queryByText(/changed while you were looking/i)).toBeNull();
   });
 });
