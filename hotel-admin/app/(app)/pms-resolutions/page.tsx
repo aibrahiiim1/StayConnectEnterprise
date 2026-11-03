@@ -5,6 +5,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { InfoHint } from "@/components/ui/quiet";
 import type { PmsResolution } from "@/lib/api";
 import { useServerPage, type PagedFields } from "@/lib/use-server-page";
 import { Pagination } from "@/components/ui/data";
@@ -22,7 +23,6 @@ import { LiveStatus, refreshingClass } from "@/components/ui/patterns";
 import { cn, formatDate, formatRelative } from "@/lib/utils";
 import { ShieldCheck } from "lucide-react";
 
-// An unknown code falls through to a de-underscored label rather than being hidden, so it is still countable.
 const OUTCOMES: Record<string, { label: string; meaning: string; fix?: string; tone: "ok" | "warn" | "err" }> = {
   VERIFIED: {
     label: "Verified",
@@ -94,7 +94,6 @@ const outcome = (code: string) =>
 
 type ResolutionsResp = PagedFields & {
   data?: PmsResolution[];
-  /** Summary of the most recent `window` checks. */
   summary?: {
     window?: number;
     total?: number;
@@ -108,7 +107,6 @@ type ResolutionsResp = PagedFields & {
 export default function PMSResolutionsPage() {
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
 
-  // The table pages through every check; the breakdown covers only the most recent, since it answers what is failing now.
   const list = useServerPage<ResolutionsResp>({ path: "/pms-resolutions" });
   const { resp, current, err, loading: refreshing } = list;
   const rows = current && resp ? resp.data ?? [] : err && !resp ? [] : null;
@@ -132,7 +130,6 @@ export default function PMSResolutionsPage() {
     };
   }, [resp]);
 
-  // One network failing while others succeed is a routing problem, so call it out.
   const suspectNetwork = useMemo(() => {
     if (!summary || summary.networks.length < 2) return null;
     const bad = summary.networks.filter(([, n]) => n.total >= 3 && n.verified === 0);
@@ -240,11 +237,11 @@ export default function PMSResolutionsPage() {
               {summary.outcomes.map(([code, n]) => {
                 const o = outcome(code);
                 return (
-                  <li key={code} className="flex gap-3 py-2.5 first:pt-0 last:pb-0">
+                  <li key={code} className="flex gap-3 py-2 first:pt-0 last:pb-0">
                     <Badge tone={o.tone} className="mt-0.5 shrink-0 tabular">{n}</Badge>
                     <div className="min-w-0">
-                      <div className="text-sm font-medium">{o.label}</div>
-                      <p className="text-xs text-muted-foreground">{o.meaning}{o.fix ? ` ${o.fix}` : ""}</p>
+                      <div className="flex items-center gap-1 text-sm font-medium">{o.label}<InfoHint>{o.meaning}</InfoHint></div>
+                      {o.fix && <p className="text-xs text-muted-foreground">{o.fix}</p>}
                     </div>
                   </li>
                 );

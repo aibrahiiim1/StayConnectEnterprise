@@ -19,7 +19,8 @@ import { StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
-import { ErrorBanner, Callout } from "@/components/ui/error-banner";
+import { ErrorBanner, Callout, Notice } from "@/components/ui/error-banner";
+import { InfoHint } from "@/components/ui/quiet";
 import { HelpList, HelpSection } from "@/components/help";
 import { SkeletonRows, DList, MonoId } from "@/components/ui/misc";
 import { DetailsDrawer, DetailsSection } from "@/components/ui/details-drawer";
@@ -31,7 +32,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LiveStatus, NotAvailable, refreshingClass } from "@/components/ui/patterns";
 import { useOperatorRoles } from "@/lib/whoami-context";
 
-// The label comes from the server's Go map so a new result code never shows as a raw enum.
 const RESULT_WORDS: Record<string, { tone: "ok" | "warn" | "err" | "info" | "neutral"; meaning: string }> = {
   VERIFIED: { tone: "ok", meaning: "The guest proved who they are and was offered access." },
   CREDENTIAL_MISMATCH: {
@@ -168,8 +168,7 @@ export default function GuestSignInAttemptsPage() {
 
   const [tab, setTab] = useState<"attempts" | "restrictions">("attempts");
 
-  // Paged and searched on the server (search in a header, never the URL).
-  // The period is measured from a fixed `anchor` so paging walks one stable question.
+  // Search goes in a header, never the URL; paging is anchored to one fixed period.
   const path = useMemo(() => {
     const params = new URLSearchParams({ from: new Date(anchor - Number(range) * 3600_000).toISOString() });
     if (room.trim()) params.set("room", room.trim());
@@ -225,7 +224,6 @@ export default function GuestSignInAttemptsPage() {
     <ActiveRestrictions
       canRelease={mayRelease}
       onShowAttempts={(mac) => {
-        // Widen the period too: the attempts behind a restriction may predate the default window.
         setTab("attempts");
         setQuery(mac);
         setRoom("");
@@ -251,10 +249,10 @@ export default function GuestSignInAttemptsPage() {
       </StatGrid>
 
       {counts.systemic > 0 && (
-        <Callout tone="warning" title={`${counts.systemic} attempt${counts.systemic === 1 ? "" : "s"} failed for reasons no guest could fix`}>
-          Refused because the guest list was out of date, the PMS routing, or an internal fault. Guests saw &ldquo;we
-          are unable to verify your stay right now&rdquo;, not a request to re-check their details.
-        </Callout>
+        <Notice tone="warning" title={`${counts.systemic} attempt${counts.systemic === 1 ? "" : "s"} failed for reasons no guest could fix`}>
+          Out-of-date guest list, PMS routing or an internal fault.
+          <InfoHint>Guests saw &ldquo;we are unable to verify your stay right now&rdquo;, not a request to re-check their details.</InfoHint>
+        </Notice>
       )}
 
       <Card className="overflow-hidden">

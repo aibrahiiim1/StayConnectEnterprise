@@ -12,7 +12,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, FieldGrid, Input, InputGroup, Select } from "@/components/ui/input";
-import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { Callout, Notice, ErrorBanner } from "@/components/ui/error-banner";
+import { Disclosure, InfoHint } from "@/components/ui/quiet";
 import { HelpSection, HelpTip } from "@/components/help";
 import { ConfirmDialog, DialogForm } from "@/components/ui/dialog";
 import { KeyValueGrid, MetricStrip } from "@/components/ui/data";
@@ -193,7 +194,7 @@ function OverviewTab({
 
   return (
     <>
-      <Callout
+      <Notice
         tone={!active ? "neutral" : readiness.tone === "ok" ? "success" : readiness.tone === "err" ? "danger" : "warning"}
         title={active ? readiness.headline : wordsFor(LIFECYCLE_WORDS, iface.lifecycle_state, "Not in use")}
       >
@@ -204,7 +205,7 @@ function OverviewTab({
             : !iface.published
               ? "Never configured — not connected to any PMS. Publish a configuration and activate it to start."
               : "This connection is switched off, so nobody signs in with a room number through it. Activate it from Actions."}
-      </Callout>
+      </Notice>
 
       <SheetSection title="The checks room sign-in depends on">
         <ChecksRow health={health} />
@@ -275,25 +276,25 @@ function OverviewTab({
             <Link href="/pms-reconciliation" className="font-medium underline underline-offset-2">Unresolved departures</Link>
           </Callout>
         ) : (
-          <p className="text-xs text-muted-foreground">
-            Every PMS message has been matched or answered. Reconciliation runs automatically after each complete
-            guest list.
+          <p className="flex items-center gap-1 text-xs text-muted-foreground">
+            Every PMS message has been matched or answered.
+            <InfoHint>Reconciliation runs automatically after each complete guest list.</InfoHint>
           </p>
         )}
       </SheetSection>
 
-      <SheetSection title="Investigate further" description="For troubleshooting. Nothing here needs checking day to day.">
+      <Disclosure title="Troubleshooting">
         <ul className="grid gap-2 text-sm sm:grid-cols-2">
-          <li><Link href="/stay-events" className="font-medium underline underline-offset-2">Stay events</Link>
-            <p className="text-xs text-muted-foreground">Every check-in, move and check-out received.</p></li>
-          <li><Link href="/roster-reconciliation" className="font-medium underline underline-offset-2">Roster reconciliation</Link>
-            <p className="text-xs text-muted-foreground">How the guest list is kept identical to the PMS&rsquo;s.</p></li>
-          <li><Link href="/pms-reconciliation" className="font-medium underline underline-offset-2">Unresolved departures</Link>
-            <p className="text-xs text-muted-foreground">Messages that could not be matched to a stay.</p></li>
-          <li><Link href="/pms-source-conflicts" className="font-medium underline underline-offset-2">Source conflicts</Link>
-            <p className="text-xs text-muted-foreground">Two connections that may be the same PMS.</p></li>
+          <li className="flex items-center gap-1"><Link href="/stay-events" className="font-medium underline underline-offset-2">Stay events</Link>
+            <InfoHint>Every check-in, move and check-out received.</InfoHint></li>
+          <li className="flex items-center gap-1"><Link href="/roster-reconciliation" className="font-medium underline underline-offset-2">Roster reconciliation</Link>
+            <InfoHint>How the guest list is kept identical to the PMS&rsquo;s.</InfoHint></li>
+          <li className="flex items-center gap-1"><Link href="/pms-reconciliation" className="font-medium underline underline-offset-2">Unresolved departures</Link>
+            <InfoHint>Messages that could not be matched to a stay.</InfoHint></li>
+          <li className="flex items-center gap-1"><Link href="/pms-source-conflicts" className="font-medium underline underline-offset-2">Source conflicts</Link>
+            <InfoHint>Two connections that may be the same PMS.</InfoHint></li>
         </ul>
-      </SheetSection>
+      </Disclosure>
 
       <SheetSection title="System">
         <KeyValueGrid
@@ -504,7 +505,6 @@ function RevisionDialog({
   onOpenChange: (v: boolean) => void;
   iface: PmsConnection;
   provider: PmsProvider;
-  /** The live configuration, so Edit changes what is there. */
   from: PmsRevision | null;
   onDone: () => void | Promise<void>;
 }) {
@@ -556,7 +556,6 @@ function RevisionDialog({
   );
 }
 
-// Derived only from stored values; identical settings are said so, naming any derived state that moved.
 function ChangeSummary({ rev, prev, provider }: { rev: PmsRevision; prev?: PmsRevision; provider: PmsProvider }) {
   if (!prev) return <p className="text-sm text-muted-foreground">The first saved configuration.</p>;
   const a = configRows(provider, prev);

@@ -50,7 +50,8 @@ export function formatRelative(s?: string | null): string {
   if (!s) return "—";
   const then = new Date(s).getTime();
   const diff = Date.now() - then;
-  if (diff < 0) return new Date(s).toLocaleString();
+  // Appliance and browser clocks differ by seconds; only a real future time is shown as a date.
+  if (diff < -120_000) return new Date(s).toLocaleString();
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return "just now";
   if (mins < 60) return `${mins}m ago`;

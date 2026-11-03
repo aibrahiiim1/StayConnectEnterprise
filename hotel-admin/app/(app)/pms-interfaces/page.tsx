@@ -12,7 +12,7 @@ import { FilterBar } from "@/components/ui/toolbar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { Callout, Notice, ErrorBanner } from "@/components/ui/error-banner";
 import { FilterChips } from "@/components/ui/data";
 import { Skeleton } from "@/components/ui/misc";
 import { canWrite } from "@/lib/roles";
@@ -90,7 +90,6 @@ export default function PMSInterfacesPage() {
     void api.get<Whoami>("/auth/whoami").then((me) => setRoles(me?.roles ?? [])).catch(() => setRoles([]));
   }, []);
 
-  // Poll faster while any guest list is loading.
   const anySyncing = Object.values(health).some(isSyncing);
   usePoll(() => load(), anySyncing ? 4000 : 20000);
 
@@ -221,17 +220,18 @@ export default function PMSInterfacesPage() {
       ) : (
         <>
           {healthLoaded && active.length > 0 && (signIn.state === "down" || signIn.state === "partial") && onlyUndecided(signIn) ? (
-            <Callout tone="warning" title="Room sign-in needs a decision">
-              {`Nobody has chosen how room sign-in works on ${signIn.affected.map((a) => a.guestNetwork).join(", ")}. `}
-              <Link href="/pms-routing" className="underline underline-offset-2">Choose under PMS routing</Link>
-            </Callout>
+            <Notice tone="warning" title="Room sign-in needs a decision"
+              actions={<Link href="/pms-routing" className="font-medium underline underline-offset-2">PMS routing</Link>}>
+              Nobody has chosen how room sign-in works on {signIn.affected.map((a) => a.guestNetwork).join(", ")}.
+            </Notice>
           ) : healthLoaded && active.length > 0 && (signIn.state === "down" || signIn.state === "partial") ? (
-            <Callout tone={signIn.state === "down" ? "danger" : "warning"}
-              title={signIn.state === "down" ? "Guests cannot sign in with a room number" : "Room sign-in is not working on every client network"}>
+            <Notice tone={signIn.state === "down" ? "danger" : "warning"}
+              title={signIn.state === "down" ? "Guests cannot sign in with a room number" : "Room sign-in is not working on every client network"}
+              actions={<Link href="/pms-routing" className="font-medium underline underline-offset-2">PMS routing</Link>}>
               {signIn.state === "down"
                 ? `${signIn.reason[0]?.toUpperCase() ?? ""}${signIn.reason.slice(1)}.`
                 : `Not working on: ${signIn.affected.map((a) => a.guestNetwork).join(", ")}.`}
-            </Callout>
+            </Notice>
           ) : null}
 
           {live.length > 1 && (
@@ -361,7 +361,6 @@ export default function PMSInterfacesPage() {
   );
 }
 
-// Diagnostics stay reachable from here rather than the sidebar; the operator is told here when one has something to show.
 function AdvancedDiagnostics({ reviewEvents }: { reviewEvents: number }) {
   return (
     <SectionCard title="Advanced diagnostics" description="For investigating the PMS integration.">
@@ -396,10 +395,8 @@ function RoomSignInStat({
   signIn: RoomSignInReadiness;
   activeCount: number;
   ready: number;
-  /** A ready connection is answering from its last complete guest list rather than a live feed. */
   fromLastRoster: boolean;
 }) {
-  // Per guest network when routing is known; otherwise the per-connection count.
   if (activeCount === 0) {
     return <StatCard label="Room sign-in" value={<span className="text-muted-foreground">Not in use</span>} hint="No connection is active" />;
   }

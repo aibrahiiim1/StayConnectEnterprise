@@ -1,9 +1,7 @@
 "use client";
 
 // Guest names are PII: never write them to logs or diagnostics.
-// Only ADMIN_BLOCK is an operator's (site administrator, reason + password); PMS_NO_POST and PMS_DATA_SUSPECT
-// clear only from fresh PMS data and POSTING_UNRESOLVED only from manual review, so the page never offers to lift them.
-// A room number belongs to the PMS connection it came from: the same number at two connections is two rooms, never a duplicate.
+// Only ADMIN_BLOCK can be lifted here; PMS and review blocks clear by themselves.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -67,7 +65,6 @@ export default function StaysPage() {
   const [status, setStatus] = useState("IN_HOUSE");
   const [q, setQ] = useState("");
   const [vipOnly, setVipOnly] = useState(false);
-  // "" = every connection together; otherwise one connection's stays only.
   const [pms, setPms] = useState("");
   const { multi } = usePmsConnections();
   const [pageSize, setPageSize] = useState(PAGE_SIZES[1]);
@@ -124,7 +121,6 @@ export default function StaysPage() {
 
   useEffect(() => { void load(); }, [load]);
 
-  // Server totals over every matching stay, not just the page on screen.
   const summary = useMemo(() => {
     const s = resp?.summary;
     const list = rows ?? [];
@@ -341,8 +337,8 @@ export default function StaysPage() {
                     <div className="flex items-center gap-1.5 font-medium">
                       {s.room ?? "—"}
                       {s.vip ? <Badge tone="warn" size="sm">VIP</Badge> : null}
+                      {showPms && <PmsTag label={s.pms_interface_label} />}
                     </div>
-                    {showPms && <div className="mt-0.5"><PmsTag label={s.pms_interface_label} /></div>}
                     {s.external_reservation_id && (
                       <div className="truncate font-mono text-2xs text-muted-foreground" title={s.external_reservation_id}>{s.external_reservation_id}</div>
                     )}
@@ -487,7 +483,6 @@ export default function StaysPage() {
                       ? formatRelative(detail.occupancy_evidence_at)
                       : "No confirmation recorded",
                   },
-                  // Only when the connector supplied them; dashes would suggest the PMS failed to send them.
                   { label: "Room type", value: detail.room_type, hidden: !detail.room_type },
                   { label: "Rate plan", value: detail.rate_plan, hidden: !detail.rate_plan },
                   { label: "Travel agent", value: detail.travel_agent, hidden: !detail.travel_agent },
@@ -658,9 +653,8 @@ function RoomChargeSection({
 function AccessCell({ stay }: { stay: Stay }) {
   if (!stay.access_status) {
     return (
-      <span className="text-xs text-muted-foreground">
+      <span className="text-xs text-muted-foreground" title={stay.status === "IN_HOUSE" ? "Nobody has signed in" : undefined}>
         None yet
-        {stay.status === "IN_HOUSE" && <span className="block text-2xs">Nobody has signed in</span>}
       </span>
     );
   }
