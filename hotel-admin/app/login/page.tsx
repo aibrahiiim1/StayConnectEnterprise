@@ -63,7 +63,7 @@ function LoginInner() {
   return (
     <div className="flex min-h-screen flex-col bg-background">
       <header className="flex items-center justify-between gap-3 px-4 py-4 sm:px-6">
-        <OneGateLockup product="Admin Console" />
+        <OneGateLockup product="Admin Console" animated />
         <ThemeToggle />
       </header>
 

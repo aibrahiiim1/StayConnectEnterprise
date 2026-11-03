@@ -3,9 +3,10 @@
 import * as React from "react";
 import * as SwitchPrimitive from "@radix-ui/react-switch";
 import * as SeparatorPrimitive from "@radix-ui/react-separator";
-import { Check, Copy, Loader2 } from "lucide-react";
+import { Check, Copy } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tooltip } from "./tooltip";
+import { OneGateLoader } from "@/components/brand";
 
 export function Skeleton({ className }: { className?: string }) {
   return <div className={cn("animate-pulse rounded-md bg-accent motion-reduce:animate-none", className)} />;
@@ -15,7 +16,7 @@ export function Skeleton({ className }: { className?: string }) {
 export function Spinner({ className, label = "Loading" }: { className?: string; label?: string }) {
   return (
     <span role="status" className={cn("inline-flex items-center text-muted-foreground", className)}>
-      <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden />
+      <OneGateLoader className="size-4" />
       <span className="sr-only">{label}</span>
     </span>
   );

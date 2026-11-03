@@ -33,9 +33,9 @@ import { ScheduledBackupsCard } from "./scheduled-backups-card";
 import { SCHEDULE_SETTING_KEYS, backupKindLabel } from "@/lib/ledger-words";
 import { submitDownload } from "@/lib/backup-download";
 import {
-  Archive, ShieldCheck, Download, RotateCcw, AlertTriangle, CheckCircle2, Loader2,
-} from "lucide-react";
+  Archive, ShieldCheck, Download, RotateCcw, AlertTriangle, CheckCircle2, } from "lucide-react";
 import { useOperatorRoles } from "@/lib/whoami-context";
+import { OneGateLoader } from "@/components/brand";
 
 type Artifact = {
   name: string; kind?: string; size_bytes: number; modified_at?: string;
@@ -195,7 +195,7 @@ export default function BackupsPage() {
       )}
 
       {maint?.active && (
-        <Callout tone="warning" icon={<Loader2 className="animate-spin motion-reduce:animate-none" />}
+        <Callout tone="warning" icon={<OneGateLoader tone="current" />}
           title="This appliance is not serving clients right now">
           {maint.reason}{maint.since ? ` · started ${formatDate(maint.since)}` : ""}
         </Callout>
@@ -472,7 +472,7 @@ function LastRestoreCard({ result }: { result: RestoreResult }) {
     <SectionCard
       title={
         <span className="flex items-center gap-2">
-          {running ? <Loader2 className="size-4 animate-spin text-muted-foreground motion-reduce:animate-none" aria-hidden />
+          {running ? <OneGateLoader className="size-4" />
             : result.ok ? <CheckCircle2 className="size-4 text-success" aria-hidden />
                         : <AlertTriangle className="size-4 text-destructive" aria-hidden />}
           {running ? "Restore in progress" : "Last restore"}
@@ -599,7 +599,7 @@ function RestoreDialog({ backup, onClose, onDone }: {
 
       {started && (
         <div role="status" aria-live="polite" className="flex items-start gap-2.5 rounded-md border border-info/25 bg-info-subtle px-3.5 py-3 text-sm text-info-subtle-foreground">
-          <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden />
+          <OneGateLoader tone="current" className="mt-0.5 size-4" />
           <p>
             <strong className="font-semibold">Restoring — this window stays open until it finishes.</strong>{" "}
             The appliance has accepted the restore and is working through it. This can take several minutes. The
