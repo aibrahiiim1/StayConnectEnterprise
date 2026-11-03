@@ -14,12 +14,14 @@ import {
   type AccessState,
   accessWarnings,
   boundsOf,
+  deviceAllowanceWords,
   devicePolicyTitle,
   fmtData,
   fmtHours,
   fmtSpeed,
   fmtWhen,
   guestReceivesSentence,
+  normalisePolicy,
   sourceWords,
 } from "@/lib/api/after-checkout-access";
 import { PageHeader, PageShell, StatCard, StatGrid } from "@/components/ui/page";
@@ -85,7 +87,8 @@ export function AfterCheckoutAccessScreen({
 
   const source = state?.effective?.source;
   const words = sourceWords(source);
-  const effectivePolicy: AccessPolicy | undefined = state?.effective?.policy;
+  // The emergency terms arrive in the grant's shape; one shape for every view below.
+  const effectivePolicy: AccessPolicy | undefined = normalisePolicy(state?.effective?.policy);
   const version = state?.config_version ?? 0;
   const latest = history.find((h) => h.config_version === version);
   const bounds = boundsOf(state);
@@ -213,6 +216,17 @@ export function AfterCheckoutAccessScreen({
               {warnings.map((w) => (
                 <Callout key={w.id} tone={w.tone} title={w.title}>
                   <p>{w.body}</p>
+                  {w.id === "emergency-in-force" && (
+                    canWrite ? (
+                      <div className="mt-2.5">
+                        <Button size="sm" variant="secondary" onClick={() => setEditing(true)}>
+                          <Pencil /> Set this site&apos;s terms
+                        </Button>
+                      </div>
+                    ) : (
+                      <p className="mt-1.5 text-xs">A manager with access to this page can publish the site&apos;s terms.</p>
+                    )
+                  )}
                 </Callout>
               ))}
             </section>
@@ -251,7 +265,7 @@ export function AfterCheckoutAccessScreen({
                   ...(effectivePolicy
                     ? [{
                         label: "Device allowance",
-                        value: `Up to ${effectivePolicy.device_limit} device${effectivePolicy.device_limit === 1 ? "" : "s"} at once`,
+                        value: deviceAllowanceWords(effectivePolicy.device_limit),
                         hint: devicePolicyTitle(effectivePolicy.device_policy),
                       }]
                     : []),

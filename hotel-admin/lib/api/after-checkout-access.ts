@@ -70,6 +70,30 @@ export const DEFAULT_BOUNDS: AccessBounds = {
   device_limit: { min: 1, max: 20, default: 5, unit: "devices" },
 };
 
+/**
+ * The terms in one shape. A published policy carries duration_hours and device_policy; the built-in emergency terms come
+ * in the grant's own shape (duration_seconds, device_limit_policy) without them, which read as "no time" and "—".
+ */
+export function normalisePolicy(p: (Partial<AccessPolicy> & { device_limit_policy?: string }) | null | undefined): AccessPolicy | undefined {
+  if (!p) return undefined;
+  const seconds = typeof p.duration_seconds === "number" ? p.duration_seconds
+    : typeof p.duration_hours === "number" ? Math.round(p.duration_hours * 3600) : 0;
+  return {
+    duration_hours: typeof p.duration_hours === "number" ? p.duration_hours : seconds / 3600,
+    duration_seconds: seconds,
+    down_kbps: p.down_kbps ?? 0,
+    up_kbps: p.up_kbps ?? 0,
+    data_quota_bytes: p.data_quota_bytes ?? 0,
+    device_limit: p.device_limit ?? 0,
+    device_policy: p.device_policy || p.device_limit_policy || "",
+  };
+}
+
+/** A device limit of 0 is unset: no separate cap, only the stay's own devices (the emergency terms carry 0). */
+export function deviceAllowanceWords(limit: number): string {
+  return limit > 0 ? `Up to ${limit} device${limit === 1 ? "" : "s"} at once` : "No separate limit";
+}
+
 export function boundsOf(s?: AccessState | null): AccessBounds {
   const b = s?.bounds ?? {};
   return {
@@ -151,9 +175,11 @@ export function guestReceivesSentence(p: AccessPolicy): string {
   return (
     `Every device that was authorised on the stay before check-out can reconnect for ${fmtHours(p.duration_hours)} ` +
     `after the verified check-out, at up to ${fmtSpeed(p.down_kbps)} down and ${fmtSpeed(p.up_kbps)} up. All of ` +
-    `those devices share ${fmtData(p.data_quota_bytes)} of data in total, and up to ${p.device_limit} ` +
-    `device${p.device_limit === 1 ? "" : "s"} can be connected at once. The guest types only the room number and the ` +
-    `reservation number. New devices are refused.`
+    `those devices share ${fmtData(p.data_quota_bytes)} of data in total` +
+    (p.device_limit > 0
+      ? `, and up to ${p.device_limit} device${p.device_limit === 1 ? "" : "s"} can be connected at once. `
+      : ". ") +
+    `The guest types only the room number and the reservation number. New devices are refused.`
   );
 }
 
@@ -373,7 +399,8 @@ export function accessWarnings(state: AccessState, historyAvailable: boolean): A
       title: "Departing guests are on the emergency fallback",
       body:
         "After Check-out Access is on, but this site has not published its terms. Guests receive the built-in " +
-        "emergency terms: a safe default, not a decision made for this site. Each use raises a critical alert.",
+        "emergency terms: a safe default, not a decision made for this site. Each use raises a critical alert. " +
+        "To end this, review the terms and publish them for this site.",
     });
   }
   if (src === "DISABLED") {

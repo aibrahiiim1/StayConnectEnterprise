@@ -15,7 +15,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ErrorBanner } from "@/components/ui/error-banner";
-import { Field, Input, Select } from "@/components/ui/input";
+import { Field, Input, Select, QuietHints } from "@/components/ui/input";
+import { InfoHint } from "@/components/ui/quiet";
 import { DescriptionList } from "@/components/ui/data";
 import { DetailsDrawer, DetailsSection } from "@/components/ui/details-drawer";
 import { ChangeDiff, HistoryList } from "@/components/ui/history";
@@ -271,17 +272,16 @@ export function EmailAccountsSettingsCard({ canEdit }: { canEdit: boolean }) {
         ) : !data || !draft ? (
           <Skeleton className="h-40" />
         ) : (
+          <QuietHints>
           <form
             className="space-y-4"
             onSubmit={(e) => { e.preventDefault(); void save(); }}
             aria-label="Email accounts settings"
           >
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border px-3.5 py-2.5">
-              <div className="min-w-0 space-y-0.5">
+              <div className="flex min-w-0 items-center gap-1">
                 <p className="text-sm font-medium">Require email verification</p>
-                <p className="text-xs text-muted-foreground">
-                  Off: accounts never need to be verified, and nobody is suspended.
-                </p>
+                <InfoHint>Off: accounts never need to be verified, and nobody is suspended.</InfoHint>
               </div>
               {canEdit ? (
                 <Switch
@@ -331,15 +331,19 @@ export function EmailAccountsSettingsCard({ canEdit }: { canEdit: boolean }) {
               })}
             </div>
 
-            <p className="text-xs text-muted-foreground" role="note">
-              A changed time to verify applies to accounts registered after the change; accounts already registered keep
-              the deadline they were given. Switching verification off, or choosing to only remind, applies to every
-              account at once.
+            <p className="flex items-center gap-1 text-xs text-muted-foreground" role="note">
+              A new time to verify applies to new accounts only.
+              <InfoHint>
+                A changed time to verify applies to accounts registered after the change; accounts already registered keep
+                the deadline they were given. Switching verification off, or choosing to only remind, applies to every
+                account at once.
+              </InfoHint>
             </p>
 
             {problem && <p className="text-xs text-destructive" role="alert">{problem}</p>}
 
-            {canEdit && !data.awaiting_assignment && (
+            {/* Asked only once something changed: a reason and the password confirm a change, not a visit. */}
+            {canEdit && !data.awaiting_assignment && dirty && (
               <div className="grid gap-4 md:grid-cols-2">
                 <Field label="Reason for the change" error={reasonErr ?? undefined} hint="Recorded in the history below." required>
                   <Input value={reason} maxLength={500} disabled={busy} onChange={(e) => setReason(e.target.value)}
@@ -379,6 +383,7 @@ export function EmailAccountsSettingsCard({ canEdit }: { canEdit: boolean }) {
               )}
             </div>
           </form>
+          </QuietHints>
         )}
       </CardBody>
     </Card>

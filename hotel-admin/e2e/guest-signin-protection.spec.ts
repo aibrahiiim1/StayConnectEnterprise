@@ -98,7 +98,7 @@ async function installBackend(
 test.describe("guest sign-in protection settings", () => {
   test("each value arrives with its unit, its standard and its allowed range", async ({ page }) => {
     await installBackend(page, []);
-    await page.goto("/sign-in-methods");
+    await page.goto("/sign-in-methods#protection");
 
     const card = page.locator("div").filter({ hasText: /client sign-in protection/i }).first();
     await expect(page.getByText(/client sign-in protection/i).first()).toBeVisible();
@@ -118,7 +118,7 @@ test.describe("guest sign-in protection settings", () => {
 
   test("the screen says a change applies to what happens next, and names the action that does not", async ({ page }) => {
     await installBackend(page, []);
-    await page.goto("/sign-in-methods");
+    await page.goto("/sign-in-methods#protection");
 
     await expect(page.getByText(/new settings apply to\s*what happens next/i)).toBeVisible();
     await expect(page.getByText(/shortening the wait here does not end a wait already running/i)).toBeVisible();
@@ -128,7 +128,7 @@ test.describe("guest sign-in protection settings", () => {
   test("a value outside the allowed range cannot be saved", async ({ page }) => {
     const mutations: Mutations = [];
     await installBackend(page, mutations);
-    await page.goto("/sign-in-methods");
+    await page.goto("/sign-in-methods#protection");
 
     const attempts = page.getByLabel(/maximum failed attempts/i);
     await attempts.fill("1");
@@ -149,7 +149,7 @@ test.describe("guest sign-in protection settings", () => {
 
   test("a role that may only read the policy is offered no way to change it", async ({ page }) => {
     await installBackend(page, [], ["front_office_operator"]);
-    await page.goto("/sign-in-methods");
+    await page.goto("/sign-in-methods#protection");
 
     await expect(page.getByText(/your role can see these settings but not change them/i)).toBeVisible();
     await expect(page.getByRole("button", { name: /save protection settings/i })).toHaveCount(0);

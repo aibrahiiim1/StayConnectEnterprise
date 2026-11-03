@@ -14,7 +14,8 @@ import { Card } from "@/components/ui/card";
 import { RowActions } from "@/components/ui/row-actions";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Input, Field, Select } from "@/components/ui/input";
+import { Input, Field, Select, QuietHints } from "@/components/ui/input";
+import { Disclosure, InfoHint } from "@/components/ui/quiet";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
@@ -287,7 +288,12 @@ export default function NotificationsPage() {
               size="sm"
               icon={<Send />}
               title="No sender is configured"
-              hint="Clients cannot be sent an SMS or WhatsApp code, or an Email account's verification email, until one is. Room numbers, vouchers and staff-created accounts do not need this."
+              hint={
+                <span className="inline-flex items-center gap-1">
+                  Needed for SMS and WhatsApp codes, and Email account emails.
+                  <InfoHint>Room numbers, vouchers and staff-created accounts do not need a sender.</InfoHint>
+                </span>
+              }
               action={writable && channels.length > 0 ? <Button onClick={openNew}><Plus /> Add a sender</Button> : undefined}
             />
           ) : (
@@ -356,7 +362,7 @@ export default function NotificationsPage() {
         open={mode !== "closed"}
         onOpenChange={(v) => { if (!v) { setMode("closed"); setEditing(null); } }}
         title={mode === "edit" ? "Edit sender" : "Add a sender"}
-        description="Credentials come from the sending service's own console. The key or password is stored write-only and is never shown again."
+        description="Credentials come from the service's console and are stored write-only."
         submitLabel={mode === "edit" ? "Save changes" : "Add sender"}
         busy={busy}
         error={formErr}
@@ -364,6 +370,8 @@ export default function NotificationsPage() {
         disabledReason="Enter your password to save."
         onSubmit={onSubmit}
       >
+        <QuietHints>
+        <FormSection title="Sender">
         <div className="grid gap-4 sm:grid-cols-2">
           {mode === "new" ? (
             <>
@@ -388,6 +396,10 @@ export default function NotificationsPage() {
           <Field label="Name" hint="How this sender is labelled in this admin.">
             <Input value={f.display_name} onChange={(e) => set("display_name", e.target.value)} placeholder="Optional" />
           </Field>
+        </div>
+        </FormSection>
+        <FormSection title="Connection">
+        <div className="grid gap-4 sm:grid-cols-2">
           {f.kind === "smtp" && (
             <>
               <Field label="Mail server" required hint="The SMTP host name or address.">
@@ -431,6 +443,11 @@ export default function NotificationsPage() {
               <Input value={f.api_user} onChange={(e) => set("api_user", e.target.value)} placeholder="Optional" />
             </Field>
           )}
+        </div>
+        </FormSection>
+        {(f.channel === "email" || f.kind === "twilio_whatsapp" || f.kind === "meta_whatsapp") && (
+        <FormSection title="Sending as">
+        <div className="grid gap-4 sm:grid-cols-2">
           {f.channel === "email" && (
             <>
               <Field label="From address" hint="Clients see this as the sender.">
@@ -445,15 +462,6 @@ export default function NotificationsPage() {
                 <Input value={f.from_name} onChange={(e) => set("from_name", e.target.value)} placeholder="Wi-Fi Access" />
               </Field>
             </>
-          )}
-          {f.kind === "smtp" && (
-            <Field
-              label="Timeout"
-              hint={`Seconds to wait for the mail server before a send is reported as failed. Default ${SMTP_TIMEOUT_DEFAULT} seconds; allowed ${SMTP_TIMEOUT_MIN}–${SMTP_TIMEOUT_MAX}.`}
-            >
-              <Input type="number" min={SMTP_TIMEOUT_MIN} max={SMTP_TIMEOUT_MAX} step={1} value={f.timeout_seconds}
-                onChange={(e) => set("timeout_seconds", e.target.value)} placeholder={String(SMTP_TIMEOUT_DEFAULT)} />
-            </Field>
           )}
           {f.kind === "twilio_whatsapp" && (
             <Field label="WhatsApp sender number" hint="The approved WhatsApp sender, with the country code.">
@@ -476,18 +484,31 @@ export default function NotificationsPage() {
             </Field>
           )}
         </div>
+        </FormSection>
+        )}
+        {f.kind === "smtp" && (
+          // Opened when a timeout other than the default is stored, so a stored choice is never hidden.
+          <Disclosure title="Advanced: timeout" defaultOpen={f.timeout_seconds.trim() !== "" && f.timeout_seconds.trim() !== String(SMTP_TIMEOUT_DEFAULT)}>
+            <Field
+              label="Timeout"
+              hint={`Seconds to wait for the mail server before a send is reported as failed. Default ${SMTP_TIMEOUT_DEFAULT} seconds; allowed ${SMTP_TIMEOUT_MIN}–${SMTP_TIMEOUT_MAX}.`}
+            >
+              <Input type="number" min={SMTP_TIMEOUT_MIN} max={SMTP_TIMEOUT_MAX} step={1} value={f.timeout_seconds}
+                onChange={(e) => set("timeout_seconds", e.target.value)} placeholder={String(SMTP_TIMEOUT_DEFAULT)} className="sm:max-w-[12rem]" />
+            </Field>
+          </Disclosure>
+        )}
         <div className="flex items-center justify-between rounded-md border border-border bg-surface/50 px-3.5 py-2.5">
-          <div>
-            <div className="text-sm font-medium">Use this sender</div>
-            <div className="text-xs text-muted-foreground">
-              Turn it off to finish configuring it before any client code goes through it.
-            </div>
+          <div className="flex items-center gap-1">
+            <span className="text-sm font-medium">Use this sender</span>
+            <InfoHint>Turn it off to finish configuring it before any client code goes through it.</InfoHint>
           </div>
           <Switch checked={f.enabled} onCheckedChange={(v) => set("enabled", v)} label="Use this sender" />
         </div>
         <Field label="Your password" required hint="Confirms the change. It is not stored.">
           <Input type="password" autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} />
         </Field>
+        </QuietHints>
       </DialogForm>
 
       <DialogForm
@@ -495,7 +516,7 @@ export default function NotificationsPage() {
         onOpenChange={(v) => !v && setTesting(null)}
         title="Send a test message"
         description={testing
-          ? `Connects to ${testing.display_name || (KIND_LABELS[testing.kind] ?? testing.kind)} with the stored credentials and delivers one message. The outcome is recorded in the Health column.`
+          ? `Sends one message through ${testing.display_name || (KIND_LABELS[testing.kind] ?? testing.kind)}. The result shows under Health.`
           : undefined}
         submitLabel={testResult ? "Send again" : "Send test"}
         busy={busy}
@@ -548,5 +569,15 @@ export default function NotificationsPage() {
         onConfirm={onDelete}
       />
     </PageShell>
+  );
+}
+
+/** A titled group of fields in a dialog, so a long form reads as a few short steps. */
+function FormSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section aria-label={title} className="space-y-3">
+      <h3 className="text-2xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</h3>
+      {children}
+    </section>
   );
 }

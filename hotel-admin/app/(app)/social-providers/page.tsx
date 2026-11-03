@@ -14,7 +14,8 @@ import { Card } from "@/components/ui/card";
 import { RowActions } from "@/components/ui/row-actions";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Input, Field, Select } from "@/components/ui/input";
+import { Input, Field, Select, QuietHints } from "@/components/ui/input";
+import { Disclosure, InfoHint } from "@/components/ui/quiet";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
@@ -76,11 +77,13 @@ const STEP_STATE: Record<SocialSetupStep["state"], { mark: string; label: string
 function GoogleSetupChecklist({ steps }: { steps: SocialSetupStep[] }) {
   return (
     <fieldset className="space-y-2" aria-label="Google setup checklist">
-      <legend className="text-label">Google setup</legend>
-      <p className="text-xs text-muted-foreground">
-        Your Site owns its Google Cloud project, its OAuth client and its portal domain; this appliance signs your clients in
-        itself and nothing about them goes through OneGate Central. Items marked “?” cannot be checked from here.
-      </p>
+      <legend className="flex items-center gap-1 text-label">
+        Google setup
+        <InfoHint>
+          Your Site owns its Google Cloud project, its OAuth client and its portal domain; this appliance signs your clients in
+          itself and nothing about them goes through OneGate Central. Items marked “?” cannot be checked from here.
+        </InfoHint>
+      </legend>
       <ul className="space-y-2">
         {steps.map((s) => {
           const st = STEP_STATE[s.state];
@@ -311,7 +314,7 @@ export default function SocialProvidersPage() {
         open={mode !== "closed"}
         onOpenChange={(v) => { if (!v) { setMode("closed"); setEditing(null); } }}
         title={mode === "edit" ? `Edit ${editing?.display_name || PROVIDER_LABELS[editing?.provider ?? ""] || "provider"}` : "Add an identity provider"}
-        description="These values come from the OAuth application you registered with the provider."
+        description="From the OAuth application your Site registered with the provider."
         size="lg"
         submitLabel={mode === "edit" ? "Save changes" : "Add provider"}
         busy={busy}
@@ -319,6 +322,7 @@ export default function SocialProvidersPage() {
         disabled={!canSubmit}
         onSubmit={onSubmit}
       >
+        <QuietHints>
         <div className="grid gap-4 sm:grid-cols-2">
           {mode === "new" ? (
             <Field label="Provider">
@@ -351,19 +355,6 @@ export default function SocialProvidersPage() {
               placeholder={mode === "edit" ? "Unchanged" : ""}
             />
           </Field>
-          <Field label="Scopes" hint="Leave empty to ask only for what sign-in needs. Space separated.">
-            <Input value={f.scopes} onChange={(e) => set("scopes", e.target.value)} placeholder={DEFAULT_SCOPES[f.provider] ?? ""} />
-          </Field>
-          {extraScopes(f.provider, f.scopes).length > 0 && (
-            <div className="sm:col-span-2">
-            <Callout tone="warning" title="This asks guests for more than sign-in needs">
-              Guests will be asked to share {extraScopes(f.provider, f.scopes).map((x) => `"${x}"`).join(", ")} as
-              well as their email. Sign-in keeps only the email and the account id, so this data is not used. Under
-              data-protection law you must have a reason to collect it and tell clients in your privacy notice.
-              You can still save.
-            </Callout>
-            </div>
-          )}
           {f.provider === "microsoft" && (
             <Field label="Directory (tenant)" hint="Leave empty for common (any Microsoft account).">
               <Input value={f.tenant} onChange={(e) => set("tenant", e.target.value)} placeholder="common" />
@@ -384,8 +375,13 @@ export default function SocialProvidersPage() {
         {f.provider === "google" && editing?.setup && editing.setup.length > 0 && <GoogleSetupChecklist steps={editing.setup} />}
 
         <fieldset className="space-y-2">
-          <legend className="text-label">Callback URLs</legend>
-          <p className="text-xs text-muted-foreground">{PROVIDER_CONSOLE_HELP[f.provider]}</p>
+          <legend className="flex items-center gap-1 text-label">
+            Callback URLs
+            <InfoHint>Register each URL in your {providerName} app, then tick it. The portal offers the provider only over HTTPS, at a ticked host name.</InfoHint>
+          </legend>
+          <Disclosure title={`How to register it with ${providerName}`} className="bg-surface/40">
+            <p className="text-xs text-muted-foreground">{PROVIDER_CONSOLE_HELP[f.provider]}</p>
+          </Disclosure>
           {callbacks.length === 0 ? (
             <Callout tone="warning">
               This appliance has no portal host name yet, so there is no callback URL to register. See{" "}
@@ -414,7 +410,7 @@ export default function SocialProvidersPage() {
                       I registered this callback URL in my {providerName} app
                     </label>
                     {googleOnOneGate && (
-                      <p className="mt-1 text-xs text-muted-foreground">Google does not accept this host name; use your portal domain.</p>
+                      <p className="mt-1 text-xs text-warning-subtle-foreground">Google does not accept this host name; use your portal domain.</p>
                     )}
                   </li>
                 );
@@ -424,17 +420,31 @@ export default function SocialProvidersPage() {
         </fieldset>
 
         <div className="flex items-center justify-between rounded-md border border-border bg-surface/50 px-3.5 py-2.5">
-          <div>
-            <div className="text-sm font-medium">Offer this on the sign-in page</div>
-            <div className="text-xs text-muted-foreground">
-              Turn it off to finish setting it up without clients seeing it.
-            </div>
+          <div className="flex items-center gap-1">
+            <span className="text-sm font-medium">Offer this on the sign-in page</span>
+            <InfoHint>Turn it off to finish setting it up without clients seeing it.</InfoHint>
           </div>
           <Switch checked={f.enabled} onCheckedChange={(v) => set("enabled", v)} label="Offer this provider" />
         </div>
+
+        {/* Advanced: opened when the entry already asks for extra scopes, so a stored choice is never hidden. */}
+        <Disclosure title="Advanced: scopes" defaultOpen={f.scopes.trim() !== ""}>
+          <Field label="Scopes" hint="Leave empty to ask only for what sign-in needs. Space separated.">
+            <Input value={f.scopes} onChange={(e) => set("scopes", e.target.value)} placeholder={DEFAULT_SCOPES[f.provider] ?? ""} />
+          </Field>
+        </Disclosure>
+        {extraScopes(f.provider, f.scopes).length > 0 && (
+          <Callout tone="warning" title="This asks guests for more than sign-in needs">
+            Guests will be asked to share {extraScopes(f.provider, f.scopes).map((x) => `"${x}"`).join(", ")} as
+            well as their email. Sign-in keeps only the email and the account id, so this data is not used. Under
+            data-protection law you must have a reason to collect it and tell clients in your privacy notice.
+            You can still save.
+          </Callout>
+        )}
         <Field label="Your password" required hint="Confirms the change. It is not stored.">
           <Input type="password" autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} />
         </Field>
+        </QuietHints>
       </DialogForm>
 
       <ConfirmDialog

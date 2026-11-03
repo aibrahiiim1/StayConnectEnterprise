@@ -120,9 +120,14 @@ describe("a read-only role is offered no write control", () => {
     expect(await screen.findByText(/can see which sign-in methods are offered but not change them/i)).toBeInTheDocument();
     expect(screen.getAllByText("Voucher code").length).toBeGreaterThan(0);
     expect(screen.queryAllByRole("switch")).toHaveLength(0);
+    // The protection settings have their own tab (Radix activates a tab on mouse down).
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Protection" }), { button: 0 });
     expect(await screen.findByText(/can see these settings but not change them/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /save protection settings/i })).toBeNull();
     expect(screen.getByLabelText(/maximum failed attempts/i)).toBeDisabled();
+    // Choosing the tab named it in the URL; the next test starts on the default tab.
+    expect(window.location.hash).toBe("#protection");
+    window.history.replaceState(null, "", window.location.pathname);
   });
 
   it("Sign-in methods: an admin gets real switches that save immediately, one key at a time", async () => {
@@ -141,8 +146,12 @@ describe("a read-only role is offered no write control", () => {
 
   it("Guest sign-in protection: an out-of-range value blocks Save and says the range", async () => {
     routes(["site_admin"]);
+    // A link to the tab opens it directly.
+    window.history.replaceState(null, "", "#protection");
     render(<SignInMethodsPage />);
     const attempts = await screen.findByLabelText(/maximum failed attempts/i);
+    expect(window.location.hash).toBe("#protection");
+    window.history.replaceState(null, "", window.location.pathname);
     expect(screen.getByText(/default 5 attempts; allowed 3–20/i)).toBeInTheDocument();
     fireEvent.change(attempts, { target: { value: "1" } });
     expect(await screen.findByText(/enter a whole number between 3 and 20/i)).toBeInTheDocument();
