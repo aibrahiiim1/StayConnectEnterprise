@@ -11,7 +11,7 @@ export function RoomChargeLiveNotice({ className }: { className?: string }) {
     <div className={className} data-testid="room-charge-live-notice">
       <Notice tone="warning" title="Room-charge posting is live on this appliance">
         Charge to room creates a real charge on the guest&rsquo;s reservation.
-        <InfoHint>Test with a package and a stay you are allowed to charge, and reverse any test charge in the PMS.</InfoHint>
+        <InfoHint className="ms-1">Test with a package and a stay you are allowed to charge, and reverse any test charge in the PMS.</InfoHint>
       </Notice>
     </div>
   );

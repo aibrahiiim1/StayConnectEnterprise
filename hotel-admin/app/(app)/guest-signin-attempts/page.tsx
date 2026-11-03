@@ -251,7 +251,7 @@ export default function GuestSignInAttemptsPage() {
       {counts.systemic > 0 && (
         <Notice tone="warning" title={`${counts.systemic} attempt${counts.systemic === 1 ? "" : "s"} failed for reasons no guest could fix`}>
           Out-of-date guest list, PMS routing or an internal fault.
-          <InfoHint>Guests saw &ldquo;we are unable to verify your stay right now&rdquo;, not a request to re-check their details.</InfoHint>
+          <InfoHint className="ms-1">Guests saw &ldquo;we are unable to verify your stay right now&rdquo;, not a request to re-check their details.</InfoHint>
         </Notice>
       )}
 

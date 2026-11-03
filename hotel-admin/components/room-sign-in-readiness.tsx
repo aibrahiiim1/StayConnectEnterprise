@@ -78,7 +78,7 @@ export function RoomSignInReadinessCallout({ readiness }: { readiness: RoomSignI
         </span>
       ))}
       {readiness.unchecked.length > 0 && <> · Not checked: {readiness.unchecked.join(", ")}</>}
-      <InfoHint>Other sign-in methods and networks are not affected. Each warning clears once its cause is corrected.</InfoHint>
+      <InfoHint className="ms-1">Other sign-in methods and networks are not affected. Each warning clears once its cause is corrected.</InfoHint>
     </Notice>
   );
 }

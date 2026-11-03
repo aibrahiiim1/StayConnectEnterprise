@@ -246,7 +246,10 @@ function Rail({ title, description, link, items }: {
         </Link>
       }
     >
-      <MetricStrip items={items.map((it) => ({ ...it, tone: it.tone === "default" ? undefined : it.tone }))} />
+      <MetricStrip
+        items={items.map((it) => ({ ...it, tone: it.tone === "default" ? undefined : it.tone }))}
+        className={items.length % 2 ? "[&>div:last-child]:col-span-2" : undefined}
+      />
     </SectionCard>
   );
 }
