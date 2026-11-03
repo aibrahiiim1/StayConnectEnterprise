@@ -1362,7 +1362,7 @@
       "dispositions": "docs/AUDIT_DECISION_DISPOSITIONS.md"
     }
   },
-  "latest_transition_id": "T0288",
+  "latest_transition_id": "T0289",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1858,16 +1858,16 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "ADMIN_CONSOLE_UX_CLOSURE_2026_11_03",
-    "decision": "Product Owner closure request of 2026-11-03 for the authorised Admin Console UX mission. No new decision record.",
-    "decision_note": "Admin Console only; installed on the test appliance as release 20261103-082555 (source_commit 98196984, BUILD_ID dcssK6rq0MRtPkrV4ijN6), read back.",
-    "manifest": "docs/manifests/AdminConsoleUXClosure20261103-change-manifest.md",
-    "base": "577463f7842065e4d36480b3e79f44e9a6715d70",
-    "base_note": "Master after the merge of PR #297.",
-    "transition": "T0288",
-    "previous_delivery": "T0287",
-    "branch": "delivery/ux-closure-2026-11-03",
-    "note": "T0288. Go-Live not authorised."
+    "kind": "OPERATOR_USERNAME_AND_ALERTS_FIX_2026_11_03",
+    "decision": "Product Owner report of 2026-11-03. No new decision record; merge awaits PO approval.",
+    "decision_note": "edged c91b6f98 and Admin Console release 20261103-092631 on the test appliance, read back; svc_edged alert grant applied.",
+    "manifest": "docs/manifests/OperatorUsernameAlerts20261103-change-manifest.md",
+    "base": "ebb8f155c5df8d49b2e81685252974943fa01124",
+    "base_note": "Master after the merge of PR #298.",
+    "transition": "T0289",
+    "previous_delivery": "T0288",
+    "branch": "delivery/operator-username-alerts-2026-11-03",
+    "note": "T0289. Go-Live not authorised."
   },
   "onboarding_reconciliation": {
     "decision": "D37",

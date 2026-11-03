@@ -1,0 +1,35 @@
+{
+  "transition_id": "T0289",
+  "seq": 289,
+  "timestamp": "2026-11-03T11:26:52+02:00",
+  "timestamp_derivation": "Read from the workstation clock (UTC+02:00) by the script that wrote this receipt, immediately before the commit that introduces it.",
+  "record_type": "OPERATOR_USERNAME_AND_ALERT_ACTIONS_FIX",
+  "authorisation": "The Product Owner's report of 2026-11-03 (operators cannot be added with a username; an alert cannot be resolved), under the standing test-appliance deployment authority (D79). Merge awaits the Product Owner.",
+  "delivery": "edged accepts an operator name that is an email or a 3-64 character username (letters, digits, dots, dashes, underscores), as the form, the login page and the manuals already said; sign-in already accepted any name. svc_edged gains EXECUTE on iam_v2.record_alert_action in svc-edged-phase345-admin-grants.sql: without it every Acknowledge and Resolve failed with a generic conflict that the page reported as 'the alert changed'. The page now says so only for a real state conflict. A privilege test runs as svc_edged (the phase-3 fixture connects as a superuser, which is why this was missed).",
+  "finding": "The open CHECKOUT_GRACE_CONFIG_INVALID alert recorded a real event (one departure on 2026-11-01 received the emergency terms before the site published its own); publishing does not close it by design. It was resolved live after the fix. Investigated, not changed: a room sign-in on a stay with an ACTIVE entitlement is offered packages because the live-entitlement lookup matches the subject but not the stay; changing it is guest-authentication core and awaits a Product Owner decision. The One Day package is configured MANUAL_END (no 24-hour window).",
+  "deployment": {
+    "test_appliance": "172.21.96.97: edged from c91b6f9854086c917592fe844ac2488066c5e888 (read back: -tags=stayconnect_production, vcs.modified=false; backup edged.bak-pre-c91b6f98-20261103T091807Z; DEPLOYED_BINARIES.sha256 updated, all eight OK); GRANT EXECUTE ON iam_v2.record_alert_action TO svc_edged applied and read back true; Admin Console release 20261103-092631 reads source_commit c91b6f98 and BUILD_ID gwjEyZYrbqPbJOn3HOnks, previous 20261103-082555 kept.",
+    "central": "Not changed."
+  },
+  "verification": "edged unit TestValidOperatorAccountName PASS; svc_edged privilege test FAIL without the grant and PASS with the grants file; edged operator and alert integration 21/21 PASS; Admin Console operator and alert tests 67/67 PASS; tsc and eslint clean. Live: an operator created with a username (201), an invalid name refused (400), sign-in with the username (200), the test operator deleted; the alert resolved (200) and the queue empty.",
+  "not_touched": "Operator password rules, sign-in, step-up and roles; guest authentication and entitlements; PMS; financial behaviour; After Check-out terms; networking; the production Central.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "ebb8f155c5df8d49b2e81685252974943fa01124",
+  "previous_delivery": "T0288",
+  "decision": "none (FAST Admin Console change)",
+  "go_live": "NOT authorised."
+}
