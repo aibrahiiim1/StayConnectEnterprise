@@ -4,7 +4,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -114,6 +116,53 @@ func TestSpeedAllocation_ASessionMovedToAnotherEntitlementJoinsItsGroup(t *testi
 		if c.op == "delete" || c.op == "prepare" {
 			t.Fatalf("a session already under its group was rebuilt again: %+v", c)
 		}
+	}
+}
+
+type failingGenerations struct{}
+
+func (failingGenerations) AllocateClassGeneration(context.Context, string, string, string) (int64, error) {
+	return 0, errors.New("database unavailable")
+}
+
+// The rebuild is fail-closed: packet authorization is revoked before the class goes, and a rebuild that cannot finish leaves the device denied,
+// never forwarding through the default class unshaped and uncounted.
+func TestSpeedAllocation_ARegroupRevokesBeforeTheClassGoesAndStaysDeniedOnFailure(t *testing.T) {
+	tc, g := newFakeTC(), newFakeGate()
+	tc.reportParents = true
+	p := allocWriter(t, tc, g, "10.0.0.11")
+	s := allocSession("a", "10.0.0.11", "ent-free", "SHARED")
+	if res, err := p.submit(context.Background(), envelope(1, s), time.Now()); err != nil || res.Shaped != 1 {
+		t.Fatalf("first pass: %+v %v", res, err)
+	}
+	g.mu.Lock()
+	g.calls = nil
+	g.mu.Unlock()
+	tc.mu.Lock()
+	tc.calls = nil
+	tc.mu.Unlock()
+
+	p.generations = failingGenerations{}
+	s.EntitlementID = "ent-fullstay"
+	if _, err := p.submit(context.Background(), envelope(2, s), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if g.isAuthorized("br-guest", "10.0.0.11") {
+		t.Fatal("the device is authorized with no class to shape or count it")
+	}
+	g.mu.Lock()
+	revoked := len(g.calls) > 0 && strings.HasPrefix(g.calls[0], "revoke ")
+	g.mu.Unlock()
+	tc.mu.Lock()
+	deleted := false
+	for _, c := range tc.calls {
+		if c.op == "delete" {
+			deleted = true
+		}
+	}
+	tc.mu.Unlock()
+	if !revoked || !deleted {
+		t.Fatalf("revoke first then delete: revoked=%v deleted=%v", revoked, deleted)
 	}
 }
 

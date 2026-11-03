@@ -444,6 +444,10 @@ func (p *phase3Shaping) regroupedAway(ctx context.Context, bridge string, ip net
 	if !(d.Params && d.Parent != want) && !(u.Params && u.Parent != want) {
 		return false
 	}
+	// Fail closed: without its class the device would forward unshaped and uncounted, so it is denied first; the rebuild re-admits it once accountable.
+	if err := p.denyAccess(ctx, bridge, ip); err != nil {
+		return false
+	}
 	if err := p.shp.DeleteSession(ctx, bridge, ip); err != nil {
 		return false
 	}
