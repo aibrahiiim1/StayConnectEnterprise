@@ -19,8 +19,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/pmsd"
-	"github.com/stayconnect/enterprise/data-plane/internal/pmsprovider"
+	"github.com/onegate/onegate/data-plane/internal/pmsd"
+	"github.com/onegate/onegate/data-plane/internal/pmsprovider"
 )
 
 type pmsInterfaceRow struct {

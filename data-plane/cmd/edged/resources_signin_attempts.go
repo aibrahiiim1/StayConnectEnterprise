@@ -17,7 +17,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/signinattempt"
+	"github.com/onegate/onegate/data-plane/internal/signinattempt"
 )
 
 // signInAttemptRow is the LIST projection: no submitted value, accepted value or ciphertext is in this struct.

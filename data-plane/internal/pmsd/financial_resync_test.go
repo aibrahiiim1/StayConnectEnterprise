@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/pms"
+	"github.com/onegate/onegate/data-plane/internal/pms"
 )
 
 func TestFinResync_AsksAtMostOncePerMinuteAndNeverWhileResyncing(t *testing.T) {

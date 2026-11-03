@@ -7,7 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/namenorm"
+	"github.com/onegate/onegate/data-plane/internal/namenorm"
 )
 
 // Sharer is one occupant of a Stay as the PMS reports it; exactly one is the primary. The external id is

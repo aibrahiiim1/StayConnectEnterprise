@@ -15,7 +15,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/transfer"
+	"github.com/onegate/onegate/data-plane/internal/transfer"
 )
 
 // A window, not an open-ended grant; the destination property's own authentication then applies.

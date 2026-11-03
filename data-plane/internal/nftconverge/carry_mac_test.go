@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/nft"
+	"github.com/onegate/onegate/data-plane/internal/nft"
 )
 
 // A structural replace carries a MAC-bound authorization with its device address and remaining lease; dropping the MAC

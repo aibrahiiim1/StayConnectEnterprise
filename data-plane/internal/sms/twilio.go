@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/phone"
+	"github.com/onegate/onegate/data-plane/internal/phone"
 )
 
 type Twilio struct {

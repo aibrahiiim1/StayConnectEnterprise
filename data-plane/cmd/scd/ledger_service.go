@@ -26,10 +26,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/backupcrypt"
-	"github.com/stayconnect/enterprise/data-plane/internal/ledger"
-	"github.com/stayconnect/enterprise/data-plane/internal/localkeys"
-	"github.com/stayconnect/enterprise/data-plane/internal/sealbox"
+	"github.com/onegate/onegate/data-plane/internal/backupcrypt"
+	"github.com/onegate/onegate/data-plane/internal/ledger"
+	"github.com/onegate/onegate/data-plane/internal/localkeys"
+	"github.com/onegate/onegate/data-plane/internal/sealbox"
 )
 
 // ledgerLocalPath is the primary copy, outside the backup folders on purpose: backups are rotated and restored, the ledger is neither.

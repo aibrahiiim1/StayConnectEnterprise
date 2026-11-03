@@ -24,8 +24,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
-	"github.com/stayconnect/enterprise/data-plane/internal/nft"
+	"github.com/onegate/onegate/data-plane/internal/netcfg"
+	"github.com/onegate/onegate/data-plane/internal/nft"
 )
 
 // Runner is the process boundary, an interface so tests can observe exactly which commands a reconciliation issued,
@@ -52,7 +52,7 @@ type Outcome struct {
 // objects without reading or carrying them.
 var AuthSets = []string{nft.AuthV4, nft.Phase3AuthV4, nft.Phase3MACV4, nft.GardenV4, nft.GardenTCP, nft.GardenUDP}
 
-// tableName is the single StayConnect nft table, named once so no read path drifts from the table the render replaces.
+// tableName is the single OneGate nft table, named once so no read path drifts from the table the render replaces.
 const tableName = "stayconnect"
 
 type Engine struct {

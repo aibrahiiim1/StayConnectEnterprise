@@ -47,8 +47,8 @@ func TestURIAndSecret(t *testing.T) {
 	if err != nil || len(s) != SecretBytes {
 		t.Fatalf("secret %d bytes, %v", len(s), err)
 	}
-	u := URI(s, "StayConnect Grand Hotel", "ada@hotel.example")
-	if !strings.HasPrefix(u, "otpauth://totp/StayConnect%20Grand%20Hotel:ada@hotel.example?") ||
+	u := URI(s, "OneGate Grand Hotel", "ada@hotel.example")
+	if !strings.HasPrefix(u, "otpauth://totp/OneGate%20Grand%20Hotel:ada@hotel.example?") ||
 		!strings.Contains(u, "secret="+EncodeSecret(s)) || !strings.Contains(u, "digits=6") || !strings.Contains(u, "period=30") {
 		t.Fatalf("uri %s", u)
 	}

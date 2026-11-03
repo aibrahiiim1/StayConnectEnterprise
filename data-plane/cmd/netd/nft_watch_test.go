@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
+	"github.com/onegate/onegate/data-plane/internal/netcfg"
 )
 
 // After `systemctl restart nftables` the table is gone; the periodic re-assertion rebuilds it from the in-force intent.

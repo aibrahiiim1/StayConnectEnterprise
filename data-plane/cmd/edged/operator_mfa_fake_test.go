@@ -12,7 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/totp"
+	"github.com/onegate/onegate/data-plane/internal/totp"
 )
 
 // fakeMFA stands in for scd: real TOTP codes with the secret in memory, mirroring a confirmed authenticator into

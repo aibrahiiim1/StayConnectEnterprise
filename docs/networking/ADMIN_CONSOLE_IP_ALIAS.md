@@ -38,7 +38,7 @@ running it.
 
 **No TLS warnings:** a workstation that trusts the Caddy local root
 (`/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt`, distributed as
-the StayConnect CA) validates **both** URLs cleanly — verified with
+the OneGate CA) validates **both** URLs cleanly — verified with
 `openssl verify` (`-verify_hostname` for the name, `-verify_ip` for the IP) and
 `curl --cacert`, both `return code 0 (ok)`.
 

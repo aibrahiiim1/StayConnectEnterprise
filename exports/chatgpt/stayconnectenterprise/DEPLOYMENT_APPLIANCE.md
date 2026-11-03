@@ -171,7 +171,7 @@ EDGE_NETWORKING.md.
 On the **LAN** interface (§1), the client-facing NIC assigned the **`guest_trunk`**
 role (*Client trunk*) carries **tagged** 802.1Q client VLANs from the WLAN controller (e.g. `ens192`
 as a trunk; VLAN 20 → `ens192.20` → `br-g20` → `10.20.0.1/22`). The trunk parent
-is address-less (an L2 trunk); StayConnect owns the per-VLAN gateway. A plain
+is address-less (an L2 trunk); OneGate owns the per-VLAN gateway. A plain
 untagged client port uses role `guest_access` (*Client access*) instead. See
 CLIENT_VLANS_AND_SSIDS.md, Part B.
 

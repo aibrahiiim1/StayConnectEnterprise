@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/enforce"
+	"github.com/onegate/onegate/data-plane/internal/enforce"
 )
 
 type valRow struct {

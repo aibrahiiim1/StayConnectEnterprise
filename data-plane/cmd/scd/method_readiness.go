@@ -4,7 +4,7 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
+	"github.com/onegate/onegate/data-plane/internal/tenantcfg"
 )
 
 // Provider readiness is the fourth gate for a code or social sign-in: a licensed, deployed, enabled method is not offered

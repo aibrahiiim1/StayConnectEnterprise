@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/testdb"
+	"github.com/onegate/onegate/control-plane/internal/testdb"
 )
 
 // Audit Phase 1 L6: an overdue retirement becomes terminal_delivery_failed only together with its alert.

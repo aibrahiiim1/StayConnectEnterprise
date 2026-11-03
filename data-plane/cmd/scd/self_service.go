@@ -22,7 +22,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/mail"
+	"github.com/onegate/onegate/data-plane/internal/mail"
 )
 
 const (

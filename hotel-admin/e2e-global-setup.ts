@@ -15,7 +15,7 @@ export default async function globalSetup(config: FullConfig) {
         lastProblem = `the server answered ${res.status}`;
       } else {
         const body = await res.text();
-        if (body.includes("StayConnect") || body.includes("Sign in")) return;
+        if (body.includes("OneGate") || body.includes("Sign in")) return;
         lastProblem = `${target} answered ${res.status} but did not look like the Admin Console login page`;
       }
     } catch (err) {

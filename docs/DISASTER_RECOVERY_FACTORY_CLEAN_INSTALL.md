@@ -1,4 +1,4 @@
-# Factory-clean install and disaster recovery — StayConnect appliance
+# Factory-clean install and disaster recovery — OneGate appliance
 
 **Scope.** How a *new* appliance is built from repository-controlled sources alone, with **no** database dump,
 `/etc/stayconnect`, service state, test identity, account, voucher or other runtime state copied from any

@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/activation"
-	"github.com/stayconnect/enterprise/control-plane/internal/assignment"
+	"github.com/onegate/onegate/control-plane/internal/activation"
+	"github.com/onegate/onegate/control-plane/internal/assignment"
 )
 
 // A package minted by activationPackage carries the registry Central serves to appliances, and that registry verifies against Central's registry

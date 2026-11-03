@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/enforce"
-	"github.com/stayconnect/enterprise/data-plane/internal/shapeplan"
+	"github.com/onegate/onegate/data-plane/internal/enforce"
+	"github.com/onegate/onegate/data-plane/internal/shapeplan"
 )
 
 // The producer half on its own (audit Phase 6 CC4): what acctd builds is a plan netd's validator accepts, every

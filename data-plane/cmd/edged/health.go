@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
+	"github.com/onegate/onegate/data-plane/internal/startupbackoff"
 )
 
 // Health states. The supervisor only observes; systemd and the adaptive startup backoff own restarts.

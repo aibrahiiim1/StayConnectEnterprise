@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/api"
+	"github.com/onegate/onegate/control-plane/internal/api"
 )
 
 // Audit Phase 1 L19: a panicking housekeeping step is logged and the pass (and the loop) carries on.

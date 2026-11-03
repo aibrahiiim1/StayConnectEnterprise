@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/appliancecert"
-	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
-	"github.com/stayconnect/enterprise/data-plane/internal/identity"
-	"github.com/stayconnect/enterprise/data-plane/internal/licstate"
-	lic "github.com/stayconnect/enterprise/license"
+	"github.com/onegate/onegate/data-plane/internal/appliancecert"
+	"github.com/onegate/onegate/data-plane/internal/assignment"
+	"github.com/onegate/onegate/data-plane/internal/identity"
+	"github.com/onegate/onegate/data-plane/internal/licstate"
+	lic "github.com/onegate/onegate/license"
 )
 
 var now0 = time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)

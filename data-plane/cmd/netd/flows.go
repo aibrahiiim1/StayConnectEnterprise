@@ -16,7 +16,7 @@ import (
 	"net"
 	"net/http"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/conntrack"
+	"github.com/onegate/onegate/data-plane/internal/conntrack"
 )
 
 type flowsEndReq struct {

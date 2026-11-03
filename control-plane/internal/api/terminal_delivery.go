@@ -14,10 +14,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/assignment"
-	"github.com/stayconnect/enterprise/control-plane/internal/audit"
-	"github.com/stayconnect/enterprise/control-plane/internal/auth"
-	pki "github.com/stayconnect/enterprise/control-plane/internal/pki"
+	"github.com/onegate/onegate/control-plane/internal/assignment"
+	"github.com/onegate/onegate/control-plane/internal/audit"
+	"github.com/onegate/onegate/control-plane/internal/auth"
+	pki "github.com/onegate/onegate/control-plane/internal/pki"
 )
 
 // beginTerminalDelivery starts retirement inside the caller's transaction, so the caller's licence revocation and

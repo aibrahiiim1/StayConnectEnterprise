@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/audit"
-	"github.com/stayconnect/enterprise/control-plane/internal/auth"
+	"github.com/onegate/onegate/control-plane/internal/audit"
+	"github.com/onegate/onegate/control-plane/internal/auth"
 )
 
 // Central security settings (one row): the absolute console session lifetime (however active the operator is),

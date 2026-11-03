@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/testdb"
+	"github.com/onegate/onegate/control-plane/internal/testdb"
 )
 
 // Audit Phase 1 L14: a site code follows the slug rule, and a site of an archived customer cannot be restored.

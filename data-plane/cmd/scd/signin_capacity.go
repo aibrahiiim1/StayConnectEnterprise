@@ -9,8 +9,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/otp"
-	"github.com/stayconnect/enterprise/data-plane/internal/poststay"
+	"github.com/onegate/onegate/data-plane/internal/otp"
+	"github.com/onegate/onegate/data-plane/internal/poststay"
 )
 
 // signinCeilingFloor is the lowest appliance-wide sign-in ceiling (attempts a minute) whatever the licence or the setting says.

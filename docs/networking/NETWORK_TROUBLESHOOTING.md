@@ -39,7 +39,7 @@ carries the right `user-context`.
 
 | Check | How | Fix |
 |---|---|---|
-| Is the VLAN trunked/tagged to the appliance? | switch/AP uplink port must be an 802.1Q trunk with the VLAN tagged | fix the controller/switch — **StayConnect does not configure it** ([CLIENT_VLANS_AND_SSIDS.md, Part B](CLIENT_VLANS_AND_SSIDS.md)) |
+| Is the VLAN trunked/tagged to the appliance? | switch/AP uplink port must be an 802.1Q trunk with the VLAN tagged | fix the controller/switch — **OneGate does not configure it** ([CLIENT_VLANS_AND_SSIDS.md, Part B](CLIENT_VLANS_AND_SSIDS.md)) |
 | Did netplan apply? | `ip -br link show ens192.20` exists; `ip -br link show br-g20` UP | re-apply the revision; check `netplan generate` gate passed |
 | Is the parent a trunk with the VLAN device? | rendered netplan `vlans: ens192.20 {id:20, link:ens192}` | present in the bundle; if the parent has an IP it's mis-roled — parent should be `guest_trunk`, address-less |
 | Is the bridge carrying the VLAN device? | `bridge link show` → `ens192.20` master `br-g20` | if not enslaved, re-apply |

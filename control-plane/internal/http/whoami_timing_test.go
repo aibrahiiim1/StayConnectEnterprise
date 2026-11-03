@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/auth"
+	"github.com/onegate/onegate/control-plane/internal/auth"
 )
 
 func TestWhoamiReportsSessionExpiry(t *testing.T) {

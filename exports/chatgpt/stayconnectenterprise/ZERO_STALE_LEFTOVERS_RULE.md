@@ -1,6 +1,6 @@
 # PERMANENT RULE — Zero Stale Leftovers (project-wide, mandatory)
 
-**Authoritative, permanent Product-Owner rule for the entire StayConnect Enterprise project.** Referenced from `StayConnect-IAM-Handoff.md`, `00-START-HERE.md`, and `PROJECT-INSTRUCTIONS.md`.
+**Authoritative, permanent Product-Owner rule for the entire OneGate project.** Referenced from `StayConnect-IAM-Handoff.md`, `00-START-HERE.md`, and `PROJECT-INSTRUCTIONS.md`.
 
 ## WHEN THIS RULE APPLIES (Product-Owner decision — read first)
 

@@ -12,10 +12,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/mail"
-	"github.com/stayconnect/enterprise/data-plane/internal/metrics"
-	"github.com/stayconnect/enterprise/data-plane/internal/sms"
-	"github.com/stayconnect/enterprise/data-plane/internal/whatsapp"
+	"github.com/onegate/onegate/data-plane/internal/mail"
+	"github.com/onegate/onegate/data-plane/internal/metrics"
+	"github.com/onegate/onegate/data-plane/internal/sms"
+	"github.com/onegate/onegate/data-plane/internal/whatsapp"
 )
 
 const (

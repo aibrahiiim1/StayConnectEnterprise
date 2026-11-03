@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
+	"github.com/onegate/onegate/data-plane/internal/netcfg"
 )
 
 // applyBundle brings the live system to the target state: create/destroy VLAN sub-interfaces and bridges surgically, write and validate the persistence

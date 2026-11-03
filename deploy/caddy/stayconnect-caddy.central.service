@@ -28,7 +28,7 @@
 # afterwards (`caddy adapt` or an HTTP check) rather than assuming the restart applied it.
 
 [Unit]
-Description=StayConnect Central Caddy (TLS ingress)
+Description=OneGate Central Caddy (TLS ingress)
 Documentation=https://caddyserver.com/docs/
 After=network-online.target stayconnect-ctrlapi.service stayconnect-cloud-admin.service
 Wants=network-online.target

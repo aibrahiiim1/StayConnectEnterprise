@@ -25,7 +25,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/payment"
+	"github.com/onegate/onegate/data-plane/internal/payment"
 )
 
 const (

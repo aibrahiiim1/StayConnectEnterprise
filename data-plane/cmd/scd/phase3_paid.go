@@ -21,12 +21,12 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/authctx"
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
-	"github.com/stayconnect/enterprise/data-plane/internal/payment"
-	"github.com/stayconnect/enterprise/data-plane/internal/signinattempt"
-	"github.com/stayconnect/enterprise/data-plane/internal/staygrant"
-	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
+	"github.com/onegate/onegate/data-plane/internal/authctx"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/payment"
+	"github.com/onegate/onegate/data-plane/internal/signinattempt"
+	"github.com/onegate/onegate/data-plane/internal/staygrant"
+	"github.com/onegate/onegate/data-plane/internal/writerguard"
 )
 
 // stayMethodGate is a variable only so an integration test can replace the licence-dependent module resolver.

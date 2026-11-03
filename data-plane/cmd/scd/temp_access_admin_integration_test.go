@@ -14,7 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/sealbox"
+	"github.com/onegate/onegate/data-plane/internal/sealbox"
 )
 
 // Staff help for SMS / WhatsApp codes against the database (temp_access_admin.go). Needs PHASE3_TEST_DSN; skipped otherwise.

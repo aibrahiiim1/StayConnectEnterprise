@@ -4,8 +4,8 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
-	"github.com/stayconnect/enterprise/data-plane/internal/nftconverge"
+	"github.com/onegate/onegate/data-plane/internal/netcfg"
+	"github.com/onegate/onegate/data-plane/internal/nftconverge"
 )
 
 // The reconciliation engine lives in internal/nftconverge so the real-kernel suite tests the same code; see it

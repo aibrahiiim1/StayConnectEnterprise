@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/buildprofile"
+	"github.com/onegate/onegate/data-plane/internal/buildprofile"
 )
 
 // Audit B-13: the stub is the fallback for a site with no WhatsApp provider, so on a production appliance it

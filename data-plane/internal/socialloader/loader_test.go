@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/social"
+	"github.com/onegate/onegate/data-plane/internal/social"
 )
 
 // The secret comes from the opener only: a row that opens is built with it, one that does not is skipped,

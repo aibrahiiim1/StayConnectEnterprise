@@ -17,10 +17,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/metrics"
-	"github.com/stayconnect/enterprise/data-plane/internal/social"
-	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
-	lic "github.com/stayconnect/enterprise/license"
+	"github.com/onegate/onegate/data-plane/internal/metrics"
+	"github.com/onegate/onegate/data-plane/internal/social"
+	"github.com/onegate/onegate/data-plane/internal/tenantcfg"
+	lic "github.com/onegate/onegate/license"
 )
 
 func TestIntegration_SocialSecretsAreSealedAndAttemptsAreBound(t *testing.T) {

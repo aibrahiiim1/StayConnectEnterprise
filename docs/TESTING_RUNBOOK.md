@@ -1,4 +1,4 @@
-# StayConnect — Testing Runbook (Control Plane + Appliance Edge)
+# OneGate — Testing Runbook (Control Plane + Appliance Edge)
 
 Step‑by‑step checks for both planes and the link between them. Run everything from
 a workstation that can SSH to both hosts. **Central here is production:** the checks below are read-only on

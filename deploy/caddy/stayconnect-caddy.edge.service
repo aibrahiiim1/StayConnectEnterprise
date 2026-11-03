@@ -19,7 +19,7 @@
 # caddy.service is also around.
 
 [Unit]
-Description=StayConnect edge proxy (Caddy)
+Description=OneGate edge proxy (Caddy)
 Documentation=https://caddyserver.com/docs/
 After=network-online.target
 Wants=network-online.target

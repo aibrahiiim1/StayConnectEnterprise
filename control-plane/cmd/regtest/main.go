@@ -21,8 +21,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/applianceauth"
-	"github.com/stayconnect/enterprise/control-plane/internal/opsignin"
+	"github.com/onegate/onegate/control-plane/internal/applianceauth"
+	"github.com/onegate/onegate/control-plane/internal/opsignin"
 )
 
 // signIn takes the password from the environment so it never shows in a process list.

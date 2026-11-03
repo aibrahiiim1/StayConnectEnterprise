@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/pmsprovider"
+	"github.com/onegate/onegate/data-plane/internal/pmsprovider"
 )
 
 // oldPMSSourceFingerprint is a verbatim copy of the pre-registry fingerprint function.

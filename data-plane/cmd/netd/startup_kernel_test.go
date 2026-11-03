@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
+	"github.com/onegate/onegate/data-plane/internal/netcfg"
 )
 
 // The real binary, started with a database that refuses connections: it must stay up, rebuild the last-confirmed network from the snapshot, and refuse changes.

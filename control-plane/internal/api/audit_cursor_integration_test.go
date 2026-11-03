@@ -8,7 +8,7 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/auth"
+	"github.com/onegate/onegate/control-plane/internal/auth"
 )
 
 // P4: paging the audit log loses no row when several rows share a timestamp (audit_log has no id column).

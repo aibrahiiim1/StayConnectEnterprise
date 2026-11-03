@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/applianceauth"
-	"github.com/stayconnect/enterprise/control-plane/internal/auth"
+	"github.com/onegate/onegate/control-plane/internal/applianceauth"
+	"github.com/onegate/onegate/control-plane/internal/auth"
 )
 
 type IdentityBase struct {

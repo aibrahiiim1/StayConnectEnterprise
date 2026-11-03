@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/buildprofile"
-	"github.com/stayconnect/enterprise/data-plane/internal/identity"
+	"github.com/onegate/onegate/data-plane/internal/buildprofile"
+	"github.com/onegate/onegate/data-plane/internal/identity"
 )
 
 // Builds the assignment paths from the daemon's environment prefix (EDGED, ACCTD, NETD, ...) with the shared appliance-wide defaults.

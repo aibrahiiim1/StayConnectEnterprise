@@ -7,7 +7,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
+	"github.com/onegate/onegate/data-plane/internal/assignment"
 )
 
 // watchAssignmentReexec re-execs edged (same PID, so systemd sees no crash) when the persisted assignment

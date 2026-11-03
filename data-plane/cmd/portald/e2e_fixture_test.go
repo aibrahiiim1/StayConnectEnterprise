@@ -10,7 +10,7 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
 )
 
 // Renders the real landing page into the fixture the hotel-admin/e2e browser tests read; fails when stale. Regenerate with UPDATE_E2E_FIXTURE=1 go test ./cmd/portald/ -run TestE2EPortalFixtures.

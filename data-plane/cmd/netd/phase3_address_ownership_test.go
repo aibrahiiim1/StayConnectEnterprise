@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/shapeplan"
+	"github.com/onegate/onegate/data-plane/internal/shapeplan"
 )
 
 // fakeLeases stages DHCP evidence; nil error with no rows means "nobody holds anything", unlike a server that could not be asked.

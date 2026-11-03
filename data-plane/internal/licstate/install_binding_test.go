@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	lic "github.com/stayconnect/enterprise/license"
+	lic "github.com/onegate/onegate/license"
 )
 
 func (f *fixture) docEnvelope(t *testing.T, mutate func(*lic.Document)) []byte {

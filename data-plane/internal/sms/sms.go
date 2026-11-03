@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/buildprofile"
+	"github.com/onegate/onegate/data-plane/internal/buildprofile"
 )
 
 // ErrNotDelivered: the message did not and could not leave the appliance (no provider is configured). A caller reports

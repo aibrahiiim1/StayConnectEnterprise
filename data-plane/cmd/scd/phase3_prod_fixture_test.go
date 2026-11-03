@@ -14,7 +14,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	iamv2 "github.com/stayconnect/enterprise/data-plane/internal/iamv2"
+	iamv2 "github.com/onegate/onegate/data-plane/internal/iamv2"
 )
 
 func newProdAuthFixture(t *testing.T) *authFixture {

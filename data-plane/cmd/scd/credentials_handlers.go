@@ -15,8 +15,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
-	"github.com/stayconnect/enterprise/data-plane/internal/passwordhash"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/passwordhash"
 )
 
 // authorizeGuestAccount: every failure mode (unknown, wrong password, disabled, expired, locked, switch off) is answered identically and creates no auth context, device, entitlement or session.

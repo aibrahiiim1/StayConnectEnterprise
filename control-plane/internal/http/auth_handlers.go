@@ -11,11 +11,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/api"
-	"github.com/stayconnect/enterprise/control-plane/internal/audit"
-	"github.com/stayconnect/enterprise/control-plane/internal/auth"
-	"github.com/stayconnect/enterprise/control-plane/internal/clientip"
-	"github.com/stayconnect/enterprise/control-plane/internal/ratebudget"
+	"github.com/onegate/onegate/control-plane/internal/api"
+	"github.com/onegate/onegate/control-plane/internal/audit"
+	"github.com/onegate/onegate/control-plane/internal/auth"
+	"github.com/onegate/onegate/control-plane/internal/clientip"
+	"github.com/onegate/onegate/control-plane/internal/ratebudget"
 )
 
 type authDeps struct {

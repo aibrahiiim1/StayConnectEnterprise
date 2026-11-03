@@ -11,7 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/checkout"
+	"github.com/onegate/onegate/data-plane/internal/checkout"
 )
 
 // These tests need a disposable PostgreSQL 16 with the iam_v2 schema at PHASE3_TEST_DSN

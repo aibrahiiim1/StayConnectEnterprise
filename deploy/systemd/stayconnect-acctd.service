@@ -1,5 +1,5 @@
 [Unit]
-Description=StayConnect Accounting Daemon (acctd)
+Description=OneGate Accounting Daemon (acctd)
 # Soft dependencies: acctd polls scd's socket and the site DB per tick and
 # tolerates either being momentarily unavailable (it logs and retries on the
 # next tick), so scd being down must NOT stop it. docker.service for

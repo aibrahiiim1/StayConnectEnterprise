@@ -6,7 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/payment"
+	"github.com/onegate/onegate/data-plane/internal/payment"
 )
 
 // D1-L6: financial requests reuse one engine instead of building one (and possibly a new pool) each time; a failed

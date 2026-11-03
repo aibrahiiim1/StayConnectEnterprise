@@ -7,8 +7,8 @@ import (
 	"context"
 	"net"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/metrics"
-	"github.com/stayconnect/enterprise/data-plane/internal/nft"
+	"github.com/onegate/onegate/data-plane/internal/metrics"
+	"github.com/onegate/onegate/data-plane/internal/nft"
 )
 
 type localNFT struct {

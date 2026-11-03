@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/pms"
+	"github.com/onegate/onegate/data-plane/internal/pms"
 )
 
 // A claimed command adds exactly one DR on top of the automatic initial one (two on the wire). The sink hands

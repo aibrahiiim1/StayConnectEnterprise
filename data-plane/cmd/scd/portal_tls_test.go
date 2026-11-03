@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/portaltls"
-	"github.com/stayconnect/enterprise/data-plane/internal/portaltls/portaltlstest"
+	"github.com/onegate/onegate/data-plane/internal/portaltls"
+	"github.com/onegate/onegate/data-plane/internal/portaltls/portaltlstest"
 )
 
 const (

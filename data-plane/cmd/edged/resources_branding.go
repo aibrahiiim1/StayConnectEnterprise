@@ -21,7 +21,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/portaldesign"
+	"github.com/onegate/onegate/data-plane/internal/portaldesign"
 )
 
 // maxRevisions bounds the history in a row that is read on every portal load.

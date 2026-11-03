@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
 )
 
 // A replacement republishes (immutable) package revisions onto the successor, so any field the forwarded spec drops

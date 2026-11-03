@@ -20,7 +20,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/authctx"
+	"github.com/onegate/onegate/data-plane/internal/authctx"
 )
 
 // ConvertRequest's subject comes from the consumed auth context, never the caller; a caller naming the

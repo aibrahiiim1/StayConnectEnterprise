@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/passwordhash"
+	"github.com/onegate/onegate/data-plane/internal/passwordhash"
 )
 
 type accountRow struct {

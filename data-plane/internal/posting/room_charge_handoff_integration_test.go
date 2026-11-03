@@ -22,9 +22,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/pms"
-	"github.com/stayconnect/enterprise/data-plane/internal/pmsd"
-	"github.com/stayconnect/enterprise/data-plane/internal/postinghandoff"
+	"github.com/onegate/onegate/data-plane/internal/pms"
+	"github.com/onegate/onegate/data-plane/internal/pmsd"
+	"github.com/onegate/onegate/data-plane/internal/postinghandoff"
 )
 
 type nopSink struct{}

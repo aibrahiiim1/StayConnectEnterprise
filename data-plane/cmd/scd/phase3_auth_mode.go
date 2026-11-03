@@ -3,7 +3,7 @@ package main
 import (
 	"strings"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
+	"github.com/onegate/onegate/data-plane/internal/tenantcfg"
 )
 
 // The configured room sign-in mode (tenants.auth_methods.pms.mode) is enforced here, not only by the portal:

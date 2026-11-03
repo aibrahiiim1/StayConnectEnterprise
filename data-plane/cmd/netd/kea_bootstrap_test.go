@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
+	"github.com/onegate/onegate/data-plane/internal/netcfg"
 )
 
 // status-get can answer "healthy" from a Kea holding no socket; these assert the /proc/net/udp check instead.

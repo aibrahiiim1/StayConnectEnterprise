@@ -194,27 +194,27 @@ operator through a client network (a `guest_networks` row) and its apply:
 
 ## Part B — WLAN controller (Aruba and others): SSID → VLAN mapping
 
-> Where the WLAN controller's job ends and StayConnect's begins. StayConnect does
+> Where the WLAN controller's job ends and OneGate's begins. OneGate does
 > **not** configure your wireless controller — it consumes the VLANs the
 > controller trunks to it. Overview: [EDGE_NETWORKING.md](EDGE_NETWORKING.md).
 > Boundary rationale: [PHASE19_ASSESSMENT.md (retired; see the archive)](../ARCHIVE.md) §4.
 
 ### 1. The responsibility boundary
 
-| Owned by the WLAN controller (Aruba/Ruckus/Cisco/Extreme) | Owned by StayConnect |
+| Owned by the WLAN controller (Aruba/Ruckus/Cisco/Extreme) | Owned by OneGate |
 |---|---|
 | The **SSID** ("OneGate Wi-Fi") and its radio/security settings | — |
 | **SSID → VLAN** assignment (which VLAN a client lands on) | — |
-| Tagging client traffic 802.1Q and **trunking the VLAN** to the StayConnect client-trunk port (`guest_trunk` role) | — |
+| Tagging client traffic 802.1Q and **trunking the VLAN** to the OneGate client-trunk port (`guest_trunk` role) | — |
 | — | **VLAN → interface** (the `parent.<vlan>` sub-interface + bridge) |
 | — | **Gateway** (`gateway_ip`/`subnet_cidr`), **DHCP**, **DNS** |
 | — | **Captive portal** (option 114, DNAT interception, portald) |
 | — | **Internet policy** (NAT, walled garden, shaping, client isolation) |
 
-One sentence: **the controller decides which VLAN a client is on; StayConnect
+One sentence: **the controller decides which VLAN a client is on; OneGate
 provides everything that VLAN needs to reach the internet through a sign-in
 page.** `guest_networks.ssid_label` is descriptive only — a human label to help
-operators match a StayConnect network to the controller's SSID. Setting it does
+operators match a OneGate network to the controller's SSID. Setting it does
 not touch the controller.
 
 ### 2. Step-by-step — Aruba
@@ -223,16 +223,16 @@ On the Aruba controller / Aruba Central (Instant AP flow is analogous):
 
 1. **Create the SSID.** WLAN → *New*. Name it `OneGate Wi-Fi`. Set the security
    you want (typically Open or Enhanced Open for a captive-portal client network;
-   leave the controller's own captive portal **off** — StayConnect is the
+   leave the controller's own captive portal **off** — OneGate is the
    portal).
 2. **Map the SSID to VLAN 20.** In the SSID's network/VLAN settings, set the
    client VLAN to **20** (static VLAN assignment). Do not enable the controller's
    built-in portal, MAC auth, or its own DHCP for this SSID.
-3. **Trunk VLAN 20 to the StayConnect uplink.** On the switch port (or the AP
-   uplink / controller uplink) that connects toward the StayConnect appliance,
+3. **Trunk VLAN 20 to the OneGate uplink.** On the switch port (or the AP
+   uplink / controller uplink) that connects toward the OneGate appliance,
    configure an 802.1Q **trunk** and **tag VLAN 20** on it. That port must reach
    the appliance interface you've assigned the `guest_trunk` role.
-4. **Confirm no other DHCP/gateway serves VLAN 20** — StayConnect is the gateway
+4. **Confirm no other DHCP/gateway serves VLAN 20** — OneGate is the gateway
    and DHCP server for it (unless you deliberately chose external DHCP, see
    [DHCP.md, Part C](DHCP.md)).
 
@@ -248,7 +248,7 @@ Then in the **OneGate Admin Console**:
    [NETWORK_APPLY_AND_ROLLBACK.md](NETWORK_APPLY_AND_ROLLBACK.md)).
 
 The result: a client joins `OneGate Wi-Fi` → the AP tags them VLAN 20 → the
-trunk carries VLAN 20 to `ens192` → `ens192.20` → `br-g20` → StayConnect gives
+trunk carries VLAN 20 to `ens192` → `ens192.20` → `br-g20` → OneGate gives
 them a `10.20.x.x` lease, option 114, and the captive portal.
 
 ### 3. The exact UI note text
@@ -272,15 +272,15 @@ is the same everywhere; only the menu names differ:
 | **Cisco** (Catalyst / 9800 WLC) | WLAN → Policy Profile → VLAN 20 | `switchport mode trunk` + `switchport trunk allowed vlan add 20` |
 | **Extreme** (ExtremeCloud IQ) | Network Policy → SSID → VLAN 20 | port trunk, tag VLAN 20 |
 
-### 5. What StayConnect never does
+### 5. What OneGate never does
 
 - It does not log into or push config to the controller.
 - It does not create or rename SSIDs (the `ssid_label` is cosmetic).
 - It does not choose which clients land on which VLAN — that is the controller's
   SSID→VLAN policy.
 
-If VLAN 20 traffic never reaches StayConnect, the problem is the controller/switch
-trunk, not StayConnect — see
+If VLAN 20 traffic never reaches OneGate, the problem is the controller/switch
+trunk, not OneGate — see
 [NETWORK_TROUBLESHOOTING.md](NETWORK_TROUBLESHOOTING.md) §"VLAN not passing
 traffic".
 
@@ -288,7 +288,7 @@ traffic".
 
 Once both sides are configured, walk the path from the client inward:
 
-| Step | Check on StayConnect | Expected |
+| Step | Check on OneGate | Expected |
 |---|---|---|
 | Tagged frames arrive | `ip -br link show ens192.20` | device exists, state UP |
 | Bridge carries the VLAN | `bridge link show` | `ens192.20` master `br-g20` |
@@ -305,10 +305,10 @@ bridge to pass VLAN-tagged client MACs).
 ### 7. Common mapping mistakes
 
 - **Controller portal left on** — the AP shows its own splash page and clients
-  never reach StayConnect's. Turn the controller's captive portal off for the
-  SSID; StayConnect is the portal.
+  never reach OneGate's. Turn the controller's captive portal off for the
+  SSID; OneGate is the portal.
 - **VLAN sent untagged** — if the controller puts VLAN 20 on the trunk untagged,
-  create an `untagged` StayConnect network on that access port instead, or fix the
+  create an `untagged` OneGate network on that access port instead, or fix the
   trunk to tag it. Untagged frames can't be demuxed to `ens192.20`.
 - **Access port instead of trunk** — a single-VLAN access port works only for one
   untagged network; to carry multiple client VLANs the appliance port must be a

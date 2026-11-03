@@ -8,7 +8,7 @@ import (
 
 	redis "github.com/redis/go-redis/v9"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/auth"
+	"github.com/onegate/onegate/control-plane/internal/auth"
 )
 
 // ReauthTTL is how long a password step-up stays valid for sensitive actions.

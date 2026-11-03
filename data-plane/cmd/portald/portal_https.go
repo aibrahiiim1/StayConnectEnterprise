@@ -18,7 +18,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/portaltls"
+	"github.com/onegate/onegate/data-plane/internal/portaltls"
 )
 
 const portalTLSPollEvery = 15 * time.Second

@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/buildprofile"
+	"github.com/onegate/onegate/data-plane/internal/buildprofile"
 )
 
 // Asserts the production default; skipped under -tags devlicense, which intentionally permits permissive mode.

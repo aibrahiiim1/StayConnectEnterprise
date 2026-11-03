@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/portaltls"
-	"github.com/stayconnect/enterprise/data-plane/internal/portaltls/portaltlstest"
+	"github.com/onegate/onegate/data-plane/internal/portaltls"
+	"github.com/onegate/onegate/data-plane/internal/portaltls/portaltlstest"
 )
 
 const host = "ab12cd34.gw.onegate.getsemantics.com"

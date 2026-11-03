@@ -9,7 +9,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/pms"
+	"github.com/onegate/onegate/data-plane/internal/pms"
 )
 
 // Dialer is the only way the adapter obtains a socket; tests inject net.Pipe or a fake listener.

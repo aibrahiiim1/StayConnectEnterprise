@@ -17,7 +17,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
+	"github.com/onegate/onegate/data-plane/internal/netcfg"
 )
 
 // persistConfirmedKea writes the confirmed active revision's DHCP configuration to the file Kea starts from. eventRev names the revision

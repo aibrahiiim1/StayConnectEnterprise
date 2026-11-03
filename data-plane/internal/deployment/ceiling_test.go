@@ -3,7 +3,7 @@ package deployment
 import (
 	"testing"
 
-	lic "github.com/stayconnect/enterprise/license"
+	lic "github.com/onegate/onegate/license"
 )
 
 func TestIdentityModulesFollowTheirIAMv2Method(t *testing.T) {

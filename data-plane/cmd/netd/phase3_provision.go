@@ -21,8 +21,8 @@ import (
 	"net"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/shape"
-	"github.com/stayconnect/enterprise/data-plane/internal/shapeplan"
+	"github.com/onegate/onegate/data-plane/internal/shape"
+	"github.com/onegate/onegate/data-plane/internal/shapeplan"
 )
 
 // provCtx is what the checks that precede any kernel work established about one session.

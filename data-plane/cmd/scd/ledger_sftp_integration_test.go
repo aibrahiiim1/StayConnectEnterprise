@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/onegate/onegate/data-plane/internal/ledger"
+	"github.com/onegate/onegate/data-plane/internal/sealbox"
 	"github.com/pkg/sftp"
-	"github.com/stayconnect/enterprise/data-plane/internal/ledger"
-	"github.com/stayconnect/enterprise/data-plane/internal/sealbox"
 	"golang.org/x/crypto/ssh"
 )
 

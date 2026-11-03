@@ -16,11 +16,11 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/applianceauth"
-	"github.com/stayconnect/enterprise/control-plane/internal/auth"
-	"github.com/stayconnect/enterprise/control-plane/internal/licensing"
-	"github.com/stayconnect/enterprise/control-plane/internal/testdb"
-	lic "github.com/stayconnect/enterprise/license"
+	"github.com/onegate/onegate/control-plane/internal/applianceauth"
+	"github.com/onegate/onegate/control-plane/internal/auth"
+	"github.com/onegate/onegate/control-plane/internal/licensing"
+	"github.com/onegate/onegate/control-plane/internal/testdb"
+	lic "github.com/onegate/onegate/license"
 )
 
 type fixture struct {

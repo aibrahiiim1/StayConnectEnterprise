@@ -8,7 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/stayconnect/enterprise/data-plane/internal/payment"
+	"github.com/onegate/onegate/data-plane/internal/payment"
 )
 
 // Financial operations API: health, payments and post-restore recovery. Mounted under

@@ -9,8 +9,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
-	"github.com/stayconnect/enterprise/data-plane/internal/netstatus"
+	"github.com/onegate/onegate/data-plane/internal/netcfg"
+	"github.com/onegate/onegate/data-plane/internal/netstatus"
 )
 
 // The overview tells the operator what each client network IS, derived from the revisions the appliance actually confirmed and what it observes now, not from what

@@ -7,9 +7,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/audit"
-	"github.com/stayconnect/enterprise/control-plane/internal/auth"
-	pki "github.com/stayconnect/enterprise/control-plane/internal/pki"
+	"github.com/onegate/onegate/control-plane/internal/audit"
+	"github.com/onegate/onegate/control-plane/internal/auth"
+	pki "github.com/onegate/onegate/control-plane/internal/pki"
 )
 
 // CertBase serves the appliance CSR/cert-fetch endpoints and the platform certificate lifecycle.

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/testdb"
-	"github.com/stayconnect/enterprise/control-plane/internal/totp"
+	"github.com/onegate/onegate/control-plane/internal/testdb"
+	"github.com/onegate/onegate/control-plane/internal/totp"
 )
 
 func TestCheckKeyCatchesTheWrongKey(t *testing.T) {

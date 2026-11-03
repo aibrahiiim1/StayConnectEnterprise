@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
+	"github.com/onegate/onegate/data-plane/internal/tenantcfg"
 )
 
 func TestMethodSwitchOnMatchesThePortal(t *testing.T) {

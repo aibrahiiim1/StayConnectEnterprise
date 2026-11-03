@@ -8,7 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/testdb"
+	"github.com/onegate/onegate/control-plane/internal/testdb"
 )
 
 // What the Central RUNTIME role (ctrlapi_rt, migration 0063, audit P3 M1) can and cannot do. Meaningful only when the

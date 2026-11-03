@@ -1,6 +1,6 @@
 # Appliance activation and licensing — operator guide
 
-There are exactly **two** ways to activate a StayConnect appliance: **Online** and **Offline**. Everything
+There are exactly **two** ways to activate a OneGate appliance: **Online** and **Offline**. Everything
 else — registration, signed assignment, certificates, mTLS, convergence — happens by itself; its details sit
 under the collapsed **Technical details** on the **System → Appliance & licence** page of the Admin Console (formerly Hotel Admin) and under
 **Advanced** on the appliance's page in Central. You do not drive it. The Central side is specified in

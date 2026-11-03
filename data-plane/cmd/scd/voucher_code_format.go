@@ -7,7 +7,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/codegen"
+	"github.com/onegate/onegate/data-plane/internal/codegen"
 )
 
 type voucherCodeFormat struct {

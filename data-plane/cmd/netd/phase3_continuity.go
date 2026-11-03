@@ -31,8 +31,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/shape"
-	"github.com/stayconnect/enterprise/data-plane/internal/shapeplan"
+	"github.com/onegate/onegate/data-plane/internal/shape"
+	"github.com/onegate/onegate/data-plane/internal/shapeplan"
 )
 
 // contTakeoverAge: plans have been silent this long (monotonic), so the governor renews. Below the 90 s lease with margin: the

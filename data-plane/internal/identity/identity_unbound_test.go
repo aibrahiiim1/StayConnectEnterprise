@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/hwid"
+	"github.com/onegate/onegate/data-plane/internal/hwid"
 )
 
 type fakeCentral struct {

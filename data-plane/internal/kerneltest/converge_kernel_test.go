@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
-	"github.com/stayconnect/enterprise/data-plane/internal/nftconverge"
+	"github.com/onegate/onegate/data-plane/internal/netcfg"
+	"github.com/onegate/onegate/data-plane/internal/nftconverge"
 )
 
 // Drives the engine netd runs against real nft in the disposable router namespace; each test restores the

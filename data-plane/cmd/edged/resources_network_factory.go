@@ -12,7 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
+	"github.com/onegate/onegate/data-plane/internal/netcfg"
 )
 
 // The factory-prepared client network and the Access / Trunk mode of a port. Both stage their changes (resources_network_changes.go): nothing is live, and

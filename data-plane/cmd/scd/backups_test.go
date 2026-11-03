@@ -14,7 +14,7 @@ import (
 
 	"filippo.io/age"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/backupcrypt"
+	"github.com/onegate/onegate/data-plane/internal/backupcrypt"
 )
 
 func TestScheduledBackupDue(t *testing.T) {

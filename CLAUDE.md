@@ -1,4 +1,4 @@
-# StayConnect — Direct Execution Mode
+# OneGate — Direct Execution Mode
 
 **Permanent project operating rules.** They override workflow preferences, governance, review and validation
 habits and earlier agent conventions wherever they conflict. **The user (Product Owner, PO) is the final

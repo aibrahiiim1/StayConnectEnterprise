@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/shapeplan"
+	"github.com/onegate/onegate/data-plane/internal/shapeplan"
 )
 
 func i64(n int64) *int64 { return &n }

@@ -10,7 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/signinattempt"
+	"github.com/onegate/onegate/data-plane/internal/signinattempt"
 )
 
 // GDPR plan C1 (migration 0127): guest-data retention is an audited operational setting with the approved

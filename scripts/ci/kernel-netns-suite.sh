@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # THE REAL-KERNEL GATE.
 #
-# Builds a disposable three-namespace topology, renders the real StayConnect nftables ruleset into the router
+# Builds a disposable three-namespace topology, renders the real OneGate nftables ruleset into the router
 # namespace, and runs internal/kerneltest against the REAL nft and tc binaries with REAL packets.
 #
 #   p3-guest ── veth ──> p3-rtr ── veth ──> p3-wan
@@ -147,7 +147,7 @@ table inet stayconnect {
 }
 EOF
 if ! ip netns exec "$RTR" nft -f "$WORK/ruleset.nft"; then
-  log "kernel gate: this kernel/nftables does not accept the StayConnect ruleset"
+  log "kernel gate: this kernel/nftables does not accept the OneGate ruleset"
   exit 2
 fi
 

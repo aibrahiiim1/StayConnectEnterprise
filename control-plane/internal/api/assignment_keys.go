@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/assignment"
-	"github.com/stayconnect/enterprise/control-plane/internal/audit"
+	"github.com/onegate/onegate/control-plane/internal/assignment"
+	"github.com/onegate/onegate/control-plane/internal/audit"
 )
 
 // Assignment-signing key states ("stop signing with it" and "stop trusting it" are different decisions):

@@ -8,8 +8,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/assignment"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
 )
 
 type phase3Mode struct {

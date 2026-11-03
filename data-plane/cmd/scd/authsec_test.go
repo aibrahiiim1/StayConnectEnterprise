@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
 )
 
 // panicRepo fails the test on any call: the dark authenticator must never reach the repository.

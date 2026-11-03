@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/licensing"
+	"github.com/onegate/onegate/control-plane/internal/licensing"
 )
 
 // Retention never takes what licensing needs: a still-valid revoked licence stays on the revocation list, and an

@@ -7,8 +7,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
-	"github.com/stayconnect/enterprise/data-plane/internal/livez"
+	"github.com/onegate/onegate/data-plane/internal/assignment"
+	"github.com/onegate/onegate/data-plane/internal/livez"
 )
 
 // reexecSelf replaces the process image (same PID, so the supervisor sees no crash) to re-read identity and assignment.

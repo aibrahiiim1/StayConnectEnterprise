@@ -7,7 +7,7 @@ package main
 import (
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/shapeplan"
+	"github.com/onegate/onegate/data-plane/internal/shapeplan"
 )
 
 // phase3LeaseTTL equals the producer's plan validity (acctd's planValidity), so the kernel stops forwarding

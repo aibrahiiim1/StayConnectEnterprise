@@ -1,5 +1,5 @@
 [Unit]
-Description=StayConnect Session Controller Daemon (scd)
+Description=OneGate Session Controller Daemon (scd)
 # docker.service: the site DB (stayconnect-pg) is a container, so order after
 # Docker at cold boot. scd itself uses a lazy pgx pool (no startup Ping), so a
 # slow DB does not crash it — this is ordering, not a hard requirement.

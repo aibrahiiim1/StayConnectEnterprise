@@ -14,7 +14,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/payment"
+	"github.com/onegate/onegate/data-plane/internal/payment"
 )
 
 // reconcileFinancialEpochAtStartup returns the outcome, or "" when it could not be established.

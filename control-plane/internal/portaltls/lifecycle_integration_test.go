@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/testdb"
+	"github.com/onegate/onegate/control-plane/internal/testdb"
 )
 
 func refusalCode(err error) string {

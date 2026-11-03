@@ -29,7 +29,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/totp"
+	"github.com/onegate/onegate/data-plane/internal/totp"
 )
 
 const (

@@ -12,7 +12,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/stayconnect/enterprise/data-plane/internal/localkeys"
+	"github.com/onegate/onegate/data-plane/internal/localkeys"
 )
 
 // OTPPrefix is the generation-key file prefix (files are "<prefix>_<gen>.key").

@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/passwordhash"
+	"github.com/onegate/onegate/data-plane/internal/passwordhash"
 )
 
 // Password hashing is the shared internal/passwordhash implementation (same argon2id format and parameters), so

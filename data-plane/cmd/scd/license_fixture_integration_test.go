@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/licstate"
-	lic "github.com/stayconnect/enterprise/license"
+	"github.com/onegate/onegate/data-plane/internal/licstate"
+	lic "github.com/onegate/onegate/license"
 )
 
 // devLicence is what a development build runs with when no licence is installed: Active, every feature, no concurrent-guest limit.

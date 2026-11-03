@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/pmsrest"
+	"github.com/onegate/onegate/data-plane/internal/pmsrest"
 )
 
 type sinkEvent struct {

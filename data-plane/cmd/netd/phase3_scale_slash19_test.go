@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/shape"
+	"github.com/onegate/onegate/data-plane/internal/shape"
 )
 
 func TestSlash19HighEndSessionsAreShaped(t *testing.T) {

@@ -15,9 +15,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/applianceauth"
-	"github.com/stayconnect/enterprise/control-plane/internal/clientip"
-	"github.com/stayconnect/enterprise/control-plane/internal/ratebudget"
+	"github.com/onegate/onegate/control-plane/internal/applianceauth"
+	"github.com/onegate/onegate/control-plane/internal/clientip"
+	"github.com/onegate/onegate/control-plane/internal/ratebudget"
 )
 
 // maxSignedBody bounds the request body buffered to hash for signature binding.

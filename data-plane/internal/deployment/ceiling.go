@@ -8,10 +8,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
-	"github.com/stayconnect/enterprise/data-plane/internal/payment"
-	"github.com/stayconnect/enterprise/data-plane/internal/posting"
-	lic "github.com/stayconnect/enterprise/license"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/payment"
+	"github.com/onegate/onegate/data-plane/internal/posting"
+	lic "github.com/onegate/onegate/license"
 )
 
 // EnvPaymentLiveAllowed is the only switch that lets a LIVE-mode provider account execute (moves real money).

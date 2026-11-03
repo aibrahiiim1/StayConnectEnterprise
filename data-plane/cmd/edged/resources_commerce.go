@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	lic "github.com/stayconnect/enterprise/license"
+	lic "github.com/onegate/onegate/license"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -18,7 +18,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
 )
 
 func (s *server) commercialPackagesRoutes() http.Handler {
@@ -733,7 +733,7 @@ func (s *server) getCommercialPackageCurrent(w http.ResponseWriter, r *http.Requ
 			jsonErr(w, http.StatusConflict, "conditions_unreadable",
 				"This package cannot be edited here yet: its eligibility conditions and speed steps are not "+
 					"readable by this service, and saving without them would change who the package is "+
-					"offered to. Ask your StayConnect administrator to grant read access.")
+					"offered to. Ask your OneGate administrator to grant read access.")
 			return
 		}
 		jsonErr(w, http.StatusNotFound, "not_found", "no current configuration for this package")

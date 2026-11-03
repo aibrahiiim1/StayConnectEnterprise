@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/deployment"
+	"github.com/onegate/onegate/data-plane/internal/deployment"
 )
 
 // A connection test is a real provider call. Without the provider-call capability it is refused before anything is read

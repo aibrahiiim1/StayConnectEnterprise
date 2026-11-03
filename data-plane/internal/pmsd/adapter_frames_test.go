@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/pms"
+	"github.com/onegate/onegate/data-plane/internal/pms"
 )
 
 // gateConn can be armed to fail all subsequent Writes, injecting a write failure after a successful startup.

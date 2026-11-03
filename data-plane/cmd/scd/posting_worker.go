@@ -20,7 +20,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/posting"
+	"github.com/onegate/onegate/data-plane/internal/posting"
 )
 
 const EnvPostingDSN = "SCD_POSTING_DB_URL"

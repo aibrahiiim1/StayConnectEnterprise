@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/healthdir"
+	"github.com/onegate/onegate/data-plane/internal/healthdir"
 )
 
 // Dir is on tmpfs so a reboot starts clean: boot transients must not inherit earlier backoff.

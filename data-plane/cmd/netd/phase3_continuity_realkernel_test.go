@@ -20,8 +20,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/nft"
-	"github.com/stayconnect/enterprise/data-plane/internal/shapeplan"
+	"github.com/onegate/onegate/data-plane/internal/nft"
+	"github.com/onegate/onegate/data-plane/internal/shapeplan"
 )
 
 func realNft(t *testing.T, script string) {

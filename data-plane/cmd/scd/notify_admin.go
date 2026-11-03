@@ -20,12 +20,12 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/localkeys"
-	"github.com/stayconnect/enterprise/data-plane/internal/mail"
-	"github.com/stayconnect/enterprise/data-plane/internal/notifyloader"
-	"github.com/stayconnect/enterprise/data-plane/internal/sealbox"
-	"github.com/stayconnect/enterprise/data-plane/internal/sms"
-	"github.com/stayconnect/enterprise/data-plane/internal/whatsapp"
+	"github.com/onegate/onegate/data-plane/internal/localkeys"
+	"github.com/onegate/onegate/data-plane/internal/mail"
+	"github.com/onegate/onegate/data-plane/internal/notifyloader"
+	"github.com/onegate/onegate/data-plane/internal/sealbox"
+	"github.com/onegate/onegate/data-plane/internal/sms"
+	"github.com/onegate/onegate/data-plane/internal/whatsapp"
 )
 
 const (

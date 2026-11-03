@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
 )
 
 func TestFallbackOwnerExistsExactlyWhenThePhase3ArmDoesNot(t *testing.T) {

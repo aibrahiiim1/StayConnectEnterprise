@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/shapeplan"
+	"github.com/onegate/onegate/data-plane/internal/shapeplan"
 )
 
 // macGate is a fakeGate that, like nftGate, takes a session's MAC only from a map the caller fills with BindMAC, and refreshes the

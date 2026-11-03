@@ -1,4 +1,4 @@
-# StayConnect — Alertmanager production config (phase 15).
+# OneGate — Alertmanager production config (phase 15).
 #
 # Alertmanager doesn't expand ${ENV_VAR}s natively. Before deploy, run
 # envsubst to substitute SENDGRID_API_KEY + SMTP_FROM:

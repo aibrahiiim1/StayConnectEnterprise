@@ -8,7 +8,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/postinghandoff"
+	"github.com/onegate/onegate/data-plane/internal/postinghandoff"
 )
 
 const hoBody = "PS|RN1421|G#5|TA1500|PT|SOOG|CTWIFI|P#42|WSOG|"

@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
 )
 
 // applyAggregateTimeCapability is the one place the aggregate flag reaches the commerce admin. It takes the

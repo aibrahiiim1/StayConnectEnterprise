@@ -4,7 +4,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/pms"
+	"github.com/onegate/onegate/data-plane/internal/pms"
 )
 
 // ErrRecordMalformed drives continuity→GAP_DETECTED and sync→RESYNC_REQUIRED with zero admission; it never carries raw bytes.

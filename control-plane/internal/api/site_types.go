@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	lic "github.com/stayconnect/enterprise/license"
+	lic "github.com/onegate/onegate/license"
 )
 
 // A site type is descriptive only; it never authorises or gates anything (licence modules do). The database column

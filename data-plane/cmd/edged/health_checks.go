@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/livez"
+	"github.com/onegate/onegate/data-plane/internal/livez"
 )
 
 // unixGet makes one health request over a unix socket. Keep-alives are off and the transport is closed after the

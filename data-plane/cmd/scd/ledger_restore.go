@@ -20,8 +20,8 @@ import (
 
 	"filippo.io/age"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/backupcrypt"
-	"github.com/stayconnect/enterprise/data-plane/internal/ledger"
+	"github.com/onegate/onegate/data-plane/internal/backupcrypt"
+	"github.com/onegate/onegate/data-plane/internal/ledger"
 )
 
 func execPsql(ctx context.Context, db, sql string) (string, error) {

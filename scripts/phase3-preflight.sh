@@ -315,7 +315,7 @@ else
 fi
 
 # ---------------------------------------------------------------- 12. the surgical live-dark foundation
-# Installing the Phase-3 nft foundation on a live appliance must never flush or recreate the StayConnect table:
+# Installing the Phase-3 nft foundation on a live appliance must never flush or recreate the OneGate table:
 # the authorization set is part of it, and recreating it means recreating it EMPTY, taking every live legacy
 # guest offline at once.
 FOUND="$ROOT/data-plane/internal/nftfoundation/foundation.go"
@@ -323,7 +323,7 @@ if [ -f "$FOUND" ]; then
   if grep -nE '"(flush|delete table|add table)' "$FOUND" >/dev/null 2>&1; then
     no "the surgical foundation issues a flush/table command; it would disconnect every live legacy guest"
   else
-    ok "the surgical foundation never flushes or recreates the StayConnect table"
+    ok "the surgical foundation never flushes or recreates the OneGate table"
   fi
   if grep -q 'sameElements' "$FOUND" && grep -q 'LegacyBefore' "$FOUND"; then
     ok "the foundation proves legacy authorization parity before and after, and rolls back if it cannot"
@@ -419,7 +419,7 @@ else
 fi
 
 # ---------------------------------------------------------------- 12. the surgical live-dark foundation
-# Installing the Phase-3 nft foundation on a live appliance must never flush or recreate the StayConnect table:
+# Installing the Phase-3 nft foundation on a live appliance must never flush or recreate the OneGate table:
 # the authorization set is part of it, and recreating it means recreating it EMPTY, taking every live legacy
 # guest offline at once.
 FOUND="$ROOT/data-plane/internal/nftfoundation/foundation.go"
@@ -427,7 +427,7 @@ if [ -f "$FOUND" ]; then
   if grep -nE '"(flush|delete table|add table)' "$FOUND" >/dev/null 2>&1; then
     no "the surgical foundation issues a flush/table command; it would disconnect every live legacy guest"
   else
-    ok "the surgical foundation never flushes or recreates the StayConnect table"
+    ok "the surgical foundation never flushes or recreates the OneGate table"
   fi
   if grep -q 'sameElements' "$FOUND" && grep -q 'LegacyBefore' "$FOUND"; then
     ok "the foundation proves legacy authorization parity before and after, and rolls back if it cannot"

@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/backupcrypt"
+	"github.com/onegate/onegate/data-plane/internal/backupcrypt"
 )
 
 // Nightly backup encrypt/decrypt round trip, and the reader verify and restore load from.

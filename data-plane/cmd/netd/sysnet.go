@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/sysnet"
+	"github.com/onegate/onegate/data-plane/internal/sysnet"
 )
 
 const (

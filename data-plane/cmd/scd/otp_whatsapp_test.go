@@ -19,12 +19,12 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/licstate"
-	"github.com/stayconnect/enterprise/data-plane/internal/metrics"
-	"github.com/stayconnect/enterprise/data-plane/internal/otp"
-	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
-	"github.com/stayconnect/enterprise/data-plane/internal/whatsapp"
-	lic "github.com/stayconnect/enterprise/license"
+	"github.com/onegate/onegate/data-plane/internal/licstate"
+	"github.com/onegate/onegate/data-plane/internal/metrics"
+	"github.com/onegate/onegate/data-plane/internal/otp"
+	"github.com/onegate/onegate/data-plane/internal/tenantcfg"
+	"github.com/onegate/onegate/data-plane/internal/whatsapp"
+	lic "github.com/onegate/onegate/license"
 )
 
 // fixtureIdentityFpr is the identity key fingerprint the fixture licences are bound to (AD-15), shared with

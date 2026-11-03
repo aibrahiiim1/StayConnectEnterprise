@@ -15,10 +15,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/payment/paymob"
-	"github.com/stayconnect/enterprise/data-plane/internal/payment/stripe"
-	"github.com/stayconnect/enterprise/data-plane/internal/portaldesign"
-	"github.com/stayconnect/enterprise/data-plane/internal/portaltls"
+	"github.com/onegate/onegate/data-plane/internal/payment/paymob"
+	"github.com/onegate/onegate/data-plane/internal/payment/stripe"
+	"github.com/onegate/onegate/data-plane/internal/portaldesign"
+	"github.com/onegate/onegate/data-plane/internal/portaltls"
 )
 
 // Content-Security-Policy: guests reach portald directly (nftables DNAT), so no proxy sends headers and this

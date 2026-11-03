@@ -9,11 +9,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/mail"
-	"github.com/stayconnect/enterprise/data-plane/internal/notifyloader"
-	"github.com/stayconnect/enterprise/data-plane/internal/sealbox"
-	"github.com/stayconnect/enterprise/data-plane/internal/sms"
-	"github.com/stayconnect/enterprise/data-plane/internal/whatsapp"
+	"github.com/onegate/onegate/data-plane/internal/mail"
+	"github.com/onegate/onegate/data-plane/internal/notifyloader"
+	"github.com/onegate/onegate/data-plane/internal/sealbox"
+	"github.com/onegate/onegate/data-plane/internal/sms"
+	"github.com/onegate/onegate/data-plane/internal/whatsapp"
 )
 
 // P5 M3 and P5 L5: a provider that cannot be built, or whose sealed secret cannot be opened, says so in last_error and is never marked working.

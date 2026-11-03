@@ -17,8 +17,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
-	"github.com/stayconnect/enterprise/data-plane/internal/nft"
+	"github.com/onegate/onegate/data-plane/internal/netcfg"
+	"github.com/onegate/onegate/data-plane/internal/nft"
 )
 
 const (
@@ -93,7 +93,7 @@ func (f *Foundation) Inspect(ctx context.Context) (State, error) {
 	var st State
 	out, err := f.nft(ctx, "-a", "list", "table", "inet", "stayconnect")
 	if err != nil {
-		// No table: not a StayConnect edge, or not rendered yet. The foundation must not create one: it would not be the
+		// No table: not a OneGate edge, or not rendered yet. The foundation must not create one: it would not be the
 		// generated table and the next render would delete it.
 		return st, fmt.Errorf("phase-3 foundation: the stayconnect nftables table is not present; refusing to create it: %w", err)
 	}

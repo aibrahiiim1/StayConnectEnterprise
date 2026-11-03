@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
 )
 
 // The setting write takes tenant, site, appliance and operator identity from the server, never the caller:

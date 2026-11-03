@@ -14,7 +14,7 @@ import (
 	"os/exec"
 	"syscall"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
+	"github.com/onegate/onegate/data-plane/internal/startupbackoff"
 )
 
 func main() {

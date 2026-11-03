@@ -15,8 +15,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/authctx"
-	"github.com/stayconnect/enterprise/data-plane/internal/staygrant"
+	"github.com/onegate/onegate/data-plane/internal/authctx"
+	"github.com/onegate/onegate/data-plane/internal/staygrant"
 )
 
 func grantRequestFor(authContextID, pkgRev string, dev deviceIdentity) staygrant.Request {

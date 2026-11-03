@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
-	"github.com/stayconnect/enterprise/data-plane/internal/assignment/assignmenttest"
+	"github.com/onegate/onegate/data-plane/internal/assignment"
+	"github.com/onegate/onegate/data-plane/internal/assignment/assignmenttest"
 )
 
 // Audit P6 L13: an assignment that changed after acctd resolved its scope must not become the watcher's

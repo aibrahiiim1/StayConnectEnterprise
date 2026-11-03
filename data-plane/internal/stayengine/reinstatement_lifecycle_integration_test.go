@@ -9,7 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/checkout"
+	"github.com/onegate/onegate/data-plane/internal/checkout"
 )
 
 // Everything enters through the inbox and is applied by Processor.ProcessNext with the real Converter;

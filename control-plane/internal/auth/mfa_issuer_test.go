@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/totp"
+	"github.com/onegate/onegate/control-plane/internal/totp"
 )
 
 // A newly enrolled Central authenticator is labelled "OneGate Central"; the issuer is display only.

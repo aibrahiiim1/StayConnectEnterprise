@@ -39,7 +39,7 @@ note() { [ $JSON -eq 1 ] || echo "  [ ok ] $1"; }
 command -v systemctl >/dev/null 2>&1 || [ -n "${SC_UNIT_ENABLED_CMD:-}" ] || {
   echo "CANNOT CHECK: systemctl is required"; exit 2; }
 
-# ---- 1. nothing StayConnect may be in a failed state --------------------------------------------------------
+# ---- 1. nothing OneGate may be in a failed state --------------------------------------------------------
 failed="$($FAILED_CMD 2>/dev/null | awk '{print $1}' | grep '^stayconnect-' || true)"
 if [ -n "$failed" ]; then
   while IFS= read -r u; do
@@ -47,7 +47,7 @@ if [ -n "$failed" ]; then
     no "$u is in a FAILED state"
   done <<< "$failed"
 else
-  ok "no StayConnect unit is in a failed state"
+  ok "no OneGate unit is in a failed state"
 fi
 
 # ---- 2. every unit that could run must have every Exec path it declares -------------------------------------

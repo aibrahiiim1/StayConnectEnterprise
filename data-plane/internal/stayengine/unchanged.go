@@ -7,7 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/namenorm"
+	"github.com/onegate/onegate/data-plane/internal/namenorm"
 )
 
 // fastPathApplied counts events applied through the cheap path below; tests and the progress log read it.

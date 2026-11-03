@@ -37,7 +37,7 @@ network.
 
 ```
                      ┌──────────────────────────┐
-                     │        PLATFORM          │  StayConnect (vendor)
+                     │        PLATFORM          │  OneGate (vendor)
                      │  platform operators,     │  cloud DB, vendor signing key,
                      │  activation,             │  fleet status, platform audit
                      │  license issuance        │
@@ -66,7 +66,7 @@ network.
 
 | Product | Runs | Serves | Data |
 |---|---|---|---|
-| **Cloud / Central** (`control-plane/` = ctrlapi + `cloud-admin/` UI) | StayConnect's infrastructure, served centrally | Platform operators and customer users: customers, sites, appliance activation and lifecycle, license issuance/suspension/revocation, fleet status | Cloud Postgres — no client PII |
+| **Cloud / Central** (`control-plane/` = ctrlapi + `cloud-admin/` UI) | OneGate's infrastructure, served centrally | Platform operators and customer users: customers, sites, appliance activation and lifecycle, license issuance/suspension/revocation, fleet status | Cloud Postgres — no client PII |
 | **Edge Appliance** (`data-plane/` = scd, portald, acctd, edged) | On-prem at each site, inline on the client network | Clients (Client Portal) and the Admin Console API | Site-local Postgres `stayconnect_site` — the entire client domain |
 | **Admin Console** (`hotel-admin/` UI) | Served from the appliance itself via Caddy on the **management IP** (e.g. `https://172.21.15.30`) | Site staff: access plans, vouchers, sessions, PMS, walled garden, payments, local operators, backups | Talks only to the local `/edge/v1` API — works with the cloud down |
 

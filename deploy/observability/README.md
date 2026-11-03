@@ -1,4 +1,4 @@
-# StayConnect — observability (Prometheus + Alertmanager + Grafana)
+# OneGate — observability (Prometheus + Alertmanager + Grafana)
 
 Phase 13 added Prometheus scraping + Grafana dashboards + alert rules.
 Phase 15 completes the loop with Alertmanager: fire rules now route to

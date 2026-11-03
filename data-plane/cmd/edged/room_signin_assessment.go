@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/pmsresolve"
+	"github.com/onegate/onegate/data-plane/internal/pmsresolve"
 )
 
 const (

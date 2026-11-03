@@ -333,7 +333,7 @@ stage8() {
 }
 
 main() {
-  echo "StayConnect preflight - refusing locally what the gates would refuse remotely"
+  echo "OneGate preflight - refusing locally what the gates would refuse remotely"
   echo "mode: $MODE${ONLY_STAGE:+ (stage $ONLY_STAGE only)}"
   local t0; t0=$(date -u +%s)
 

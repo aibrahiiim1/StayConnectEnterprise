@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/totp"
+	"github.com/onegate/onegate/control-plane/internal/totp"
 )
 
 func TestNextStepNeverRepeatsAndWaitsOnlyWhenItMust(t *testing.T) {

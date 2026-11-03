@@ -8,7 +8,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/pmsprovider"
+	"github.com/onegate/onegate/data-plane/internal/pmsprovider"
 )
 
 var errForbiddenAddress = errors.New("the address is loopback or link-local")

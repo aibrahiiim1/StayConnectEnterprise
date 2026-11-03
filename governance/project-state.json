@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "project": "StayConnect Enterprise",
+  "project": "OneGate",
   "_note": "AUTHORITATIVE mutable current-state source. The ONLY place current operational state is defined. Mutate via `tools/project-state.py transition`; validate via `tools/project-state.py validate`; generated status blocks are rendered from here via `tools/project-state.py render`. Do not duplicate current-state wording elsewhere outside generated blocks.",
   "authoritative_remote": "https://github.com/aibrahiiim1/StayConnectEnterprise.git",
   "delivery_governance": {

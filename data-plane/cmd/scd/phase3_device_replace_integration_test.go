@@ -14,7 +14,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/metrics"
+	"github.com/onegate/onegate/data-plane/internal/metrics"
 )
 
 func TestIntegration_Phase3_ARoomGuestAtTheLimitReplacesADevice(t *testing.T) {

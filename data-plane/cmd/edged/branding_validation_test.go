@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/portaldesign"
+	"github.com/onegate/onegate/data-plane/internal/portaldesign"
 )
 
 func TestBrandingRefusesExecutableContent(t *testing.T) {

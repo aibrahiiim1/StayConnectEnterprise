@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/signinattempt"
+	"github.com/onegate/onegate/data-plane/internal/signinattempt"
 )
 
 // testSealingKeyID and withSealingKey install a known key; without one the daemon records attempts with a

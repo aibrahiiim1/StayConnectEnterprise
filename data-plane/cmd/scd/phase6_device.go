@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/deviceselfservice"
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/deviceselfservice"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
 )
 
 // Guest device self-service (internal scd surface). Two controls, both required and checked separately:

@@ -58,7 +58,7 @@ if [ "$VERIFY_ONLY" -eq 0 ]; then
   else
     # No login, no home, no shell: this account exists to own a process and nothing else.
     useradd --system --gid "$SVC_USER" --no-create-home --home-dir /nonexistent \
-            --shell /usr/sbin/nologin --comment "StayConnect PMS connector (dark)" "$SVC_USER" \
+            --shell /usr/sbin/nologin --comment "OneGate PMS connector (dark)" "$SVC_USER" \
       || die "could not create user $SVC_USER"
     echo "  created system user $SVC_USER (nologin, no home)"
   fi

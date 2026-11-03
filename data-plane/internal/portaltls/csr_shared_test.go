@@ -8,7 +8,7 @@ import (
 	"encoding/pem"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/portaltls"
+	"github.com/onegate/onegate/data-plane/internal/portaltls"
 )
 
 // The shared-name CSR names the shared name and the appliance's own hostname, nothing else, never twice.

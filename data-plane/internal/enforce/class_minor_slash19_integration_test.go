@@ -7,7 +7,7 @@ import (
 	"net"
 	"testing"
 
-	netdshape "github.com/stayconnect/enterprise/data-plane/internal/shape"
+	netdshape "github.com/onegate/onegate/data-plane/internal/shape"
 )
 
 // The database re-derives a session's class minor to refuse an observation whose class does not describe it. On a /19 client

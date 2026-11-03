@@ -22,7 +22,7 @@ import (
 	"filippo.io/age"
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/backupcrypt"
+	"github.com/onegate/onegate/data-plane/internal/backupcrypt"
 )
 
 // nightlyBackupDir is where the retired nightly job wrote; the restore test looks there too.

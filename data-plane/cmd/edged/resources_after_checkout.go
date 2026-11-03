@@ -17,8 +17,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/grace"
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/grace"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
 )
 
 func (s *server) afterCheckoutAccessRoutes() http.Handler {

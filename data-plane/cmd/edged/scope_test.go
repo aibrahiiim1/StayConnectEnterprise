@@ -4,8 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
-	"github.com/stayconnect/enterprise/data-plane/internal/assignment/assignmenttest"
+	"github.com/onegate/onegate/data-plane/internal/assignment"
+	"github.com/onegate/onegate/data-plane/internal/assignment/assignmenttest"
 )
 
 func scopeEnv(f *assignmenttest.Fixture, extra map[string]string) func(string) string {

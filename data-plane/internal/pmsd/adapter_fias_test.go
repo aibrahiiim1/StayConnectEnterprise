@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/pms"
+	"github.com/onegate/onegate/data-plane/internal/pms"
 )
 
 // coverageReport is what a sweep told the sink it observed, including vacant rooms that are never admitted.

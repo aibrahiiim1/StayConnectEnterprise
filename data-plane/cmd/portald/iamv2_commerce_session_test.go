@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
 )
 
 // An IAM-v2 reply issues the server-side commerce session and goes to package selection, not success; a legacy reply is left completely alone. Authentication is not access.

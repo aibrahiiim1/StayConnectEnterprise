@@ -8,7 +8,7 @@
 # work under edged's NoNewPrivileges=yes sandbox (D-Bus/polkit, not setuid/sudo).
 #
 # Install to /etc/polkit-1/localauthority/50-local.d/50-stayconnect-health.pkla.
-[StayConnect appliance health supervisor: manage own service units]
+[OneGate appliance health supervisor: manage own service units]
 Identity=unix-user:stayconnect
 Action=org.freedesktop.systemd1.manage-units
 ResultAny=yes

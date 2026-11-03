@@ -13,7 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/namenorm"
+	"github.com/onegate/onegate/data-plane/internal/namenorm"
 )
 
 // probeMatches copies the predicate of the resolver's probeInterface (cmd/scd/phase3_auth.go; a main

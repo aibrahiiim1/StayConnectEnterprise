@@ -9,7 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/checkout"
+	"github.com/onegate/onegate/data-plane/internal/checkout"
 )
 
 // rosterGeneration publishes resync generation gen listing exactly the given reservations, with sweep

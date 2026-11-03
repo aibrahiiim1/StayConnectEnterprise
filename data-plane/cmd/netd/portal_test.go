@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
+	"github.com/onegate/onegate/data-plane/internal/netcfg"
 )
 
 // Modelled portal interface: applies exactly the `ip` commands netd issues, so tests read back what netd executed and what the interface carries.

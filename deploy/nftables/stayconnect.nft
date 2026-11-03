@@ -1,5 +1,5 @@
 #!/usr/sbin/nft -f
-# StayConnect Enterprise — gateway ruleset (edge-first)
+# OneGate — gateway ruleset (edge-first)
 #
 # Topology:
 #   WAN  = ens160   (uplink; management SSH only)

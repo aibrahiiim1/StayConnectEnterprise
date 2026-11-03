@@ -1,4 +1,4 @@
-# StayConnect — Alertmanager dev/E2E config.
+# OneGate — Alertmanager dev/E2E config.
 #
 # SMTP is stubbed out — everything routes to the localhost webhook-sink
 # service so the E2E test can verify routing without SendGrid creds.

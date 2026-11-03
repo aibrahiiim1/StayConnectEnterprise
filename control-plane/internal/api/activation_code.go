@@ -5,7 +5,7 @@ import (
 	"encoding/base64"
 	"net/http"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/applianceauth"
+	"github.com/onegate/onegate/control-plane/internal/applianceauth"
 )
 
 // activationCodeRefusal is the AD-1 check: the typed code must equal the code derived from the identity key Central

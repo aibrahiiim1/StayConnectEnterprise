@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/healthdir"
+	"github.com/onegate/onegate/data-plane/internal/healthdir"
 )
 
 const Dir = "/run/stayconnect/health"

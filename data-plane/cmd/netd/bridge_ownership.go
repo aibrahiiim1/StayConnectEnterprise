@@ -15,7 +15,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
+	"github.com/onegate/onegate/data-plane/internal/netcfg"
 )
 
 // ownerMarkPrefix is the interface alias prefix that marks a resource netd created.

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-project-state.py — StayConnect Enterprise project-state governance (Python 3 stdlib only).
+project-state.py — OneGate project-state governance (Python 3 stdlib only).
 
 Single machine-readable current-state source: governance/project-state.json.
 Append-only transitions: governance/transitions/*.json.
@@ -45,9 +45,9 @@ BLOCK_TARGETS = [
     (os.path.join(ROOT, "docs/context/StayConnect-IAM-Handoff.md"), "# StayConnect IAM"),
     (os.path.join(ROOT, "docs/architecture/StayConnect-IAM-Phase1B-Plan.md"), "# StayConnect IAM — Phase 1B"),
     (os.path.join(ROOT, "docs/architecture/StayConnect-IAM-Phase1A-Plan.md"), "# StayConnect IAM — Phase 1A"),
-    (os.path.join(ROOT, "docs/architecture/StayConnect-IAM-Phase0-Contract.md"), "# StayConnect Internet Access Management"),
-    (os.path.join(PACK, "00-START-HERE.md"), "# StayConnect Enterprise — START HERE"),
-    (os.path.join(PACK, "PROJECT-INSTRUCTIONS.md"), "# StayConnect Enterprise — ChatGPT Project Instructions"),
+    (os.path.join(ROOT, "docs/architecture/StayConnect-IAM-Phase0-Contract.md"), "# OneGate Internet Access Management"),
+    (os.path.join(PACK, "00-START-HERE.md"), "# OneGate — START HERE"),
+    (os.path.join(PACK, "PROJECT-INSTRUCTIONS.md"), "# OneGate — ChatGPT Project Instructions"),
 ]
 
 def load(p):
@@ -202,7 +202,7 @@ def render_block(st):
            f"evidence records, including its superseded guest-IAM schema "
            f"({dev['iam_v2_tables_live']} iam_v2 tables live). Reference and evidence only, never an "
            f"installation source."),
-        f"**Lifecycle:** PRE-LIVE (D24): no real hotel guest or staff depends on StayConnect for live "
+        f"**Lifecycle:** PRE-LIVE (D24): no real hotel guest or staff depends on OneGate for live "
         f"service yet.",
         f"**Single next authorized action:** {st['next_authorized_action']}",
         f"**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `{st['latest_accepted_po_decision']}`.",
@@ -1049,7 +1049,7 @@ def _build_project_pack(block, src_commit, tid, schema, ts):
         if re.search("|".join(re.escape(a) for a,_ in PII), t): raise SystemExit(f"PII leak in {name}")
         _w(os.path.join(PACK,name),t)
     # MANIFEST (generated block + new provenance; SOURCE_COMMIT only, no self-reference export stamp)
-    L=[f"# StayConnect Enterprise — ChatGPT Project Pack MANIFEST","",block,"",
+    L=[f"# OneGate — ChatGPT Project Pack MANIFEST","",block,"",
        "## Provenance",
        f"- **SOURCE_COMMIT (clean source this pack was built from):** `{src_commit}`",
        f"- **State transition:** `{tid}`  ·  **schema:** `{schema}`  ·  **build timestamp:** `{ts}`",

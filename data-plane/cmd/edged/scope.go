@@ -4,7 +4,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
+	"github.com/onegate/onegate/data-plane/internal/assignment"
 )
 
 // resolveSiteScope returns the tenant and site from the VERIFIED assignment (signature, trust registry, binding), the same resolver scd uses.

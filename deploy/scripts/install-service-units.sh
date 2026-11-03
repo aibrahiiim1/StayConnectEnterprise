@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the StayConnect systemd units and their startup gate scripts.
+# Install the OneGate systemd units and their startup gate scripts.
 #
 # The gate runs FIRST, before anything is copied. An incompatible PMS-dependent
 # guest configuration is therefore rejected while it is still just a config

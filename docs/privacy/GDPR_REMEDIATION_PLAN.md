@@ -9,7 +9,7 @@ is in the tables below and in [GDPR_AUDIT_2026-10-19.md](GDPR_AUDIT_2026-10-19.m
 
 ## 0. Where we stand
 
-**StayConnect is not GDPR compliant today.** On each guest appliance, the hotel is the **controller** and we are the **processor**. Our product therefore has to let a hotel:
+**OneGate is not GDPR compliant today.** On each guest appliance, the hotel is the **controller** and we are the **processor**. Our product therefore has to let a hotel:
 
 - tell guests what is processed;
 - keep data no longer than necessary;

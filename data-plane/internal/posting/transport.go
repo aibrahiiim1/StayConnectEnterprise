@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/pmsd"
+	"github.com/onegate/onegate/data-plane/internal/pmsd"
 )
 
 // Transport is the only way a financial record leaves this process; every Transport is wrapped by

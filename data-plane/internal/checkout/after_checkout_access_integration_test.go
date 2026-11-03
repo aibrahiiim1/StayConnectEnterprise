@@ -24,9 +24,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/authctx"
-	"github.com/stayconnect/enterprise/data-plane/internal/poststay"
-	"github.com/stayconnect/enterprise/data-plane/internal/throttle"
+	"github.com/onegate/onegate/data-plane/internal/authctx"
+	"github.com/onegate/onegate/data-plane/internal/poststay"
+	"github.com/onegate/onegate/data-plane/internal/throttle"
 )
 
 const acQuota = int64(1_000_000_000) // 1 GB

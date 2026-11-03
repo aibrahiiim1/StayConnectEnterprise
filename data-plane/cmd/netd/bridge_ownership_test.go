@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
+	"github.com/onegate/onegate/data-plane/internal/netcfg"
 )
 
 // ownershipFixture is a non-dry-run applier with an in-memory ownership mark (the alias netd sets) updated by the commands it issues.
