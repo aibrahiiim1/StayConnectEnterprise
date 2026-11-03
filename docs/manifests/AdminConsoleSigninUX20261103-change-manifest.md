@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ba028616cb74558056b44af6a05ffc45e80ad270`
-- **HEAD commit:** `be520c2d`
-- **Provenance (generation HEAD = inventory_head):** `be520c2d8569c755a17b58816e8d2b6c0943d248`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `349fee51`
+- **Provenance (generation HEAD = inventory_head):** `349fee51e6b2557fe2c758022b878073818cfe3f`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/admin-console-signin-ux-2026-11-03`
 - **Remote branch:** `origin/delivery/admin-console-signin-ux-2026-11-03`
 - **Changed files:** 36
@@ -17,7 +17,7 @@
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0286 records the sign-in UX delivery and its test-appliance read-back |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0286 records the sign-in UX delivery and its test-appliance read-back |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0286 records the sign-in UX delivery and its test-appliance read-back |
-| `docs/manifests/AdminConsoleSigninUX20261103-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Governance: T0286 records the sign-in UX delivery and its test-appliance read-back |
+| `docs/manifests/AdminConsoleSigninUX20261103-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Governance: manifest regenerated for the delivery head |
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt after the console read-back |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt after the console read-back |
 | `exports/chatgpt/phase-evidence/GIT_STAT_614617eb.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Packs rebuilt after the console read-back |
@@ -43,7 +43,7 @@
 | `hotel-admin/components/guest-signin-protection.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Admin Console: sign-in protection cards keep the hint beside the title; one Identity providers link when none is set up |
 | `hotel-admin/components/network/effective-signin.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Admin Console: sign-in pages reorganised; After check-out shows the emergency terms as sent |
 | `hotel-admin/components/ui/quiet.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Admin Console: sign-in pages reorganised; After check-out shows the emergency terms as sent |
-| `hotel-admin/e2e/guest-signin-protection.spec.ts` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Admin Console: sign-in pages reorganised; After check-out shows the emergency terms as sent |
+| `hotel-admin/e2e/guest-signin-protection.spec.ts` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | E2E: sign-in protection confirms with Cancel/Save, as the console has since PR #287 |
 | `hotel-admin/e2e/multi-pms-admin.spec.ts` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Admin Console: sign-in pages reorganised; After check-out shows the emergency terms as sent |
 | `hotel-admin/lib/api/after-checkout-access.ts` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Admin Console: sign-in pages reorganised; After check-out shows the emergency terms as sent |
 | `hotel-admin/test/after-checkout-access.test.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Admin Console: sign-in pages reorganised; After check-out shows the emergency terms as sent |
@@ -56,7 +56,7 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   2 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   2 +-
  docs/context/StayConnect-IAM-Handoff.md            |   2 +-
- ...AdminConsoleSigninUX20261103-change-manifest.md | 103 +++++
+ ...AdminConsoleSigninUX20261103-change-manifest.md | 105 +++++
  .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 354557 -> 354558 bytes
  .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 178009 -> 178006 bytes
  .../chatgpt/phase-evidence/GIT_STAT_614617eb.txt   |   4 +
@@ -82,12 +82,12 @@
  hotel-admin/components/guest-signin-protection.tsx |   2 +-
  .../components/network/effective-signin.tsx        |   7 +-
  hotel-admin/components/ui/quiet.tsx                |  19 +
- hotel-admin/e2e/guest-signin-protection.spec.ts    |   8 +-
+ hotel-admin/e2e/guest-signin-protection.spec.ts    |  14 +-
  hotel-admin/e2e/multi-pms-admin.spec.ts            |   2 +-
  hotel-admin/lib/api/after-checkout-access.ts       |  35 +-
  hotel-admin/test/after-checkout-access.test.tsx    |  32 ++
  .../test/onegate-offering-portal-charges.test.tsx  |   9 +
- 36 files changed, 727 insertions(+), 350 deletions(-)
+ 36 files changed, 731 insertions(+), 354 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -97,6 +97,8 @@ M  docs/manifests/AdminConsoleSigninUX20261103-change-manifest.md
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 349fee51 E2E: sign-in protection confirms with Cancel/Save, as the console has since PR #287
+HISTORICAL: e0bdfade Governance: manifest regenerated for the delivery head
 HISTORICAL: be520c2d Packs rebuilt after the console read-back
 HISTORICAL: 614617eb Governance: T0286 records the sign-in UX delivery and its test-appliance read-back
 HISTORICAL: 464aa3d9 Admin Console: sign-in protection cards keep the hint beside the title; one Identity providers link when none is set up
