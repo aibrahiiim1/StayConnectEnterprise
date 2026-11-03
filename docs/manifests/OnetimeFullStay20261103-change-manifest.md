@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `6e3a88a048f77f388a2969197d279bfa1f5d4e6b`
-- **HEAD commit:** `a503be92`
-- **Provenance (generation HEAD = inventory_head):** `a503be92736444c72f43e0d578a5c086b1703ef7`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `d9e20b09`
+- **Provenance (generation HEAD = inventory_head):** `d9e20b09c021f3af8d2face031663ddf3e983df8`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/fullstay-migration-2026-11-03`
 - **Remote branch:** `origin/delivery/fullstay-migration-2026-11-03`
 - **Changed files:** 27
@@ -12,50 +12,50 @@
 
 | Path | Classification | Git status | Domain | Workstream | Rollback | Purpose (last commit subject in range) |
 |---|---|---|---|---|---|---|
-| `data-plane/cmd/netd/phase3_provision.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | netd denies a device before rebuilding its class under another group |
+| `data-plane/cmd/netd/phase3_provision.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | netd re-binds the device address after revoking a regrouped session |
 | `data-plane/cmd/netd/phase3_shaping.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | netd rebuilds at most eight moved classes per pass |
 | `data-plane/cmd/netd/phase3_shaping_test.go` | MODIFIED | `M` | tests/tooling | RUNTIME | rollback RESTORES prior content | netd rebuilds a shared-speed class left under another entitlement's group |
-| `data-plane/cmd/netd/phase3_speed_allocation_test.go` | MODIFIED | `M` | tests/tooling | RUNTIME | rollback RESTORES prior content | netd denies a device before rebuilding its class under another group |
+| `data-plane/cmd/netd/phase3_speed_allocation_test.go` | MODIFIED | `M` | tests/tooling | RUNTIME | rollback RESTORES prior content | netd re-binds the device address after revoking a regrouped session |
 | `data-plane/cmd/scd/onetime_fullstay_grant_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | One-time Full Stay grant declares its entitlement row with the table's type |
 | `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0292 records the one-time Full Stay migration and the netd regroup fix |
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0292 records the one-time Full Stay migration and the netd regroup fix |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0292 records the one-time Full Stay migration and the netd regroup fix |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0292 records the one-time Full Stay migration and the netd regroup fix |
 | `docs/manifests/OnetimeFullStay20261103-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Governance: manifest regenerated for the delivery head |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt for the fail-closed netd head |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt for the fail-closed netd head |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt for the netd head |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt for the netd head |
+| `exports/chatgpt/phase-evidence/GIT_STAT_3466fba7.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Packs rebuilt for the netd head |
 | `exports/chatgpt/phase-evidence/GIT_STAT_502e02c0.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Packs rebuilt after the T0292 receipt |
-| `exports/chatgpt/phase-evidence/GIT_STAT_8af69d9c.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Packs rebuilt for the fail-closed netd head |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt for the fail-closed netd head |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt for the fail-closed netd head |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt for the netd head |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt for the netd head |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0292 records the one-time Full Stay migration and the netd regroup fix |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt for the fail-closed netd head |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt for the netd head |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0292 records the one-time Full Stay migration and the netd regroup fix |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt after the T0292 receipt |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt after the T0292 receipt |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt after the T0292 receipt |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs rebuilt after the T0292 receipt |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: current delivery names the deployed fail-closed netd |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: current delivery names the deployed netd |
 | `governance/transitions/T0292.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: T0292 records the one-time Full Stay migration and the netd regroup fix |
 | `scripts/sql/onetime-fullstay-grant.sql` | CREATED | `A` | other | OTHER | rollback REMOVES it | One-time Full Stay grant declares its entitlement row with the table's type |
 | `scripts/sql/onetime-fullstay-run.sql` | CREATED | `A` | other | OTHER | rollback REMOVES it | One-time Full Stay grant for stays that paid on the previous system |
 
 ## Total diff statistics (`git diff --stat`)
 ```text
- data-plane/cmd/netd/phase3_provision.go            |  43 ++++
+ data-plane/cmd/netd/phase3_provision.go            |  47 +++++
  data-plane/cmd/netd/phase3_shaping.go              |   3 +
  data-plane/cmd/netd/phase3_shaping_test.go         |  15 ++
- .../cmd/netd/phase3_speed_allocation_test.go       | 139 +++++++++++++
+ .../cmd/netd/phase3_speed_allocation_test.go       | 164 ++++++++++++++++
  .../scd/onetime_fullstay_grant_integration_test.go | 216 +++++++++++++++++++++
  .../StayConnect-IAM-Phase0-Contract.md             |   2 +-
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   2 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   2 +-
  docs/context/StayConnect-IAM-Handoff.md            |   2 +-
- .../OnetimeFullStay20261103-change-manifest.md     |  92 +++++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 354560 -> 354557 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 178001 -> 177991 bytes
+ .../OnetimeFullStay20261103-change-manifest.md     |  96 +++++++++
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 354560 -> 354559 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 178001 -> 177981 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_3466fba7.txt   |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_502e02c0.txt   |   4 -
- .../chatgpt/phase-evidence/GIT_STAT_8af69d9c.txt   |   4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   4 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   4 +-
  .../chatgpt/stayconnectenterprise/00-START-HERE.md |   2 +-
@@ -69,7 +69,7 @@
  governance/transitions/T0292.json                  |  36 ++++
  scripts/sql/onetime-fullstay-grant.sql             | 148 ++++++++++++++
  scripts/sql/onetime-fullstay-run.sql               |  49 +++++
- 27 files changed, 800 insertions(+), 59 deletions(-)
+ 27 files changed, 833 insertions(+), 59 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -79,6 +79,10 @@ M  docs/manifests/OnetimeFullStay20261103-change-manifest.md
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: d9e20b09 Packs rebuilt for the netd head
+HISTORICAL: 3466fba7 Governance: current delivery names the deployed netd
+HISTORICAL: 2b9e13ab netd re-binds the device address after revoking a regrouped session
+HISTORICAL: 1e0ce02b Governance: manifest regenerated for the delivery head
 HISTORICAL: a503be92 One-time Full Stay grant declares its entitlement row with the table's type
 HISTORICAL: e3c574b3 Governance: manifest regenerated for the delivery head
 HISTORICAL: 862c650b Packs rebuilt for the fail-closed netd head
