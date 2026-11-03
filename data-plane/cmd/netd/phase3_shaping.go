@@ -115,6 +115,8 @@ type phase3Shaping struct {
 	passClasses map[string]map[int]shape.ClassBytes
 	// passGroups records the SHARED group classes already re-rated in this pass, so a group is re-rated once per pass, not once per device.
 	passGroups map[string]bool
+	// passRegroups counts classes rebuilt under another group in this pass (regroupedAway); capped so renewals are never starved.
+	passRegroups int
 
 	// fastPath enables AD-53 (phase3_fastpath.go): an unchanged plan only refreshes validity between full walks.
 	fastPath bool
@@ -688,6 +690,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 	// 3. Shape what must be forwarded, staged and fail-closed (see provisionSession); tc class inventories are read once per device per pass.
 	p.passClasses = strayReads
 	p.passGroups = map[string]bool{}
+	p.passRegroups = 0
 	for _, bridge := range sortedKeys(bridges) {
 		byMinor := desired[bridge]
 		if len(byMinor) == 0 {

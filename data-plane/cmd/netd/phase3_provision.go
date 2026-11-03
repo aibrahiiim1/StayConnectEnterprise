@@ -425,7 +425,7 @@ func (p *phase3Shaping) reRateGroup(ctx context.Context, bridge string, s shapep
 
 // regroupedAway removes a SHARED class left under another entitlement's group (HTB cannot re-parent; `tc class change` keeps the old one) so it is rebuilt.
 func (p *phase3Shaping) regroupedAway(ctx context.Context, bridge string, ip net.IP, minor int, s shapeplan.Session) bool {
-	if s.SpeedAllocation != speedAllocationShared {
+	if s.SpeedAllocation != speedAllocationShared || p.passRegroups >= maxRegroupsPerPass {
 		return false
 	}
 	want := shape.GroupClassid(s.EntitlementID)
@@ -451,9 +451,13 @@ func (p *phase3Shaping) regroupedAway(ctx context.Context, bridge string, ip net
 		delete(p.passClasses, bridge)
 		delete(p.passClasses, shape.IFBName(bridge))
 	}
+	p.passRegroups++
 	p.count("regroup", 1)
 	return true
 }
+
+// maxRegroupsPerPass bounds rebuilds per pass: 215 at once (a bulk package switch) slowed passes until other guests' leases lapsed.
+const maxRegroupsPerPass = 8
 
 // provisionalOrLess caps the lease at the provisional one without overshooting the hard boundary.
 func provisionalOrLess(lease time.Duration) time.Duration {

@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -113,6 +114,54 @@ func TestSpeedAllocation_ASessionMovedToAnotherEntitlementJoinsItsGroup(t *testi
 		if c.op == "delete" || c.op == "prepare" {
 			t.Fatalf("a session already under its group was rebuilt again: %+v", c)
 		}
+	}
+}
+
+// A bulk move is spread over passes, and every session stays shaped and authorized in each of them.
+func TestSpeedAllocation_ABulkMoveIsRebuiltAFewSessionsPerPass(t *testing.T) {
+	tc, g := newFakeTC(), newFakeGate()
+	tc.reportParents = true
+	var ips []string
+	for i := 10; i < 30; i++ {
+		ips = append(ips, fmt.Sprintf("10.0.0.%d", i))
+	}
+	p := allocWriter(t, tc, g, ips...)
+	sessions := make([]shapeplan.Session, len(ips))
+	for i, ip := range ips {
+		sessions[i] = allocSession(fmt.Sprintf("s%d", i), ip, fmt.Sprintf("old-%d", i), "SHARED")
+	}
+	if res, err := p.submit(context.Background(), envelope(1, sessions...), time.Now()); err != nil || res.Shaped != len(ips) {
+		t.Fatalf("first pass: %+v %v", res, err)
+	}
+	for i := range sessions {
+		sessions[i].EntitlementID = fmt.Sprintf("new-%d", i)
+	}
+	moved := func() int {
+		n := 0
+		for i, ip := range ips {
+			if tc.parentOf("br-guest", ip) == shape.GroupClassid(fmt.Sprintf("new-%d", i)) {
+				n++
+			}
+		}
+		return n
+	}
+	for gen := int64(2); gen <= 4; gen++ {
+		before := moved()
+		res, err := p.submit(context.Background(), envelope(gen, sessions...), time.Now())
+		if err != nil || res.Failed != 0 || res.Shaped != len(ips) {
+			t.Fatalf("pass %d: %+v %v", gen, res, err)
+		}
+		if step := moved() - before; step > maxRegroupsPerPass {
+			t.Fatalf("pass %d rebuilt %d sessions, want at most %d", gen, step, maxRegroupsPerPass)
+		}
+		for _, ip := range ips {
+			if !g.isAuthorized("br-guest", ip) {
+				t.Fatalf("pass %d: %s lost its access while others were rebuilt", gen, ip)
+			}
+		}
+	}
+	if n := moved(); n != len(ips) {
+		t.Fatalf("after three passes %d of %d sessions are under their new group", n, len(ips))
 	}
 }
 
