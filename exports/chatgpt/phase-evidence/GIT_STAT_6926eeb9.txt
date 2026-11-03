@@ -1,0 +1,4 @@
+commit 6926eeb9edbe8cbc84134ce495f7a5c07090101b
+Date:   Tue Nov 3 11:27:14 2026 +0200
+
+    Governance: T0289 records the operator-username and alert-action fix and its read-back

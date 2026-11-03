@@ -1,4 +1,0 @@
-commit aa7ca59bc4d0db878aee54a69c712f5b5aed9086
-Date:   Tue Nov 3 10:30:37 2026 +0200
-
-    Governance: T0288 records the UX closure and its test-appliance read-back
