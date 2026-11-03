@@ -391,9 +391,11 @@ export default function SignInMethodsPage() {
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                       <span className="text-emphasis">Identity providers</span>
                       <InfoHint>The client signs in with an existing account such as Google. Each provider is offered on its own.</InfoHint>
-                      <Link href="/social-providers" className="inline-flex items-center gap-0.5 text-xs font-medium text-primary underline-offset-4 hover:underline">
-                        Identity providers <ArrowUpRight className="size-3.5" aria-hidden />
-                      </Link>
+                      {socialListed.length > 0 && (
+                        <Link href="/social-providers" className="inline-flex items-center gap-0.5 text-xs font-medium text-primary underline-offset-4 hover:underline">
+                          Identity providers <ArrowUpRight className="size-3.5" aria-hidden />
+                        </Link>
+                      )}
                     </div>
                     {socialListed.length === 0 ? (
                       <div className="flex flex-wrap items-center gap-2 text-sm">

@@ -115,7 +115,7 @@ export function NetworkPauseSettingsCard({ canWrite }: { canWrite: boolean }) {
     <Card>
       <CardHeader>
         <div className="min-w-0">
-          <CardTitle className="flex flex-wrap items-center gap-2">
+          <CardTitle className="inline-flex flex-wrap items-center gap-2">
             Many wrong room sign-ins on one network
             {p.is_default && <Badge tone="default">Using the standard settings</Badge>}
           </CardTitle>

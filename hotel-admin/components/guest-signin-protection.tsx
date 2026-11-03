@@ -106,7 +106,7 @@ export function GuestSignInProtectionCard({ canWrite }: { canWrite: boolean }) {
     <Card>
       <CardHeader>
         <div className="min-w-0">
-          <CardTitle className="flex flex-wrap items-center gap-2">
+          <CardTitle className="inline-flex flex-wrap items-center gap-2">
             Client sign-in protection
             <HelpTip title="Client sign-in protection">
               <HelpSection>
