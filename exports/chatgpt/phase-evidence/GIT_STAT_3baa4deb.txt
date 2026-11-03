@@ -1,0 +1,4 @@
+commit 3baa4debba229f5b77971802109bd0838debae08
+Date:   Tue Nov 3 20:35:43 2026 +0200
+
+    Governance: T0292 records the one-time Full Stay migration and the netd regroup fix
