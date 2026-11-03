@@ -18,7 +18,7 @@ CREATE OR REPLACE FUNCTION pg_temp.onetime_fullstay_grant(p_tenant uuid, p_site 
                                                           p_target_rev uuid, p_operator uuid, p_reason text)
 RETURNS TABLE(outcome text, old_entitlement uuid, new_entitlement uuid, purchase uuid, devices integer, sessions integer)
 LANGUAGE plpgsql AS $fn$
-DECLARE o record; t record; v_live int; v_now timestamptz; v_purchase uuid; v_new uuid; v_devices int := 0;
+DECLARE o iam_v2.entitlements%ROWTYPE; t record; v_live int; v_now timestamptz; v_purchase uuid; v_new uuid; v_devices int := 0;
         v_sessions uuid[] := '{}'; v_sid uuid; v_ctx uuid;
 BEGIN
   IF p_operator IS NULL OR p_reason IS NULL OR length(btrim(p_reason)) < 4 THEN

@@ -172,9 +172,24 @@ func TestIntegration_OnetimeFullStayGrant(t *testing.T) {
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
-	outcome, oldEnt, freshEnt, devices, _, err := grant(fresh)
-	if err != nil || outcome != "GRANTED" || oldEnt != "" || devices != 0 {
-		t.Fatalf("grant without access: %s %s %d %v", outcome, oldEnt, devices, err)
+	// The first call on a fresh connection is a no-access grant: nothing earlier has given the function's record its shape.
+	conn2, err := f.pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn2.Release()
+	if _, err := conn2.Exec(ctx, string(src)); err != nil {
+		t.Fatal(err)
+	}
+	var freshEnt string
+	var oldPtr *string
+	if err := conn2.QueryRow(ctx, `SELECT outcome, old_entitlement::text, new_entitlement::text, devices
+		FROM pg_temp.onetime_fullstay_grant($1,$2,$3,$4,$5,$6,$7,'paid Full Stay on the previous system')`,
+		f.tenant, f.site, fresh, f.iface, freePkg, target, operator).Scan(&outcome, &oldPtr, &freshEnt, &devices); err != nil {
+		t.Fatalf("a no-access grant as the connection's first call: %v", err)
+	}
+	if outcome != "GRANTED" || oldPtr != nil || devices != 0 {
+		t.Fatalf("grant without access: %s %v %d", outcome, oldPtr, devices)
 	}
 	body := f.resolveBody("413", "Adeyemi", "", "0000f502-0000-4000-8000-000000000000")
 	body["device"] = map[string]string{"ip": f.net.otherIP, "mac": "02:00:00:f5:00:02"}
