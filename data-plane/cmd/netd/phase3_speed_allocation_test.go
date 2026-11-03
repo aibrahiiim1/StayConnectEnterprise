@@ -75,6 +75,47 @@ func TestSpeedAllocation_SharedReRateKeepsTheGroupAndFollowsTheAllowance(t *test
 	}
 }
 
+// A session moved to another entitlement (staff Reset, a package switch) is rebuilt under the new entitlement's group: HTB cannot
+// re-parent a class, so a re-rate alone left it capped at the old group's rate.
+func TestSpeedAllocation_ASessionMovedToAnotherEntitlementJoinsItsGroup(t *testing.T) {
+	tc, g := newFakeTC(), newFakeGate()
+	tc.reportParents = true
+	p := allocWriter(t, tc, g, "10.0.0.11")
+	s := allocSession("a", "10.0.0.11", "ent-free", "SHARED")
+	s.DownKbps, s.UpKbps = 4000, 4000
+	if res, err := p.submit(context.Background(), envelope(1, s), time.Now()); err != nil || res.Failed != 0 {
+		t.Fatalf("first pass: %+v %v", res, err)
+	}
+	s.EntitlementID, s.DownKbps, s.UpKbps = "ent-fullstay", 10000, 10000
+	if res, err := p.submit(context.Background(), envelope(2, s), time.Now()); err != nil || res.Failed != 0 || res.Shaped != 1 {
+		t.Fatalf("pass after the move: %+v %v", res, err)
+	}
+	group := shape.GroupClassid("ent-fullstay")
+	if got := tc.parentOf("br-guest", "10.0.0.11"); got != group {
+		t.Fatalf("the session hangs under %q, want the new entitlement's group %q", got, group)
+	}
+	if rate, ok := tc.groupRate("br-guest", group); !ok || rate != 10000 {
+		t.Fatalf("new group rate = %d (present=%v), want 10000", rate, ok)
+	}
+	if !g.isAuthorized("br-guest", "10.0.0.11") {
+		t.Fatal("the moved session lost its internet access")
+	}
+	// Once under its own group it is left alone: no further rebuild.
+	tc.mu.Lock()
+	tc.calls = nil
+	tc.mu.Unlock()
+	if res, err := p.submit(context.Background(), envelope(3, s), time.Now()); err != nil || res.Failed != 0 {
+		t.Fatalf("steady pass: %+v %v", res, err)
+	}
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	for _, c := range tc.calls {
+		if c.op == "delete" || c.op == "prepare" {
+			t.Fatalf("a session already under its group was rebuilt again: %+v", c)
+		}
+	}
+}
+
 // PER_DEVICE: no group is created and each session hangs off the root at its own rate.
 func TestSpeedAllocation_PerDeviceKeepsIndependentRates(t *testing.T) {
 	tc, g := newFakeTC(), newFakeGate()

@@ -206,6 +206,9 @@ func (p *phase3Shaping) provisionTail(ctx context.Context, bridge string, minor 
 	if epoch, active := p.epochs[key]; active {
 		if _, held := p.classes[key]; held {
 			present, err := p.classPresentCached(ctx, bridge, minor)
+			if err == nil && present && p.regroupedAway(ctx, bridge, ip, minor, s) {
+				present = false
+			}
 			if err == nil && present {
 				groupCid, gproblem := p.reRateGroup(ctx, bridge, s)
 				if gproblem != "" {
@@ -418,6 +421,38 @@ func (p *phase3Shaping) reRateGroup(ctx context.Context, bridge string, s shapep
 		p.passGroups[k] = true
 	}
 	return groupCid, ""
+}
+
+// regroupedAway removes a SHARED class left under another entitlement's group (HTB cannot re-parent; `tc class change` keeps the old one) so it is rebuilt.
+func (p *phase3Shaping) regroupedAway(ctx context.Context, bridge string, ip net.IP, minor int, s shapeplan.Session) bool {
+	if s.SpeedAllocation != speedAllocationShared {
+		return false
+	}
+	want := shape.GroupClassid(s.EntitlementID)
+	if want == "" {
+		return false
+	}
+	down, err := p.readClassesForPass(ctx, bridge)
+	if err != nil {
+		return false
+	}
+	up, err := p.readClassesForPass(ctx, shape.IFBName(bridge))
+	if err != nil {
+		return false
+	}
+	d, u := down[minor], up[minor]
+	if !(d.Params && d.Parent != want) && !(u.Params && u.Parent != want) {
+		return false
+	}
+	if err := p.shp.DeleteSession(ctx, bridge, ip); err != nil {
+		return false
+	}
+	if p.passClasses != nil {
+		delete(p.passClasses, bridge)
+		delete(p.passClasses, shape.IFBName(bridge))
+	}
+	p.count("regroup", 1)
+	return true
 }
 
 // provisionalOrLess caps the lease at the provisional one without overshooting the hard boundary.

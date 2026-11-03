@@ -52,6 +52,8 @@ type fakeTC struct {
 
 	groups  map[string]int
 	parents map[string]string
+	// reportParents makes ReadClasses report each class's parent, as the kernel does.
+	reportParents bool
 }
 
 func newFakeTC() *fakeTC {
@@ -238,6 +240,19 @@ func (f *fakeTC) ReadClasses(ctx context.Context, device string) (map[int]shape.
 	out := map[int]shape.ClassBytes{}
 	for minor := range f.installed[device] {
 		out[minor] = shape.ClassBytes{}
+	}
+	if f.reportParents {
+		for k, parent := range f.parents {
+			bridge, ip, _ := strings.Cut(k, "|")
+			if bridge != device && shape.IFBName(bridge) != device {
+				continue
+			}
+			if minor, ok := shape.MinorForIP(net.ParseIP(ip)); ok {
+				if _, installed := out[minor]; installed {
+					out[minor] = shape.ClassBytes{Params: true, Parent: parent}
+				}
+			}
+		}
 	}
 	return out, nil
 }
