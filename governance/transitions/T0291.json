@@ -1,0 +1,35 @@
+{
+  "transition_id": "T0291",
+  "seq": 291,
+  "timestamp": "2026-11-03T15:39:08+02:00",
+  "timestamp_derivation": "Read from the workstation clock (UTC+02:00) by the script that wrote this receipt, immediately before the commit that introduces it.",
+  "record_type": "ROOM_RESIGN_ACCEPTED_MERGED_AND_CLOSED",
+  "authorisation": "The Product Owner's message of 2026-11-03: real-device acceptance PASSED and an explicit approval to merge PR #300 and complete the delivery and closure work. Deployment under the standing test-appliance authority (D79).",
+  "delivery": "PR #300 merged as 98fc1f4bdc9276ee19d861f0cc1c7e6a45faa9aa (merge commit; approved head 17cfe4510d3721824aadd84d4e36f1c7baa3a9f6; po-merge-authorization PASS). Correction forward of T0290: the change that fixed the room path is 9dba9511, not d7c55c21. A room sign-in goes through scd /v1/phase3/auth/pms/resolve and /grant, which never looked for the stay's live access; d7c55c21 changed only the commerce lookup. Resolve now answers live_access (no offers) when the stay holds an ACTIVE, in-window entitlement; portald then sends join_live and scd joins the device to that entitlement (staygrant.JoinLiveTx), within the device limit and with the replace page unchanged. Nothing is offered or bought, so a package edit (new revision) can no longer re-offer the purchased package as a second room charge.",
+  "acceptance": "Product Owner, real iPhone on the SOFT-ONE network, a room with an existing One Day purchase: reconnected directly to the active package without package selection. PASS.",
+  "deployment": {
+    "test_appliance": "172.21.96.97, read back after the merge: portald and scd vcs.revision=9dba9511b11d494ee903afe6dfbfb1211db262c7, -tags=stayconnect_production, vcs.modified=false, DEPLOYED_BINARIES.sha256 matches both, both active, no failed units. Master 98fc1f4b differs from 9dba9511 outside data-plane tests only in records (manifest, receipts, packs), so the deployed functional code equals master; no redeploy. Admin Console release 20261103-100433 (source d7c55c21) has no source difference from master.",
+    "central": "Not changed."
+  },
+  "verification": "scd integration suite, staygrant and portald PASS on Linux against PostgreSQL (new: a second device joins after the package revision was superseded, one purchase and one entitlement; a join without live access is refused and leaves the context unconsumed; portald never offers a choice when the stay has access). Codex review of head 17cfe451 clean, its one finding fixed in 8f092c88. Real-device acceptance above.",
+  "not_touched": "One Day package and service plan settings, online time allowance, durations, prices and existing purchases (left to the Product Owner); PMS configuration; financial behaviour; After Check-out terms; networking; the production Central.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "98fc1f4bdc9276ee19d861f0cc1c7e6a45faa9aa",
+  "previous_delivery": "T0290",
+  "decision": "none (Product Owner acceptance and merge approval)",
+  "go_live": "NOT authorised."
+}
