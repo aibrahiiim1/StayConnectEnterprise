@@ -100,6 +100,8 @@ type phase3Response struct {
 	AuthContextID string        `json:"auth_context_id,omitempty"`
 	ExpiresIn     int           `json:"expires_in_seconds,omitempty"`
 	Offers        []phase3Offer `json:"offers,omitempty"`
+	// LiveAccess: the stay already holds live access; the grant joins it (join_live) and no offers are made.
+	LiveAccess bool `json:"live_access,omitempty"`
 	// DeviceID and GuestNetworkID are present only on a DEVICE_LIMIT refusal, for portald alone, which never
 	// forwards them to the guest.
 	DeviceID       string `json:"device_id,omitempty"`
@@ -500,20 +502,32 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 		notVerified(w, at.Result, "no_published_revision")
 		return
 	}
-	// The offer set is what the eligibility engine says this Stay qualifies for, not the whole free catalogue.
-	decisions, err := p.offersFor(ctx, out.Stay, iface, dev.GuestNetwork, dev.DeviceID, time.Now())
-	if err != nil {
+	// A stay with live access is joined, not offered packages: its access may sit on a superseded revision, and
+	// re-offering the package as new would start a second purchase.
+	var live bool
+	if err := p.srv.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM iam_v2.entitlements
+		WHERE tenant_id=$1 AND site_id=$2 AND stay_id=$3::uuid AND status='ACTIVE'
+		  AND (window_ends_at IS NULL OR window_ends_at > now()))`, p.srv.tenID, p.srv.siteID, out.Stay).Scan(&live); err != nil {
 		at.Result = signinattempt.ServiceUnavailable
-		notVerified(w, at.Result, "offers: "+err.Error())
+		notVerified(w, at.Result, "live_access: "+err.Error())
 		return
 	}
-	if len(decisions) == 0 {
-		// A configuration or eligibility outcome, not an identity one; kept distinct from wrong surnames.
-		at.Result = signinattempt.VerifiedNoEligiblePackage
-		notVerified(w, at.Result, "verified_but_no_eligible_package")
-		return
+	var decisions []offerDecision
+	if !live {
+		// The offer set is what the eligibility engine says this Stay qualifies for, not the whole free catalogue.
+		decisions, err = p.offersFor(ctx, out.Stay, iface, dev.GuestNetwork, dev.DeviceID, time.Now())
+		if err != nil {
+			at.Result = signinattempt.ServiceUnavailable
+			notVerified(w, at.Result, "offers: "+err.Error())
+			return
+		}
+		if len(decisions) == 0 {
+			// A configuration or eligibility outcome, not an identity one; kept distinct from wrong surnames.
+			at.Result = signinattempt.VerifiedNoEligiblePackage
+			notVerified(w, at.Result, "verified_but_no_eligible_package")
+			return
+		}
 	}
-	evidenceVersion := decisions[0].EvidenceVersion
 
 	// The Context and its offer set are written together; without the set the grant's "was this offered?" check
 	// would weaken to "is this generally grantable?".
@@ -539,11 +553,13 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The controlled writer is idempotent per (context, package), so a retry re-states the same set.
-	if err := p.recordOfferSet(ctx, tx, id, evidenceVersion, decisions,
-		time.Now().Add(p.contextTTL)); err != nil {
-		at.Result = signinattempt.ServiceUnavailable
-		notVerified(w, at.Result, "offer_record: "+err.Error())
-		return
+	if !live {
+		if err := p.recordOfferSet(ctx, tx, id, decisions[0].EvidenceVersion, decisions,
+			time.Now().Add(p.contextTTL)); err != nil {
+			at.Result = signinattempt.ServiceUnavailable
+			notVerified(w, at.Result, "offer_record: "+err.Error())
+			return
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		at.Result = signinattempt.ServiceUnavailable
@@ -560,7 +576,7 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 			PriceMinor: d.PriceMinor, Currency: d.Currency, CurrencyExponent: d.CurrencyExponent, Methods: d.Methods})
 	}
 	writeJSONScd(w, http.StatusOK, phase3Response{
-		Outcome: outcomeVerified, AuthContextID: id, ExpiresIn: int(p.contextTTL.Seconds()), Offers: offers})
+		Outcome: outcomeVerified, AuthContextID: id, ExpiresIn: int(p.contextTTL.Seconds()), Offers: offers, LiveAccess: live})
 }
 
 // validRequestID reports whether s is a canonical 8-4-4-4-12 hex UUID; anything else is refused before SQL runs.
@@ -854,6 +870,8 @@ type phase3GrantReq struct {
 	Method string `json:"method,omitempty"`
 	// ReturnBase is the portal origin a card provider sends the client back to.
 	ReturnBase string `json:"return_base,omitempty"`
+	// JoinLive joins the stay's live access (resolve answered live_access); no package is named or bought.
+	JoinLive bool `json:"join_live,omitempty"`
 }
 
 type phase3GrantResp struct {
@@ -921,60 +939,64 @@ func (p *phase3Auth) grantHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// "Was this package offered to this Stay?" is the authorisation question; "is it grantable?" is not enough,
-	// or a guest could name any free package whose eligibility rules they fail. Runs in the grant transaction
-	// with the offer row locked FOR UPDATE so a concurrent consumption cannot slip in.
-	var offeredTier *int
-	var offerEvidence int64
-	// Locks via iam_v2.lock_auth_context_offer, not an inline FOR UPDATE: a row lock needs UPDATE privilege,
-	// which would let scd rewrite the tier, evidence version and expiry validated below.
-	err = tx.QueryRow(ctx,
-		`SELECT matched_tier_order, evidence_version
-		   FROM iam_v2.lock_auth_context_offer($1,$2,$3::uuid,$4::uuid)`,
-		p.srv.tenID, p.srv.siteID, strings.TrimSpace(req.AuthContextID),
-		strings.TrimSpace(req.PackageRevID)).Scan(&offeredTier, &offerEvidence)
-	if err != nil {
-		// Only "no such offer" is an authorisation answer; permission errors, dead connections and timeouts are
-		// internal failures and must not be reported as "not offered".
-		if errors.Is(err, pgx.ErrNoRows) {
-			// A stay-eligibility fact, not an identity one.
-			grantResult = signinattempt.VerifiedNoEligiblePackage
-			notVerified(w, grantResult, "package_not_offered_to_this_context")
+	grant := p.grants.JoinLiveTx
+	if !req.JoinLive {
+		grant = p.grants.GrantTx
+		// "Was this package offered to this Stay?" is the authorisation question; "is it grantable?" is not enough,
+		// or a guest could name any free package whose eligibility rules they fail. Runs in the grant transaction
+		// with the offer row locked FOR UPDATE so a concurrent consumption cannot slip in.
+		var offeredTier *int
+		var offerEvidence int64
+		// Locks via iam_v2.lock_auth_context_offer, not an inline FOR UPDATE: a row lock needs UPDATE privilege,
+		// which would let scd rewrite the tier, evidence version and expiry validated below.
+		err = tx.QueryRow(ctx,
+			`SELECT matched_tier_order, evidence_version
+			   FROM iam_v2.lock_auth_context_offer($1,$2,$3::uuid,$4::uuid)`,
+			p.srv.tenID, p.srv.siteID, strings.TrimSpace(req.AuthContextID),
+			strings.TrimSpace(req.PackageRevID)).Scan(&offeredTier, &offerEvidence)
+		if err != nil {
+			// Only "no such offer" is an authorisation answer; permission errors, dead connections and timeouts are
+			// internal failures and must not be reported as "not offered".
+			if errors.Is(err, pgx.ErrNoRows) {
+				// A stay-eligibility fact, not an identity one.
+				grantResult = signinattempt.VerifiedNoEligiblePackage
+				notVerified(w, grantResult, "package_not_offered_to_this_context")
+				return
+			}
+			slog.Error("phase3 grant: offer lock failed", "err", err,
+				"context", strings.TrimSpace(req.AuthContextID))
+			notVerified(w, signinattempt.ServiceUnavailable, "offer_lock_unavailable")
 			return
 		}
-		slog.Error("phase3 grant: offer lock failed", "err", err,
-			"context", strings.TrimSpace(req.AuthContextID))
-		notVerified(w, signinattempt.ServiceUnavailable, "offer_lock_unavailable")
-		return
-	}
-	// The evidence must still be what the offer was decided under; a moved, re-rated or checked-out Stay is a different subject.
-	var nowEvidence int64
-	if err := tx.QueryRow(ctx, `
-		SELECT s.occupancy_evidence_version FROM iam_v2.stays s
-		  JOIN iam_v2.auth_contexts c ON c.stay_id = s.id
-		 WHERE c.id=$1::uuid AND c.tenant_id=$2 AND c.site_id=$3`,
-		strings.TrimSpace(req.AuthContextID), p.srv.tenID, p.srv.siteID).Scan(&nowEvidence); err != nil {
-		notVerified(w, signinattempt.ServiceUnavailable, "stay_evidence_unreadable")
-		return
-	}
-	if nowEvidence != offerEvidence {
-		grantResult = signinattempt.StayNotEligible
-		notVerified(w, grantResult, "stay_evidence_changed_since_the_offer")
-		return
-	}
-
-	// A paid choice creates a quote, purchase and required settlement; no access until the PMS or card provider confirms payment.
-	if m := strings.TrimSpace(req.Method); m != "" && m != "NOT_REQUIRED" {
-		req.Method = m
-		res, ok := p.paidPurchase(w, r, tx, req, dev, offeredTier)
-		grantResult = res
-		if ok {
-			grantResult = signinattempt.Verified
+		// The evidence must still be what the offer was decided under; a moved, re-rated or checked-out Stay is a different subject.
+		var nowEvidence int64
+		if err := tx.QueryRow(ctx, `
+			SELECT s.occupancy_evidence_version FROM iam_v2.stays s
+			  JOIN iam_v2.auth_contexts c ON c.stay_id = s.id
+			 WHERE c.id=$1::uuid AND c.tenant_id=$2 AND c.site_id=$3`,
+			strings.TrimSpace(req.AuthContextID), p.srv.tenID, p.srv.siteID).Scan(&nowEvidence); err != nil {
+			notVerified(w, signinattempt.ServiceUnavailable, "stay_evidence_unreadable")
+			return
 		}
-		return
+		if nowEvidence != offerEvidence {
+			grantResult = signinattempt.StayNotEligible
+			notVerified(w, grantResult, "stay_evidence_changed_since_the_offer")
+			return
+		}
+
+		// A paid choice creates a quote, purchase and required settlement; no access until the PMS or card provider confirms payment.
+		if m := strings.TrimSpace(req.Method); m != "" && m != "NOT_REQUIRED" {
+			req.Method = m
+			res, ok := p.paidPurchase(w, r, tx, req, dev, offeredTier)
+			grantResult = res
+			if ok {
+				grantResult = signinattempt.Verified
+			}
+			return
+		}
 	}
 
-	granted, err := p.grants.GrantTx(ctx, tx, p.srv.tenID, p.srv.siteID, staygrant.Request{
+	granted, err := grant(ctx, tx, p.srv.tenID, p.srv.siteID, staygrant.Request{
 		AuthContextID: strings.TrimSpace(req.AuthContextID),
 		Presenter: authctx.Presenter{
 			Tenant: p.srv.tenID, Site: p.srv.siteID,
@@ -984,7 +1006,7 @@ func (p *phase3Auth) grantHandler(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		// Every grant failure is uniform to the guest; the operator record keeps that an already-entitled stay is an eligibility fact.
-		if errors.Is(err, staygrant.ErrAlreadyEntitled) {
+		if errors.Is(err, staygrant.ErrAlreadyEntitled) || errors.Is(err, staygrant.ErrNoLiveAccess) {
 			grantResult = signinattempt.StayNotEligible
 		}
 		// A full device limit is neither a wrong room nor a fault; it gets its own sentence so the guest can disconnect another device.

@@ -141,11 +141,11 @@ func TestIntegration_Phase3Auth_RepeatingASuccessCannotDoubleGrant(t *testing.T)
 	}
 
 	_, fresh := post(t, f.p3.resolveHandler, f.verifyBody("412", "Okonkwo", f.reqID(t, 2)))
-	if fresh.Outcome != outcomeVerified {
-		t.Fatalf("a fresh submission by an already-connected guest failed to verify: %+v", fresh)
+	if fresh.Outcome != outcomeVerified || !fresh.LiveAccess || len(fresh.Offers) != 0 {
+		t.Fatalf("a fresh submission by an already-connected guest must verify into its live access: %+v", fresh)
 	}
-	second := postGrant(t, f, fresh.AuthContextID, fresh.Offers[0].PackageRevisionID)
-	if second.Outcome == outcomeVerified && second.EntitlementID != granted.EntitlementID {
+	second := postJoinLive(t, f, fresh.AuthContextID)
+	if second.Outcome != outcomeVerified || second.EntitlementID != granted.EntitlementID {
 		t.Fatalf("a second grant produced a NEW entitlement %s alongside %s", second.EntitlementID, granted.EntitlementID)
 	}
 
