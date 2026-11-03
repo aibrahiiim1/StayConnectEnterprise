@@ -469,8 +469,9 @@ export default function OperatorsPage() {
         onSubmit={onCreate}
       >
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Email or username" required>
-            <Input value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="ops@example.com" />
+          <Field label="Email or username" required hint="An email address, or a username of 3 to 64 letters, digits, dots, dashes or underscores.">
+            <Input value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="frontdesk1 or ops@example.com"
+              autoCapitalize="none" autoCorrect="off" spellCheck={false} />
           </Field>
           <Field label="Name" hint="Shown instead of the email where there is room for it.">
             <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Optional" />

@@ -68,8 +68,7 @@ export function OperationalAlertsView({
       toast.success(action === "resolve" ? "Alert resolved" : "Alert acknowledged");
       await load();
     } catch (e: any) {
-      if (e?.status === 409) {
-        // Reload on conflict to show the other operator's decision.
+      if (e?.status === 409 && e?.code === "state_conflict") {
         setNote("This alert changed while you were looking at it. The queue has been refreshed.");
         await load();
       } else {

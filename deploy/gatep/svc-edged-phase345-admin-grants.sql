@@ -104,6 +104,8 @@ GRANT SELECT ON iam_v2.v_financial_payments           TO svc_edged;
 GRANT SELECT ON iam_v2.v_financial_settlements        TO svc_edged;
 GRANT SELECT ON iam_v2.v_zero_attempt_recovery_queue  TO svc_edged;
 GRANT SELECT ON iam_v2.active_operational_alerts      TO svc_edged;
+-- Acknowledge and Resolve on the Alerts screen: the one controlled operation that owns the alert lifecycle.
+GRANT EXECUTE ON FUNCTION iam_v2.record_alert_action(uuid,uuid,uuid,text,uuid,text,text) TO svc_edged;
 
 -- ---- Phase 5: post-stay and transfer read surfaces ---------------------------------------------------
 GRANT SELECT ON iam_v2.post_stay_profiles              TO svc_edged;
