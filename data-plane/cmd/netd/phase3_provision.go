@@ -448,6 +448,10 @@ func (p *phase3Shaping) regroupedAway(ctx context.Context, bridge string, ip net
 	if err := p.denyAccess(ctx, bridge, ip); err != nil {
 		return false
 	}
+	// Revoke drops the device address the precheck bound; the rebuild's authorization must be MAC-bound again.
+	if mb, ok := p.gate.(macBinder); ok && s.MAC != "" {
+		mb.BindMAC(bridge, ip, s.MAC)
+	}
 	if err := p.shp.DeleteSession(ctx, bridge, ip); err != nil {
 		return false
 	}

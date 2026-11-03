@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -163,6 +164,30 @@ func TestSpeedAllocation_ARegroupRevokesBeforeTheClassGoesAndStaysDeniedOnFailur
 	tc.mu.Unlock()
 	if !revoked || !deleted {
 		t.Fatalf("revoke first then delete: revoked=%v deleted=%v", revoked, deleted)
+	}
+}
+
+// With MAC binding on, the rebuilt session is authorized through the MAC-bound set in the same pass, not left denied.
+func TestSpeedAllocation_ARegroupKeepsTheMACBinding(t *testing.T) {
+	tc := newFakeTC()
+	tc.reportParents = true
+	gate, sets := newMACGate(true)
+	p := allocWriter(t, tc, nil, "10.0.0.11")
+	p.gate = gate
+	s := allocSession("a", "10.0.0.11", "ent-free", "SHARED")
+	if res, err := p.submit(context.Background(), envelope(1, s), time.Now()); err != nil || res.Shaped != 1 {
+		t.Fatalf("first pass: %+v %v", res, err)
+	}
+	s.EntitlementID = "ent-fullstay"
+	res, err := p.submit(context.Background(), envelope(2, s), time.Now())
+	if err != nil || res.Failed != 0 || res.Shaped != 1 {
+		t.Fatalf("pass after the move: %+v %v", res, err)
+	}
+	if ok, _ := gate.Authorized(context.Background(), "br-guest", net.ParseIP("10.0.0.11")); !ok {
+		t.Fatalf("the rebuilt session is not authorized by the MAC-bound set: %v", sets.mac)
+	}
+	if got := tc.parentOf("br-guest", "10.0.0.11"); got != shape.GroupClassid("ent-fullstay") {
+		t.Fatalf("parent %q, want the new group", got)
 	}
 }
 
