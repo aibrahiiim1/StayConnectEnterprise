@@ -4,15 +4,7 @@ import { ChevronRight } from "lucide-react";
 import { Explain } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
-/**
- * The explanation that used to sit as a line of text under a title. It is one small info icon beside the title now, and
- * its text is read on hover or focus; assistive technology and search still get the words, in place, so nothing is
- * removed from the page, only from its visual noise.
- */
-/**
- * A form note that is read on hover or focus of an info icon instead of taking a paragraph. The words stay in the page
- * (assistive technology, search, tests by data-testid). Warnings that need action are not hints: keep those visible.
- */
+/** Not for warnings that need action: those stay visible. */
 export function InfoHint({ children, testId, className }: { children: React.ReactNode; testId?: string; className?: string }) {
   if (children == null || children === "" || children === false) return null;
   return (
@@ -23,10 +15,7 @@ export function InfoHint({ children, testId, className }: { children: React.Reac
   );
 }
 
-/**
- * Progressive disclosure for secondary settings or long instructions: closed by default, one line when closed. The
- * content stays in the page (a native details element), so a form keeps its fields and their values when it is closed.
- */
+/** Closed content stays mounted, so a form keeps its fields and values. */
 export function Disclosure({
   title, defaultOpen = false, children, className, testId,
 }: { title: React.ReactNode; defaultOpen?: boolean; children: React.ReactNode; className?: string; testId?: string }) {

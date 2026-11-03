@@ -71,6 +71,36 @@ const CALLOUT_TONES = {
   },
 } as const;
 
+/** A one-line, severity-aware status: what is wrong, where, and the action that fixes it. */
+export function Notice({
+  tone = "warning",
+  title,
+  children,
+  actions,
+  className,
+}: {
+  tone?: keyof typeof CALLOUT_TONES;
+  title: React.ReactNode;
+  children?: React.ReactNode;
+  actions?: React.ReactNode;
+  className?: string;
+}) {
+  const t = CALLOUT_TONES[tone];
+  const Icon = t.Icon;
+  return (
+    <div
+      role={t.role}
+      aria-live={t.role === "alert" ? "assertive" : t.role === "status" ? "polite" : undefined}
+      className={cn("flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border px-3 py-2 text-sm", t.box, className)}
+    >
+      <Icon className="size-4 shrink-0" aria-hidden />
+      <span className="font-medium">{title}</span>
+      {children && <span className="min-w-0 opacity-90 [&_strong]:font-semibold">{children}</span>}
+      {actions && <span className="ms-auto flex flex-wrap items-center gap-x-3 gap-y-1">{actions}</span>}
+    </div>
+  );
+}
+
 export function Callout({
   tone = "info",
   title,

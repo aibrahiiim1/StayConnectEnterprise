@@ -1,8 +1,5 @@
 "use client";
 
-// Each switch saves immediately (no page-level Save) and a refused change re-reads server state.
-// No PMS interface selector here: the PMS is decided by the guest network, in Network routing.
-
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api, ListResp } from "@/lib/api";
@@ -35,7 +32,7 @@ import { senderReady, type NotifyProvider } from "@/lib/sign-in-readiness";
 import { Ticket, Hotel, KeyRound, Mail, MessageSquare, Users, ArrowUpRight, PackageOpen, Smartphone } from "lucide-react";
 import { useOperatorRoles } from "@/lib/whoami-context";
 
-// Only the keys this screen owns are typed; the server's per-key merge preserves the rest.
+// Typed keys only: the server merges per key, so unrendered config is kept.
 type Method = { enabled?: boolean };
 type PMSMethod = { enabled?: boolean; mode?: string; provider?: string; template_id?: string };
 type PrimaryMethod = "" | "pms" | "email_account" | "sms" | "whatsapp" | "guest_account" | "voucher";
@@ -43,7 +40,6 @@ type PortalJourney = { primary_method?: PrimaryMethod; remember_device_days?: nu
 type AuthMethods = {
   voucher?: Method;
   guest_account?: Method;
-  // Access is held by an anonymous access subject, never by the device's MAC address.
   open?: Method;
   email_account?: Method;
   sms?: Method;
@@ -53,7 +49,6 @@ type AuthMethods = {
   portal?: PortalJourney;
 };
 
-// Remember-device days; 0 = always ask.
 const REMEMBER_DAYS_DEFAULT = 30;
 const REMEMBER_DAYS_MIN = 0;
 const REMEMBER_DAYS_MAX = 365;
@@ -67,7 +62,6 @@ type SocialProvider = { provider: string; enabled: boolean };
 
 const SOCIAL_LABELS: Record<string, string> = { google: "Google", apple: "Apple", facebook: "Facebook", microsoft: "Microsoft" };
 
-// The page's sections. The URL hash names the open one (/sign-in-methods#protection), so a link can open it directly.
 type SignInTab = "methods" | "networks" | "email" | "codes" | "protection";
 const SIGN_IN_TABS: readonly SignInTab[] = ["methods", "networks", "email", "codes", "protection"];
 
@@ -84,10 +78,8 @@ export default function SignInMethodsPage() {
   const writable = roles === null ? false : canWrite("auth-methods", roles);
   const mayChangeProtection = roles === null ? false : canWrite("guest-signin-protection", roles);
 
-  // Optional methods show only when their module is licensed; unknown module state hides them.
   const caps = useCapabilities();
   const hospitality = moduleLicensed(caps, "hospitality");
-  // The email_otp module gates "Email accounts".
   const emailMod = moduleLicensed(caps, "email_otp");
   const smsMod = moduleLicensed(caps, "sms_otp");
   const whatsappMod = moduleLicensed(caps, "whatsapp_otp");
@@ -97,7 +89,6 @@ export default function SignInMethodsPage() {
   const [cfg, setCfg] = useState<AuthMethods | null>(null);
   const [notify, setNotify] = useState<NotifyProvider[]>([]);
   const [social, setSocial] = useState<SocialProvider[]>([]);
-  // null: unknown, nothing is shown.
   const [httpsActive, setHttpsActive] = useState<boolean | null>(null);
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -110,7 +101,6 @@ export default function SignInMethodsPage() {
   }, []);
   const selectTab = useCallback((t: SignInTab) => {
     setTab(t);
-    // replaceState: switching sections is not a navigation, so Back leaves the page rather than stepping through tabs.
     window.history.replaceState(null, "", t === "methods" ? window.location.pathname + window.location.search : `#${t}`);
   }, []);
   const { readiness: pmsReadiness } = useRoomSignInReadiness(hospitality);
@@ -124,7 +114,6 @@ export default function SignInMethodsPage() {
       setErr(e);
       setCfg({});
     }
-    // Readiness is advisory (failures must not block managing methods) and is requested only for licensed modules and readable roles.
     if ((emailMod || smsMod || whatsappMod) && roles !== null && canRead("notification-providers", roles)) {
       try {
         const n = await api.get<ListResp<NotifyProvider>>("/notification-providers");
@@ -146,7 +135,7 @@ export default function SignInMethodsPage() {
   }, [emailMod, smsMod, whatsappMod, socialMod, roles]);
   useEffect(() => { load(); }, [load]);
 
-  // Sends only the changed key; the server merges per top-level key, so unrendered config is never deleted.
+  // Sends only the changed key, so unrendered config is never deleted.
   const save = useCallback(async (patch: Partial<AuthMethods>, label: string) => {
     setBusy(label); setErr(null);
     try {
@@ -163,7 +152,6 @@ export default function SignInMethodsPage() {
   const smsReady = useMemo(() => senderReady(notify, "sms"), [notify]);
   const whatsappReady = useMemo(() => senderReady(notify, "whatsapp"), [notify]);
   const socialReady = useMemo(() => social.filter((p) => p.enabled).map((p) => p.provider), [social]);
-  // A provider switched ON stays listed even if its app is gone or disabled, so it can be turned OFF.
   const socialListed = useMemo(() => {
     const on = Object.entries(cfg?.social ?? {}).filter(([, m]) => m?.enabled).map(([p]) => p);
     return Array.from(new Set([...socialReady, ...on]));
@@ -264,7 +252,6 @@ export default function SignInMethodsPage() {
       )}
       <ErrorBanner err={err} className="mb-0" />
 
-      {/* A running network pause is shown where staff manage sign-in (GDPR audit A4). */}
       {hospitality && roles !== null && canRead("guest-signin-restrictions", roles) && (
         <NetworkPausesNotice canAct={canWrite("guest-signin-restrictions", roles)} />
       )}
@@ -347,7 +334,6 @@ export default function SignInMethodsPage() {
                   busy={busy === "Email accounts"}
                   writable={writable}
                   onToggle={(v) => save({ email_account: { ...(cfg.email_account ?? {}), enabled: v } }, "Email accounts")}
-                  // A missing sender warns but does not block the switch.
                   warning={emailReady ? undefined
                     : "No email sender is switched on under Delivery, so verification and password-reset emails cannot be sent."}
                   manageHref="/notifications"
@@ -475,7 +461,6 @@ export default function SignInMethodsPage() {
         {showProtection && (
           <TabsContent value="protection" className="mt-5 space-y-5">
             <QuietHints>
-              {/* Sign-in protection counts wrong ROOM details (Room sign-in only), so it needs Hospitality. */}
               {hospitality && <GuestSignInProtectionCard canWrite={mayChangeProtection} />}
               {hospitality && <NetworkPauseSettingsCard canWrite={mayChangeProtection} />}
             </QuietHints>
@@ -489,7 +474,6 @@ export default function SignInMethodsPage() {
     </PageShell>
   );
 }
-// Explicit Save, unlike the switches: saving per keystroke would write "3", "30", "300" for a typed day count.
 function ClientJourneyCard({ cfg, writable, busy, hospitality, onSave }: {
   cfg: AuthMethods; writable: boolean; busy: boolean; hospitality: boolean;
   onSave: (portal: PortalJourney) => void;
@@ -501,7 +485,6 @@ function ClientJourneyCard({ cfg, writable, busy, hospitality, onSave }: {
   const [days, setDays] = useState(String(storedDays));
   useEffect(() => { setPrimary(storedPrimary); setDays(String(storedDays)); }, [storedPrimary, storedDays]);
 
-  // Only switched-on methods can lead; a stored choice since switched off stays listed so the fallback is explained.
   const enabledMethods = useMemo(() => {
     const on: Exclude<PrimaryMethod, "">[] = [];
     if (hospitality && cfg.pms?.enabled) on.push("pms");
@@ -584,15 +567,12 @@ function MethodIcon({ icon }: { icon: React.ReactNode }) {
   );
 }
 
-// A method whose provider is not ready is shown unavailable with its switch disabled; not ready blocks switching
-// on, never off.
 function MethodRow({
   icon, title, description, enabled, busy, writable, onToggle, ready = true, notReadyReason, warning, manageHref, manageLabel,
 }: {
   icon: React.ReactNode; title: string; description: string;
   enabled: boolean; busy: boolean; writable: boolean; onToggle: (v: boolean) => void;
   ready?: boolean; notReadyReason?: string;
-  /** Does not block the switch. */
   warning?: string;
   manageHref?: string; manageLabel?: string;
 }) {

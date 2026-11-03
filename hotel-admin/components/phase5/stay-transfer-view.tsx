@@ -312,11 +312,11 @@ export function StayTransferView({ canAct, rolesKnown = true }: { canAct: boolea
         <CardHeader>
           <div className="space-y-0.5">
             <CardTitle>Review signals</CardTitle>
-            {/* Preserve the API's warning so ambiguous outcomes cannot be mistaken for moves. */}
-            <CardDescription data-testid="signal-notice">
+            {/* Visible on purpose: ambiguous outcomes must never read as moves. */}
+            <p data-testid="signal-notice" className="text-xs text-muted-foreground">
               {signalNotice ||
                 "Ambiguous authentication outcomes. They are not transfers and are never evidence that a guest moved."}
-            </CardDescription>
+            </p>
           </div>
         </CardHeader>
         {signals === null ? (

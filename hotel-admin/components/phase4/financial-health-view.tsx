@@ -3,13 +3,14 @@
 // This diagnostic omits guest and transaction identifiers; details stay behind audited Manual review.
 
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, CircleCheck, RefreshCw } from "lucide-react";
+import Link from "next/link";
+import { AlertTriangle, ArrowUpRight, CircleCheck, RefreshCw } from "lucide-react";
 import { api, FinancialHealth, surfaceUnavailableMessage } from "@/lib/api";
 import { Card, CardBody, SectionCard } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { DescriptionList } from "@/components/ui/data";
-import { PageHeader, PageShell, StatCard, StatGrid } from "@/components/ui/page";
+import { DescriptionList, MetricStrip } from "@/components/ui/data";
+import { PageHeader, PageShell, StatGrid } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { Skeleton } from "@/components/ui/misc";
@@ -174,48 +175,34 @@ export function FinancialHealthView() {
 
           <Rail
             title="PMS posting"
-            description="Internet charges posted to a guest's room bill in the PMS."
-          >
-            <StatCard label="Queued" value={health.outbox_queued} />
-            <StatCard label="In flight" value={health.outbox_in_flight} />
-            <StatCard label="Held (recovery)" value={health.outbox_held_recovery} tone={flag(health.outbox_held_recovery, "warn")} />
-            <StatCard label="Oldest waiting" value={ageText(health.outbox_oldest_age_seconds)} />
-            <StatCard
-              label="Unknown outcomes"
-              value={health.postings_unknown}
-              hint="Never retried automatically"
-              tone={flag(health.postings_unknown, "err")}
-            />
-            <StatCard
-              label="Review queue"
-              value={health.review_queue_open}
-              tone={flag(health.review_queue_open, "warn")}
-              href="/financial-review"
-              hint="Open Manual review"
-            />
-            <StatCard label="Oldest unreviewed" value={ageText(health.review_oldest_age_seconds)} />
-          </Rail>
+            description="Internet charges posted to a guest's room bill in the PMS. Unknown outcomes are never retried automatically."
+            link={{ href: "/financial-review", label: "Manual review" }}
+            items={[
+              { label: "Queued", value: health.outbox_queued },
+              { label: "In flight", value: health.outbox_in_flight },
+              { label: "Held (recovery)", value: health.outbox_held_recovery, tone: flag(health.outbox_held_recovery, "warn") },
+              { label: "Oldest waiting", value: ageText(health.outbox_oldest_age_seconds) },
+              { label: "Unknown outcomes", value: health.postings_unknown, tone: flag(health.postings_unknown, "err") },
+              { label: "Review queue", value: health.review_queue_open, tone: flag(health.review_queue_open, "warn") },
+              { label: "Oldest unreviewed", value: ageText(health.review_oldest_age_seconds) },
+            ]}
+          />
 
-          <Rail title="Online payment" description="Payments a guest makes on the portal, and how each one settled.">
-            <StatCard label="Created" value={health.payments_created} />
-            <StatCard label="Pending" value={health.payments_pending} />
-            <StatCard
-              label="Unknown outcomes"
-              value={health.payments_unknown}
-              hint="Never retried automatically"
-              tone={flag(health.payments_unknown, "err")}
-            />
-            <StatCard label="Oldest in flight" value={ageText(health.payments_oldest_age_seconds)} />
-            <StatCard label="Payments waiting" value={health.settlements_required} href="/financial-settlements" hint="Open Package payments" />
-            <StatCard label="Payments in progress" value={health.settlements_in_progress} />
-            <StatCard
-              label="Payments to review"
-              value={health.settlements_manual_review}
-              tone={flag(health.settlements_manual_review, "warn")}
-            />
-            <StatCard label="Payments failed" value={health.settlements_failed} tone={flag(health.settlements_failed, "err")} />
-          </Rail>
-
+          <Rail
+            title="Online payment"
+            description="Payments a guest makes on the portal, and how each one settled. Unknown outcomes are never retried automatically."
+            link={{ href: "/financial-settlements", label: "Package payments" }}
+            items={[
+              { label: "Created", value: health.payments_created },
+              { label: "Pending", value: health.payments_pending },
+              { label: "Unknown outcomes", value: health.payments_unknown, tone: flag(health.payments_unknown, "err") },
+              { label: "Oldest in flight", value: ageText(health.payments_oldest_age_seconds) },
+              { label: "Payments waiting", value: health.settlements_required },
+              { label: "Payments in progress", value: health.settlements_in_progress },
+              { label: "Payments to review", value: health.settlements_manual_review, tone: flag(health.settlements_manual_review, "warn") },
+              { label: "Payments failed", value: health.settlements_failed, tone: flag(health.settlements_failed, "err") },
+            ]}
+          />
           <SectionCard title="Configuration">
             <DescriptionList
               items={[
@@ -241,14 +228,28 @@ export function FinancialHealthView() {
   );
 }
 
-function Rail({ title, description, children }: { title: string; description?: string; children: React.ReactNode }) {
+type Tone = "ok" | "warn" | "err" | "info";
+
+function Rail({ title, description, link, items }: {
+  title: string;
+  description: string;
+  link: { href: string; label: string };
+  items: { label: string; value: React.ReactNode; tone?: Tone | "default" }[];
+}) {
   return (
-    <section className="space-y-3" aria-label={title}>
-      <div className="space-y-0.5">
-        <h2 className="text-emphasis">{title}</h2>
-        {description && <p className="text-xs text-muted-foreground">{description}</p>}
-      </div>
-      <StatGrid cols={4}>{children}</StatGrid>
-    </section>
+    <SectionCard
+      title={title}
+      description={description}
+      actions={
+        <Link href={link.href} className="inline-flex items-center gap-0.5 text-xs font-medium text-primary hover:underline">
+          {link.label} <ArrowUpRight className="size-3.5" aria-hidden />
+        </Link>
+      }
+    >
+      <MetricStrip
+        items={items.map((it) => ({ ...it, tone: it.tone === "default" ? undefined : it.tone }))}
+        className={items.length % 2 ? "[&>div:last-child]:col-span-2" : undefined}
+      />
+    </SectionCard>
   );
 }

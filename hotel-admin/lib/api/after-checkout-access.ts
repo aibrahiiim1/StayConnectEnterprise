@@ -1,6 +1,3 @@
-// After Check-out Access: types and pure helpers for /edge/v1/after-checkout-access (contract:
-// docs/architecture/ONEGATE_AFTER_CHECKOUT_ACCESS.md section 6). One policy, one grant, one place.
-// Bounds come from the API (`bounds`); DEFAULT_BOUNDS only seeds the form before/if the API omits them.
 
 export type AccessSource = "PUBLISHED" | "EMERGENCY_FALLBACK" | "DISABLED";
 
@@ -37,7 +34,6 @@ export type AccessState = {
   sign_in?: string;
 };
 
-/** A publication snapshot. Terms keep the ledger's historical key names; a switch change carries `change`. */
 export type AccessSnapshot = {
   grace_duration_seconds?: number;
   grace_down_kbps?: number;
@@ -122,7 +118,6 @@ export function fmtSpeed(kbps: number): string {
   return kbps >= 1000 ? trim1(kbps / 1000) + " Mbps" : kbps + " kbps";
 }
 
-/** "12 hours", "1 hour", "90 minutes" (fractional hours exist only on a policy published before the whole-hour rule). */
 export function fmtHours(hours: number): string {
   if (!Number.isFinite(hours) || hours <= 0) return "no time";
   if (hours < 1) return Math.round(hours * 60) + " minutes";
@@ -170,7 +165,6 @@ export function sourceWords(source: AccessSource | undefined): { label: string; 
   }
 }
 
-/** What a departing guest receives, from the terms alone. */
 export function guestReceivesSentence(p: AccessPolicy): string {
   return (
     `Every device that was authorised on the stay before check-out can reconnect for ${fmtHours(p.duration_hours)} ` +
@@ -183,7 +177,6 @@ export function guestReceivesSentence(p: AccessPolicy): string {
   );
 }
 
-/** The terms in the ledger's snapshot shape, for comparing history entries. */
 export type TermKey = "hours" | "down" | "up" | "quota" | "limit" | "policy" | "enabled";
 export type TermChange = { key: TermKey; label: string; from: string; to: string; changed: boolean };
 
@@ -212,10 +205,8 @@ const FIELDS: { key: TermKey; label: string; get: (s: AccessSnapshot) => string 
   { key: "policy", label: "New devices", get: (s) => (s.grace_device_limit_policy === undefined ? undefined : devicePolicyTitle(s.grace_device_limit_policy)) },
 ];
 
-/** True when the entry is a switch event, not a terms publication. */
 export const isSwitchEvent = (h: AccessHistoryItem) => h.policy?.change === "AFTER_CHECKOUT_ENABLED";
 
-/** Every term, old to new; `changed` where they differ. A missing side renders an em dash. */
 export function compareSnapshots(prev: AccessSnapshot | null | undefined, next: AccessSnapshot | null | undefined): TermChange[] {
   return FIELDS.map(({ key, label, get }) => {
     const a = prev ? get(prev) : undefined;
@@ -248,7 +239,6 @@ export function changeLine(history: AccessHistoryItem[], idx: number): string {
   return changes.map((c) => `${c.label} ${c.from} → ${c.to}`).join(", ");
 }
 
-/** What the server accepts: `^[A-Z][A-Z0-9_]{0,63}$`. */
 export const REASON_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/;
 
 export const REASON_CHOICES: { code: string; label: string }[] = [
@@ -316,7 +306,6 @@ function num(s: string): number {
   return t === "" ? NaN : Number(t);
 }
 
-/** The draft in the API's units: one conversion for the preview, the review and the request. */
 export function draftToTerms(d: AccessDraft) {
   return {
     duration_hours: num(d.hours),
@@ -328,7 +317,6 @@ export function draftToTerms(d: AccessDraft) {
   };
 }
 
-/** Per-field problems against the API's own bounds. Empty object means publishable. */
 export function validateDraft(d: AccessDraft, bounds: AccessBounds, supported: string[]): Partial<Record<DraftField, string>> {
   const t = draftToTerms(d);
   const e: Partial<Record<DraftField, string>> = {};
@@ -350,7 +338,6 @@ export function validateDraft(d: AccessDraft, bounds: AccessBounds, supported: s
 
 export type PublishFailure = { conflict: boolean; message: string; field?: "password" | "reason" };
 
-/** Maps the API's bounded failure codes to operator sentences. */
 export function describePublishFailure(e: any): PublishFailure {
   const status: number | undefined = e?.status;
   const code: string | undefined = e?.code ?? e?.body?.error;

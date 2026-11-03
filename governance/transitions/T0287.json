@@ -1,0 +1,35 @@
+{
+  "transition_id": "T0287",
+  "seq": 287,
+  "timestamp": "2026-11-03T09:22:08+02:00",
+  "timestamp_derivation": "Read from the workstation clock (UTC+02:00) by the script that wrote this receipt, immediately before the commit that introduces it.",
+  "record_type": "ADMIN_CONSOLE_HOTEL_UX_DELIVERY",
+  "authorisation": "The Product Owner's mission of 2026-11-03 (complete PR #296 incl. its browser E2E and merge, then the Hotel section UX overhaul), which authorises the protected merges and the test-appliance deployment for this mission.",
+  "delivery": "PR #296 completed: its stale sign-in protection E2E (confirm-only since PR #287) corrected, Codex clean on f5ad2d96, merged as 67ff0272. Hotel: a shared one-line severity Notice replaces the multi-paragraph room sign-in and live-posting banners (titles and critical visibility kept; no self-links); Room charge groups each FIAS interface into one panel with a one-line guest-list proof and a closed answer-meanings section; Charge health shows compact metric strips; the PMS connection panel moves troubleshooting into a disclosure; Guest sign-in checks keeps fixes visible with meanings as hints; Stays rows shortened; relative times tolerate seconds of clock skew; the Cross-PMS transfer safety notice is visible again (its E2E failed on master). Comments trimmed in touched code.",
+  "finding": "Confirmation review: every password step-up in the Hotel section guards PMS configuration or traffic (publish, lifecycle, test, guest-list reload), PMS credentials, financial approval or blocks, guest typed values, stay transfer or After Check-out publication; none was removed. Routine settings in the section already confirm without a password (PR #287). Server authorisation, audit and validation unchanged.",
+  "deployment": {
+    "test_appliance": "172.21.96.97: Admin Console release 20261103-072127 reads source_commit b94424bb79ec55e383f0064828108ec9bad2dc3f and BUILD_ID mbzKgUwM6SjMynPRk3Yx4, served; previous release 20261103-071258 kept. edged unchanged.",
+    "central": "Not changed."
+  },
+  "verification": "Admin Console full suite 1075/1075 PASS plus new hotel-ux-compact tests; Central console 261/261 PASS (shared error-banner.tsx and quiet.tsx); tsc and eslint clean; browser E2E for every Hotel page 70/70 PASS after the transfer-notice fix. Live on the test appliance: every Hotel page inspected before and after at 1440 px and 390 px, no horizontal scroll.",
+  "not_touched": "PMS traffic and configuration, financial behaviour and payments, networking, licensing, identity security, PKI, edged, schema, After Check-out terms (not published), the production Central.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "67ff027233fa6a62c94c93eeeac7db3c6b39c66a",
+  "previous_delivery": "T0286",
+  "decision": "none (FAST Admin Console change)",
+  "go_live": "NOT authorised."
+}

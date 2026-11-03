@@ -1,10 +1,6 @@
 "use client";
 
-// WhatsApp is its own channel, never a kind of SMS. A channel is offered for a new sender only when its
-// sign-in module is licensed; an existing sender stays listed so it can be edited or removed. A blank secret
-// on Edit keeps the stored one. Amazon SES is no longer offered (edged refuses it) but a stored row is listed
-// so it can be removed. Every sender can be tested with its stored credentials, and the result is recorded on
-// the row; the Health column reads from that record.
+// A blank secret on Edit keeps the stored one.
 
 import { useEffect, useState } from "react";
 import { api, ListResp, NotificationProvider, NotificationTestResult } from "@/lib/api";
@@ -64,7 +60,6 @@ function health(n: NotificationProvider): { tone: "ok" | "err" | "default"; labe
     return { tone: "err", label: "Failing", detail: n.last_error ?? undefined };
   }
   if (n.last_success_at) return { tone: "ok", label: "Sending" };
-  // A sender that has never delivered is untested, not idle.
   return { tone: "default", label: "Never used" };
 }
 
@@ -123,7 +118,6 @@ export default function NotificationsPage() {
   const [f, setF] = useState<FormState>(EMPTY);
   const [deleting, setDeleting] = useState<NotificationProvider | null>(null);
 
-  // Kept open after the answer so the service's error text can be read, not flashed in a toast.
   const [testing, setTesting] = useState<NotificationProvider | null>(null);
   const [testTo, setTestTo] = useState("");
   const [testResult, setTestResult] = useState<NotificationTestResult | null>(null);
@@ -487,7 +481,6 @@ export default function NotificationsPage() {
         </FormSection>
         )}
         {f.kind === "smtp" && (
-          // Opened when a timeout other than the default is stored, so a stored choice is never hidden.
           <Disclosure title="Advanced: timeout" defaultOpen={f.timeout_seconds.trim() !== "" && f.timeout_seconds.trim() !== String(SMTP_TIMEOUT_DEFAULT)}>
             <Field
               label="Timeout"
@@ -572,7 +565,6 @@ export default function NotificationsPage() {
   );
 }
 
-/** A titled group of fields in a dialog, so a long form reads as a few short steps. */
 function FormSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section aria-label={title} className="space-y-3">

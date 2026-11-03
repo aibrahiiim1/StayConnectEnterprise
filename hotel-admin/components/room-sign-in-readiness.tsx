@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { ArrowUpRight } from "lucide-react";
 import { api } from "@/lib/api";
 import type { RoomSignInAssessment } from "@/lib/api/pms-routing";
 import { onlyUndecided, readinessFromAssessment, type RoomSignInReadiness } from "@/lib/pms-availability";
-import { Callout } from "@/components/ui/error-banner";
+import { Notice } from "@/components/ui/error-banner";
+import { InfoHint } from "@/components/ui/quiet";
 
 export function useRoomSignInReadiness(enabled = true): {
   readiness: RoomSignInReadiness;
@@ -34,51 +36,49 @@ export function roomSignInImpaired(r: RoomSignInReadiness): boolean {
   return r.state === "down" || r.state === "partial";
 }
 
+function RoutingLinks({ withConnections }: { withConnections: boolean }) {
+  const here = usePathname();
+  return (
+    <>
+      {here !== "/pms-routing" && (
+        <Link href="/pms-routing" className="inline-flex items-center gap-0.5 font-medium underline">
+          PMS routing <ArrowUpRight className="size-3.5" aria-hidden />
+        </Link>
+      )}
+      {withConnections && here !== "/pms-interfaces" && (
+        <Link href="/pms-interfaces" className="inline-flex items-center gap-0.5 font-medium underline">
+          PMS connections <ArrowUpRight className="size-3.5" aria-hidden />
+        </Link>
+      )}
+    </>
+  );
+}
+
 export function RoomSignInReadinessCallout({ readiness }: { readiness: RoomSignInReadiness }) {
   if (readiness.state !== "down" && readiness.state !== "partial") return null;
   if (onlyUndecided(readiness)) {
     return (
-      <Callout tone="warning" title="Room sign-in needs a decision">
-        <p>
-          Nobody has chosen how room sign-in works on {readiness.affected.map((a) => a.guestNetwork).join(", ")}, so it is not offered there. Other sign-in methods are not affected.
-        </p>
-        <p className="mt-1">
-          <Link href="/pms-routing" className="inline-flex items-center gap-0.5 font-medium underline">
-            Choose under PMS routing <ArrowUpRight className="size-3.5" aria-hidden />
-          </Link>
-        </p>
-      </Callout>
+      <Notice tone="warning" title="Room sign-in needs a decision" actions={<RoutingLinks withConnections={false} />}>
+        Nobody has chosen how room sign-in works on {readiness.affected.map((a) => a.guestNetwork).join(", ")}.
+      </Notice>
     );
   }
   return (
-    <Callout
+    <Notice
       tone={readiness.state === "down" ? "danger" : "warning"}
       title={readiness.state === "down"
         ? "Room sign-in is not working on any network that offers it"
         : "Room sign-in is not working on some client networks"}
+      actions={<RoutingLinks withConnections />}
     >
-      <p>
-        Guests on the networks below cannot sign in with their room number. Other sign-in methods and the rest of the networks are
-        not affected. Each warning clears by itself once its cause is corrected.
-      </p>
-      <ul className="mt-1 list-disc space-y-0.5 ps-4">
-        {readiness.affected.map((a) => (
-          <li key={a.networkId ?? `${a.guestNetwork}-${a.pmsInterface}`}>
-            <span className="font-medium">{a.guestNetwork}</span> ({a.pmsInterface}) — {a.reason}
-          </li>
-        ))}
-      </ul>
-      {readiness.unchecked.length > 0 && (
-        <p className="mt-1">Readiness could not be checked for {readiness.unchecked.join(", ")}.</p>
-      )}
-      <p className="mt-1 flex flex-wrap gap-x-4">
-        <Link href="/pms-routing" className="inline-flex items-center gap-0.5 font-medium underline">
-          Open PMS routing <ArrowUpRight className="size-3.5" aria-hidden />
-        </Link>
-        <Link href="/pms-interfaces" className="inline-flex items-center gap-0.5 font-medium underline">
-          Check the PMS connections <ArrowUpRight className="size-3.5" aria-hidden />
-        </Link>
-      </p>
-    </Callout>
+      {readiness.affected.map((a, i) => (
+        <span key={a.networkId ?? `${a.guestNetwork}-${a.pmsInterface}`}>
+          {i > 0 && " · "}
+          <strong>{a.guestNetwork}</strong>: {a.reason}
+        </span>
+      ))}
+      {readiness.unchecked.length > 0 && <> · Not checked: {readiness.unchecked.join(", ")}</>}
+      <InfoHint className="ms-1">Other sign-in methods and networks are not affected. Each warning clears once its cause is corrected.</InfoHint>
+    </Notice>
   );
 }

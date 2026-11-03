@@ -23,15 +23,13 @@ import { useOperatorRoles } from "@/lib/whoami-context";
 type PMSMethod = { enabled?: boolean; mode?: string; provider?: string; template_id?: string };
 type AuthMethods = { pms?: PMSMethod; [key: string]: unknown };
 
-// Recommended option first. Not exported: a Next page module may export only its page and route config.
+// Not exported: a Next page module may export only its page and route config.
 const ROOM_SIGN_IN_OPTIONS: { value: string; label: string; hint: string }[] = [
   {
     value: "room_any",
     label: "Room number + any one of: first name, surname or reservation number (recommended)",
     hint:
-      "The guest types their room number, then one more detail in a single box — their first name, their " +
-      "surname or their reservation number, without being asked which. A value matching more than one guest " +
-      "in the room is refused rather than guessed.",
+      "One box for the first name, surname or reservation number. A value matching more than one guest is refused, never guessed.",
   },
   {
     value: "room_lastname",
@@ -177,7 +175,7 @@ export default function RoomSignInPage() {
 
       <SectionCard
         title="What the guest types"
-        description="The room number, plus one detail from their reservation."
+        description="The room number, plus one detail from their reservation. Which PMS checks it is set per network in PMS routing."
         actions={busy ? <span className="text-xs text-muted-foreground" aria-live="polite">Saving…</span> : undefined}
       >
           <fieldset className="space-y-3">
@@ -203,10 +201,6 @@ export default function RoomSignInPage() {
                 />
               ))}
             </div>
-            <p className="text-xs text-muted-foreground">
-              Which property management system a guest is checked against is decided by their network, in{" "}
-              <Link href="/pms-routing" className="text-primary underline underline-offset-2 hover:decoration-2">PMS routing</Link>.
-            </p>
           </fieldset>
       </SectionCard>
     </PageShell>

@@ -15,7 +15,6 @@ import {
 import { formatDate } from "@/lib/utils";
 import { Card, CardDescription, CardHeader, CardTitle, SectionCard } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
-import { DescriptionList } from "@/components/ui/data";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DialogForm } from "@/components/ui/dialog";
@@ -24,6 +23,7 @@ import { Field, Input, InputGroup, Textarea } from "@/components/ui/input";
 import { PageHeader, PageShell } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { SkeletonRows } from "@/components/ui/misc";
+import { Disclosure, InfoHint } from "@/components/ui/quiet";
 import { NotAvailable, ReadOnlyNotice } from "@/components/ui/patterns";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
@@ -235,8 +235,17 @@ export default function RoomChargePage() {
           )}
       </SectionCard>
 
-      {interfaces.filter((i) => i.connector_kind === FIAS && i.financial_mirror).map((i) => (
-        <GuestListProofCard key={`proof-${i.pms_interface_id}`} iface={i} canChange={isSiteAdmin} onChange={() => setMirrorChange(i)} />
+      {interfaces.filter((i) => i.connector_kind === FIAS).map((i) => (
+        <SectionCard key={i.pms_interface_id} title={`Room charge checks — ${i.display_label || i.pms_interface_id}`} bodyClassName="space-y-4">
+          {i.financial_mirror && (
+            <GuestListProof iface={i} canChange={isSiteAdmin} onChange={() => setMirrorChange(i)} />
+          )}
+          <AnswerMeanings
+            iface={i}
+            canChange={isSiteAdmin}
+            onChange={(meaning, action) => setAnswerChange({ iface: i, meaning, action })}
+          />
+        </SectionCard>
       ))}
 
       {isSiteAdmin && (
@@ -251,14 +260,6 @@ export default function RoomChargePage() {
         />
       )}
 
-      {interfaces.filter((i) => i.connector_kind === FIAS).map((i) => (
-        <AnswerMeaningsCard
-          key={i.pms_interface_id}
-          iface={i}
-          canChange={isSiteAdmin}
-          onChange={(meaning, action) => setAnswerChange({ iface: i, meaning, action })}
-        />
-      ))}
 
       {isSiteAdmin && (
         <AnswerDialog
@@ -367,7 +368,6 @@ function ApproveDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Prefill what is already recorded, USD otherwise; the admin may change it before confirming.
   useEffect(() => {
     setCurrency(iface?.financial_base_currency || DEFAULT_CURRENCY);
     setError(null);
@@ -423,8 +423,7 @@ function ApproveDialog({
   );
 }
 
-/** The vendor-confirmed meaning of each PMS answer on one FIAS interface. */
-function AnswerMeaningsCard({
+function AnswerMeanings({
   iface, canChange, onChange,
 }: {
   iface: OnboardingInterface;
@@ -433,17 +432,23 @@ function AnswerMeaningsCard({
 }) {
   const meanings = iface.answer_meanings ?? [];
   const name = iface.display_label || iface.pms_interface_id;
+  const confirmed = meanings.filter((m) => m.confirmed).length;
   return (
-    <SectionCard
-      flush
-      title={`Answer meanings (vendor-confirmed) — ${name}`}
-      description={
-        <>
-          A status counts as &ldquo;nothing was posted&rdquo; only once the vendor has confirmed it for this interface.
-          An unconfirmed status, and UR always, is treated as unknown: the charge is held for Manual review, never
-          counted as posted or failed. Recording these does not switch posting on or off.
-        </>
+    <Disclosure
+      title={
+        <span className="flex flex-1 flex-wrap items-center gap-2">
+          Answer meanings
+          <InfoHint>
+            A status counts as &ldquo;nothing was posted&rdquo; only once the vendor has confirmed it for this interface.
+            An unconfirmed status, and UR always, is treated as unknown: the charge is held for Manual review, never
+            counted as posted or failed. Recording these does not switch posting on or off.
+          </InfoHint>
+          <Badge tone={confirmed === meanings.length && meanings.length > 0 ? "ok" : "neutral"} className="ms-auto">
+            {confirmed} of {meanings.length} confirmed
+          </Badge>
+        </span>
       }
+      className="[&>div]:p-0"
     >
         {meanings.length === 0 ? (
           <p className="px-5 py-4 text-sm text-muted-foreground">The answer meanings could not be read for this interface.</p>
@@ -507,7 +512,7 @@ function AnswerMeaningsCard({
             </TBody>
           </Table>
         )}
-    </SectionCard>
+    </Disclosure>
   );
 }
 
@@ -610,7 +615,6 @@ function AnswerDialog({
   );
 }
 
-// Room charge pauses if no complete guest list (full resync) has arrived within the trust limit.
 function ago(iso: string | null | undefined): string {
   if (!iso) return "never";
   const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
@@ -626,56 +630,38 @@ function hoursWords(seconds: number): string {
   return Number.isInteger(h) ? `${h} ${h === 1 ? "hour" : "hours"}` : `${Math.round(seconds / 60)} minutes`;
 }
 
-function GuestListProofCard({ iface, canChange, onChange }: { iface: OnboardingInterface; canChange: boolean; onChange: () => void }) {
+function GuestListProof({ iface, canChange, onChange }: { iface: OnboardingInterface; canChange: boolean; onChange: () => void }) {
   const m = iface.financial_mirror!;
   const last = m.last_complete_sync_at;
   const ageS = last ? (Date.now() - new Date(last).getTime()) / 1000 : Infinity;
   const withinLimit = ageS <= m.max_age_seconds;
   return (
-    <Card data-testid="guest-list-proof">
-      <CardHeader className="items-start">
-        <div className="min-w-0 space-y-0.5">
-          <CardTitle>Guest list proof for room charge — {iface.display_label || "Protel"}</CardTitle>
-          <CardDescription>
-            Room charge uses the guest list only while Protel has recently sent it complete. OneGate asks Protel for a
-            fresh complete list by itself after {hoursWords(m.max_age_seconds / 2)}; if none arrives within the limit,
-            room charge pauses.
-          </CardDescription>
-        </div>
-        {canChange && (
-          <Button size="xs" variant="secondary" onClick={onChange} aria-label={`Change the guest list maximum age for ${iface.display_label || "this interface"}`}>
-            Change limit
-          </Button>
-        )}
-      </CardHeader>
-      <div className="px-5 py-3">
-        <DescriptionList
-          columns={2}
-          items={[
-            {
-              label: "Last complete guest list",
-              value: (
-                <>
-                  {ago(last)} {last && <span className="text-xs text-muted-foreground">({formatDate(last)})</span>}
-                  <div className="mt-1">
-                    {withinLimit
-                      ? <StatusBadge tone="ok">Within the limit</StatusBadge>
-                      : <StatusBadge tone="warn">Older than the limit — room charge paused</StatusBadge>}
-                  </div>
-                </>
-              ),
-            },
-            {
-              label: "Maximum age",
-              value: <>{hoursWords(m.max_age_seconds)} {m.is_default && <span className="text-xs text-muted-foreground">(default)</span>}</>,
-            },
-          ]}
-        />
-      </div>
-    </Card>
+    <div data-testid="guest-list-proof" className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm">
+      <span className="inline-flex items-center gap-1 font-medium">
+        Guest list proof
+        <InfoHint>
+          Room charge uses the guest list only while Protel has recently sent it complete. OneGate asks Protel for a
+          fresh complete list by itself after {hoursWords(m.max_age_seconds / 2)}; if none arrives within the limit,
+          room charge pauses.
+        </InfoHint>
+      </span>
+      {withinLimit
+        ? <StatusBadge tone="ok">Within the limit</StatusBadge>
+        : <StatusBadge tone="warn">Older than the limit — room charge paused</StatusBadge>}
+      <span className="text-muted-foreground">
+        Last complete list <time dateTime={last ?? undefined} title={last ? formatDate(last) : undefined} className="text-foreground">{ago(last)}</time>
+        {" · "}limit <span className="text-foreground">{hoursWords(m.max_age_seconds)}</span>
+        {m.is_default && <span className="text-xs"> (default)</span>}
+      </span>
+      {canChange && (
+        <Button size="xs" variant="secondary" className="ms-auto" onClick={onChange}
+          aria-label={`Change the guest list maximum age for ${iface.display_label || "this interface"}`}>
+          Change limit
+        </Button>
+      )}
+    </div>
   );
 }
-
 function MirrorAgeDialog({ iface, onClose, onSaved }: { iface: OnboardingInterface | null; onClose: () => void; onSaved: () => Promise<void> }) {
   const open = iface !== null;
   const [hours, setHours] = useState(4);
