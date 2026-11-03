@@ -1860,7 +1860,7 @@
   "current_delivery": {
     "kind": "ONETIME_FULLSTAY_MIGRATION_2026_11_03",
     "decision": "Product Owner approval of 2026-11-03 (one-time Full Stay grants for stays that paid on the previous system). No new decision record; merge awaits PO approval.",
-    "decision_note": "netd 4d2b6655 on the test appliance, read back; 87 stays granted with zero money activity.",
+    "decision_note": "netd 395af38a (fail-closed regroup, Codex P1) on the test appliance, read back; 87 stays granted with zero money activity.",
     "manifest": "docs/manifests/OnetimeFullStay20261103-change-manifest.md",
     "base": "6e3a88a048f77f388a2969197d279bfa1f5d4e6b",
     "base_note": "Master after the merge of PR #301.",
