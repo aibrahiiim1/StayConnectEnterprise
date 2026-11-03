@@ -1,0 +1,4 @@
+commit 614617eb78ab38f96fd474f2733ddb7860892005
+Date:   Tue Nov 3 07:39:38 2026 +0200
+
+    Governance: T0286 records the sign-in UX delivery and its test-appliance read-back
