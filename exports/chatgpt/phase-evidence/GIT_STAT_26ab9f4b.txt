@@ -1,4 +1,0 @@
-commit 26ab9f4bf9954e76595b661452c3594447b33dc3
-Date:   Tue Nov 3 09:22:15 2026 +0200
-
-    Governance: T0287 records the Hotel UX delivery and its test-appliance read-back
