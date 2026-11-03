@@ -23,8 +23,10 @@ export function DialogContent({
   size = "md",
   className,
   children,
+  onOpenAutoFocus,
   ...props
 }: React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & { size?: keyof typeof SIZES }) {
+  const contentRef = React.useRef<HTMLDivElement>(null);
   return (
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay
@@ -49,6 +51,15 @@ export function DialogContent({
             className,
           )}
           {...props}
+          ref={contentRef}
+          onOpenAutoFocus={(e) => {
+            onOpenAutoFocus?.(e);
+            if (e.defaultPrevented) return;
+            const field = contentRef.current?.querySelector<HTMLElement>(
+              "input:not([type=hidden]):not(:disabled):not([readonly]), select:not(:disabled), textarea:not(:disabled):not([readonly])",
+            );
+            if (field) { e.preventDefault(); field.focus(); }
+          }}
         >
           {children}
           <DialogPrimitive.Close

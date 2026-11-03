@@ -1,8 +1,5 @@
 "use client";
 
-// The one place to configure what a guest keeps after a verified check-out. Contract:
-// docs/architecture/ONEGATE_AFTER_CHECKOUT_ACCESS.md.
-
 import { SIGNIN_SETTING_GROUPS, SigninSettingsGroup } from "@/components/devices/signin-limits-card";
 import * as React from "react";
 import { History, Pencil, RefreshCw } from "lucide-react";
@@ -43,7 +40,6 @@ import { PostStayView } from "@/components/phase5/post-stay-view";
 export function AfterCheckoutAccessScreen({
   canWrite = true, canActOnReconnections = false, rolesKnown = true, canReadLimits = false, canEditLimits = false,
 }: {
-  /** The After check-out sign-in limits (rate limits and lockout) live on the sign-in settings endpoint (auth-methods). */
   canReadLimits?: boolean;
   canEditLimits?: boolean;
   canWrite?: boolean;
@@ -63,7 +59,6 @@ export function AfterCheckoutAccessScreen({
       const s = await api.get<AccessState>("/after-checkout-access");
       setState(s);
       setLoadError(null);
-      // Keep the setting visible when the history ledger cannot be read.
       try {
         const h = await api.get<AccessHistoryResp>("/after-checkout-access/history");
         setHistory(h?.data ?? []);
@@ -87,7 +82,6 @@ export function AfterCheckoutAccessScreen({
 
   const source = state?.effective?.source;
   const words = sourceWords(source);
-  // The emergency terms arrive in the grant's shape; one shape for every view below.
   const effectivePolicy: AccessPolicy | undefined = normalisePolicy(state?.effective?.policy);
   const version = state?.config_version ?? 0;
   const latest = history.find((h) => h.config_version === version);

@@ -1,8 +1,6 @@
 "use client";
 
-// Submitted and accepted VALUES need View_Guest_SignIn_Credentials, enforced by edged; hiding a panel here is a
-// courtesy, not the boundary.
-// With no stay in the local mirror nothing would have been accepted, and the panel says so.
+// edged enforces View_Guest_SignIn_Credentials; hiding a panel here is not the boundary.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { KeyRound, ShieldAlert } from "lucide-react";
@@ -154,21 +152,18 @@ export default function GuestSignInAttemptsPage() {
   const [detail, setDetail] = useState<SignInAttemptDetail | null>(null);
   const [creds, setCreds] = useState<SignInAttemptCredentials | null>(null);
   const [credsErr, setCredsErr] = useState<unknown>(null);
-  // Typed values are shown only after the operator confirms their password; it is cleared once sent and when the
-  // panel closes.
+  // Typed values need the operator's password; it is cleared after use and on close.
   const [credsPw, setCredsPw] = useState("");
   const [revealing, setRevealing] = useState(false);
 
-  // The credential permission fails closed while it loads; edged is the real boundary.
   const roles = useOperatorRoles();
   const maySeeCredentials = roles === null ? false : canRead("guest-signin-credentials", roles);
-  // Three separate permissions, none implying another; edged enforces all of them.
   const maySeeRestrictions = roles === null ? false : canRead("guest-signin-restrictions", roles);
   const mayRelease = roles === null ? false : canWrite("guest-signin-restrictions", roles);
 
   const [tab, setTab] = useState<"attempts" | "restrictions">("attempts");
 
-  // Search goes in a header, never the URL; paging is anchored to one fixed period.
+  // Search goes in a header, never the URL.
   const path = useMemo(() => {
     const params = new URLSearchParams({ from: new Date(anchor - Number(range) * 3600_000).toISOString() });
     if (room.trim()) params.set("room", room.trim());

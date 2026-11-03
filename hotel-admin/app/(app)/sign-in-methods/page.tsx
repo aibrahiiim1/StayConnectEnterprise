@@ -32,7 +32,6 @@ import { senderReady, type NotifyProvider } from "@/lib/sign-in-readiness";
 import { Ticket, Hotel, KeyRound, Mail, MessageSquare, Users, ArrowUpRight, PackageOpen, Smartphone } from "lucide-react";
 import { useOperatorRoles } from "@/lib/whoami-context";
 
-// Typed keys only: the server merges per key, so unrendered config is kept.
 type Method = { enabled?: boolean };
 type PMSMethod = { enabled?: boolean; mode?: string; provider?: string; template_id?: string };
 type PrimaryMethod = "" | "pms" | "email_account" | "sms" | "whatsapp" | "guest_account" | "voucher";

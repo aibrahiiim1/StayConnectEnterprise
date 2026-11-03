@@ -4,7 +4,6 @@ import { ChevronRight } from "lucide-react";
 import { Explain } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
-/** Not for warnings that need action: those stay visible. */
 export function InfoHint({ children, testId, className }: { children: React.ReactNode; testId?: string; className?: string }) {
   if (children == null || children === "" || children === false) return null;
   return (

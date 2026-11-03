@@ -1,7 +1,6 @@
 "use client";
 
-// Everything that changes what happens to guests (publish, activate, pause, store a credential, test, reload
-// the guest list) asks for the operator's own password, because edged requires it.
+// Guest-affecting changes require the operator's password; edged enforces it.
 
 import { RemoveConnectionDialog } from "@/components/pms/remove-connection-dialog";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -328,8 +327,7 @@ function PublishDialog({
   const [reason, setReason] = useState(PUBLISH_REASONS[0].value);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<unknown>(null);
-  // edged refuses (room_charge_reset_unconfirmed) to put live a version without the live version's posting
-  // target, since room charge would stop until onboarded again; the operator may confirm.
+  // edged refuses a publish that drops the live posting target unless the operator confirms.
   const [resetWarning, setResetWarning] = useState<string | null>(null);
   const [resetAck, setResetAck] = useState(false);
   const older = !!target && !!iface.current_revision_no && target.revision_no < iface.current_revision_no;
@@ -597,7 +595,6 @@ function ChangeSummary({ rev, prev, provider }: { rev: PmsRevision; prev?: PmsRe
 
 function VersionProvenance({ rev, unavailable }: { rev: PmsRevision; unavailable?: boolean }) {
   const when = rev.published_at ?? rev.authored_at;
-  // "Nothing was recorded" and "the record could not be read" look the same in the data but mean opposite things.
   if (unavailable) {
     return (
       <p className="text-xs text-warning-subtle-foreground">
@@ -666,7 +663,6 @@ function ConnectionRecovery({ id, writable }: { id: string; writable: boolean })
     try {
       setSettings(await api.get<PmsConnectionSettings>(`/pms-interfaces/${id}/connection-settings`));
     } catch {
-      /* not every connection exposes recovery settings */
     }
   }, [id]);
   useEffect(() => { void load(); }, [load]);

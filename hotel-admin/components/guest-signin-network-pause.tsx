@@ -1,6 +1,5 @@
 "use client";
 
-// Network pauses limit room-sign-in guessing even when a device changes its address.
 // Releasing a device or pause only permits another attempt; it never signs anyone in.
 
 import { useCallback, useEffect, useState } from "react";
@@ -56,7 +55,6 @@ function invalid(value: string, min: number, max: number): string | undefined {
     ? `Enter a whole number between ${min} and ${max}.` : undefined;
 }
 
-/** Display minutes while the server's bounds and payload use seconds. */
 export function NetworkPauseSettingsCard({ canWrite }: { canWrite: boolean }) {
   const toast = useToast();
   const [p, setP] = useState<NetworkPausePolicy | null>(null);

@@ -16,7 +16,6 @@ import {
   type AccessState,
 } from "@/lib/api/after-checkout-access";
 
-// jsdom implements no ResizeObserver; the switch measures itself on mount.
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 (globalThis as any).ResizeObserver = (globalThis as any).ResizeObserver ?? ResizeObserverStub;
 
@@ -120,7 +119,6 @@ describe("After Check-out Access: pure rules", () => {
   it("reads switch events and term changes from the history", () => {
     expect(isSwitchEvent(history[0])).toBe(true);
     expect(changeLine(history, 0)).toMatch(/turned off/);
-    // A switch event has no terms: the terms in force are the next older publication.
     expect(termsAt(history, 0)?.grace_duration_seconds).toBe(12 * 3600);
     expect(changeLine(history, 1)).toMatch(/Duration after check-out 8 hours → 12 hours/);
     expect(compareSnapshots(history[2].policy, history[1].policy).filter((c) => c.changed).map((c) => c.key)).toEqual(["hours"]);
@@ -161,9 +159,7 @@ describe("After Check-out Access page", () => {
     expect(screen.getByTestId("aca-sentence").textContent).toMatch(/turned off/);
   });
 
-  // The appliance sends the built-in terms in the grant's shape (edged emergencyEffective): duration_seconds and
-  // device_limit_policy, no duration_hours or device_policy, and device_limit 0 (no separate cap). Read as a published
-  // policy they showed "no time", "Up to 0 devices" and "—".
+  // The emergency terms exactly as edged sends them (emergencyEffective).
   it("shows the emergency terms as the appliance sends them, with a way to publish the site's own", async () => {
     const asSent = {
       source: "EMERGENCY_FALLBACK", duration_seconds: 3600, down_kbps: 5000, up_kbps: 2000,
@@ -179,7 +175,6 @@ describe("After Check-out Access page", () => {
     expect(screen.getByText("No separate limit")).toBeInTheDocument();
     expect(screen.getByText("Refuse new devices")).toBeInTheDocument();
     expect(screen.queryByText("no time")).toBeNull();
-    // The warning stays, and says what ends it.
     expect(screen.getByText("Departing guests are on the emergency fallback")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Set this site's terms/ }));
     expect(await screen.findByRole("dialog")).toBeInTheDocument();

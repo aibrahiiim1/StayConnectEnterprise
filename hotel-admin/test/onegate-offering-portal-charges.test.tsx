@@ -1,4 +1,3 @@
-// A read-only role sees state and no write control; every Charges page has a title equal to its menu label.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
@@ -146,7 +145,6 @@ describe("a read-only role is offered no write control", () => {
 
   it("Guest sign-in protection: an out-of-range value blocks Save and says the range", async () => {
     routes(["site_admin"]);
-    // A link to the tab opens it directly.
     window.history.replaceState(null, "", "#protection");
     render(<SignInMethodsPage />);
     const attempts = await screen.findByLabelText(/maximum failed attempts/i);

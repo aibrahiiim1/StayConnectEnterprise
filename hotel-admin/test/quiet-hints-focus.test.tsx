@@ -10,6 +10,27 @@ class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 (globalThis as Record<string, unknown>).ResizeObserver = (globalThis as Record<string, unknown>).ResizeObserver ?? ResizeObserverStub;
 
 describe("form hints", () => {
+  it("are skipped by a dialog's initial focus, which goes to the first field", async () => {
+    render(
+      <Dialog open>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add a client group</DialogTitle>
+            <DialogDescription>Form</DialogDescription>
+          </DialogHeader>
+          <QuietHints>
+            <Field label="Name" hint="As it appears when a package chooses its audience.">
+              <Input />
+            </Field>
+          </QuietHints>
+        </DialogContent>
+      </Dialog>,
+    );
+    const name = await screen.findByRole("textbox", { name: "Name" });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(name).toHaveFocus();
+  });
+
   it("do not open when a dialog opens and focuses its first hint", async () => {
     render(
       <Dialog open>

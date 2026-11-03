@@ -1,9 +1,6 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
 import { installCapabilities } from "./capabilities";
 
-// The multi-PMS, multi-network administrator journeys, in a real browser at desktop and phone width: stays that belong to a PMS connection, removing a connection, which design
-// each network shows, what each network actually offers at sign-in, and what a physical port carries. edged is mocked per test.
-
 const A = "11111111-1111-4111-8111-111111111111";
 const B = "22222222-2222-4222-8222-222222222222";
 const C = "33333333-3333-4333-8333-333333333333";

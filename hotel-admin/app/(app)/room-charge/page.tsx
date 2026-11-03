@@ -1,8 +1,7 @@
 "use client";
 
-// Approval is revisioned: a stale `expected_revision_id` is refused with 409 revision_conflict.
-// Only a status the vendor confirmed as "definitely not posted" fails a purchase; any other Protel answer is UNKNOWN and goes to manual review.
-// Only site administrators may approve (edged enforces it), and only FIAS interfaces are offered the approval.
+// Only a vendor-confirmed "not posted" status fails a purchase; any other answer is UNKNOWN.
+// edged enforces site-administrator approval.
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
@@ -53,7 +52,7 @@ export default function RoomChargePage() {
   const [approving, setApproving] = useState<OnboardingInterface | null>(null);
   const [answerChange, setAnswerChange] = useState<AnswerChange | null>(null);
   const [mirrorChange, setMirrorChange] = useState<OnboardingInterface | null>(null);
-  // Maps approver operator ids to names; roles that cannot read the directory see "A site administrator", never the id.
+  // Never show operator ids.
   const [approvers, setApprovers] = useState<Map<string, string> | null>(null);
 
   const load = useCallback(async () => {
@@ -260,7 +259,6 @@ export default function RoomChargePage() {
         />
       )}
 
-
       {isSiteAdmin && (
         <AnswerDialog
           change={answerChange}
@@ -293,7 +291,7 @@ export default function RoomChargePage() {
   );
 }
 
-// The posting switch is a safety switch set at install, deliberately not a page setting: it makes real charges reach the PMS.
+// Posting is an install-time safety switch, never a page setting.
 function SetupChecklist({ interfaces }: { interfaces: OnboardingInterface[] }) {
   const fias = interfaces.filter((i) => i.connector_kind === FIAS);
   const approved = fias.filter((i) => i.approved_at || i.posting_target_model === "RESERVATION");
@@ -530,7 +528,7 @@ function AnswerDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Clear everything, the password above all, whenever the dialog opens for another answer or closes.
+  // Clear the password whenever the dialog changes or closes.
   useEffect(() => {
     setEvidence("");
     setReason("");

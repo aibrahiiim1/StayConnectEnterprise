@@ -1,7 +1,6 @@
 "use client";
 
-// A client is in a group when ANY rule matches, on VERIFIED identity only; the lowest priority number wins.
-// The server refuses (409) to delete a group a package names as its audience.
+// Membership uses verified identity only; any rule matches and the lowest priority wins.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -58,7 +57,6 @@ const RULE_KINDS: { type: ClientGroupRuleType; label: string; assurance: string;
 
 type RuleForm = { type: ClientGroupRuleType; list: string; include_subdomains: boolean };
 
-// Domains are lowercased because the engine matches case-insensitively; tenant IDs are kept as typed.
 const splitList = (s: string, lower = false): string[] =>
   Array.from(new Set(s.split(/[\n,;\s]+/).map((x) => (lower ? x.trim().toLowerCase() : x.trim())).filter(Boolean)));
 
@@ -146,7 +144,6 @@ export default function ClientGroupsPage() {
   }, []);
   useEffect(() => { if (tab === "history") loadChanges(); }, [tab, loadChanges]);
 
-  // Sorted as the engine decides (priority, then name): table order is conflict order.
   const sorted = useMemo(
     () => (rows ?? []).slice().sort((a, b) => a.priority - b.priority || a.name.localeCompare(b.name)),
     [rows]);

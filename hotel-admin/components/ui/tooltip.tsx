@@ -7,15 +7,10 @@ import { cn } from "@/lib/utils";
 
 export const TooltipProvider = TooltipPrimitive.Provider;
 
-/**
- * A tooltip opens on hover, and on focus only when the focus came from the keyboard. A dialog moves focus to its first
- * focusable element when it opens, and in a form whose hints are icons that element is a hint: without this, every such
- * form opened with a hint already showing. Preventing the event's default skips Radix's own focus handler.
- */
+// A dialog's own autofocus must not open a hint; keyboard focus still does.
 let lastInputWasKeyboard = false;
 if (typeof window !== "undefined") {
-  // Capture phase: recorded before any handler moves focus in response to the same key or click.
-  window.addEventListener("keydown", (e) => { if (e.key === "Tab" || e.key.startsWith("Arrow")) lastInputWasKeyboard = true; }, true);
+  window.addEventListener("keydown", (e) => { if (!["Shift", "Control", "Alt", "Meta"].includes(e.key)) lastInputWasKeyboard = true; }, true);
   window.addEventListener("pointerdown", () => { lastInputWasKeyboard = false; }, true);
   window.addEventListener("mousedown", () => { lastInputWasKeyboard = false; }, true);
 }

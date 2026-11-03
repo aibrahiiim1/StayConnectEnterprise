@@ -66,10 +66,7 @@ export const DEFAULT_BOUNDS: AccessBounds = {
   device_limit: { min: 1, max: 20, default: 5, unit: "devices" },
 };
 
-/**
- * The terms in one shape. A published policy carries duration_hours and device_policy; the built-in emergency terms come
- * in the grant's own shape (duration_seconds, device_limit_policy) without them, which read as "no time" and "—".
- */
+/** Published and emergency terms arrive in different shapes; one shape for every view. */
 export function normalisePolicy(p: (Partial<AccessPolicy> & { device_limit_policy?: string }) | null | undefined): AccessPolicy | undefined {
   if (!p) return undefined;
   const seconds = typeof p.duration_seconds === "number" ? p.duration_seconds
@@ -215,10 +212,6 @@ export function compareSnapshots(prev: AccessSnapshot | null | undefined, next: 
   });
 }
 
-/**
- * The terms in force after entry `idx` (newest first): a switch event carries no terms, so look back to the
- * newest older entry that does.
- */
 export function termsAt(history: AccessHistoryItem[], idx: number): AccessSnapshot | null {
   for (let i = idx; i < history.length; i++) {
     const h = history[i];
@@ -273,7 +266,6 @@ export function reasonLabel(code: string): string {
   return REASON_CHOICES.find((r) => r.code === code)?.label ?? humanise(code);
 }
 
-/** Strings, so an operator can clear a field while typing without it snapping to 0. */
 export type AccessDraft = {
   enabled: boolean;
   hours: string;
