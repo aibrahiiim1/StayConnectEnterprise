@@ -15,7 +15,8 @@ import { ChangeDiff, HistoryList } from "@/components/ui/history";
 import { RowActions } from "@/components/ui/row-actions";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Input, Field, Select, Textarea } from "@/components/ui/input";
+import { Input, Field, Select, Textarea, QuietHints } from "@/components/ui/input";
+import { InfoHint } from "@/components/ui/quiet";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
@@ -271,12 +272,14 @@ export default function ClientGroupsPage() {
                   icon={<UsersRound />}
                   title="No client groups yet"
                   hint={
-                    <>
-                      Every client is offered the same packages. Create a group to offer some clients something
-                      different — for example an <strong>Employees</strong> group matched by your Microsoft or Google
-                      organisation and given a Free package, a <strong>Partners</strong> group matched by verified email
-                      at their domains and given a cheaper package, with public clients seeing the normal packages.
-                    </>
+                    <span className="inline-flex items-center gap-1">
+                      Offer staff, partners or VIPs their own packages.
+                      <InfoHint>
+                        For example an <strong>Employees</strong> group matched by your Microsoft or Google organisation and
+                        given a Free package, a <strong>Partners</strong> group matched by verified email at their domains
+                        and given a cheaper package, with public clients seeing the normal packages.
+                      </InfoHint>
+                    </span>
                   }
                   action={writable ? <Button onClick={openNew}><Plus /> Add the first group</Button> : undefined}
                 />
@@ -312,13 +315,15 @@ export default function ClientGroupsPage() {
               )}
           </Card>
           {rows !== null && rows.length > 0 && (
-            <p className="mt-3 text-xs text-muted-foreground">
-              Listed in the order the appliance decides them: when a client matches several groups, the lowest number wins.
-              Packages choose their audience under{" "}
+            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+              <span className="inline-flex items-center gap-1">
+                Lowest priority number wins
+                <InfoHint>Listed in the order the appliance decides them: when a client matches several groups, the lowest number wins.</InfoHint>
+              </span>
               <Link href="/internet-packages" className="inline-flex items-center gap-0.5 text-primary underline-offset-4 hover:underline">
-                Internet packages <ArrowUpRight className="size-3" aria-hidden />
-              </Link>.
-            </p>
+                Choose audiences in Internet packages <ArrowUpRight className="size-3" aria-hidden />
+              </Link>
+            </div>
           )}
         </TabsContent>
 
@@ -376,13 +381,14 @@ export default function ClientGroupsPage() {
         open={mode !== "closed"}
         onOpenChange={(v) => { if (!v) { setMode("closed"); setEditing(null); } }}
         title={mode === "edit" ? `Edit ${editing?.name ?? "group"}` : "Add a client group"}
-        description="A client is in the group when any one of its rules matches their verified identity."
+        description="Clients join when any rule matches a verified identity."
         submitLabel={mode === "edit" ? "Save changes" : "Create group"}
         size="lg"
         busy={busy}
         error={formErr}
         onSubmit={onSubmit}
       >
+        <QuietHints>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Name" required hint="As it appears when a package chooses its audience.">
             <Input value={f.name} onChange={(e) => set("name", e.target.value)} placeholder="Employees" required />
@@ -401,9 +407,9 @@ export default function ClientGroupsPage() {
 
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <div>
-              <div className="text-label">Membership rules</div>
-              <div className="text-xs text-muted-foreground">Any one rule matching puts the client in the group.</div>
+            <div className="flex items-center gap-1">
+              <span className="text-label">Membership rules</span>
+              <InfoHint>Any one rule matching puts the client in the group.</InfoHint>
             </div>
             <Button type="button" variant="ghost" size="sm"
               onClick={() => set("rules", [...f.rules, { type: "EMAIL_DOMAIN", list: "", include_subdomains: false }])}>
@@ -430,9 +436,9 @@ export default function ClientGroupsPage() {
                     <Trash2 />
                   </Button>
                 </div>
-                <div className="flex flex-wrap items-center gap-1.5">
+                <div className="flex flex-wrap items-center gap-1">
                   <Badge tone={r.type === "EMAIL_DOMAIN" ? "info" : "accent"}>{kind.assurance}</Badge>
-                  <span className="text-xs text-muted-foreground">{kind.hint}</span>
+                  <InfoHint>{kind.hint}</InfoHint>
                 </div>
                 <Field
                   label={r.type === "IDP_TENANT" ? `${n}: tenant ID(s)` : `${n}: domain(s)`}
@@ -447,9 +453,9 @@ export default function ClientGroupsPage() {
                 </Field>
                 {r.type === "EMAIL_DOMAIN" && (
                   <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-medium">Include subdomains</div>
-                      <div className="text-xs text-muted-foreground">mail.company.com counts as company.com.</div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-sm font-medium">Include subdomains</span>
+                      <InfoHint>mail.company.com counts as company.com.</InfoHint>
                     </div>
                     <Switch checked={r.include_subdomains} onCheckedChange={(v) => setRule(i, { include_subdomains: v })}
                       label={`${n}: include subdomains`} />
@@ -461,9 +467,9 @@ export default function ClientGroupsPage() {
         </div>
 
         <div className="flex items-center justify-between rounded-md border border-border bg-surface/50 px-3.5 py-2.5">
-          <div>
-            <div className="text-sm font-medium">Group is on</div>
-            <div className="text-xs text-muted-foreground">A switched-off group matches nobody; packages that name it are offered to no one through it.</div>
+          <div className="flex items-center gap-1">
+            <span className="text-sm font-medium">Group is on</span>
+            <InfoHint>A switched-off group matches nobody; packages that name it are offered to no one through it.</InfoHint>
           </div>
           <Switch checked={f.enabled} onCheckedChange={(v) => set("enabled", v)} label="Group is on" />
         </div>
@@ -471,20 +477,21 @@ export default function ClientGroupsPage() {
         <Field label="Reason for this change" hint="Optional. Recorded in the group's history and the activity log.">
           <Input value={f.reason} onChange={(e) => set("reason", e.target.value)} placeholder="Partner pricing agreed with Acme" />
         </Field>
+        </QuietHints>
       </DialogForm>
 
       <ConfirmDialog
         open={deleting !== null}
         onOpenChange={(v) => !v && setDeleting(null)}
         title={deleting ? `Delete ${deleting.name}?` : "Delete this group?"}
-        description="Clients in this group are offered the same packages as everyone else from their next sign-in. A package that names this group as its audience must be changed first; the appliance refuses the deletion until it is."
+        description="From their next sign-in, its clients see the packages everyone else sees. A package that targets this group must be changed first."
         confirmLabel="Delete"
         confirmVariant="danger"
         busy={busy}
         error={formErr}
         onConfirm={onDelete}
       >
-        <Field label="Reason" hint="Optional. Recorded in the group's history.">
+        <Field label="Reason (optional)">
           <Input value={deleteReason} onChange={(e) => setDeleteReason(e.target.value)} placeholder="No longer a partner" />
         </Field>
       </ConfirmDialog>

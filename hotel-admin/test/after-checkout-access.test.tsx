@@ -161,6 +161,38 @@ describe("After Check-out Access page", () => {
     expect(screen.getByTestId("aca-sentence").textContent).toMatch(/turned off/);
   });
 
+  // The appliance sends the built-in terms in the grant's shape (edged emergencyEffective): duration_seconds and
+  // device_limit_policy, no duration_hours or device_policy, and device_limit 0 (no separate cap). Read as a published
+  // policy they showed "no time", "Up to 0 devices" and "—".
+  it("shows the emergency terms as the appliance sends them, with a way to publish the site's own", async () => {
+    const asSent = {
+      source: "EMERGENCY_FALLBACK", duration_seconds: 3600, down_kbps: 5000, up_kbps: 2000,
+      data_quota_bytes: 500 * 1024 * 1024, device_limit: 0, device_limit_policy: "REJECT_NEW_DEVICE",
+      policy_version: "EMERGENCY_GRACE_V1",
+    };
+    mockApi([{ ...unconfigured, effective: { source: "EMERGENCY_FALLBACK", policy: asSent as any } }]);
+    await renderScreen();
+    const sentence = screen.getByTestId("aca-sentence").textContent ?? "";
+    expect(sentence).toMatch(/reconnect for 1 hour after the verified check-out/);
+    expect(sentence).toMatch(/share 500 MB of data in total\./);
+    expect(sentence).not.toMatch(/no time|up to 0 device/);
+    expect(screen.getByText("No separate limit")).toBeInTheDocument();
+    expect(screen.getByText("Refuse new devices")).toBeInTheDocument();
+    expect(screen.queryByText("no time")).toBeNull();
+    // The warning stays, and says what ends it.
+    expect(screen.getByText("Departing guests are on the emergency fallback")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Set this site's terms/ }));
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(put).not.toHaveBeenCalled();
+  });
+
+  it("does not offer to publish the terms to a role that cannot", async () => {
+    mockApi([unconfigured]);
+    await renderScreen(false);
+    expect(screen.getByText("Departing guests are on the emergency fallback")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Set this site's terms/ })).toBeNull();
+  });
+
   it("lists switch events in the history table", async () => {
     mockApi([base], history);
     await renderScreen();

@@ -11,6 +11,7 @@ import type { NetworkOverview, OverviewNetwork } from "@/lib/api/network-overvie
 import { Badge } from "@/components/ui/badge";
 import { SectionCard } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/misc";
+import { Disclosure } from "@/components/ui/quiet";
 import { cn } from "@/lib/utils";
 import { serviceStateOf, topologyWords } from "@/lib/network-state";
 import { CELL_WORDS, METHOD_LABEL, effectiveMethods, type NetworkOverride, type SiteFacts } from "@/lib/sign-in-effective";
@@ -35,7 +36,7 @@ export function NetworkSignInOverview({ facts }: { facts: SiteFacts }) {
   return (
     <SectionCard
       title="What each client network offers"
-      description="The switches above apply to the whole site. A network can narrow them, and room sign-in follows the network's PMS routing. This is the result for every network that is serving clients."
+      description="The Methods switches apply to the whole site. A network can narrow them, and room sign-in follows the network's PMS routing. This is the result for every network that is serving clients."
     >
       {data === undefined ? (
         <Skeleton className="h-24 w-full" />
@@ -89,12 +90,14 @@ export function NetworkSignInOverview({ facts }: { facts: SiteFacts }) {
           })}
         </ul>
       )}
-      <dl className="mt-4 grid gap-x-6 gap-y-1 border-t border-border pt-3 text-xs text-muted-foreground sm:grid-cols-2">
+      <Disclosure title="Where each part is set" className="mt-4">
+      <dl className="grid gap-x-6 gap-y-1 text-xs text-muted-foreground sm:grid-cols-2">
         <div><dt className="inline font-medium text-foreground">Site-wide: </dt><dd className="inline">the switches on this page.</dd></div>
         <div><dt className="inline font-medium text-foreground">Network-specific: </dt><dd className="inline">methods switched off for one network, on its Client networks page.</dd></div>
         <div><dt className="inline font-medium text-foreground">PMS-specific: </dt><dd className="inline">room sign-in and which PMS answers it, under <Link href="/pms-routing" className="underline underline-offset-2">PMS routing</Link>.</dd></div>
         <div><dt className="inline font-medium text-foreground">Package eligibility: </dt><dd className="inline">which package a signed-in client gets, under <Link href="/internet-packages" className="underline underline-offset-2">Internet packages</Link>. It never hides a method.</dd></div>
       </dl>
+      </Disclosure>
     </SectionCard>
   );
 }

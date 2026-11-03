@@ -98,7 +98,7 @@ async function installBackend(
 test.describe("guest sign-in protection settings", () => {
   test("each value arrives with its unit, its standard and its allowed range", async ({ page }) => {
     await installBackend(page, []);
-    await page.goto("/sign-in-methods");
+    await page.goto("/sign-in-methods#protection");
 
     const card = page.locator("div").filter({ hasText: /client sign-in protection/i }).first();
     await expect(page.getByText(/client sign-in protection/i).first()).toBeVisible();
@@ -118,7 +118,7 @@ test.describe("guest sign-in protection settings", () => {
 
   test("the screen says a change applies to what happens next, and names the action that does not", async ({ page }) => {
     await installBackend(page, []);
-    await page.goto("/sign-in-methods");
+    await page.goto("/sign-in-methods#protection");
 
     await expect(page.getByText(/new settings apply to\s*what happens next/i)).toBeVisible();
     await expect(page.getByText(/shortening the wait here does not end a wait already running/i)).toBeVisible();
@@ -128,7 +128,7 @@ test.describe("guest sign-in protection settings", () => {
   test("a value outside the allowed range cannot be saved", async ({ page }) => {
     const mutations: Mutations = [];
     await installBackend(page, mutations);
-    await page.goto("/sign-in-methods");
+    await page.goto("/sign-in-methods#protection");
 
     const attempts = page.getByLabel(/maximum failed attempts/i);
     await attempts.fill("1");
@@ -137,19 +137,17 @@ test.describe("guest sign-in protection settings", () => {
     await attempts.fill("8");
     await page.getByRole("button", { name: /save protection settings/i }).click();
     const confirm = page.getByRole("dialog", { name: /change client sign-in protection/i });
-    await confirm.getByLabel(/reason/i).fill("conference floor, frequent typos");
-    await confirm.getByLabel(/confirm your password/i).fill("operatorpw");
+    await expect(confirm.getByLabel(/reason/i)).toHaveCount(0);
+    await expect(confirm.getByLabel(/password/i)).toHaveCount(0);
     await confirm.getByRole("button", { name: /save protection settings/i }).click();
     await expect.poll(() => mutations.length).toBeGreaterThan(0);
     expect(mutations[0].body.max_failed_attempts).toBe(8);
-    expect(mutations[0].body.reason).toBe("conference floor, frequent typos");
-    expect(mutations[0].body.password).toBe("operatorpw");
     await expect(page.getByText(/nothing needs restarting/i)).toBeVisible();
   });
 
   test("a role that may only read the policy is offered no way to change it", async ({ page }) => {
     await installBackend(page, [], ["front_office_operator"]);
-    await page.goto("/sign-in-methods");
+    await page.goto("/sign-in-methods#protection");
 
     await expect(page.getByText(/your role can see these settings but not change them/i)).toBeVisible();
     await expect(page.getByRole("button", { name: /save protection settings/i })).toHaveCount(0);

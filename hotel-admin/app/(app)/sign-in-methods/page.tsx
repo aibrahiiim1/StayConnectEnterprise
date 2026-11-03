@@ -18,7 +18,9 @@ import { roomSignInImpaired, useRoomSignInReadiness } from "@/components/room-si
 import { Card, CardBody, CardDescription, CardHeader, CardTitle, SectionCard } from "@/components/ui/card";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Field, Select } from "@/components/ui/input";
+import { Field, QuietHints, Select } from "@/components/ui/input";
+import { InfoHint } from "@/components/ui/quiet";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { PageHeader, PageShell } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
@@ -65,6 +67,16 @@ type SocialProvider = { provider: string; enabled: boolean };
 
 const SOCIAL_LABELS: Record<string, string> = { google: "Google", apple: "Apple", facebook: "Facebook", microsoft: "Microsoft" };
 
+// The page's sections. The URL hash names the open one (/sign-in-methods#protection), so a link can open it directly.
+type SignInTab = "methods" | "networks" | "email" | "codes" | "protection";
+const SIGN_IN_TABS: readonly SignInTab[] = ["methods", "networks", "email", "codes", "protection"];
+
+function tabFromHash(): SignInTab {
+  if (typeof window === "undefined") return "methods";
+  const h = window.location.hash.replace(/^#/, "") as SignInTab;
+  return SIGN_IN_TABS.includes(h) ? h : "methods";
+}
+
 export default function SignInMethodsPage() {
   const toast = useToast();
   // Read-only until the role loads; edged enforces the real gate.
@@ -89,6 +101,18 @@ export default function SignInMethodsPage() {
   const [httpsActive, setHttpsActive] = useState<boolean | null>(null);
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [tab, setTab] = useState<SignInTab>("methods");
+  useEffect(() => {
+    setTab(tabFromHash());
+    const onHash = () => setTab(tabFromHash());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  const selectTab = useCallback((t: SignInTab) => {
+    setTab(t);
+    // replaceState: switching sections is not a navigation, so Back leaves the page rather than stepping through tabs.
+    window.history.replaceState(null, "", t === "methods" ? window.location.pathname + window.location.search : `#${t}`);
+  }, []);
   const { readiness: pmsReadiness } = useRoomSignInReadiness(hospitality);
 
   const load = useCallback(async () => {
@@ -148,7 +172,7 @@ export default function SignInMethodsPage() {
   const header = (
     <PageHeader
       title="Sign-in methods"
-      description="How clients sign in, for the whole site. Each switch applies immediately; clients already online stay connected. A network can narrow these, as shown further down."
+      description="How clients sign in, for the whole site. A network can narrow these: see By network."
       help={
         <>
           <HelpSection title="What this page sets">
@@ -187,7 +211,7 @@ export default function SignInMethodsPage() {
           <HelpSection title="Client sign-in protection">
             <p>
               After too many incorrect sign-in details from the same device, that device is asked to wait before it
-              can try again. The card at the bottom decides how strict that is; it is always on.
+              can try again. The Protection tab decides how strict that is; it is always on.
             </p>
           </HelpSection>
           )}
@@ -220,6 +244,17 @@ export default function SignInMethodsPage() {
     socialProviders: socialMod && roles !== null && canRead("social-providers", roles) ? socialReady : null,
   };
 
+  const showCodes = roles !== null && (canRead("auth-methods", roles) || ((smsMod || whatsappMod) && canRead("code-requests", roles)));
+  const showProtection = hospitality || (roles !== null && canRead("auth-methods", roles));
+  const tabs: { value: SignInTab; label: string }[] = [
+    { value: "methods", label: "Methods" },
+    { value: "networks", label: "By network" },
+    ...(emailMod ? [{ value: "email" as const, label: "Email accounts" }] : []),
+    ...(showCodes ? [{ value: "codes" as const, label: "One-time codes" }] : []),
+    ...(showProtection ? [{ value: "protection" as const, label: "Protection" }] : []),
+  ];
+  const activeTab = tabs.some((t) => t.value === tab) ? tab : "methods";
+
   return (
     <PageShell>
       {header}
@@ -236,198 +271,224 @@ export default function SignInMethodsPage() {
 
       {httpsActive === false && typedSignInOn(cfg) && (
         <Callout tone="warning" title="Sign-ins are not encrypted yet">
-          The client sign-in page is still served over plain HTTP, because the portal has no HTTPS certificate yet. Until
-          it has, what clients type to sign in (room and name, passwords, codes) crosses the client network unencrypted,
-          and another device on that network could read it. Keep client isolation on for client networks, and finish{" "}
-          <Link href="/portal-https" className="underline">Portal HTTPS</Link> before clients rely on these methods.
+          The sign-in page is still plain HTTP, so what clients type crosses the client network unencrypted. Keep client
+          isolation on, and finish <Link href="/portal-https" className="underline">Portal HTTPS</Link> before clients rely on
+          these methods.
         </Callout>
       )}
 
-      <SectionCard title="Methods" description="Methods of modules this site is not licensed for are not shown." flush>
-        <ul className="divide-y divide-border">
-          <MethodRow
-            icon={<Ticket />}
-            title="Voucher code"
-            description="The client types a code from a printed or emailed voucher."
-            enabled={!!cfg.voucher?.enabled}
-            busy={busy === "Voucher"}
-            writable={writable}
-            onToggle={(v) => save({ voucher: { ...(cfg.voucher ?? {}), enabled: v } }, "Voucher")}
-            manageHref="/vouchers"
-            manageLabel="Vouchers"
-          />
-          <MethodRow
-            icon={<KeyRound />}
-            title="Client account"
-            description="A username and password issued to the client."
-            enabled={!!cfg.guest_account?.enabled}
-            busy={busy === "Client account"}
-            writable={writable}
-            onToggle={(v) => save({ guest_account: { ...(cfg.guest_account ?? {}), enabled: v } }, "Client account")}
-            manageHref="/guest-accounts"
-            manageLabel="Client accounts"
-          />
-          <MethodRow
-            icon={<PackageOpen />}
-            title="Choose a package without signing in"
-            description={cardMod
-              ? "The client picks a Free package, or pays by card, with no credential. A recovery code resumes it later."
-              : "The client picks a Free package with no credential. A recovery code resumes it later."}
-            enabled={!!cfg.open?.enabled}
-            busy={busy === "Open package selection"}
-            writable={writable}
-            onToggle={(v) => save({ open: { ...(cfg.open ?? {}), enabled: v } }, "Open package selection")}
-            manageHref="/payment-methods"
-            manageLabel="Payment methods"
-          />
-          {hospitality && (
-            <MethodRow
-              icon={<Hotel />}
-              title="Room sign-in"
-              description="Room number and one detail from the reservation, checked against the PMS."
-              enabled={!!pms.enabled}
-              busy={busy === "Room sign-in"}
-              writable={writable}
-              onToggle={(v) => save({ pms: { ...pms, enabled: v, mode: pms.mode || "room_lastname" } }, "Room sign-in")}
-              warning={pms.enabled && roomSignInImpaired(pmsReadiness)
-                ? pmsReadiness.state === "down"
-                  ? "Not working on any network that offers it — see PMS routing."
-                  : "Not working on some client networks — see PMS routing."
-                : undefined}
-              manageHref="/room-sign-in"
-              manageLabel="Room sign-in settings — under Hotel"
-            />
-          )}
-          {emailMod && (
-            <MethodRow
-              icon={<Mail />}
-              title="Email accounts"
-              description="The client registers with their email address and a password, then signs in with them."
-              enabled={!!cfg.email_account?.enabled}
-              busy={busy === "Email accounts"}
-              writable={writable}
-              onToggle={(v) => save({ email_account: { ...(cfg.email_account ?? {}), enabled: v } }, "Email accounts")}
-              // A missing sender warns but does not block the switch.
-              warning={emailReady ? undefined
-                : "No email sender is switched on under Delivery, so verification and password-reset emails cannot be sent."}
-              manageHref="/notifications"
-              manageLabel="Delivery"
-            />
-          )}
-          {smsMod && (
-            <MethodRow
-              icon={<MessageSquare />}
-              title="SMS code"
-              description="The client receives a one-time code by text message."
-              enabled={!!cfg.sms?.enabled}
-              busy={busy === "SMS code"}
-              writable={writable}
-              onToggle={(v) => save({ sms: { ...(cfg.sms ?? {}), enabled: v } }, "SMS code")}
-              ready={smsReady}
-              notReadyReason="Not available until a text-message sender exists and is switched on, so codes cannot be sent yet."
-              manageHref="/notifications"
-              manageLabel="Delivery"
-            />
-          )}
-          {whatsappMod && (
-            <MethodRow
-              icon={<Smartphone />}
-              title="WhatsApp code"
-              description="The client receives a one-time code on WhatsApp for their phone number."
-              enabled={!!cfg.whatsapp?.enabled}
-              busy={busy === "WhatsApp code"}
-              writable={writable}
-              onToggle={(v) => save({ whatsapp: { ...(cfg.whatsapp ?? {}), enabled: v } }, "WhatsApp code")}
-              ready={whatsappReady}
-              notReadyReason="Not available until a WhatsApp sender exists and is switched on, so codes cannot be sent yet."
-              manageHref="/notifications"
-              manageLabel="Delivery"
-            />
-          )}
-          {socialMod && (
-            <li className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-start">
-              <MethodIcon icon={<Users />} />
-              <div className="min-w-0 flex-1 space-y-2.5">
-                <div>
-                  <div className="text-emphasis">Identity providers</div>
-                  <p className="text-sm text-muted-foreground">The client signs in with an existing account such as Google.</p>
-                </div>
-                {socialListed.length === 0 ? (
-                  <div className="flex flex-wrap items-center gap-2 text-sm">
-                    <Badge tone="default">Not available</Badge>
-                    <span className="text-muted-foreground">No identity provider is configured.</span>
-                    <Link href="/social-providers" className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2 hover:decoration-2">
-                      Set one up in Identity providers <ArrowUpRight className="size-3.5" aria-hidden />
-                    </Link>
+      <Tabs value={activeTab} onValueChange={(v) => selectTab(v as SignInTab)}>
+        <TabsList aria-label="Sign-in methods sections">
+          {tabs.map((t) => <TabsTrigger key={t.value} value={t.value}>{t.label}</TabsTrigger>)}
+        </TabsList>
+
+        <TabsContent value="methods" className="mt-5 space-y-5">
+          <SectionCard title="Methods" description="Each switch applies immediately; clients already online stay connected. Methods of modules this site is not licensed for are not shown." flush>
+            <ul className="divide-y divide-border">
+              <MethodRow
+                icon={<Ticket />}
+                title="Voucher code"
+                description="The client types a code from a printed or emailed voucher."
+                enabled={!!cfg.voucher?.enabled}
+                busy={busy === "Voucher"}
+                writable={writable}
+                onToggle={(v) => save({ voucher: { ...(cfg.voucher ?? {}), enabled: v } }, "Voucher")}
+                manageHref="/vouchers"
+                manageLabel="Vouchers"
+              />
+              <MethodRow
+                icon={<KeyRound />}
+                title="Client account"
+                description="A username and password issued to the client."
+                enabled={!!cfg.guest_account?.enabled}
+                busy={busy === "Client account"}
+                writable={writable}
+                onToggle={(v) => save({ guest_account: { ...(cfg.guest_account ?? {}), enabled: v } }, "Client account")}
+                manageHref="/guest-accounts"
+                manageLabel="Client accounts"
+              />
+              <MethodRow
+                icon={<PackageOpen />}
+                title="Choose a package without signing in"
+                description={cardMod
+                  ? "The client picks a Free package, or pays by card, with no credential. A recovery code resumes it later."
+                  : "The client picks a Free package with no credential. A recovery code resumes it later."}
+                enabled={!!cfg.open?.enabled}
+                busy={busy === "Open package selection"}
+                writable={writable}
+                onToggle={(v) => save({ open: { ...(cfg.open ?? {}), enabled: v } }, "Open package selection")}
+                manageHref="/payment-methods"
+                manageLabel="Payment methods"
+              />
+              {hospitality && (
+                <MethodRow
+                  icon={<Hotel />}
+                  title="Room sign-in"
+                  description="Room number and one detail from the reservation, checked against the PMS."
+                  enabled={!!pms.enabled}
+                  busy={busy === "Room sign-in"}
+                  writable={writable}
+                  onToggle={(v) => save({ pms: { ...pms, enabled: v, mode: pms.mode || "room_lastname" } }, "Room sign-in")}
+                  warning={pms.enabled && roomSignInImpaired(pmsReadiness)
+                    ? pmsReadiness.state === "down"
+                      ? "Not working on any network that offers it — see PMS routing."
+                      : "Not working on some client networks — see PMS routing."
+                    : undefined}
+                  manageHref="/room-sign-in"
+                  manageLabel="Room sign-in settings — under Hotel"
+                />
+              )}
+              {emailMod && (
+                <MethodRow
+                  icon={<Mail />}
+                  title="Email accounts"
+                  description="The client registers with their email address and a password, then signs in with them."
+                  enabled={!!cfg.email_account?.enabled}
+                  busy={busy === "Email accounts"}
+                  writable={writable}
+                  onToggle={(v) => save({ email_account: { ...(cfg.email_account ?? {}), enabled: v } }, "Email accounts")}
+                  // A missing sender warns but does not block the switch.
+                  warning={emailReady ? undefined
+                    : "No email sender is switched on under Delivery, so verification and password-reset emails cannot be sent."}
+                  manageHref="/notifications"
+                  manageLabel="Delivery"
+                />
+              )}
+              {smsMod && (
+                <MethodRow
+                  icon={<MessageSquare />}
+                  title="SMS code"
+                  description="The client receives a one-time code by text message."
+                  enabled={!!cfg.sms?.enabled}
+                  busy={busy === "SMS code"}
+                  writable={writable}
+                  onToggle={(v) => save({ sms: { ...(cfg.sms ?? {}), enabled: v } }, "SMS code")}
+                  ready={smsReady}
+                  notReadyReason="Not available until a text-message sender is switched on under Delivery."
+                  manageHref="/notifications"
+                  manageLabel="Delivery"
+                />
+              )}
+              {whatsappMod && (
+                <MethodRow
+                  icon={<Smartphone />}
+                  title="WhatsApp code"
+                  description="The client receives a one-time code on WhatsApp for their phone number."
+                  enabled={!!cfg.whatsapp?.enabled}
+                  busy={busy === "WhatsApp code"}
+                  writable={writable}
+                  onToggle={(v) => save({ whatsapp: { ...(cfg.whatsapp ?? {}), enabled: v } }, "WhatsApp code")}
+                  ready={whatsappReady}
+                  notReadyReason="Not available until a WhatsApp sender is switched on under Delivery."
+                  manageHref="/notifications"
+                  manageLabel="Delivery"
+                />
+              )}
+              {socialMod && (
+                <li className="flex flex-col gap-3 px-5 py-3.5 sm:flex-row sm:items-start">
+                  <MethodIcon icon={<Users />} />
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <span className="text-emphasis">Identity providers</span>
+                      <InfoHint>The client signs in with an existing account such as Google. Each provider is offered on its own.</InfoHint>
+                      {socialListed.length > 0 && (
+                        <Link href="/social-providers" className="inline-flex items-center gap-0.5 text-xs font-medium text-primary underline-offset-4 hover:underline">
+                          Identity providers <ArrowUpRight className="size-3.5" aria-hidden />
+                        </Link>
+                      )}
+                    </div>
+                    {socialListed.length === 0 ? (
+                      <div className="flex flex-wrap items-center gap-2 text-sm">
+                        <Badge tone="default">Not available</Badge>
+                        <span className="text-muted-foreground">No identity provider is configured.</span>
+                        <Link href="/social-providers" className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2 hover:decoration-2">
+                          Set one up in Identity providers <ArrowUpRight className="size-3.5" aria-hidden />
+                        </Link>
+                      </div>
+                    ) : (
+                      <ul className="grid gap-2 sm:grid-cols-2">
+                        {socialListed.map((p) => {
+                          const on = !!cfg.social?.[p]?.enabled;
+                          const ready = socialReady.includes(p);
+                          const name = SOCIAL_LABELS[p] ?? p;
+                          return (
+                            <li key={p} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3.5 py-2.5">
+                              {writable ? (
+                                <label className="flex cursor-pointer items-center gap-2.5 text-sm">
+                                  <input
+                                    type="checkbox"
+                                    className="size-4 accent-primary"
+                                    checked={on}
+                                    disabled={busy === `Social (${p})` || (!ready && !on)}
+                                    onChange={(e) =>
+                                      save({ social: { ...(cfg.social ?? {}), [p]: { ...(cfg.social?.[p] ?? {}), enabled: e.target.checked } } },
+                                        `Social (${p})`)}
+                                  />
+                                  <span className="capitalize">{name}</span>
+                                </label>
+                              ) : (
+                                <span className="text-sm capitalize">{name}</span>
+                              )}
+                              {ready
+                                ? <StatusBadge tone={on ? "ok" : "default"}>{on ? "Offered" : "Not offered"}</StatusBadge>
+                                : <Badge tone="warn">Not set up — switch it off or set it up under Identity providers</Badge>}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
                   </div>
-                ) : (
-                  <ul className="grid gap-2 sm:grid-cols-2">
-                    {socialListed.map((p) => {
-                      const on = !!cfg.social?.[p]?.enabled;
-                      const ready = socialReady.includes(p);
-                      const name = SOCIAL_LABELS[p] ?? p;
-                      return (
-                        <li key={p} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3.5 py-2.5">
-                          {writable ? (
-                            <label className="flex cursor-pointer items-center gap-2.5 text-sm">
-                              <input
-                                type="checkbox"
-                                className="size-4 accent-primary"
-                                checked={on}
-                                disabled={busy === `Social (${p})` || (!ready && !on)}
-                                onChange={(e) =>
-                                  save({ social: { ...(cfg.social ?? {}), [p]: { ...(cfg.social?.[p] ?? {}), enabled: e.target.checked } } },
-                                    `Social (${p})`)}
-                              />
-                              <span className="capitalize">{name}</span>
-                            </label>
-                          ) : (
-                            <span className="text-sm capitalize">{name}</span>
-                          )}
-                          {ready
-                            ? <StatusBadge tone={on ? "ok" : "default"}>{on ? "Offered" : "Not offered"}</StatusBadge>
-                            : <Badge tone="warn">Not set up — switch it off or set it up under Identity providers</Badge>}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </div>
-            </li>
-          )}
-        </ul>
-      </SectionCard>
+                </li>
+              )}
+            </ul>
+          </SectionCard>
 
-      <NetworkSignInOverview facts={facts} />
+          <ClientJourneyCard
+            cfg={cfg}
+            writable={writable}
+            busy={busy === "Client journey"}
+            hospitality={hospitality}
+            onSave={(portal) => save({ portal }, "Client journey")}
+          />
+        </TabsContent>
 
-      {emailMod && <EmailAccountsSettingsCard canEdit={writable} />}
+        <TabsContent value="networks" className="mt-5">
+          <NetworkSignInOverview facts={facts} />
+        </TabsContent>
 
-      {(smsMod || whatsappMod) && roles !== null && canRead("code-requests", roles) && <CodeRequestsCard roles={roles} />}
+        {emailMod && (
+          <TabsContent value="email" className="mt-5">
+            <EmailAccountsSettingsCard canEdit={writable} />
+          </TabsContent>
+        )}
 
-      {roles !== null && canRead("auth-methods", roles) && (
-        <SigninSettingsGroup title="One-time codes" keys={SIGNIN_SETTING_GROUPS.oneTimeCodes} canEdit={writable}
-          hint="How long a code sent by email, text or WhatsApp lasts, how many wrong guesses it allows, and how many codes may be requested per hour." />
-      )}
+        {showCodes && (
+          <TabsContent value="codes" className="mt-5 space-y-5">
+            {roles !== null && canRead("auth-methods", roles) && (
+              <SigninSettingsGroup title="One-time codes" keys={SIGNIN_SETTING_GROUPS.oneTimeCodes} canEdit={writable}
+                hint="How long a code sent by email, text or WhatsApp lasts, how many wrong guesses it allows, and how many codes may be requested per hour." />
+            )}
+            {(smsMod || whatsappMod) && roles !== null && canRead("code-requests", roles) && <CodeRequestsCard roles={roles} />}
+          </TabsContent>
+        )}
 
-      <ClientJourneyCard
-        cfg={cfg}
-        writable={writable}
-        busy={busy === "Client journey"}
-        hospitality={hospitality}
-        onSave={(portal) => save({ portal }, "Client journey")}
-      />
-
-      {/* Sign-in protection counts wrong ROOM details (Room sign-in only), so it needs Hospitality. */}
-      {hospitality && <GuestSignInProtectionCard canWrite={mayChangeProtection} />}
-      {hospitality && <NetworkPauseSettingsCard canWrite={mayChangeProtection} />}
-      {roles !== null && canRead("auth-methods", roles) && (
-        <SigninSettingsGroup title="Sign-in protection" keys={SIGNIN_SETTING_GROUPS.protection} canEdit={writable}
-          hint="The most sign-ins the whole appliance accepts per minute, and how long recent room guests are exempt from a room sign-in pause." />
-      )}
+        {showProtection && (
+          <TabsContent value="protection" className="mt-5 space-y-5">
+            <QuietHints>
+              {/* Sign-in protection counts wrong ROOM details (Room sign-in only), so it needs Hospitality. */}
+              {hospitality && <GuestSignInProtectionCard canWrite={mayChangeProtection} />}
+              {hospitality && <NetworkPauseSettingsCard canWrite={mayChangeProtection} />}
+            </QuietHints>
+            {roles !== null && canRead("auth-methods", roles) && (
+              <SigninSettingsGroup title="Sign-in protection" keys={SIGNIN_SETTING_GROUPS.protection} canEdit={writable}
+                hint="The most sign-ins the whole appliance accepts per minute, and how long recent room guests are exempt from a room sign-in pause." />
+            )}
+          </TabsContent>
+        )}
+      </Tabs>
     </PageShell>
   );
 }
-
 // Explicit Save, unlike the switches: saving per keystroke would write "3", "30", "300" for a typed day count.
 function ClientJourneyCard({ cfg, writable, busy, hospitality, onSave }: {
   cfg: AuthMethods; writable: boolean; busy: boolean; hospitality: boolean;
@@ -466,6 +527,7 @@ function ClientJourneyCard({ cfg, writable, busy, hospitality, onSave }: {
         </div>
       </CardHeader>
       <CardBody>
+        <QuietHints>
         <form
           className="grid gap-4 md:grid-cols-2"
           onSubmit={(e) => {
@@ -508,6 +570,7 @@ function ClientJourneyCard({ cfg, writable, busy, hospitality, onSave }: {
             </div>
           )}
         </form>
+        </QuietHints>
       </CardBody>
     </Card>
   );
@@ -534,25 +597,25 @@ function MethodRow({
   manageHref?: string; manageLabel?: string;
 }) {
   return (
-    <li className={cn("flex items-start gap-3 px-5 py-4", !ready && "bg-surface/50")}>
+    <li className={cn("flex items-start gap-3 px-5 py-3.5", !ready && "bg-surface/50")}>
       <MethodIcon icon={icon} />
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span className="text-emphasis">{title}</span>
+          <InfoHint>{description}</InfoHint>
           <StatusBadge tone={enabled ? "ok" : "default"}>{enabled ? "On" : "Off"}</StatusBadge>
           {!ready && <Badge tone="warn">Not available</Badge>}
+          {manageHref && (
+            <Link
+              href={manageHref}
+              className="inline-flex w-fit items-center gap-0.5 text-xs font-medium text-primary underline-offset-4 hover:underline sm:ms-1"
+            >
+              {manageLabel} <ArrowUpRight className="size-3.5" aria-hidden />
+            </Link>
+          )}
         </div>
-        <p className="text-sm text-muted-foreground">{description}</p>
         {!ready && notReadyReason && <p className="text-xs text-warning-subtle-foreground">{notReadyReason}</p>}
         {ready && warning && <p className="text-xs text-warning-subtle-foreground" role="status">{warning}</p>}
-        {manageHref && (
-          <Link
-            href={manageHref}
-            className="inline-flex w-fit items-center gap-0.5 text-xs font-medium text-primary underline-offset-4 hover:underline"
-          >
-            {manageLabel} <ArrowUpRight className="size-3.5" aria-hidden />
-          </Link>
-        )}
       </div>
       {writable && (
         <div className="flex shrink-0 items-center gap-2 pt-1">

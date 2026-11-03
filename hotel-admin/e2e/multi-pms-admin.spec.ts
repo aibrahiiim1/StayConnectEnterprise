@@ -149,7 +149,7 @@ for (const vp of [{ width: 1280, height: 800 }, { width: 390, height: 800 }]) {
         }),
         "/network/sign-in-overrides": () => ({ overrides: { n2: { disabled_methods: ["voucher"], primary_method: "" } } }),
       });
-      await page.goto("/sign-in-methods");
+      await page.goto("/sign-in-methods#networks");
       await expect(page.getByRole("heading", { name: "What each client network offers" })).toBeVisible();
       const wifi = page.getByRole("list", { name: "Sign-in methods on Client Wi-Fi" });
       await expect(wifi.getByText("Room sign-in")).toBeVisible();
