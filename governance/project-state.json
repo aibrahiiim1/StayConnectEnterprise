@@ -1362,7 +1362,7 @@
       "dispositions": "docs/AUDIT_DECISION_DISPOSITIONS.md"
     }
   },
-  "latest_transition_id": "T0287",
+  "latest_transition_id": "T0288",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1858,16 +1858,16 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "ADMIN_CONSOLE_HOTEL_UX_2026_11_03",
-    "decision": "Product Owner mission of 2026-11-03 (Hotel UX; merge and test deployment authorised). No new decision record.",
-    "decision_note": "Admin Console only; installed on the test appliance as release 20261103-072127 (source_commit b94424bb, BUILD_ID mbzKgUwM6SjMynPRk3Yx4), read back.",
-    "manifest": "docs/manifests/AdminConsoleHotelUX20261103-change-manifest.md",
-    "base": "67ff027233fa6a62c94c93eeeac7db3c6b39c66a",
-    "base_note": "Master after the merge of PR #296.",
-    "transition": "T0287",
-    "previous_delivery": "T0286",
-    "branch": "delivery/hotel-ux-2026-11-03",
-    "note": "T0287. Go-Live not authorised."
+    "kind": "ADMIN_CONSOLE_UX_CLOSURE_2026_11_03",
+    "decision": "Product Owner closure request of 2026-11-03 for the authorised Admin Console UX mission. No new decision record.",
+    "decision_note": "Admin Console only; installed on the test appliance as release 20261103-082555 (source_commit 98196984, BUILD_ID dcssK6rq0MRtPkrV4ijN6), read back.",
+    "manifest": "docs/manifests/AdminConsoleUXClosure20261103-change-manifest.md",
+    "base": "577463f7842065e4d36480b3e79f44e9a6715d70",
+    "base_note": "Master after the merge of PR #297.",
+    "transition": "T0288",
+    "previous_delivery": "T0287",
+    "branch": "delivery/ux-closure-2026-11-03",
+    "note": "T0288. Go-Live not authorised."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
