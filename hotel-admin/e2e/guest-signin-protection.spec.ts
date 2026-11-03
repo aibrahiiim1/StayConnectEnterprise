@@ -137,13 +137,11 @@ test.describe("guest sign-in protection settings", () => {
     await attempts.fill("8");
     await page.getByRole("button", { name: /save protection settings/i }).click();
     const confirm = page.getByRole("dialog", { name: /change client sign-in protection/i });
-    await confirm.getByLabel(/reason/i).fill("conference floor, frequent typos");
-    await confirm.getByLabel(/confirm your password/i).fill("operatorpw");
+    await expect(confirm.getByLabel(/reason/i)).toHaveCount(0);
+    await expect(confirm.getByLabel(/password/i)).toHaveCount(0);
     await confirm.getByRole("button", { name: /save protection settings/i }).click();
     await expect.poll(() => mutations.length).toBeGreaterThan(0);
     expect(mutations[0].body.max_failed_attempts).toBe(8);
-    expect(mutations[0].body.reason).toBe("conference floor, frequent typos");
-    expect(mutations[0].body.password).toBe("operatorpw");
     await expect(page.getByText(/nothing needs restarting/i)).toBeVisible();
   });
 
