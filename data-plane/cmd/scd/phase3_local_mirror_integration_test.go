@@ -31,6 +31,19 @@ func postGrant(t *testing.T, f *authFixture, contextID, pkgRev string) phase3Gra
 	return out
 }
 
+func postJoinLive(t *testing.T, f *authFixture, contextID string) phase3GrantResp {
+	t.Helper()
+	raw, _ := json.Marshal(map[string]any{"auth_context_id": contextID, "join_live": true,
+		"device": map[string]string{"ip": f.net.guestIP, "mac": f.net.mac}})
+	rec := httptest.NewRecorder()
+	f.p3.grantHandler(rec, httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(raw)))
+	var out phase3GrantResp
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("undecodable grant response %q: %v", rec.Body.String(), err)
+	}
+	return out
+}
+
 // takeInterfaceOffline reproduces what pmsd writes on a transport failure. Continuity stays CONTINUOUS
 // because no events were missed (the feed stopped rather than skipping), which is the basis for trusting the mirror.
 func takeInterfaceOffline(t *testing.T, f *authFixture, errCode string) {

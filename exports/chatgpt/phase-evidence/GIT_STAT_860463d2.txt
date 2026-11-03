@@ -1,0 +1,4 @@
+commit 860463d27e0dd7eef4de5332389029e46955ffa0
+Date:   Tue Nov 3 12:05:20 2026 +0200
+
+    Governance: T0290 records the room re-sign-in fix and its read-back

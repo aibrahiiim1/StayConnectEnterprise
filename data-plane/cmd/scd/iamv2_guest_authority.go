@@ -16,29 +16,40 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
 
-// liveEntitlementForContext returns the ACTIVE, in-window entitlement held by the subject of this auth context
-// (voucher, account or guest principal), or "". A read failure answers "" -- the guest is offered packages as
-// before, and a purchase for a subject that does hold a live grant still supersedes it correctly.
+// liveEntitlementForContext returns the ACTIVE, in-window entitlement held by the subject of this auth context, or "". A read
+// failure answers "": the guest is offered packages, and choosing the live package still joins it.
 func (s *server) liveEntitlementForContext(ctx context.Context, authContextID string) string {
 	if s.db == nil || authContextID == "" {
 		return ""
 	}
+	id, err := liveEntitlementID(ctx, s.db, authContextID, s.tenID, s.siteID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		slog.Warn("iamv2: live entitlement lookup failed", "err", err)
+	}
+	return id
+}
+
+type rowQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// A room sign-in's subject is its stay: the stay's live access is the guest's, within its device limit.
+func liveEntitlementID(ctx context.Context, q rowQuerier, authContextID, tenant, site string) (string, error) {
 	var id string
-	err := s.db.QueryRow(ctx, `
+	err := q.QueryRow(ctx, `
 	    SELECT e.id::text
 	      FROM iam_v2.auth_contexts ac
 	      JOIN iam_v2.entitlements e
 	        ON e.tenant_id = ac.tenant_id AND e.site_id = ac.site_id
 	       AND (e.voucher_id = ac.voucher_id OR e.guest_account_id = ac.guest_account_id
 	            OR e.guest_principal_id = ac.guest_principal_id
-	            OR e.anonymous_subject_id = ac.anonymous_subject_id)
+	            OR e.anonymous_subject_id = ac.anonymous_subject_id
+	            OR (ac.method = 'PMS' AND e.stay_id = ac.stay_id))
 	     WHERE ac.id = $1 AND ac.tenant_id = $2 AND ac.site_id = $3
 	       AND e.status = 'ACTIVE' AND (e.window_ends_at IS NULL OR e.window_ends_at > now())
-	     LIMIT 1`, authContextID, s.tenID, s.siteID).Scan(&id)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		slog.Warn("iamv2: live entitlement lookup failed", "err", err)
-	}
-	return id
+	     ORDER BY e.activated_at DESC NULLS LAST
+	     LIMIT 1`, authContextID, tenant, site).Scan(&id)
+	return id, err
 }
 
 type iamv2GuestResult struct {

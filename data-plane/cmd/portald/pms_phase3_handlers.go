@@ -38,6 +38,7 @@ type scdResolveResp struct {
 	AuthContextID     string     `json:"auth_context_id"`
 	ExpiresIn         int        `json:"expires_in_seconds"`
 	Offers            []scdOffer `json:"offers"`
+	LiveAccess        bool       `json:"live_access"`
 }
 
 type scdGrantResp struct {
@@ -137,13 +138,18 @@ func (h *handler) authPMSPhase3(w http.ResponseWriter, r *http.Request) {
 
 	// Second call: the guest already proved who they are and chose a package.
 	if strings.TrimSpace(in.AuthContextID) != "" {
-		h.phase3Grant(w, r, b, in.AuthContextID, in.PackageRevisionID, in.Method, device)
+		h.phase3Grant(w, r, b, in.AuthContextID, in.PackageRevisionID, in.Method, device, false)
 		return
 	}
 
 	res, ok := h.phase3Resolve(w, r, b, in, device)
 	if !ok {
 		return // the uniform failure has already been written
+	}
+	// The stay already has access: this device joins it, within its device limit, and nothing is offered or bought.
+	if res.LiveAccess {
+		h.phase3Grant(w, r, b, res.AuthContextID, "", "", device, true)
+		return
 	}
 	// One choice per (offer, method): a single included offer is granted at once; anything priced, or more than
 	// one way in, is the guest's choice. Prices are formatted without the page dictionary (no extra scd hop
@@ -162,7 +168,7 @@ func (h *handler) authPMSPhase3(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(choices) == 1 && choices[0].Method == "NOT_REQUIRED" {
-		h.phase3Grant(w, r, b, res.AuthContextID, choices[0].PackageRevisionID, "", device)
+		h.phase3Grant(w, r, b, res.AuthContextID, choices[0].PackageRevisionID, "", device, false)
 		return
 	}
 	if len(choices) > 1 || (len(choices) == 1 && choices[0].Method != "NOT_REQUIRED") {
@@ -202,11 +208,14 @@ func (h *handler) phase3Resolve(w http.ResponseWriter, r *http.Request, b *phase
 	return out, true
 }
 
-func (h *handler) phase3Grant(w http.ResponseWriter, r *http.Request, b *phase3Budget, authContextID, packageRevID, method string, device map[string]string) {
+func (h *handler) phase3Grant(w http.ResponseWriter, r *http.Request, b *phase3Budget, authContextID, packageRevID, method string, device map[string]string, joinLive bool) {
 	req := map[string]any{
 		"auth_context_id":     authContextID,
 		"package_revision_id": packageRevID,
 		"device":              device,
+	}
+	if joinLive {
+		req["join_live"] = true
 	}
 	if method != "" && method != "NOT_REQUIRED" {
 		if len(method) > 32 {

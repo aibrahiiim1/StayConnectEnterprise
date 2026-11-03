@@ -45,10 +45,14 @@ func (f *authFixture) signInAt(t *testing.T, ip, reqID string) (phase3Response, 
 	if res.Outcome != outcomeVerified {
 		return res, granted
 	}
-	raw, _ := json.Marshal(map[string]any{
-		"auth_context_id": res.AuthContextID, "package_revision_id": f.pkgRev,
-		"device": map[string]string{"ip": ip, "mac": f.net.mac},
-	})
+	// As the portal does: a stay with live access is joined, otherwise the package is chosen.
+	grant := map[string]any{"auth_context_id": res.AuthContextID, "device": map[string]string{"ip": ip, "mac": f.net.mac}}
+	if res.LiveAccess {
+		grant["join_live"] = true
+	} else {
+		grant["package_revision_id"] = f.pkgRev
+	}
+	raw, _ := json.Marshal(grant)
 	rec := httptest.NewRecorder()
 	f.p3.grantHandler(rec, httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(raw)))
 	if err := json.Unmarshal(rec.Body.Bytes(), &granted); err != nil {

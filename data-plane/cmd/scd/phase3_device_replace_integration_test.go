@@ -36,9 +36,15 @@ func TestIntegration_Phase3_ARoomGuestAtTheLimitReplacesADevice(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	grant := func(ac, ip, mac string) (phase3GrantResp, phase3Response) {
-		raw, _ := json.Marshal(map[string]any{"auth_context_id": ac, "package_revision_id": f.pkgRev,
-			"device": map[string]string{"ip": ip, "mac": mac}})
+	grant := func(res phase3Response, ip, mac string) (phase3GrantResp, phase3Response) {
+		// As the portal does: a stay with live access is joined, otherwise the package is chosen.
+		body := map[string]any{"auth_context_id": res.AuthContextID, "device": map[string]string{"ip": ip, "mac": mac}}
+		if res.LiveAccess {
+			body["join_live"] = true
+		} else {
+			body["package_revision_id"] = f.pkgRev
+		}
+		raw, _ := json.Marshal(body)
 		rec := httptest.NewRecorder()
 		f.p3.grantHandler(rec, httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(raw)))
 		var g phase3GrantResp
@@ -68,7 +74,7 @@ func TestIntegration_Phase3_ARoomGuestAtTheLimitReplacesADevice(t *testing.T) {
 
 	// Device A takes the stay's only place.
 	resA := resolve(f.net.guestIP, f.net.mac, "00000006-0000-4000-8000-00000000000a")
-	gA, _ := grant(resA.AuthContextID, f.net.guestIP, f.net.mac)
+	gA, _ := grant(resA, f.net.guestIP, f.net.mac)
 	if gA.Outcome != outcomeVerified || gA.EntitlementID == "" {
 		t.Fatalf("device A was not granted: %+v", gA)
 	}
@@ -80,7 +86,7 @@ func TestIntegration_Phase3_ARoomGuestAtTheLimitReplacesADevice(t *testing.T) {
 	// Device B, same stay: refused at the limit, and the refusal names B's device and network for portald.
 	macB := "02:00:00:bb:06:0b"
 	resB := resolve(f.net.otherIP, macB, "00000006-0000-4000-8000-00000000000b")
-	_, refused := grant(resB.AuthContextID, f.net.otherIP, macB)
+	_, refused := grant(resB, f.net.otherIP, macB)
 	if refused.Outcome != outcomeNotVerified || refused.FailureClass != "DEVICE_LIMIT" || refused.DeviceID == "" || refused.GuestNetworkID != f.network {
 		t.Fatalf("the device-limit refusal must name the placed device and network: %+v", refused)
 	}

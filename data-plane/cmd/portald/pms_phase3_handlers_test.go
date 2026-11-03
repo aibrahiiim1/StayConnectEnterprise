@@ -126,6 +126,22 @@ func TestPhase3MultipleOffersAskTheGuest(t *testing.T) {
 	}
 }
 
+// A room with live access goes straight online: the grant joins it, and no package list (with its price) is shown.
+func TestPhase3LiveAccessJoinsWithoutAChoice(t *testing.T) {
+	stub := &scdStub{
+		resolve: map[string]any{"outcome": "VERIFIED", "auth_context_id": "ctx-3", "live_access": true},
+		grant:   map[string]any{"outcome": "VERIFIED", "session_id": "sess-3", "entitlement_id": "ent-live"},
+	}
+	h := stubHandler(t, stub)
+	_, out := phase3Post(t, h, map[string]any{"room": "412", "last_name": "Okonkwo", "request_id": "r3"})
+	if !out.OK || out.SessionID != "sess-3" || out.NeedsChoice || len(out.Choices) != 0 {
+		t.Fatalf("a room with live access was not joined: %+v", out)
+	}
+	if len(stub.calls) != 2 || stub.bodies[1]["join_live"] != true || stub.bodies[1]["method"] != nil {
+		t.Fatalf("the grant did not ask to join without a purchase: %v %v", stub.calls, stub.bodies)
+	}
+}
+
 // Everything that could describe one room is byte-identical; only site-wide conditions get their own
 // sentence. scd decides the class (internal/signinattempt.GuestClass) and portald forwards it.
 func TestPhase3EveryPerRoomFailureIsIndistinguishable(t *testing.T) {

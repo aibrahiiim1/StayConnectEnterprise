@@ -28,6 +28,8 @@ var (
 	// ErrAlreadyEntitled: the Stay already holds a live entitlement; refused rather than racing the unique index.
 	ErrAlreadyEntitled = errors.New("staygrant: stay already holds a live entitlement")
 	ErrDeviceLimit     = errors.New("staygrant: device limit reached")
+	// ErrNoLiveAccess: a join was asked for, but the Stay's access has ended since the sign-in.
+	ErrNoLiveAccess = errors.New("staygrant: stay holds no live access to join")
 	// ErrStayLengthUnknown: a PER_STAY_NIGHT allowance cannot be computed without known arrival and departure,
 	// and any guess is permanent once frozen onto the entitlement.
 	ErrStayLengthUnknown = errors.New("staygrant: stay length is not authoritatively known")
@@ -91,6 +93,42 @@ func (s *Store) Grant(ctx context.Context, tenant, site string, r Request) (Resu
 	return res, nil
 }
 
+// JoinLiveTx consumes the Auth Context and joins this device to the Stay's live entitlement, whatever package
+// funded it; nothing is quoted or purchased.
+func (s *Store) JoinLiveTx(ctx context.Context, tx pgx.Tx, tenant, site string, r Request) (Result, error) {
+	var res Result
+	if err := writerguard.Open(ctx, tx, writerguard.CapCommerceIntent); err != nil {
+		return res, err
+	}
+	consumed, err := s.ctxs.ConsumeTx(ctx, tx, r.AuthContextID, r.Presenter)
+	if err != nil {
+		return res, err
+	}
+	res.Stay, res.Interface = consumed.Stay, consumed.Interface
+	return joinLive(ctx, tx, res, r.Presenter.Device, ErrNoLiveAccess)
+}
+
+// joinLive authorizes the device on the Stay's ACTIVE, in-window entitlement; authorize_entitlement_device
+// enforces the device limit (MAX_DEVICES_REACHED). Without one it returns none.
+func joinLive(ctx context.Context, tx pgx.Tx, res Result, device string, none error) (Result, error) {
+	var eid string
+	err := tx.QueryRow(ctx, `SELECT id::text FROM iam_v2.entitlements
+		WHERE stay_id=$1 AND status='ACTIVE' AND (window_ends_at IS NULL OR window_ends_at > now())
+		FOR UPDATE`, res.Stay).Scan(&eid)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return res, none
+	}
+	if err != nil {
+		return res, err
+	}
+	res.EntitlementID, res.Joined = eid, true
+	if err := tx.QueryRow(ctx, `SELECT iam_v2.authorize_entitlement_device($1,$2,now())::text`,
+		eid, device).Scan(&res.DeviceAuthID); err != nil {
+		return res, err
+	}
+	return res, nil
+}
+
 // GrantTx runs the grant inside the caller's transaction.
 func (s *Store) GrantTx(ctx context.Context, tx pgx.Tx, tenant, site string, r Request) (Result, error) {
 	var res Result
@@ -146,24 +184,7 @@ func (s *Store) GrantTx(ctx context.Context, tx pgx.Tx, tenant, site string, r R
 		return res, err
 	}
 	if live > 0 {
-		// Another device of a Stay with access joins its entitlement; authorize_entitlement_device enforces
-		// the device limit (MAX_DEVICES_REACHED). A live entitlement that is not ACTIVE still refuses.
-		var eid string
-		err := tx.QueryRow(ctx, `SELECT id::text FROM iam_v2.entitlements
-			WHERE stay_id=$1 AND status='ACTIVE' AND (window_ends_at IS NULL OR window_ends_at > now())
-			FOR UPDATE`, res.Stay).Scan(&eid)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return res, ErrAlreadyEntitled
-		}
-		if err != nil {
-			return res, err
-		}
-		res.EntitlementID, res.Joined = eid, true
-		if err := tx.QueryRow(ctx, `SELECT iam_v2.authorize_entitlement_device($1,$2,now())::text`,
-			eid, r.Presenter.Device).Scan(&res.DeviceAuthID); err != nil {
-			return res, err
-		}
-		return res, nil
+		return joinLive(ctx, tx, res, r.Presenter.Device, ErrAlreadyEntitled)
 	}
 
 	// The id parameters are passed separately as uuid and text: one placeholder used as both makes

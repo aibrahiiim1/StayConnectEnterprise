@@ -1,0 +1,35 @@
+{
+  "transition_id": "T0290",
+  "seq": 290,
+  "timestamp": "2026-11-03T12:05:09+02:00",
+  "timestamp_derivation": "Read from the workstation clock (UTC+02:00) by the script that wrote this receipt, immediately before the commit that introduces it.",
+  "record_type": "ROOM_RESIGN_JOINS_LIVE_ACCESS",
+  "authorisation": "The Product Owner's explicit instruction of 2026-11-03 to fix room re-sign-in now (guest-authentication core, named by the PO) and to check the One Day duration, under the standing test-appliance deployment authority (D79). Merge awaits the Product Owner.",
+  "delivery": "scd liveEntitlementForContext now also matches a PMS (room) auth context to an ACTIVE, in-window entitlement of its own stay, so a returning room guest joins the stay's access through the existing join path (device limit and replace page unchanged) instead of being shown the package list. Service plan 'Time allowance' is labelled 'Online time allowance' and says it is not a calendar limit; a package that lasts until ended says so where its length is chosen.",
+  "finding": "One Day: behaving as decision D-C defines, not a defect. The plan's 1-day time allowance is 24 hours of ONLINE time across devices (enforced: about 2 h used); the package's length (MANUAL_END) sets no calendar end. For access that ends 24 hours after purchase, the package's 'How long access lasts' must be 'Fixed length, 24 hours' (an operator setting; not changed).",
+  "deployment": {
+    "test_appliance": "172.21.96.97: scd from d7c55c2177046ed93fe0984ffada2201650eb3dd (read back: -tags=stayconnect_production, vcs.modified=false; backup scd.bak-pre-d7c55c21-20261103T095700Z; started iamv2 master=true build=production; DEPLOYED_BINARIES.sha256 updated and checked); Admin Console release 20261103-100433 reads source_commit d7c55c21 and BUILD_ID wvj2xJg5xV5GOVD8ygR8k, previous 20261103-092631 kept; edged unchanged (c91b6f98).",
+    "central": "Not changed."
+  },
+  "verification": "New scd integration test: a room context finds its stay's live entitlement, another stay's and a voucher context do not, ended access is not offered; it fails with the stay match removed. scd package 242 PASS, 32 FAIL that fail identically on master (Windows-only directory fsync 'Access is denied' in central_retry/assignment tests). Admin Console plan and package tests 187/187 PASS; tsc and eslint clean. Live: the new lookup, run against this morning's real room sign-in, returns the stay's ACTIVE One Day entitlement. NOT VERIFIED: a room re-sign-in on a guest phone end to end.",
+  "not_touched": "The join path and its device-limit and subject checks, purchases and room-charge posting, PMS, package and plan configuration (One Day not changed), After Check-out terms, networking, the production Central.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "4883ab11b3fea85c7786ffd86a9bbd53a385a654",
+  "previous_delivery": "T0289",
+  "decision": "none (FAST Admin Console change)",
+  "go_live": "NOT authorised."
+}

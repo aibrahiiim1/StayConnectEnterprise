@@ -507,7 +507,7 @@ export default function ServicePlansPage() {
                           { label: "Speed share", value: p.speed_allocation === "SHARED" ? "Shared" : "Per device" },
                           { label: "Devices at once", value: formatDevices(p.max_concurrent_devices),
                             hint: DEVICE_LIMIT_POLICIES[p.device_limit_policy ?? ""] },
-                          { label: "Time allowance", value: formatDuration(p.time_quota_seconds) },
+                          { label: "Online time", value: formatDuration(p.time_quota_seconds) },
                           { label: "Data allowance", value: formatData(p.data_quota_bytes) },
                           { label: "Idle disconnect", value: p.idle_timeout_seconds ? formatDuration(p.idle_timeout_seconds) : "Never" },
                           { label: "Longest session", value: p.max_continuous_session_seconds ? formatDuration(p.max_continuous_session_seconds) : "No limit" },
@@ -645,13 +645,14 @@ export default function ServicePlansPage() {
               </Field>
 
               {/* Fields must be pre-filled: the form publishes a complete version from whatever they hold. */}
-              <Field label="Time allowance" htmlFor="plan-time"
+              <Field label="Online time allowance" htmlFor="plan-time"
                 hint={<>Time online, added up across the client&rsquo;s devices (two devices online for an hour use two
-                  hours). Up to {LIMITS.timeQuotaDays} days.</>}>
+                  hours). Not a calendar limit: for access that ends a fixed time after purchase, set the package&rsquo;s
+                  &ldquo;How long access lasts&rdquo;. Up to {LIMITS.timeQuotaDays} days.</>}>
                 <div className="flex gap-2">
                   <Input id="plan-time" name="time_quota" type="number" min={0} step="0.01" placeholder="Unlimited"
                     className="flex-1" defaultValue={timeQuota.value} />
-                  <Select name="time_quota_unit" aria-label="Time allowance unit" defaultValue={timeQuota.unit}
+                  <Select name="time_quota_unit" aria-label="Online time allowance unit" defaultValue={timeQuota.unit}
                     className="w-28 shrink-0">
                     <option value="hours">hours</option>
                     <option value="days">days</option>

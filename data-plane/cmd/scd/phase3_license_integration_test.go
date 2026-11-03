@@ -38,15 +38,18 @@ func (f *authFixture) attemptResult(t *testing.T, reqID string) string {
 
 func (f *authFixture) grantOffered(t *testing.T, res phase3Response, ip, mac string) (*httptest.ResponseRecorder, phase3GrantResp) {
 	t.Helper()
-	if len(res.Offers) == 0 {
+	// As the portal does: a stay with live access is joined, otherwise the first offer is chosen.
+	body := map[string]any{"auth_context_id": res.AuthContextID, "device": map[string]string{"ip": ip, "mac": mac}}
+	switch {
+	case res.LiveAccess:
+		body["join_live"] = true
+	case len(res.Offers) == 0:
 		t.Fatalf("setup: nothing was offered: %+v", res)
+	default:
+		body["package_revision_id"] = res.Offers[0].PackageRevisionID
 	}
 	rec := httptest.NewRecorder()
-	raw, _ := json.Marshal(map[string]any{
-		"auth_context_id":     res.AuthContextID,
-		"package_revision_id": res.Offers[0].PackageRevisionID,
-		"device":              map[string]string{"ip": ip, "mac": mac},
-	})
+	raw, _ := json.Marshal(body)
 	f.p3.grantHandler(rec, httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(raw)))
 	var out phase3GrantResp
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
@@ -146,8 +149,6 @@ func TestIntegration_Phase3License_CapacityCoversFirstJoinAndRejoin(t *testing.T
 	if first.Outcome != outcomeVerified || first.SessionID == "" {
 		t.Fatalf("the first guest was refused under a free licence slot: %+v", first)
 	}
-
-	// The second device is still offered the held package; choosing it joins the live entitlement.
 
 	// Second device: verified, then refused at the grant with the capacity answer.
 	joinReq := "00001c22-0000-4000-8000-000000000000"

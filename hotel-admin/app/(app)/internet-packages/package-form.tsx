@@ -337,6 +337,11 @@ export function PackageForm({
               {SUPPORTED_END_MODES.map((m) => <option key={m} value={m}>{END_MODE_SHORT[m]}</option>)}
             </Select>
           </div>
+          {duration.end_mode === "MANUAL_END" && (
+            <p className="text-xs text-muted-foreground sm:self-center" data-testid="no-calendar-end">
+              No calendar end: access lasts until the plan&rsquo;s online time or data is used, the stay ends, or staff end it.
+            </p>
+          )}
           {duration.end_mode === "VALIDITY_WINDOW" && (
             <Field label="Hours">
               <Input data-testid="duration-hours" type="number" min={0} step="0.5" value={durationHours}

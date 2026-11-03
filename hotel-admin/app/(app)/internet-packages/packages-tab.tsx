@@ -527,7 +527,7 @@ export function PackagesTab({
                             hint: p.service_plan_revision_no ? `Version ${p.service_plan_revision_no}` : undefined },
                           { label: "Speed share", value: p.speed_allocation === "SHARED" ? "Shared" : "Per device" },
                           { label: "Data allowance", value: formatData(p.data_quota_bytes) },
-                          { label: "Time allowance", value: formatDuration(p.time_quota_seconds) },
+                          { label: "Online time", value: formatDuration(p.time_quota_seconds) },
                           { label: "Devices", value: formatDevices(p.max_concurrent_devices),
                             hint: DEVICE_LIMIT_POLICIES[p.device_limit_policy ?? ""] },
                         ]} />
