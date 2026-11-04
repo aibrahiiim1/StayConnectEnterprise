@@ -64,6 +64,9 @@ var (
 	portalTLSPendingEvery = 30 * time.Second
 	// portalTLSFastPollFor bounds how long an open order is polled at portalTLSPendingEvery.
 	portalTLSFastPollFor = 15 * time.Minute
+	// portalTLSAddressEvery: a usable certificate waiting only for the portal address (netd brings it up after scd at boot) is looked at again
+	// soon, so a reboot does not leave the portal on the HTTP fallback for a full portalTLSEvery.
+	portalTLSAddressEvery = 10 * time.Second
 )
 
 // PortalTLSState is what the rest of scd (OTP links; the social sign-in redirect URIs) and portald learn about
@@ -295,6 +298,18 @@ func (a *portalTLSAgent) Renew() {
 	}
 }
 
+// nextWait is how long the agent sleeps before its next cycle.
+func (a *portalTLSAgent) nextWait() time.Duration {
+	st := a.State()
+	switch {
+	case !st.HTTPSActive && st.FallbackReason == ptReasonAddressNotActive && st.Canonical != "" && st.PortalIP != "":
+		return portalTLSAddressEvery
+	case a.pendingAny:
+		return portalTLSPendingEvery
+	}
+	return portalTLSEvery
+}
+
 func (a *portalTLSAgent) run(ctx context.Context) {
 	force := false
 	for {
@@ -304,11 +319,7 @@ func (a *portalTLSAgent) run(ctx context.Context) {
 		}
 		cancel()
 		force = false
-		wait := portalTLSEvery
-		if a.pendingAny {
-			wait = portalTLSPendingEvery
-		}
-		t := time.NewTimer(wait)
+		t := time.NewTimer(a.nextWait())
 		select {
 		case <-ctx.Done():
 			t.Stop()
