@@ -178,7 +178,8 @@ export function AddConnectionWizard({
 
   function requestClose() {
     if (busy) return;
-    if (touched && !done && !progress.id && !asking) { setAsking(true); return; }
+    // While the prompt shows, another Escape, outside click or close keeps it showing: only Discard discards.
+    if (touched && !done && !progress.id) { setAsking(true); return; }
     onOpenChange(false);
   }
 

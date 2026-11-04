@@ -146,6 +146,19 @@ describe("adding a connection", () => {
     expect(await within(dialog).findByRole("button", { name: "Open the connection" })).toBeTruthy();
   });
 
+  it("never discards what was entered on a repeated dismissal, only on Discard", async () => {
+    mockBackend();
+    await renderPage();
+    const dialog = await openWizard();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Next" }));
+    await userEvent.type(within(dialog).getByLabelText(/^Name/), "Front office");
+    await userEvent.keyboard("{Escape}");
+    expect(await within(dialog).findByText("Discard what you entered for this connection?")).toBeTruthy();
+    await userEvent.keyboard("{Escape}");
+    expect(within(dialog).getByText("Discard what you entered for this connection?")).toBeTruthy();
+    expect(within(dialog).getByLabelText(/^Name/)).toHaveValue("Front office");
+  });
+
   it("leaves a connection paused when it could not be put live, and resumes from that step", async () => {
     mockBackend();
     let publishAttempts = 0;
