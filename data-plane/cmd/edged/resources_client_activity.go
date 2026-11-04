@@ -401,8 +401,7 @@ func (s *server) listClientActivity(w http.ResponseWriter, r *http.Request) {
 	}
 	out.Meta.HasMore = int64(f.Offset+len(out.Data)) < out.Meta.Total
 
-	// Chip counts ignore the chosen category, so every chip shows what it would list.
-	sumBase, sumArgs := clientActivitySQL(f, sc, s.tenantID, s.siteID, false)
+	sumBase, sumArgs := clientActivitySQL(chipCountFilter(f), sc, s.tenantID, s.siteID, false)
 	crow, err := s.db.Query(ctx, sumBase+`
 	SELECT cat, count(*), count(*) FILTER (WHERE sev IN ('warning','error')) FROM u GROUP BY cat`, sumArgs...)
 	if err != nil {
@@ -429,6 +428,12 @@ func (s *server) listClientActivity(w http.ResponseWriter, r *http.Request) {
 	}
 	out.Total, out.PageSize, out.Page = out.Meta.Total, f.Limit, f.Offset/f.Limit+1
 	writeJSON(w, http.StatusOK, out)
+}
+
+// chipCountFilter: the Problems chip and the category chips each replace the other, so chips are counted with neither applied.
+func chipCountFilter(f clientActivityFilter) clientActivityFilter {
+	f.Problems, f.Category = false, ""
+	return f
 }
 
 func boundedSearch(v string) (string, error) {

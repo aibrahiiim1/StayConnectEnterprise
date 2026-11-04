@@ -50,6 +50,15 @@ func TestClientActivityFilterBounds(t *testing.T) {
 	}
 }
 
+func TestChipsCountWhatTheyOpen(t *testing.T) {
+	f := clientFilter(t, "range=7d&problems=1&category=device")
+	f.Q = "412"
+	c := chipCountFilter(f)
+	if c.Problems || c.Category != "" || c.Q != "412" || !c.From.Equal(f.From) || !c.To.Equal(f.To) {
+		t.Fatalf("chip counts keep a filter a chip clears, or drop the search or period: %+v", c)
+	}
+}
+
 func TestClientActivityHidesHotelSourcesOffHotelSites(t *testing.T) {
 	sc := clientActivityScopeFor([]string{"site_admin"}, false)
 	if sc.SignIns || sc.Stays {
