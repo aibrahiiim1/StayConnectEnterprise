@@ -126,7 +126,7 @@ func (s *server) endPackage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The entitlement is ended in the database whatever happens next; the kernel withdrawal is reported exactly as it went.
-	kernel := s.withdrawKernel(r, sessions)
+	kernel := s.withdrawKernel(r, sessions, nil)
 	s.audit(r, "package.ended", "entitlement", id, map[string]any{
 		"reason": in.Reason, "action_id": actionID, "outcome": outcome, "sessions_ended": len(sessions),
 		"devices_disconnected": devices, "kernel": kernel["summary"],
@@ -137,8 +137,9 @@ func (s *server) endPackage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// withdrawKernel asks scd to withdraw the ended sessions' addresses and summarises what it actually confirmed.
-func (s *server) withdrawKernel(r *http.Request, sessions []string) map[string]any {
+// withdrawKernel asks scd to withdraw the ended sessions' addresses and summarises what it actually confirmed. addrs carries the
+// addresses read before an erasure cleared them from the rows.
+func (s *server) withdrawKernel(r *http.Request, sessions []string, addrs map[string]string) map[string]any {
 	out := map[string]any{"requested": len(sessions), "withdrawn": 0, "summary": "nothing to withdraw"}
 	if len(sessions) == 0 {
 		return out
@@ -147,7 +148,11 @@ func (s *server) withdrawKernel(r *http.Request, sessions []string) map[string]a
 		out["summary"] = "not confirmed: the enforcement service is not connected; enforcement withdraws the access from the database on its next pass"
 		return out
 	}
-	code, raw, err := s.scd.call(r.Context(), http.MethodPost, "/v1/admin/sessions/withdraw", map[string]any{"sessions": sessions})
+	body := map[string]any{"sessions": sessions}
+	if len(addrs) > 0 {
+		body["addresses"] = addrs
+	}
+	code, raw, err := s.scd.call(r.Context(), http.MethodPost, "/v1/admin/sessions/withdraw", body)
 	if err != nil || code != http.StatusOK {
 		out["summary"] = "not confirmed: the enforcement service could not be reached; enforcement withdraws the access from the database on its next pass"
 		return out

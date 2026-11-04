@@ -56,3 +56,46 @@ func TestIntegration_PackageWithdrawTouchesOnlyTheEndedPackagesOwnAddresses(t *t
 		t.Fatalf("an empty request = %d", c)
 	}
 }
+
+// An erasure clears an ended session's address in its own transaction; the address the caller read before is used then, and
+// still never one another live session holds.
+func TestIntegration_PackageWithdrawUsesTheAddressSentForAnErasedSession(t *testing.T) {
+	f := newSSFixture(t)
+	ctx := context.Background()
+	erase := func(ent string) {
+		t.Helper()
+		if err := pgx.BeginFunc(ctx, f.owner, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(ctx, `SET LOCAL session_replication_role = replica`); err != nil {
+				return err
+			}
+			_, err := tx.Exec(ctx, `UPDATE iam_v2.sessions SET state='ended', ended=now(), end_reason='ADMIN', ip=NULL, mac=NULL WHERE entitlement_id=$1::uuid`, ent)
+			return err
+		}); err != nil {
+			t.Fatalf("erase: %v", err)
+		}
+	}
+	entA, _, gone := f.seedEntitlementSession(t, f.seedAccount(t, "xa-"+randHex(3)), f.ip(20), "02:aa:00:00:00:20")
+	entB, _, taken := f.seedEntitlementSession(t, f.seedAccount(t, "xb-"+randHex(3)), f.ip(21), "02:aa:00:00:00:21")
+	entC, _, unsent := f.seedEntitlementSession(t, f.seedAccount(t, "xc-"+randHex(3)), f.ip(22), "02:aa:00:00:00:22")
+	erase(entA)
+	erase(entB)
+	erase(entC)
+	f.seedEntitlementSession(t, f.seedAccount(t, "xd-"+randHex(3)), f.ip(21), "02:aa:00:00:00:23")
+
+	code, out := f.post(t, f.s.withdrawEndedSessions, map[string]any{"sessions": []string{gone, taken, unsent},
+		"addresses": map[string]string{gone: f.ip(20), taken: f.ip(21)}})
+	if code != 200 {
+		t.Fatalf("withdraw = %d %v", code, out)
+	}
+	got := map[string]string{}
+	for _, r := range out["results"].([]any) {
+		m := r.(map[string]any)
+		got[m["session"].(string)] = m["state"].(string)
+	}
+	want := map[string]string{gone: "withdrawn", taken: "address_reused", unsent: "no_address"}
+	for id, w := range want {
+		if got[id] != w {
+			t.Fatalf("session %s: %q, want %q (all: %v)", id, got[id], w, got)
+		}
+	}
+}

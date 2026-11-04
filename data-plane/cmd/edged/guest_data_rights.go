@@ -227,9 +227,10 @@ func (s *server) eraseGuestData(w http.ResponseWriter, r *http.Request) {
 	}
 	var packages int
 	var ended []string
+	var addrs map[string]string
 	endOwn := func(tx pgx.Tx) error {
 		var err error
-		packages, ended, err = s.endOwnAccessForErasure(ctx, tx, in.Kind, in.ID, opID)
+		packages, ended, addrs, err = s.endOwnAccessForErasure(ctx, tx, in.Kind, in.ID, opID)
 		return err
 	}
 	err := s.ledgerQueryAfter(ctx, endOwn, &res, `SELECT public.guest_data_erase($1::uuid,$2::uuid,$3,$4::uuid,$5,$6)`,
@@ -250,7 +251,7 @@ func (s *server) eraseGuestData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The access was ended in the erasure's own transaction; this only takes the devices off the network at once.
-	kernel := s.withdrawKernel(r, ended)
+	kernel := s.withdrawKernel(r, ended, addrs)
 	res.PackagesEnded, res.SessionsEnded = packages, len(ended)
 	s.audit(r, "guest_data.erased", "guest_data_erasure", res.Ref, map[string]any{
 		"subject_kind": in.Kind, "reason": in.Reason, "counts": res.Counts,
@@ -263,34 +264,55 @@ const erasureEndReason = "Ended to erase the guest's data"
 
 // endOwnAccessForErasure ends, through the staff End Package writer, the access whose subject is the account or identity being
 // erased: its own entitlements and their sessions. A room's access belongs to everyone in the room and is never ended here
-// (0145); a stay therefore stays refused while its room access runs. Returns the packages ended and the sessions they ended.
-func (s *server) endOwnAccessForErasure(ctx context.Context, tx pgx.Tx, kind, id, operator string) (int, []string, error) {
+// (0145); a stay therefore stays refused while its room access runs. Returns the packages ended, the sessions they ended and those
+// sessions' addresses, read before the erasure clears them so the devices can be withdrawn at once; they are kept in memory only.
+func (s *server) endOwnAccessForErasure(ctx context.Context, tx pgx.Tx, kind, id, operator string) (int, []string, map[string]string, error) {
 	col := map[string]string{"account": "guest_account_id", "principal": "guest_principal_id"}[kind]
 	if col == "" {
-		return 0, nil, nil
+		return 0, nil, nil, nil
 	}
 	rows, err := tx.Query(ctx, `SELECT id::text FROM iam_v2.entitlements
 	     WHERE tenant_id=$1 AND site_id=$2 AND `+col+`=$3::uuid AND status <> 'TERMINATED' ORDER BY id`, s.tenantID, s.siteID, id)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, nil, err
 	}
 	ents, err := pgx.CollectRows(rows, pgx.RowTo[string])
 	if err != nil || len(ents) == 0 {
-		return 0, nil, err
+		return 0, nil, nil, err
 	}
 	if !uuidRe.MatchString(operator) {
-		return 0, nil, errors.New("the erasure could not be attributed to an operator")
+		return 0, nil, nil, errors.New("the erasure could not be attributed to an operator")
 	}
 	var ended []string
 	for _, ent := range ents {
 		var sessions []string
 		if err := tx.QueryRow(ctx, `SELECT sessions::text[] FROM iam_v2.admin_end_package($1,$2,$3::uuid,$4::uuid,$5,gen_random_uuid())`,
 			s.tenantID, s.siteID, ent, operator, erasureEndReason).Scan(&sessions); err != nil {
-			return 0, nil, err
+			return 0, nil, nil, err
 		}
 		ended = append(ended, sessions...)
 	}
-	return len(ents), ended, nil
+	addrs := map[string]string{}
+	if len(ended) > 0 {
+		rows, err := tx.Query(ctx, `SELECT id::text, host(ip) FROM iam_v2.sessions
+		     WHERE tenant_id=$1 AND site_id=$2 AND id = ANY($3::uuid[]) AND ip IS NOT NULL`, s.tenantID, s.siteID, ended)
+		if err != nil {
+			return 0, nil, nil, err
+		}
+		for rows.Next() {
+			var sid, ip string
+			if err := rows.Scan(&sid, &ip); err != nil {
+				rows.Close()
+				return 0, nil, nil, err
+			}
+			addrs[sid] = ip
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return 0, nil, nil, err
+		}
+	}
+	return len(ents), ended, addrs, nil
 }
 
 // writeGuestDataLive answers a refusal the database gave with its reasons (55006): the guest is still live, the

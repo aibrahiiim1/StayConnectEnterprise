@@ -152,8 +152,25 @@ func TestIntegration_GuestDataRights_FindExportErase(t *testing.T) {
 
 	// An authorised erasure of a guest who is online ends their own access and disconnects them, then erases.
 	liveEmail := "live-" + sfx + "@example.com"
-	liveAcct, _, _ := seedAccountWithSessions(t, f, liveEmail, 0, "10.88.0.11")
+	liveAcct, _, liveSess := seedAccountWithSessions(t, f, liveEmail, 0, "10.88.0.11")
+	// Self-registered: its device is the person's own, so the erasure clears the session's address too.
+	if _, err := f.pool.Exec(ctx, `UPDATE iam_v2.guest_access_accounts SET self_registered = true, email_verified_at = now() WHERE id=$1`, liveAcct); err != nil {
+		t.Fatalf("mark self-registered: %v", err)
+	}
+	scd, rec := fakeLedgerSCD(t)
+	f.app.scd = scd
 	st, body = f.do(t, "POST", "/guest-data-rights/erase", req("account", liveAcct, "guest asked", f.password))
+	f.app.scd = nil
+	// The erasure clears the session's address, so the withdrawal carries the one read before it, from memory only.
+	if c := rec.last("/v1/admin/sessions/withdraw"); c == nil ||
+		fmt.Sprint(c.Body["addresses"]) != fmt.Sprint(map[string]any{liveSess[0].id: "10.88.0.11"}) {
+		t.Fatalf("the erased guest's device was not withdrawn by its address: %+v", c)
+	}
+	var keptIP string
+	_ = f.pool.QueryRow(ctx, `SELECT COALESCE(host(ip),'') FROM iam_v2.sessions WHERE id=$1::uuid`, liveSess[0].id).Scan(&keptIP)
+	if keptIP != "" {
+		t.Fatalf("the erased session kept its address %q", keptIP)
+	}
 	if st != 200 || body["packages_ended"] != float64(1) || body["sessions_ended"] != float64(1) {
 		t.Fatalf("erasing an online guest = %d %v, want 200 with one package and one session ended", st, body)
 	}
