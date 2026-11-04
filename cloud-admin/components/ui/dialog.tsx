@@ -199,7 +199,8 @@ export function DialogForm({
 
   const requestClose = () => {
     if (busy) return;
-    if (unsaved && !asking) { setAsking(true); return; }
+    // While the prompt shows, another Escape, outside click or close keeps it showing: only Discard changes discards.
+    if (unsaved) { setAsking(true); return; }
     onOpenChange(false);
   };
 
