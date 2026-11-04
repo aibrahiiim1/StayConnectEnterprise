@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `567bddd41a0b8386c13279815bbf128a3ac7d99f`
-- **HEAD commit:** `24bdfc57`
-- **Provenance (generation HEAD = inventory_head):** `24bdfc57cc13e20f9a015786b1beb66b88c24464`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `2115b1c3`
+- **Provenance (generation HEAD = inventory_head):** `2115b1c3ff4097fc4ad8a2c043fca6f7d3ce4224`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/client-activity`
 - **Remote branch:** `origin/delivery/client-activity`
 - **Changed files:** 50
@@ -13,10 +13,10 @@
 | Path | Classification | Git status | Domain | Workstream | Rollback | Purpose (last commit subject in range) |
 |---|---|---|---|---|---|---|
 | `data-plane/cmd/edged/client_activity_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Client activity: anchored paging window; staff actions on accounts name the account |
-| `data-plane/cmd/edged/client_activity_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Client activity: pauses come from history, not the overwritten restriction row |
+| `data-plane/cmd/edged/client_activity_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Client activity: check-outs from the check-out messages; sign-in releases carry the device |
 | `data-plane/cmd/edged/commerce_activity_test.go` | MODIFIED | `M` | tests/tooling | RUNTIME | rollback RESTORES prior content | After check-out refusal is recorded as AFTER_CHECKOUT_NEW_DEVICE_REJECTED |
 | `data-plane/cmd/edged/guest_data_reads.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | After check-out refusal is recorded as AFTER_CHECKOUT_NEW_DEVICE_REJECTED |
-| `data-plane/cmd/edged/resources_client_activity.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Client activity: pauses come from history, not the overwritten restriction row |
+| `data-plane/cmd/edged/resources_client_activity.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Client activity: check-outs from the check-out messages; sign-in releases carry the device |
 | `data-plane/cmd/edged/resources_sessions.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Client activity: one timeline of everything that happens to clients |
 | `data-plane/cmd/portald/languages_pages.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | After check-out refusal is recorded as AFTER_CHECKOUT_NEW_DEVICE_REJECTED |
 | `data-plane/cmd/portald/pms_phase3.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | After check-out refusal is recorded as AFTER_CHECKOUT_NEW_DEVICE_REJECTED |
@@ -66,10 +66,10 @@
 ## Total diff statistics (`git diff --stat`)
 ```text
  .../cmd/edged/client_activity_integration_test.go  |  49 +++
- data-plane/cmd/edged/client_activity_test.go       | 123 ++++++
+ data-plane/cmd/edged/client_activity_test.go       | 131 ++++++
  data-plane/cmd/edged/commerce_activity_test.go     |   8 +-
  data-plane/cmd/edged/guest_data_reads.go           |   1 +
- data-plane/cmd/edged/resources_client_activity.go  | 434 +++++++++++++++++++++
+ data-plane/cmd/edged/resources_client_activity.go  | 438 +++++++++++++++++++++
  data-plane/cmd/edged/resources_sessions.go         |   1 +
  data-plane/cmd/portald/languages_pages.go          |   6 +
  data-plane/cmd/portald/pms_phase3.go               |   4 +
@@ -86,7 +86,7 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   4 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   4 +-
  docs/context/StayConnect-IAM-Handoff.md            |   4 +-
- .../ClientActivity20261104-change-manifest.md      | 136 +++++++
+ .../ClientActivity20261104-change-manifest.md      | 138 +++++++
  docs/user-guide/hotel-admin-reference.md           |  16 +
  .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 354528 -> 354535 bytes
  .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 178846 -> 179250 bytes
@@ -115,7 +115,7 @@
  hotel-admin/lib/client-activity-words.ts           | 118 ++++++
  hotel-admin/test/client-activity-words.test.ts     |  22 ++
  hotel-admin/test/signin-result-labels.test.ts      |   4 +
- 50 files changed, 1524 insertions(+), 96 deletions(-)
+ 50 files changed, 1538 insertions(+), 96 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -125,6 +125,8 @@ M  docs/manifests/ClientActivity20261104-change-manifest.md
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 2115b1c3 Client activity: check-outs from the check-out messages; sign-in releases carry the device
+HISTORICAL: 223958b4 Governance: manifest regenerated for the delivery head
 HISTORICAL: 24bdfc57 Client activity: pauses come from history, not the overwritten restriction row
 HISTORICAL: bc90394d Governance: manifest regenerated for the delivery head
 HISTORICAL: 6352042f Client activity: anchored paging window; staff actions on accounts name the account
