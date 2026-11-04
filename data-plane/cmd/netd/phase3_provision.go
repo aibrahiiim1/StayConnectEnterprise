@@ -466,11 +466,11 @@ func (p *phase3Shaping) regroup(ctx context.Context, bridge string, ip net.IP, m
 		return regroupNone, ""
 	}
 	// Bounded per pass so a bulk move cannot overrun the pass and starve renewals; the rest move on the next pass (the fast path stays off).
+	// Only a completed move counts: a device whose denial or removal keeps failing must not hold up everyone else's move.
 	if p.passRegroups >= maxRegroupsPerPass {
 		p.passRegroupsDeferred++
 		return regroupNone, ""
 	}
-	p.passRegroups++
 	// Fail closed: without its class the device would forward unshaped and uncounted, so it is denied first; the rebuild re-admits it once shaped.
 	if err := p.denyAccess(ctx, bridge, ip); err != nil {
 		return regroupFailed, "its access could not be withdrawn before its class is moved, so the class is kept as it is: " + err.Error()
@@ -483,6 +483,7 @@ func (p *phase3Shaping) regroup(ctx context.Context, bridge string, ip net.IP, m
 		// Still denied; the next pass deletes and rebuilds it.
 		return regroupFailed, "its old class could not be removed, so it stays denied until the next pass: " + err.Error()
 	}
+	p.passRegroups++
 	if p.passClasses != nil {
 		delete(p.passClasses, bridge)
 		delete(p.passClasses, shape.IFBName(bridge))

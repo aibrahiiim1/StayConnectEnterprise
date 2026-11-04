@@ -162,6 +162,40 @@ func TestSpeedAllocation_AMoveFromPerDeviceIntoAGroupIsImmediate(t *testing.T) {
 	}
 }
 
+// Devices whose moves keep failing do not use up the per-pass budget: another device's move still happens in the same pass.
+func TestSpeedAllocation_FailingMovesDoNotStarveOtherMoves(t *testing.T) {
+	tc, g := newFakeTC(), newFakeGate()
+	tc.reportParents = true
+	var ips []string
+	for i := 10; i < 20; i++ {
+		ips = append(ips, fmt.Sprintf("10.0.0.%d", i))
+	}
+	p := allocWriter(t, tc, g, append(ips, "10.0.0.9")...)
+	sessions := make([]shapeplan.Session, len(ips))
+	for i, ip := range ips {
+		sessions[i] = allocSession(fmt.Sprintf("s%d", i), ip, fmt.Sprintf("old-%d", i), "SHARED")
+	}
+	t0 := time.Now()
+	if _, err := p.submit(context.Background(), envelope(1, withBulkHolder(sessions)...), t0); err != nil {
+		t.Fatal(err)
+	}
+	g.mu.Lock()
+	for _, ip := range ips[:9] {
+		g.failRevoke[ip] = true
+	}
+	g.mu.Unlock()
+	for i := range sessions {
+		sessions[i].EntitlementID = "new"
+	}
+	if _, err := p.submit(context.Background(), envelope(2, withBulkHolder(sessions)...), t0.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	last := ips[9]
+	if tc.parentOf("br-guest", last) != shape.GroupClassid("new") || !g.isAuthorized("br-guest", last) {
+		t.Fatalf("%s did not move in the pass where nine other moves failed", last)
+	}
+}
+
 // A move whose old class cannot be removed leaves the device denied (never unshaped), reports it, and completes on the next pass.
 func TestSpeedAllocation_AMoveThatCannotRemoveTheOldClassStaysDeniedAndIsRetried(t *testing.T) {
 	tc, g := newFakeTC(), newFakeGate()
