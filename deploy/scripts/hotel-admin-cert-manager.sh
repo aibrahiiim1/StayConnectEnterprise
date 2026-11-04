@@ -271,7 +271,7 @@ health_check(){ # ip expected_serial
   [ -e "${HA_CONSOLE_LINK:-/opt/stayconnect/hotel-admin}" ] || { echo "$fail"; return 0; }
   for pair in "--resolve $DNS_SAN:443:127.0.0.1|https://$DNS_SAN" "|https://$ip"; do
     local rz="${pair%%|*}" b="${pair##*|}"
-    [ "$(curl -s $rz --cacert "$root" -o /dev/null -w '%{http_code}' "$b/icon.svg")" = "200" ] || fail="$fail static($b)"
+    [ "$(curl -s $rz --cacert "$root" -o /dev/null -w '%{http_code}' "$b/favicon.svg")" = "200" ] || fail="$fail static($b)"
     [ "$(curl -s $rz --cacert "$root" -o /dev/null -w '%{http_code}' "$b/")" = "307" ] || fail="$fail redirect($b)"
     local lc; lc="$(curl -s $rz --cacert "$root" -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' "$b/api/edge/v1/auth/login")"
     [ "$lc" = "401" ] || [ "$lc" = "400" ] || fail="$fail loginproxy($b=$lc)"

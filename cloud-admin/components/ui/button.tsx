@@ -2,8 +2,8 @@
 import * as React from "react";
 import Link from "next/link";
 import { cva, type VariantProps } from "class-variance-authority";
-import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { OneGateLoader } from "@/components/brand";
 
 const buttonVariants = cva(
   cn(
@@ -64,7 +64,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
       className={cn(buttonVariants({ variant, size }), className)}
       {...props}
     >
-      {loading && <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden />}
+      {loading && <OneGateLoader tone="current" />}
       {children}
     </button>
   );

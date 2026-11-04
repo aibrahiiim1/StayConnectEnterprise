@@ -477,15 +477,18 @@ const (
 	accountResetPath  = "/account/reset"
 )
 
+// onSiteWiFi is said before every link: the link opens the property's own portal, which answers only on its Wi-Fi network.
+const onSiteWiFi = "The link works only while your device is connected to this property's Wi-Fi network, not on mobile data or another network.\n\n"
+
 func accountEmailMessage(purpose, to, link string, deadline *time.Time) mail.Message {
 	if purpose == tokenPurposeReset {
 		return mail.Message{To: to, Subject: "Reset your Wi-Fi account password",
-			Text: "Someone asked to reset the password of the Wi-Fi account for this address.\n\n" +
-				"To choose a new password, open this link within 30 minutes and follow the steps:\n" + link + "\n\n" +
+			Text: "Someone asked to reset the password of the Wi-Fi account for this address.\n\n" + onSiteWiFi +
+				"Connect to the Wi-Fi, then open this link within 30 minutes and follow the steps:\n" + link + "\n\n" +
 				"If you did not ask for this, ignore this message: your password has not changed."}
 	}
-	text := "Please confirm this email address for your Wi-Fi account.\n\n" +
-		"Open this link and press Verify:\n" + link + "\n\n"
+	text := "Please confirm this email address for your Wi-Fi account.\n\n" + onSiteWiFi +
+		"Connect to the Wi-Fi, then open this link and press Verify:\n" + link + "\n\n"
 	if deadline != nil {
 		text += "Verify before " + deadline.UTC().Format("2006-01-02 15:04 UTC") + " to keep your Internet access.\n\n"
 	}

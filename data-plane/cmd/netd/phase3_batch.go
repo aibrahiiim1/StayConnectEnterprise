@@ -602,7 +602,7 @@ func (p *phase3Shaping) tearBatch(ctx context.Context, items []tearItem, stillTo
 // rate). Anything it cannot establish is "no", which re-rates as before.
 func (p *phase3Shaping) installedMatchesPlan(ctx context.Context, bridge string, minor int, s shapeplan.Session, groupCid string) bool {
 	if groupCid != "" {
-		return false
+		return p.sharedMatchesPlan(ctx, bridge, minor, s, groupCid)
 	}
 	down, err := p.readClassesForPass(ctx, bridge)
 	if err != nil {
@@ -620,6 +620,56 @@ func (p *phase3Shaping) installedMatchesPlan(ctx context.Context, bridge string,
 		u.RateKbit == s.UpKbps && u.CeilKbit == s.UpKbps
 }
 
+// groupReader is a shaper that can read SHARED group classes; without it a SHARED session always takes the per-session path.
+type groupReader interface {
+	ReadGroupClasses(ctx context.Context, device string) (map[int]shape.ClassBytes, error)
+}
+
+// sharedMatchesPlan: the session's class is under its own group at the floor and plan ceiling, and the group itself is at the plan rate, on both devices.
+func (p *phase3Shaping) sharedMatchesPlan(ctx context.Context, bridge string, minor int, s shapeplan.Session, groupCid string) bool {
+	gr, ok := p.shp.(groupReader)
+	gminor, gok := shape.GroupMinorFor(s.EntitlementID)
+	if !ok || !gok || s.DownKbps <= 0 || s.UpKbps <= 0 {
+		return false
+	}
+	for _, dev := range []struct {
+		name string
+		kbps int
+	}{{bridge, s.DownKbps}, {shape.IFBName(bridge), s.UpKbps}} {
+		leaves, err := p.readClassesForPass(ctx, dev.name)
+		if err != nil {
+			return false
+		}
+		groups, err := p.readGroupClassesForPass(ctx, gr, dev.name)
+		if err != nil {
+			return false
+		}
+		floor, ceil := shape.SharedLeafRates(dev.kbps)
+		l, lok := leaves[minor]
+		g, gfound := groups[gminor]
+		if !lok || !gfound || !l.Params || !g.Params || l.Parent != groupCid || l.RateKbit != floor || l.CeilKbit != ceil ||
+			g.Parent != shape.RootParent || g.RateKbit != dev.kbps || g.CeilKbit != dev.kbps {
+			return false
+		}
+	}
+	return true
+}
+
+// readGroupClassesForPass caches group classes per device for the SHAPE step, like readClassesForPass; a failed read is never cached.
+func (p *phase3Shaping) readGroupClassesForPass(ctx context.Context, gr groupReader, device string) (map[int]shape.ClassBytes, error) {
+	if c, ok := p.passGroupClasses[device]; ok && p.passGroupClasses != nil {
+		return c, nil
+	}
+	c, err := gr.ReadGroupClasses(ctx, device)
+	if err != nil {
+		return nil, err
+	}
+	if p.passGroupClasses != nil {
+		p.passGroupClasses[device] = c
+	}
+	return c, nil
+}
+
 type workKind int
 
 const (
@@ -630,11 +680,17 @@ const (
 
 func (p *phase3Shaping) classifySession(ctx context.Context, bridge string, minor int, s shapeplan.Session) workKind {
 	// The reason a session takes the per-session path is counted in the pass line (ind_*), so a pass that spends its time there says why.
+	key := classKey(bridge, s.SessionID)
 	if s.SpeedAllocation == speedAllocationShared {
+		// Unchanged and already under its own group: routine. New, moved or re-rated SHARED sessions keep the per-session path.
+		_, active := p.epochs[key]
+		_, held := p.classes[key]
+		if p.quarantined[key] == nil && active && held && p.installedMatchesPlan(ctx, bridge, minor, s, shape.GroupClassid(s.EntitlementID)) {
+			return workSteady
+		}
 		p.count("ind_shared", 1)
 		return workIndividual
 	}
-	key := classKey(bridge, s.SessionID)
 	if p.quarantined[key] != nil {
 		p.count("ind_quarantined", 1)
 		return workIndividual

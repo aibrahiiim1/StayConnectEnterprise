@@ -10,6 +10,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/onegate/onegate/data-plane/internal/ledger"
@@ -111,6 +112,11 @@ func (l *scdLedger) Abort(ctx context.Context, e []ledger.Entry) error {
 // ledgerQuery runs one ledger-writing statement, committing only after the entries are durable in both copies.
 // Database errors are returned unchanged; a ledger failure is a *ledgerRefusal.
 func (s *server) ledgerQuery(ctx context.Context, dest any, sql string, args ...any) error {
+	return s.ledgerQueryAfter(ctx, nil, dest, sql, args...)
+}
+
+// ledgerQueryAfter runs before in the same transaction first, so a refusal or ledger failure undoes it too.
+func (s *server) ledgerQueryAfter(ctx context.Context, before func(pgx.Tx) error, dest any, sql string, args ...any) error {
 	if s.ledgerC == nil {
 		return &ledgerRefusal{http.StatusServiceUnavailable, "ledger_unavailable", "The erasure ledger is not available on this appliance, so nothing was erased."}
 	}
@@ -126,6 +132,11 @@ func (s *server) ledgerQuery(ctx context.Context, dest any, sql string, args ...
 	// fail an erasure that merely queued behind it. Waiting is safe: nothing has changed yet.
 	if _, err := tx.Exec(ctx, `SET LOCAL lock_timeout = '45s'`); err != nil {
 		return err
+	}
+	if before != nil {
+		if err := before(tx); err != nil {
+			return asLedgerBusy(err)
+		}
 	}
 	if err := tx.QueryRow(ctx, sql, args...).Scan(dest); err != nil {
 		return asLedgerBusy(err)

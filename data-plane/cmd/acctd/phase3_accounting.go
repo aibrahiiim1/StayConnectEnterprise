@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/onegate/onegate/data-plane/internal/shape"
+	"github.com/onegate/onegate/data-plane/internal/shapeplan"
 )
 
 // Degradation reasons are fixed phrases so no error text, SQL or identifier can reach a health reader.
@@ -186,6 +187,7 @@ func (p *phase3) accountingPass(ctx context.Context, rd counterReader, ep epochS
 		}
 	}
 	p.lastIngested = next
+	p.publishStored(next)
 	p.acctDegraded = degraded
 	if degraded == "" {
 		p.lastPassOK = now
@@ -238,6 +240,27 @@ func (p *phase3) accountingHealth(now time.Time) map[string]any {
 
 // ingestMark is the last observation the database accepted for a session; an identical one is a replay and is not sent again.
 type ingestMark struct{ epoch, up, down int64 }
+
+func (p *phase3) publishStored(m map[string]ingestMark) {
+	cp := make(map[string]ingestMark, len(m))
+	for k, v := range m {
+		cp[k] = v
+	}
+	p.storedMu.Lock()
+	p.stored = cp
+	p.storedMu.Unlock()
+}
+
+// stampStored writes the stored counters onto the plan's sessions (shapeplan.Session.Observed*).
+func (p *phase3) stampStored(sessions []shapeplan.Session) {
+	p.storedMu.Lock()
+	defer p.storedMu.Unlock()
+	for i := range sessions {
+		if m, ok := p.stored[sessions[i].SessionID]; ok {
+			sessions[i].ObservedEpoch, sessions[i].ObservedUp, sessions[i].ObservedDown = m.epoch, m.up, m.down
+		}
+	}
+}
 
 type ingestItem struct {
 	s               phase3Session

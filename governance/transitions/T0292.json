@@ -1,0 +1,36 @@
+{
+  "transition_id": "T0292",
+  "seq": 292,
+  "timestamp": "2026-11-03T20:35:25+02:00",
+  "timestamp_derivation": "Read from the workstation clock (UTC+02:00) by the script that wrote this receipt, immediately before the commit that introduces it.",
+  "record_type": "ONETIME_FULLSTAY_MIGRATION_AND_NETD_REGROUP",
+  "authorisation": "The Product Owner's explicit approval of 2026-11-03 to migrate the stays that paid for Full Stay on the hotel's previous system to Full Stay as zero-price administrative grants (backend change, testing, test-appliance deployment and the matched stay updates), with zero PMS posting, room charge, payment or new customer charge, sessions preserved and Full Stay kept off public sale. Merge awaits the Product Owner.",
+  "delivery": "scripts/sql/onetime-fullstay-grant.sql: staff Reset Package (0202) granting another package, loaded into pg_temp so nothing is added to the schema; onetime-fullstay-run.sql matches the room list (passed in, never committed) against in-house stays of one PMS interface and grants one stay per transaction. netd: a SHARED class left under another entitlement's group is rebuilt under its own group (HTB cannot re-parent; `tc class change` kept the old parent, so moved sessions stayed at the old rate and were re-rated every pass), at most eight per pass.",
+  "operation": "Run on the test appliance with the committed scripts (hashes matched cea43e0e). The 100-room list was matched to CACsite2 (the hotel behind VLAN 95; the other interface holds the same room numbers and none of its stays in the list had access). 87 stays granted: 74 switched from an ACTIVE Free entitlement (248 devices and 216 live sessions moved, none disconnected by the switch), 13 granted with no live access (their first room sign-in joins it). 13 skipped and reported: 8 arrived on the cut-over day, 4 had no in-house CACsite2 stay, 1 had two. A full database dump was taken before the run and kept on the appliance (root only).",
+  "verification": "Database: 87 Full Stay entitlements ACTIVE with no data cap, exactly one live entitlement per stay, 74 Free entitlements SUPERSEDED, 87 zero-price ADMIN_GRANT purchases with no quote, no session left on Free, 87 audit rows, Full Stay ('fullstay') still off sale. Money: the migrated stays hold 161 zero-price and 0 charged purchases; the run added no quote, settlement, posting, payment or charged purchase. Enforcement: after the netd fix 213 of 214 moved sessions run under Full Stay's 10 Mbit groups, netd passes 0 failures and every open session is in the gate. Tests: new scd integration test of the grant (switch with the session kept, grant then join, refusal, repeat, zero money rows) and two netd tests (a moved session joins its group; a bulk move is spread over passes with every session shaped and authorised); netd and shape packages pass on Linux; the moved-session test fails without the fix.",
+  "findings": "1) The first netd build rebuilt all moved classes in the same passes; passes slowed to about 15 s and part of VLAN 95 lost its gate entries for about two minutes (18:23-18:25 UTC) until the rebuild finished; the per-pass cap (4d2b6655) prevents it, and its restart kept every session in the gate. 2) A second public Full Stay package (another code, USD 10.00, room charge) was published from the Admin Console at 17:45 UTC with the shared operator account, and one non-migrated guest bought it (one CHARGE posting); not part of this operation and not changed. 3) SHARED group class ids are a hash of the entitlement id into 4,096 minors, so concurrent entitlements can share one group (one migrated stay is affected); not changed.",
+  "deployment": {
+    "test_appliance": "172.21.96.97: netd from 4d2b6655981b13d0e77a97957700745719a7a05c (read back: -tags=stayconnect_production, vcs.modified=false; backups netd.bak-pre-00adf85b-20261103T182321Z and netd.bak-pre-4d2b6655-20261103T183213Z; DEPLOYED_BINARIES.sha256 updated and checked). scd, portald, edged and the Admin Console unchanged.",
+    "central": "Not changed."
+  },
+  "not_touched": "PMS configuration and posting, payment providers, prices, the Free and Full Stay package definitions, After Check-out terms, networking, licences, the production Central.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "6e3a88a048f77f388a2969197d279bfa1f5d4e6b",
+  "previous_delivery": "T0291",
+  "decision": "none (Product Owner-approved one-time operation)",
+  "go_live": "NOT authorised."
+}

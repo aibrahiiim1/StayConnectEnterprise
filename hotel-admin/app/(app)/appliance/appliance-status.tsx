@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  CheckCircle2, ChevronDown, CircleDashed, Download, Loader2, RefreshCw, ServerCog, ShieldCheck, Upload, Unplug,
+  CheckCircle2, ChevronDown, CircleDashed, Download, RefreshCw, ServerCog, ShieldCheck, Upload, Unplug,
   XCircle, Cloud } from "lucide-react";
 import { api, ApiError, CentralRefresh, CentralStatus, } from "@/lib/api";
 import { Card, SectionCard } from "@/components/ui/card";
@@ -22,6 +22,7 @@ import { usePoll } from "@/lib/use-poll";
 import { errMsg, formatRelative } from "@/lib/utils";
 import { useOperatorRoles } from "@/lib/whoami-context";
 import { LicenceClockReset } from "./licence-clock-reset";
+import { OneGateLoader } from "@/components/brand";
 
 type Tone = "ok" | "warn" | "err" | "default" | "info";
 
@@ -166,7 +167,7 @@ function StateIcon({ tone }: { tone: Tone }) {
   const cls = "size-5 shrink-0";
   if (tone === "ok") return <CheckCircle2 className={`${cls} text-success`} aria-hidden />;
   if (tone === "err") return <XCircle className={`${cls} text-destructive`} aria-hidden />;
-  if (tone === "info") return <Loader2 className={`${cls} animate-spin text-primary motion-reduce:animate-none`} aria-hidden />;
+  if (tone === "info") return <OneGateLoader className={cls} />;
   return <CircleDashed className={`${cls} text-warning`} aria-hidden />;
 }
 
@@ -303,7 +304,7 @@ export function ApplianceStatus({ header }: { header?: (actions: React.ReactNode
       <LiveStatus updatedAt={updatedAt} intervalSeconds={(activating ? POLL_ACTIVATING_MS : POLL_MS) / 1000}
         error={!!err} onRefresh={() => void load()} />
       <Button variant="secondary" onClick={() => void checkNow()} disabled={checking}>
-        {checking ? <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden /> : <RefreshCw aria-hidden />}
+        {checking ? <OneGateLoader tone="current" /> : <RefreshCw aria-hidden />}
         {checking ? "Checking…" : "Check now"}
       </Button>
     </>

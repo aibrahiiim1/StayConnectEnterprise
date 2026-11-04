@@ -1,20 +1,9 @@
-// Bytes as a hotel reads them: binary units (quotas are written in them), one decimal, no rounding that crosses a
-// threshold.
+import { formatBytes as decimalBytes } from "./utils";
 
-const UNITS = ["B", "KB", "MB", "GB", "TB"] as const;
-
+// Decimal units everywhere (1 GB = 1,000,000,000 bytes), as allowances are entered.
 export function formatBytes(n: number | null | undefined): string {
   if (n === null || n === undefined) return "—";
-  if (n === 0) return "0 B";
-  let v = Math.abs(n);
-  let i = 0;
-  while (v >= 1024 && i < UNITS.length - 1) {
-    v /= 1024;
-    i++;
-  }
-  // Whole numbers below a kilobyte; one decimal above, which is the precision a guest's own device reports.
-  const s = i === 0 ? String(Math.round(v)) : v.toFixed(v >= 100 ? 0 : 1);
-  return `${n < 0 ? "-" : ""}${s} ${UNITS[i]}`;
+  return decimalBytes(n);
 }
 
 /** How much of an allowance has been used, or null when there was no allowance to use. */

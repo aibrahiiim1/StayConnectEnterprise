@@ -58,7 +58,7 @@ function health(n: NotificationProvider): { tone: "ok" | "err" | "default"; labe
     return { tone: "err", label: "Failing", detail: n.last_error ?? undefined };
   }
   if (n.last_success_at) return { tone: "ok", label: "Sending" };
-  return { tone: "default", label: "Never used" };
+  return { tone: "default", label: "Not tested yet" };
 }
 
 type FormState = {
@@ -229,7 +229,7 @@ export default function NotificationsPage() {
   }
 
   const secretLabel =
-    f.kind === "smtp" ? "Password"
+    f.kind === "smtp" ? "Login password"
       : f.kind === "meta_whatsapp" ? "Access token"
         : f.kind === "twilio_whatsapp" || f.kind === "twilio" ? "Auth token"
           : "API key";
@@ -290,7 +290,7 @@ export default function NotificationsPage() {
           ) : (
             <Table label="Senders">
               <THead>
-                <TR><TH>Sender</TH><TH className="hidden md:table-cell">Service</TH><TH className="hidden lg:table-cell">Sends as</TH><TH>Health</TH><TH>Offered</TH><TH><span className="sr-only">Actions</span></TH></TR>
+                <TR><TH>Sender</TH><TH className="hidden md:table-cell">Service</TH><TH className="hidden lg:table-cell">Sends as</TH><TH>Health</TH><TH>Status</TH><TH><span className="sr-only">Actions</span></TH></TR>
               </THead>
               <TBody>
                 {rows.map((n) => {
@@ -327,7 +327,7 @@ export default function NotificationsPage() {
                         )}
                       </TD>
                       <TD nowrap>
-                        {n.enabled ? <Badge tone="ok">In use</Badge> : <Badge tone="default">Off</Badge>}
+                        {n.enabled ? <Badge tone="ok">Active</Badge> : <Badge tone="default">Off</Badge>}
                       </TD>
                       <TD className="w-0">
                         {writable && (
@@ -358,7 +358,7 @@ export default function NotificationsPage() {
         busy={busy}
         error={formErr}
         disabled={pw === ""}
-        disabledReason="Enter your password to save."
+        disabledReason="Enter your Admin Console password to save."
         onSubmit={onSubmit}
       >
         <QuietHints>
@@ -413,13 +413,15 @@ export default function NotificationsPage() {
           )}
           <Field
             label={secretLabel}
-            hint={mode === "edit"
+            hint={(f.kind === "smtp" ? "The mail server's password, not your Admin Console password. " : "") + (mode === "edit"
               ? "Leave blank to keep the one already stored."
-              : f.kind === "smtp" ? "Required when a username is set. Stored write-only." : "From the service's console. Stored write-only."}
+              : f.kind === "smtp" ? "Required when a username is set. Stored write-only." : "From the service's console. Stored write-only.")}
           >
             <Input
               type="password"
-              autoComplete="off"
+              // new-password: a browser must never fill the saved Admin Console login into the sender's secret.
+              autoComplete="new-password"
+              name="sender-secret"
               value={f.api_key}
               onChange={(e) => set("api_key", e.target.value)}
               placeholder={mode === "edit" ? "Unchanged" : ""}
@@ -495,8 +497,8 @@ export default function NotificationsPage() {
           </div>
           <Switch checked={f.enabled} onCheckedChange={(v) => set("enabled", v)} label="Use this sender" />
         </div>
-        <Field label="Your password" required hint="Confirms the change. It is not stored.">
-          <Input type="password" autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} />
+        <Field label="Your Admin Console password" required hint="Every change to a sender is confirmed with the password you sign in with. It is not stored.">
+          <Input type="password" autoComplete="current-password" name="admin-confirm-password" value={pw} onChange={(e) => setPw(e.target.value)} />
         </Field>
         </QuietHints>
       </DialogForm>

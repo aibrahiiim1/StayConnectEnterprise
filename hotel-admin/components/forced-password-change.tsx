@@ -16,9 +16,7 @@ export function ForcedPasswordChange({ email, onChanged, onLogout }: {
   return (
     <div className="flex min-h-screen flex-col bg-background">
       <div className="flex items-center justify-between p-4 sm:p-6">
-        <span className="inline-flex items-center rounded-lg bg-white px-3 py-1.5 shadow-control ring-1 ring-black/5">
-          <OneGateWordmark className="text-[1.25rem]" />
-        </span>
+        <OneGateWordmark className="h-6" />
         <ThemeToggle />
       </div>
       <main className="flex flex-1 items-start justify-center px-4 pb-16 sm:px-6 sm:pt-8">

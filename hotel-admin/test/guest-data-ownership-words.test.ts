@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { LIVE_REASONS, eraseConsequences, exportDescription } from "@/lib/guest-data-words";
+import { LIVE_REASONS, eraseConsequences, erasedAccessWords, exportDescription } from "@/lib/guest-data-words";
 
 // Room credentials prove eligibility, not identity: what staff are told a request covers must match the database, never
 // shared access.
@@ -39,11 +39,23 @@ describe("what a guest-data request says it covers", () => {
     }
   });
 
-  it("every erasure still warns it cannot be undone and is refused while the guest is live", () => {
+  it("every erasure still warns it cannot be undone; a stay is refused while live, a person's own access is ended", () => {
     for (const kind of ["account", "principal", "stay", "stay_guest", undefined]) {
       const text = eraseConsequences(kind).join(" ");
       expect(text).toMatch(/cannot be undone/);
-      expect(text).toMatch(/Refused while the guest is in-house/);
+      expect(text).toMatch(/Refused while/);
+    }
+    for (const kind of ["stay", "stay_guest"]) {
+      expect(eraseConsequences(kind).join(" ")).toMatch(/Refused while the guest is in-house or the room’s internet access is still running/);
+    }
+    for (const kind of ["account", "principal"]) {
+      expect(eraseConsequences(kind).join(" ")).toMatch(/Their own internet access ends now and those devices are disconnected/);
+    }
+  });
+
+  it("the erasure warning stays short", () => {
+    for (const kind of ["account", "principal", "stay", "stay_guest"]) {
+      expect(eraseConsequences(kind).join(" ").length).toBeLessThan(800);
     }
   });
 
@@ -53,5 +65,17 @@ describe("what a guest-data request says it covers", () => {
     }
     expect(LIVE_REASONS.access_live).toMatch(/room/i);
     expect(LIVE_REASONS.online).toMatch(/room/i);
+  });
+
+  it("claims a disconnection only where the appliance confirmed it", () => {
+    expect(erasedAccessWords(0, 0, 0)).toBe("");
+    expect(erasedAccessWords(1, 0, 0)).toBe("Their access was ended (1 package).");
+    expect(erasedAccessWords(1, 2, 2)).toMatch(/The devices were disconnected\.$/);
+    expect(erasedAccessWords(1, 2, 1)).toMatch(/1 disconnected at once; the appliance takes the rest off the network/);
+    for (const w of [0, undefined]) {
+      const text = erasedAccessWords(2, 3, w);
+      expect(text).toMatch(/The disconnection is not confirmed yet/);
+      expect(text).not.toMatch(/were disconnected/);
+    }
   });
 });

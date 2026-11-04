@@ -103,6 +103,37 @@ func (t *pgTx) AccountVerifiedEmail(ctx context.Context, tenantID, siteID, accou
 	return email, err
 }
 
+// RepinAccountGroup decides the Client Group again, from the account's now-VERIFIED address, for its sign-ins that are still open (not consumed,
+// not expired), so a client who verifies after signing in sees the group's packages. Nothing a client typed decides it: an unverified address
+// pins nothing, exactly as at sign-in. tx must be the caller's transaction; the auth-context writer is opened on it. Returns the contexts changed.
+func RepinAccountGroup(ctx context.Context, tx pgx.Tx, tenantID, siteID, accountID string) (int, error) {
+	if err := writerguard.Open(ctx, tx, writerguard.CapAuthContext); err != nil {
+		return 0, err
+	}
+	pt := &pgTx{tx: tx}
+	pin, err := accountGroupPin(ctx, pt, Request{TenantID: tenantID, SiteID: siteID}, accountID)
+	if err != nil {
+		return 0, err
+	}
+	var group, evidence *string
+	if pin.id != "" {
+		group = &pin.id
+		if b, err := json.Marshal(pin.evidence); err == nil {
+			e := string(b)
+			evidence = &e
+		}
+	}
+	tag, err := tx.Exec(ctx,
+		`UPDATE iam_v2.auth_contexts SET client_group_id = $4::uuid, client_group_evidence = $5::jsonb
+		  WHERE tenant_id=$1 AND site_id=$2 AND guest_account_id=$3::uuid AND method = $6
+		    AND consumed_at IS NULL AND expires_at > now() AND client_group_id IS DISTINCT FROM $4::uuid`,
+		tenantID, siteID, accountID, group, evidence, string(MethodAccount))
+	if err != nil {
+		return 0, err
+	}
+	return int(tag.RowsAffected()), nil
+}
+
 func (t *pgTx) resolveExistingPrincipal(ctx context.Context, tenantID, factorType, issuer, valueNorm string) (string, error) {
 	var pid string
 	err := t.tx.QueryRow(ctx,

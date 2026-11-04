@@ -113,8 +113,18 @@ type phase3Shaping struct {
 	// endedTorn remembers torn-down sessions the plan still lists so their teardown is not repeated each pass.
 	endedTorn   map[string]bool
 	passClasses map[string]map[int]shape.ClassBytes
+	// passGroupClasses caches SHARED group classes per device for the same step (sharedMatchesPlan).
+	passGroupClasses map[string]map[int]shape.ClassBytes
 	// passGroups records the SHARED group classes already re-rated in this pass, so a group is re-rated once per pass, not once per device.
 	passGroups map[string]bool
+	// passRegroups counts regroups begun in this pass (regroup); capped so renewals are never starved.
+	passRegroups int
+	// passRegroupsDeferred counts regroups the cap left for a later pass; while any remain the fast path stays off.
+	passRegroupsDeferred int
+	// passRebuilds counts regroup rebuilds done in this pass, resumed waits included; capped like the starts.
+	passRebuilds int
+	// regroupWaiting holds, per class, when a regroup denied the device to wait for acctd to store its final counters.
+	regroupWaiting map[string]time.Time
 
 	// fastPath enables AD-53 (phase3_fastpath.go): an unchanged plan only refreshes validity between full walks.
 	fastPath bool
@@ -227,6 +237,7 @@ func (p *phase3Shaping) endSeries(bridge, sessionID string) {
 	delete(p.pending, classKey(bridge, sessionID))
 	delete(p.leaseMem, classKey(bridge, sessionID))
 	delete(p.provenAt, classKey(bridge, sessionID))
+	delete(p.regroupWaiting, classKey(bridge, sessionID))
 	// The quarantine deliberately outlives the series: clearing it would let the next pass re-admit the guest.
 }
 
@@ -407,8 +418,8 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 		}}
 		defer func() { p.owner = saved }()
 	}
-	p.passClasses, p.passGroups = nil, nil
-	defer func() { p.passClasses, p.passGroups = nil, nil }()
+	p.passClasses, p.passGroups, p.passGroupClasses = nil, nil, nil
+	defer func() { p.passClasses, p.passGroups, p.passGroupClasses = nil, nil, nil }()
 	p.pruneLeaseMemory(now)
 	p.mark("setup")
 	if p.batching() {
@@ -688,6 +699,8 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 	// 3. Shape what must be forwarded, staged and fail-closed (see provisionSession); tc class inventories are read once per device per pass.
 	p.passClasses = strayReads
 	p.passGroups = map[string]bool{}
+	p.passGroupClasses = map[string]map[int]shape.ClassBytes{}
+	p.passRegroups, p.passRegroupsDeferred, p.passRebuilds = 0, 0, 0
 	for _, bridge := range sortedKeys(bridges) {
 		byMinor := desired[bridge]
 		if len(byMinor) == 0 {
