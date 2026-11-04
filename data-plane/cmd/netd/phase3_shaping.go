@@ -117,8 +117,10 @@ type phase3Shaping struct {
 	passGroupClasses map[string]map[int]shape.ClassBytes
 	// passGroups records the SHARED group classes already re-rated in this pass, so a group is re-rated once per pass, not once per device.
 	passGroups map[string]bool
-	// passRegroups counts classes rebuilt under another group in this pass (regroupedAway); capped so renewals are never starved.
+	// passRegroups counts regroups begun in this pass (regroup); capped so renewals are never starved.
 	passRegroups int
+	// regroupWaiting holds, per class, when a regroup denied the device to wait for acctd to store its final counters.
+	regroupWaiting map[string]time.Time
 
 	// fastPath enables AD-53 (phase3_fastpath.go): an unchanged plan only refreshes validity between full walks.
 	fastPath bool
@@ -231,6 +233,7 @@ func (p *phase3Shaping) endSeries(bridge, sessionID string) {
 	delete(p.pending, classKey(bridge, sessionID))
 	delete(p.leaseMem, classKey(bridge, sessionID))
 	delete(p.provenAt, classKey(bridge, sessionID))
+	delete(p.regroupWaiting, classKey(bridge, sessionID))
 	// The quarantine deliberately outlives the series: clearing it would let the next pass re-admit the guest.
 }
 

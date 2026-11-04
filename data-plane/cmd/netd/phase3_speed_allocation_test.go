@@ -91,6 +91,7 @@ func TestSpeedAllocation_ASessionMovedToAnotherEntitlementJoinsItsGroup(t *testi
 		t.Fatalf("first pass: %+v %v", res, err)
 	}
 	s.EntitlementID, s.DownKbps, s.UpKbps = "ent-fullstay", 10000, 10000
+	stampStored(p, &s)
 	if res, err := p.submit(context.Background(), envelope(2, s), time.Now()); err != nil || res.Failed != 0 || res.Shaped != 1 {
 		t.Fatalf("pass after the move: %+v %v", res, err)
 	}
@@ -120,6 +121,63 @@ func TestSpeedAllocation_ASessionMovedToAnotherEntitlementJoinsItsGroup(t *testi
 	}
 }
 
+// stampStored stands in for acctd: the plan says the session's current class counters (the fake's are zero) are stored.
+func stampStored(p *phase3Shaping, s *shapeplan.Session) {
+	s.ObservedEpoch, s.ObservedUp, s.ObservedDown = p.epochs[classKey(s.Bridge, s.SessionID)], 0, 0
+}
+
+// A moved device is denied and its class kept until acctd has stored the class's final counters, then rebuilt: no byte goes uncounted.
+func TestSpeedAllocation_ARegroupWaitsForTheFinalCountersToBeStored(t *testing.T) {
+	tc, g := newFakeTC(), newFakeGate()
+	tc.reportParents = true
+	p := allocWriter(t, tc, g, "10.0.0.11")
+	s := allocSession("a", "10.0.0.11", "ent-free", "SHARED")
+	t0 := time.Now()
+	if res, err := p.submit(context.Background(), envelope(1, s), t0); err != nil || res.Shaped != 1 {
+		t.Fatalf("first pass: %+v %v", res, err)
+	}
+	old := tc.parentOf("br-guest", "10.0.0.11")
+	s.EntitlementID = "ent-fullstay" // not yet stored for this generation
+	if _, err := p.submit(context.Background(), envelope(2, s), t0.Add(5*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if g.isAuthorized("br-guest", "10.0.0.11") {
+		t.Fatal("the device forwards while its class is being replaced")
+	}
+	if got := tc.parentOf("br-guest", "10.0.0.11"); got != old {
+		t.Fatalf("the class was deleted before its final counters were stored (parent %q)", got)
+	}
+	stampStored(p, &s)
+	if res, err := p.submit(context.Background(), envelope(3, s), t0.Add(10*time.Second)); err != nil || res.Shaped != 1 || res.Failed != 0 {
+		t.Fatalf("pass after the counters are stored: %+v %v", res, err)
+	}
+	if !g.isAuthorized("br-guest", "10.0.0.11") || tc.parentOf("br-guest", "10.0.0.11") != shape.GroupClassid("ent-fullstay") {
+		t.Fatal("the device was not rebuilt under its new group once accounted")
+	}
+}
+
+// If acctd never confirms (an older acctd, or accounting down), the wait is bounded: the device is rebuilt after regroupAccountingWait.
+func TestSpeedAllocation_ARegroupWaitIsBounded(t *testing.T) {
+	tc, g := newFakeTC(), newFakeGate()
+	tc.reportParents = true
+	p := allocWriter(t, tc, g, "10.0.0.11")
+	s := allocSession("a", "10.0.0.11", "ent-free", "SHARED")
+	t0 := time.Now()
+	if _, err := p.submit(context.Background(), envelope(1, s), t0); err != nil {
+		t.Fatal(err)
+	}
+	s.EntitlementID = "ent-fullstay"
+	if _, err := p.submit(context.Background(), envelope(2, s), t0.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := p.submit(context.Background(), envelope(3, s), t0.Add(time.Second+regroupAccountingWait)); err != nil || res.Shaped != 1 {
+		t.Fatalf("after the bounded wait: %+v %v", res, err)
+	}
+	if !g.isAuthorized("br-guest", "10.0.0.11") || tc.parentOf("br-guest", "10.0.0.11") != shape.GroupClassid("ent-fullstay") {
+		t.Fatal("the device stayed denied past the bounded wait")
+	}
+}
+
 type failingGenerations struct{}
 
 func (failingGenerations) AllocateClassGeneration(context.Context, string, string, string) (int64, error) {
@@ -145,6 +203,7 @@ func TestSpeedAllocation_ARegroupRevokesBeforeTheClassGoesAndStaysDeniedOnFailur
 
 	p.generations = failingGenerations{}
 	s.EntitlementID = "ent-fullstay"
+	stampStored(p, &s)
 	if _, err := p.submit(context.Background(), envelope(2, s), time.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -179,6 +238,7 @@ func TestSpeedAllocation_ARegroupKeepsTheMACBinding(t *testing.T) {
 		t.Fatalf("first pass: %+v %v", res, err)
 	}
 	s.EntitlementID = "ent-fullstay"
+	stampStored(p, &s)
 	res, err := p.submit(context.Background(), envelope(2, s), time.Now())
 	if err != nil || res.Failed != 0 || res.Shaped != 1 {
 		t.Fatalf("pass after the move: %+v %v", res, err)
@@ -209,6 +269,7 @@ func TestSpeedAllocation_ABulkMoveIsRebuiltAFewSessionsPerPass(t *testing.T) {
 	}
 	for i := range sessions {
 		sessions[i].EntitlementID = fmt.Sprintf("new-%d", i)
+		stampStored(p, &sessions[i])
 	}
 	moved := func() int {
 		n := 0
