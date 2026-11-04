@@ -1350,6 +1350,19 @@
       "authorization_evidence": "The Product Owner's mission of 2026-11-04: prioritize seamless, immediate client package and speed-group transitions over preserving the final uncommitted usage counters; remove the mandatory accounting confirmation, the 30-second wait and the retry/postponement cycle; also record DEVICE_LIMIT_REACHED instead of SERVICE_UNAVAILABLE.",
       "does_not_authorize": "Any change to financial accounting, PMS postings or payment behaviour; the production Central; Go-Live.",
       "delivery_status": "Delivered on delivery/immediate-moves-and-device-limit (T0303)."
+    },
+    {
+      "id": "D93",
+      "decided_on": "2026-11-04",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-11-04",
+      "status": "ACTIVE",
+      "title": "CLIENT ACTIVITY AND THE AFTER CHECK-OUT REFUSAL RESULT: the Admin Console gains one read-only Client activity timeline (connections, packages, devices, accounts, staff actions on clients and, only on Hotel sites, room sign-ins, sign-in pauses and stays), each source shown only to roles that may read its own screen; a room sign-in refused by After Check-out Access for a device the stay did not use is recorded as AFTER_CHECKOUT_NEW_DEVICE_REJECTED (migration 0208) and the guest is told so, instead of SERVICE_UNAVAILABLE. The After Check-out eligibility rule is unchanged.",
+      "authorization_evidence": "The Product Owner's mission of 2026-11-04: the Client Activity page tested and approved; a dedicated AFTER_CHECKOUT_NEW_DEVICE_REJECTED result and its narrowly scoped migration approved; PR, protected merge and deployment to the test appliance. The same mission's 8-hour DHCP lease on VLAN 95 was conditional on sufficient pool capacity and was not applied.",
+      "does_not_authorize": "Any change to After Check-out eligibility, entitlements, accounting, PMS, payments or networking; Automatic Reconnection; the VLAN 95 /19 change (the Product Owner's own); the production Central; Go-Live.",
+      "delivery_status": "Delivered on delivery/client-activity (T0305)."
     }
   ]
 }
