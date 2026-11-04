@@ -7,7 +7,9 @@ import { CheckCircle2, AlertTriangle, XCircle, Info, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type Tone = "ok" | "warn" | "err" | "info";
-type ToastItem = { id: number; tone: Tone; title: string; description?: string };
+type ToastItem = { id: number; tone: Tone; title: string; description?: string; leaving?: boolean };
+
+const EXIT_MS = 150;
 
 type ToastApi = {
   toast: (t: { tone?: Tone; title: string; description?: string }) => void;
@@ -43,14 +45,22 @@ const DISMISS_AFTER_MS: Partial<Record<Tone, number>> = { ok: 5000, info: 5000, 
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [items, setItems] = React.useState<ToastItem[]>([]);
+  const [polite, setPolite] = React.useState("");
+  const [urgent, setUrgent] = React.useState("");
   const seq = React.useRef(0);
 
-  const dismiss = React.useCallback((id: number) => setItems((xs) => xs.filter((x) => x.id !== id)), []);
+  const dismiss = React.useCallback((id: number) => {
+    setItems((xs) => xs.map((x) => (x.id === id ? { ...x, leaving: true } : x)));
+    window.setTimeout(() => setItems((xs) => xs.filter((x) => x.id !== id)), EXIT_MS);
+  }, []);
 
   const api = React.useMemo<ToastApi>(() => {
     const toast: ToastApi["toast"] = ({ tone = "info", title, description }) => {
       const id = ++seq.current;
-      setItems((xs) => [...xs.slice(-3), { id, tone, title, description }]);
+      setItems((xs) => [...xs.filter((x) => !x.leaving).slice(-3), { id, tone, title, description }]);
+      const spoken = `${title}${description ? `. ${description}` : ""}${id % 2 ? "​" : ""}`;
+      if (tone === "err") setUrgent(spoken);
+      else setPolite(spoken);
     };
     return {
       toast,
@@ -62,8 +72,9 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   return (
     <Ctx.Provider value={api}>
       {children}
-      {/* Each toast owns its live role; nesting live regions would announce twice. */}
-      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-[60] flex flex-col items-center gap-2 p-4 sm:items-end sm:p-6">
+      <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">{polite}</div>
+      <div role="alert" aria-live="assertive" aria-atomic="true" className="sr-only">{urgent}</div>
+      <div data-toast-region className="pointer-events-none fixed inset-x-0 bottom-0 z-[60] flex flex-col items-center gap-2 p-4 sm:items-end sm:p-6">
         {items.map((t) => (
           <ToastCard key={t.id} item={t} onDismiss={dismiss} />
         ))}
@@ -90,7 +101,6 @@ function ToastCard({ item: t, onDismiss }: { item: ToastItem; onDismiss: (id: nu
   const Icon = ICON[t.tone];
   return (
     <div
-      role={t.tone === "err" ? "alert" : "status"}
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
       onFocus={() => setPaused(true)}
@@ -99,7 +109,9 @@ function ToastCard({ item: t, onDismiss }: { item: ToastItem; onDismiss: (id: nu
       }}
       className={cn(
         "pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-lg border border-border bg-popover px-3.5 py-3 text-popover-foreground shadow-overlay",
-        "animate-in fade-in-0 slide-in-from-bottom-2 motion-reduce:animate-none",
+        t.leaving
+          ? "animate-out fade-out-0 slide-out-to-bottom-2 fill-mode-forwards duration-150 ease-onegate motion-reduce:slide-out-to-bottom-0"
+          : "animate-in fade-in-0 slide-in-from-bottom-2 duration-base ease-onegate motion-reduce:animate-none",
       )}
     >
       <Icon className={cn("mt-0.5 size-4 shrink-0", TONE[t.tone])} />

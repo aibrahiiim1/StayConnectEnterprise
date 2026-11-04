@@ -4,6 +4,7 @@ import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { fromToastRegion } from "./dialog";
 
 export const Sheet = DialogPrimitive.Root;
 export const SheetTrigger = DialogPrimitive.Trigger;
@@ -20,21 +21,23 @@ export function SheetContent({
   width = "md",
   className,
   children,
+  onPointerDownOutside,
+  onInteractOutside,
   ...props
 }: React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & { width?: keyof typeof WIDTHS }) {
   return (
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay
         className={cn(
-          "fixed inset-0 z-50 bg-scrim/40",
-          "data-[state=open]:animate-in data-[state=closed]:animate-out",
+          "fixed inset-0 z-50 bg-scrim/50",
+          "data-[state=open]:animate-in data-[state=closed]:animate-out duration-base ease-onegate",
           "data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 motion-reduce:animate-none",
         )}
       />
       <DialogPrimitive.Content
         className={cn(
           "fixed inset-y-0 end-0 z-50 flex h-full w-full flex-col border-s border-border bg-card text-card-foreground shadow-overlay",
-          "data-[state=open]:animate-in data-[state=closed]:animate-out",
+          "data-[state=open]:animate-in data-[state=closed]:animate-out ease-onegate",
           "data-[state=open]:slide-in-from-right data-[state=closed]:slide-out-to-right",
           "rtl:data-[state=open]:slide-in-from-left rtl:data-[state=closed]:slide-out-to-left",
           "data-[state=open]:duration-200 data-[state=closed]:duration-150 motion-reduce:animate-none",
@@ -42,6 +45,14 @@ export function SheetContent({
           className,
         )}
         {...props}
+        onPointerDownOutside={(e) => {
+          if (fromToastRegion(e)) { e.preventDefault(); return; }
+          onPointerDownOutside?.(e);
+        }}
+        onInteractOutside={(e) => {
+          if (fromToastRegion(e)) { e.preventDefault(); return; }
+          onInteractOutside?.(e);
+        }}
       >
         {children}
         <DialogPrimitive.Close
