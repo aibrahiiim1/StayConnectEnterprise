@@ -1,0 +1,4 @@
+commit b38766312ba020a5addd022d2176d02b61207a2b
+Date:   Wed Nov 4 13:58:02 2026 +0200
+
+    Governance: T0301 records the netd per-device regroup

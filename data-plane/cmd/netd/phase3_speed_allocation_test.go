@@ -142,6 +142,49 @@ func stampStored(p *phase3Shaping, s *shapeplan.Session) {
 	s.ObservedEpoch, s.ObservedUp, s.ObservedDown = p.epochs[classKey(s.Bridge, s.SessionID)], 0, 0
 }
 
+// A device moved from a SHARED package to a PER_DEVICE one leaves its old group (live, 53 such devices stayed capped by a group and were
+// rewritten every pass): it is denied, its counters are confirmed stored, and it is rebuilt directly under the root.
+func TestSpeedAllocation_AMoveToPerDeviceLeavesTheGroup(t *testing.T) {
+	tc, g := newFakeTC(), newFakeGate()
+	tc.reportParents = true
+	p := allocWriter(t, tc, g, "10.0.0.11")
+	s := allocSession("a", "10.0.0.11", "ent-shared", "SHARED")
+	t0 := time.Now()
+	if res, err := p.submit(context.Background(), envelope(1, s), t0); err != nil || res.Shaped != 1 {
+		t.Fatalf("first pass: %+v %v", res, err)
+	}
+	if got := tc.parentOf("br-guest", "10.0.0.11"); got == shape.RootParent {
+		t.Fatal("the SHARED session was not under a group")
+	}
+	s.EntitlementID, s.SpeedAllocation = "ent-perdevice", "PER_DEVICE"
+	if _, err := p.submit(context.Background(), envelope(2, s), t0.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if g.isAuthorized("br-guest", "10.0.0.11") {
+		t.Fatal("the device forwards while its class is being replaced")
+	}
+	stampStored(p, &s)
+	if res, err := p.submit(context.Background(), envelope(3, s), t0.Add(2*time.Second)); err != nil || res.Failed != 0 || res.Shaped != 1 {
+		t.Fatalf("pass after the counters are stored: %+v %v", res, err)
+	}
+	if got := tc.parentOf("br-guest", "10.0.0.11"); got != shape.RootParent || !g.isAuthorized("br-guest", "10.0.0.11") {
+		t.Fatalf("after the move: parent %q authorized=%v, want the root and online", got, g.isAuthorized("br-guest", "10.0.0.11"))
+	}
+	tc.mu.Lock()
+	tc.calls = nil
+	tc.mu.Unlock()
+	if _, err := p.submit(context.Background(), envelope(4, s), t0.Add(3*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	for _, c := range tc.calls {
+		if c.op == "delete" || c.op == "prepare" {
+			t.Fatalf("the per-device session was rebuilt again: %+v", c)
+		}
+	}
+}
+
 // A moved device is denied and its class kept until acctd has stored the class's final counters, then rebuilt: no byte goes uncounted.
 func TestSpeedAllocation_ARegroupWaitsForTheFinalCountersToBeStored(t *testing.T) {
 	tc, g := newFakeTC(), newFakeGate()
