@@ -18,7 +18,6 @@ package main
 
 import (
 	"context"
-	"log/slog"
 	"net"
 	"time"
 
@@ -207,18 +206,10 @@ func (p *phase3Shaping) provisionTail(ctx context.Context, bridge string, minor 
 	if epoch, active := p.epochs[key]; active {
 		if _, held := p.classes[key]; held {
 			present, err := p.classPresentCached(ctx, bridge, minor)
-			keepParent := ""
 			if err == nil && present {
-				switch act, problem := p.regroup(ctx, bridge, ip, minor, epoch, s, now); act {
-				case regroupPostponed:
-					// Renewed where it is installed until the move is retried; HTB cannot re-parent it.
-					keepParent = problem
+				switch act, problem := p.regroup(ctx, bridge, ip, minor, s); act {
 				case regroupRebuild:
 					present = false
-				case regroupWait:
-					// Denied until acctd has stored the old class's last counters; nothing else is done for it this pass.
-					p.count("regroup_wait", 1)
-					return
 				case regroupFailed:
 					// The class stays as it is and the walk is not clean, so the next pass retries.
 					res.Failed++
@@ -227,10 +218,7 @@ func (p *phase3Shaping) provisionTail(ctx context.Context, bridge string, minor 
 				}
 			}
 			if err == nil && present {
-				groupCid, gproblem := keepParent, ""
-				if keepParent == "" {
-					groupCid, gproblem = p.reRateGroup(ctx, bridge, s)
-				}
+				groupCid, gproblem := p.reRateGroup(ctx, bridge, s)
 				if gproblem != "" {
 					// A failed group re-rate leaves the last authorised rates in force.
 					res.Failed++
@@ -446,27 +434,17 @@ func (p *phase3Shaping) reRateGroup(ctx context.Context, bridge string, s shapep
 type regroupAction int
 
 const (
-	regroupNone      regroupAction = iota // in its own group, or not SHARED: carry on
-	regroupRebuild                        // classes removed after the final counters were accounted: rebuild under the new group
-	regroupWait                           // denied, classes kept until acctd has stored their final counters
-	regroupFailed                         // the denial could not be proven: nothing was changed
-	regroupPostponed                      // the final counters were not confirmed: the device stays on its counted class for now
+	regroupNone    regroupAction = iota // under the right parent, or the move waits for a later pass: carry on
+	regroupRebuild                      // denied and its class removed: rebuild under the right parent now
+	regroupFailed                       // the device could not be denied, or its class removed while denied: retried next pass
 )
 
-// postponedRegroup is a move given up for now; wait doubles each time it is given up again.
-type postponedRegroup struct {
-	until time.Time
-	wait  time.Duration
-}
-
-// regroup handles a class left under the wrong parent: a SHARED one under another entitlement's group, or a PER_DEVICE one under a group (HTB
-// cannot re-parent; `tc class change` keeps the old one). The device is
-// denied first, then its frozen counters are kept until the plan shows acctd stored them, so deleting the class loses no bytes. A class whose counters are
-// not confirmed in time is never deleted: the device goes back on it, still counted, and the move is retried later (regroupPostponed; the string is
-// the parent it stays under).
-func (p *phase3Shaping) regroup(ctx context.Context, bridge string, ip net.IP, minor int, epoch int64, s shapeplan.Session, now time.Time) (regroupAction, string) {
-	key := classKey(bridge, s.SessionID)
-	since, waiting := p.regroupWaiting[key]
+// regroup moves a class left under the wrong parent: a SHARED one under another entitlement's group, or a PER_DEVICE one under a group
+// (HTB cannot re-parent; `tc class change` keeps the old one). The move is immediate (Product Owner, 2026-11-04): the device is denied and
+// the denial proven, its class is deleted and rebuilt in the same pass, and it is admitted again only once the new class is verified, so it
+// never forwards unshaped or uncounted. Usage the old class counted since acctd's last sample is not carried over; accounting resumes from
+// the new class's origin.
+func (p *phase3Shaping) regroup(ctx context.Context, bridge string, ip net.IP, minor int, s shapeplan.Session) (regroupAction, string) {
 	// A PER_DEVICE session belongs directly under the root: one moved from a SHARED package must leave its old group too, or it stays
 	// capped by that group and is rewritten every pass.
 	want := shape.RootParent
@@ -485,21 +463,15 @@ func (p *phase3Shaping) regroup(ctx context.Context, bridge string, ip net.IP, m
 	}
 	d, u := down[minor], up[minor]
 	if !(d.Params && d.Parent != want) && !(u.Params && u.Parent != want) {
-		delete(p.regroupWaiting, key)
 		return regroupNone, ""
 	}
-	installed := d.Parent
-	if !d.Params {
-		installed = u.Parent
-	}
-	if pp, ok := p.regroupPostponed[key]; ok && now.Before(pp.until) {
-		return regroupPostponed, installed
-	}
-	if !waiting && p.passRegroups >= maxRegroupsPerPass {
+	// Bounded per pass so a bulk move cannot overrun the pass and starve renewals; the rest move on the next pass (the fast path stays off).
+	// Only a completed move counts: a device whose denial or removal keeps failing must not hold up everyone else's move.
+	if p.passRegroups >= maxRegroupsPerPass {
 		p.passRegroupsDeferred++
 		return regroupNone, ""
 	}
-	// Fail closed: without its class the device would forward unshaped and uncounted, so it is denied first; the rebuild re-admits it once accountable.
+	// Fail closed: without its class the device would forward unshaped and uncounted, so it is denied first; the rebuild re-admits it once shaped.
 	if err := p.denyAccess(ctx, bridge, ip); err != nil {
 		return regroupFailed, "its access could not be withdrawn before its class is moved, so the class is kept as it is: " + err.Error()
 	}
@@ -507,31 +479,11 @@ func (p *phase3Shaping) regroup(ctx context.Context, bridge string, ip net.IP, m
 	if mb, ok := p.gate.(macBinder); ok && s.MAC != "" {
 		mb.BindMAC(bridge, ip, s.MAC)
 	}
-	if !waiting {
-		if p.regroupWaiting == nil {
-			p.regroupWaiting = map[string]time.Time{}
-		}
-		since = now
-		p.regroupWaiting[key] = now
-		p.passRegroups++
-	}
-	if !p.finalCountersAccounted(ctx, bridge, minor, epoch, s) {
-		if now.Sub(since) < regroupAccountingWait {
-			return regroupWait, ""
-		}
-		return p.postponeRegroup(ctx, bridge, ip, key, s.SessionID, installed, now.Sub(since), now)
-	}
-	// Rebuilds are the expensive part and are budgeted on their own, resumed waits included; the rest stay denied for the next pass.
-	if p.passRebuilds >= maxRegroupsPerPass {
-		p.passRegroupsDeferred++
-		return regroupWait, ""
-	}
 	if err := p.shp.DeleteSession(ctx, bridge, ip); err != nil {
-		return regroupWait, ""
+		// Still denied; the next pass deletes and rebuilds it.
+		return regroupFailed, "its old class could not be removed, so it stays denied until the next pass: " + err.Error()
 	}
-	p.passRebuilds++
-	delete(p.regroupWaiting, key)
-	delete(p.regroupPostponed, key)
+	p.passRegroups++
 	if p.passClasses != nil {
 		delete(p.passClasses, bridge)
 		delete(p.passClasses, shape.IFBName(bridge))
@@ -540,58 +492,9 @@ func (p *phase3Shaping) regroup(ctx context.Context, bridge string, ip net.IP, m
 	return regroupRebuild, ""
 }
 
-// postponeRegroup puts the device back on its installed, counted class and retries the move later, the wait doubling each time.
-func (p *phase3Shaping) postponeRegroup(ctx context.Context, bridge string, ip net.IP, key, sessionID, parent string, waited time.Duration, now time.Time) (regroupAction, string) {
-	if p.gate != nil {
-		if err := p.gate.Authorize(ctx, bridge, ip, phase3ProvisionalLease); err != nil {
-			return regroupFailed, "its final counters were not confirmed and access could not be given back on its current class: " + err.Error()
-		}
-		if ok, err := p.gate.Authorized(ctx, bridge, ip); err != nil || !ok {
-			return regroupFailed, "its final counters were not confirmed and access on its current class could not be verified"
-		}
-	}
-	wait := regroupPostponeFirst
-	if pp, ok := p.regroupPostponed[key]; ok {
-		wait = min(pp.wait*2, regroupPostponeMax)
-	}
-	if p.regroupPostponed == nil {
-		p.regroupPostponed = map[string]postponedRegroup{}
-	}
-	p.regroupPostponed[key] = postponedRegroup{until: now.Add(wait), wait: wait}
-	delete(p.regroupWaiting, key)
-	slog.Warn("netd: a regrouped class's final counters were not confirmed stored; the device stays on its counted class and the move is retried later",
-		"session", sessionID, "waited", waited.String(), "retry_in", wait.String())
-	p.count("regroup_postponed", 1)
-	return regroupPostponed, parent
-}
-
-// finalCountersAccounted: the class's counters, read now that the device is denied, are no more than what the plan says acctd stored for this
-// generation. Anything it cannot establish is "no".
-func (p *phase3Shaping) finalCountersAccounted(ctx context.Context, bridge string, minor int, epoch int64, s shapeplan.Session) bool {
-	if epoch <= 0 || s.ObservedEpoch != epoch {
-		return false
-	}
-	down, err := p.shp.ReadClasses(ctx, bridge)
-	if err != nil {
-		return false
-	}
-	up, err := p.shp.ReadClasses(ctx, shape.IFBName(bridge))
-	if err != nil {
-		return false
-	}
-	d, dok := down[minor]
-	u, uok := up[minor]
-	return dok && uok && int64(d.Bytes) <= s.ObservedDown && int64(u.Bytes) <= s.ObservedUp
-}
-
 const (
-	// maxRegroupsPerPass bounds rebuilds per pass: 215 at once (a bulk package switch) slowed passes until other guests' leases lapsed.
+	// maxRegroupsPerPass bounds moves per pass: 215 at once (a bulk package switch) slowed passes until other guests' leases lapsed.
 	maxRegroupsPerPass = 8
-	// regroupAccountingWait bounds how long a denied device waits for acctd to store its class's final counters (acctd observes every few seconds).
-	regroupAccountingWait = 30 * time.Second
-	// A move given up waits this long before it is retried, doubling to the maximum.
-	regroupPostponeFirst = 2 * time.Minute
-	regroupPostponeMax   = 30 * time.Minute
 )
 
 // provisionalOrLess caps the lease at the provisional one without overshooting the hard boundary.

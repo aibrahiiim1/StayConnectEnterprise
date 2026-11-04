@@ -221,6 +221,7 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// credential_method records how this device signed in: its own sign-in when it joined with one, else the sign-in that acquired the entitlement, else the authority name.
+		// A room package is the room's (PMS): a device placed on it by a replacement is never an email, phone or social sign-in.
 		var method string
 		if err := tx.QueryRow(ctx, `
 		    SELECT COALESCE(
@@ -228,7 +229,8 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 		             (SELECT NULLIF(ac.credential,'') FROM iam_v2.purchases p
 		                JOIN iam_v2.auth_contexts ac ON ac.id = p.auth_context_id
 		               WHERE p.id = e.purchase_id),
-		             CASE WHEN e.voucher_id IS NOT NULL THEN 'VOUCHER'
+		             CASE WHEN e.stay_id IS NOT NULL THEN 'PMS'
+		                  WHEN e.voucher_id IS NOT NULL THEN 'VOUCHER'
 		                  WHEN e.guest_account_id IS NOT NULL THEN 'ACCOUNT'
 		                  WHEN e.anonymous_subject_id IS NOT NULL THEN 'OPEN'
 		                  ELSE 'PRINCIPAL' END)

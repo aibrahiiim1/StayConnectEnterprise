@@ -15,6 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/onegate/onegate/data-plane/internal/metrics"
+	"github.com/onegate/onegate/data-plane/internal/signinattempt"
 )
 
 func TestIntegration_Phase3_ARoomGuestAtTheLimitReplacesADevice(t *testing.T) {
@@ -90,6 +91,10 @@ func TestIntegration_Phase3_ARoomGuestAtTheLimitReplacesADevice(t *testing.T) {
 	if refused.Outcome != outcomeNotVerified || refused.FailureClass != "DEVICE_LIMIT" || refused.DeviceID == "" || refused.GuestNetworkID != f.network {
 		t.Fatalf("the device-limit refusal must name the placed device and network: %+v", refused)
 	}
+	// Recorded as what it is, not as an internal failure (0207): Guest sign-in attempts and the appliance monitor read this.
+	if got := f.attemptResult(t, "00000006-0000-4000-8000-00000000000b"); got != string(signinattempt.DeviceLimitReached) {
+		t.Fatalf("the device-limit refusal was recorded as %s, want DEVICE_LIMIT_REACHED", got)
+	}
 
 	// The replacement page lists the stay's devices for B's verified sign-in...
 	list := call(f.srv.clientDevicesList, map[string]any{"ip": f.net.otherIP, "mac": macB, "auth_context_id": resB.AuthContextID})
@@ -113,6 +118,11 @@ func TestIntegration_Phase3_ARoomGuestAtTheLimitReplacesADevice(t *testing.T) {
 	if err := f.pool.QueryRow(ctx, `SELECT e.stay_id::text FROM iam_v2.sessions s JOIN iam_v2.entitlements e ON e.id=s.entitlement_id
 	     WHERE s.id=$1::uuid`, act["session_id"]).Scan(&stayOf); err != nil || stayOf != f.stay {
 		t.Fatalf("the new session is not on the stay's entitlement: %q %v", stayOf, err)
+	}
+	// It is a room sign-in, so the console never shows it as an email, phone or social login.
+	var method string
+	if err := f.pool.QueryRow(ctx, `SELECT credential_method FROM iam_v2.sessions WHERE id=$1::uuid`, act["session_id"]).Scan(&method); err != nil || method != "PMS" {
+		t.Fatalf("the replacing device's session records credential method %q (%v), want PMS", method, err)
 	}
 	// One entitlement for the stay: replacing a device never creates another.
 	var n int

@@ -1012,7 +1012,8 @@ func (p *phase3Auth) grantHandler(w http.ResponseWriter, r *http.Request) {
 		// A full device limit is neither a wrong room nor a fault; it gets its own sentence so the guest can disconnect another device.
 		if strings.Contains(err.Error(), "MAX_DEVICES_REACHED") {
 			slog.Info("phase3 auth: device limit reached for the stay's entitlement", "detail", err.Error())
-			writeJSONScd(w, http.StatusOK, phase3Response{Outcome: outcomeNotVerified, FailureClass: "DEVICE_LIMIT",
+			grantResult = signinattempt.DeviceLimitReached
+			writeJSONScd(w, http.StatusOK, phase3Response{Outcome: outcomeNotVerified, FailureClass: string(signinattempt.GuestDeviceLimit),
 				DeviceID: dev.DeviceID, GuestNetworkID: dev.GuestNetwork})
 			return
 		}

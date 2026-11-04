@@ -44,8 +44,8 @@ type Session struct {
 	EntitlementID string `json:"entitlement_id,omitempty"`
 	// SpeedAllocation is PER_DEVICE or SHARED; empty means PER_DEVICE.
 	SpeedAllocation string `json:"speed_allocation,omitempty"`
-	// Observed* are the counters acctd last stored durably for the session's class (zero: none yet). Not desired state, so not hashed:
-	// netd reads them only to delete a class (a regroup) after its bytes are accounted.
+	// Observed* are no longer read or written (moves are immediate, Product Owner 2026-11-04). Kept so netd, which refuses unknown fields,
+	// still accepts a plan from an acctd that has not been restarted yet; not hashed.
 	ObservedEpoch int64 `json:"observed_epoch,omitempty"`
 	ObservedUp    int64 `json:"observed_up,omitempty"`
 	ObservedDown  int64 `json:"observed_down,omitempty"`
