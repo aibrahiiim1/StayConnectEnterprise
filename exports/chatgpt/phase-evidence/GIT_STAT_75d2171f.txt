@@ -1,4 +1,0 @@
-commit 75d2171fdd7f5ada7f59cdf302b0263e97e01981
-Date:   Wed Nov 4 23:18:50 2026 +0200
-
-    Governance: D93 and T0305 for Client activity and the After Check-out refusal record
