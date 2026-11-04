@@ -1,0 +1,35 @@
+{
+  "transition_id": "T0301",
+  "seq": 301,
+  "timestamp": "2026-11-04T13:57:42+02:00",
+  "timestamp_derivation": "Read from the workstation clock (UTC+02:00) by the script that wrote this receipt, immediately before the commit that introduces it.",
+  "record_type": "NETD_PER_DEVICE_REGROUP",
+  "authorisation": "The Product Owner's mission of 2026-11-04 (resolve the related netd defects; deployment to the test appliance 172.21.96.97 under D79).",
+  "delivery": "netd: a session whose plan is PER_DEVICE but whose class hangs under a SHARED group is regrouped to the root, through the same deny / stored-counters / postpone / per-pass-cap path as a SHARED move.",
+  "findings": "Found live after T0300: 53 active sessions on one PER_DEVICE service plan revision were installed under SHARED groups (moved from a SHARED package; a regroup only handled moves into a group). They were capped by a group's shared ceiling and took the per-session path on every pass (about 240 ms of each 500-700 ms pass). Also seen: 35 empty group classes left on the main bridge (no group cleanup exists); harmless, a reused slot is re-rated.",
+  "verification": "New test TestSpeedAllocation_AMoveToPerDeviceLeavesTheGroup fails without the change and passes with it; the full netd unit suite passes.",
+  "deployment": {
+    "test_appliance": "Not deployed by this record; netd is deployed after the merge and read back.",
+    "central": "Not changed."
+  },
+  "not_touched": "Every other service, the database, PMS, payments, networking, licences, the production Central.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "995057dd8ee6588693e687ee15d879c871aa73f0",
+  "previous_delivery": "T0300",
+  "decision": "none (Product Owner-approved mission)",
+  "go_live": "NOT authorised."
+}
