@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -31,6 +32,18 @@ func TestClientActivityFilterBounds(t *testing.T) {
 	}
 	if f := clientFilter(t, "page=3&page_size=20"); f.Limit != 20 || f.Offset != 40 {
 		t.Fatalf("paging: %+v", f)
+	}
+	// The page's anchor fixes the window, so a second page asks the same question as the first.
+	anchor := time.Date(2026, 11, 4, 11, 30, 0, 0, time.UTC)
+	if f := clientFilter(t, "range=1h&at="+strconv.FormatInt(anchor.UnixMilli(), 10)); !f.To.Equal(anchor) || !f.From.Equal(anchor.Add(-time.Hour)) {
+		t.Fatalf("anchored window: %v .. %v", f.From, f.To)
+	}
+	for _, bad := range []string{"at=abc", "at=" + strconv.FormatInt(time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC).UnixMilli(), 10),
+		"at=" + strconv.FormatInt(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).UnixMilli(), 10)} {
+		q, _ := url.ParseQuery(bad)
+		if _, err := parseClientActivityFilter(q, time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)); err == nil {
+			t.Errorf("%q was accepted", bad)
+		}
 	}
 	if _, err := boundedSearch(strings.Repeat("x", clientActivityMaxQ+1)); err == nil {
 		t.Fatal("an over-long search was accepted")
@@ -93,6 +106,10 @@ func TestClientActivitySQLReadsOnlyGrantedTablesAndRealColumns(t *testing.T) {
 		if strings.Contains(list, forbidden) {
 			t.Errorf("client activity reads %q", forbidden)
 		}
+	}
+	// A staff action on a client account names that account, so it can be read and searched like any other client.
+	if !strings.Contains(list, "gat.id::text = al.target_id") || !strings.Contains(list, "COALESCE(gat.username,") {
+		t.Fatal("staff actions on client accounts are not resolved to the account")
 	}
 	// Every branch yields the same number of columns as the first.
 	want := len(strings.Split(clientActivityCols, ","))

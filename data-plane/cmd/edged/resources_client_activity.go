@@ -73,6 +73,15 @@ type clientActivityFilter struct {
 
 func parseClientActivityFilter(q url.Values, now time.Time) (clientActivityFilter, error) {
 	f := clientActivityFilter{To: now.UTC(), Limit: activityDefaultLimit}
+	// The page's anchor (ms since the epoch) fixes a preset window's end, so paging walks one stable window.
+	if v := q.Get("at"); v != "" {
+		ms, err := strconv.ParseInt(v, 10, 64)
+		at := time.UnixMilli(ms).UTC()
+		if err != nil || at.After(f.To.Add(time.Minute)) || f.To.Sub(at) > clientActivityMaxSpan {
+			return f, errors.New("at must be a recent time in milliseconds since the epoch")
+		}
+		f.To = at
+	}
 	switch rng := q.Get("range"); rng {
 	case "", "24h":
 		f.From = f.To.Add(-24 * time.Hour)
@@ -151,6 +160,12 @@ const clientOf = `CASE WHEN e.id IS NULL THEN '' WHEN e.stay_id IS NOT NULL THEN
 	            WHEN e.anonymous_subject_id IS NOT NULL THEN 'open' ELSE '' END,
 	       COALESCE(NULLIF(st.normalized_room_number,''), ga.username, ''),
 	       COALESCE(NULLIF(ipr.display->>'name',''), ip.code, '')`
+
+// staffClientOf is clientOf for a staff action, whose client may also be the account it targeted (gat).
+var staffClientOf = strings.NewReplacer(
+	"CASE WHEN e.id IS NULL", "CASE WHEN gat.id IS NOT NULL THEN 'account' WHEN e.id IS NULL",
+	"COALESCE(NULLIF(st.normalized_room_number,''), ga.username, '')", "COALESCE(gat.username, NULLIF(st.normalized_room_number,''), ga.username, '')",
+).Replace(clientOf)
 
 func entitlementJoins(on string) string {
 	return `
@@ -264,13 +279,14 @@ func clientActivitySources(sc clientActivityScope, args *[]any) string {
 	if sc.Staff && len(sc.StaffActions) > 0 {
 		acts := arg(sc.StaffActions)
 		parts = append(parts,
-			`SELECT al.ts, 'staff', al.action, 'info', COALESCE(al.payload->>'reason',''), `+clientOf+`,
+			`SELECT al.ts, 'staff', al.action, 'info', COALESCE(al.payload->>'reason',''), `+staffClientOf+`,
 	       COALESCE(s.mac::text, d.mac::text, ''), COALESCE(host(s.ip),''), '', COALESCE(s.id::text,''), COALESCE(e.id::text,''), COALESCE(st.id::text,''),
 	       COALESCE(NULLIF(op.display_name,''), op.email, al.actor_type, ''), 'x1' || al.ts::text || al.action || COALESCE(al.target_id,'')
 	  FROM public.audit_log al
 	  LEFT JOIN public.operators op ON al.actor_type = 'operator' AND op.id::text = al.actor_id
 	  LEFT JOIN iam_v2.sessions s ON al.target_type = 'session' AND s.tenant_id = $1 AND s.site_id = $2 AND s.id::text = al.target_id
-	  LEFT JOIN iam_v2.devices d ON al.target_type = 'device' AND d.tenant_id = $1 AND d.site_id = $2 AND d.id::text = al.target_id`+
+	  LEFT JOIN iam_v2.devices d ON al.target_type = 'device' AND d.tenant_id = $1 AND d.site_id = $2 AND d.id::text = al.target_id
+	  LEFT JOIN iam_v2.guest_access_accounts gat ON al.target_type = 'guest_account' AND gat.tenant_id = $1 AND gat.site_id = $2 AND gat.id::text = al.target_id`+
 				entitlementJoins("COALESCE(s.entitlement_id, CASE WHEN al.target_type = 'entitlement' AND al.target_id ~ '^[0-9a-f-]{36}$' THEN al.target_id::uuid END)")+`
 	 WHERE al.tenant_id = $1 AND al.ts >= $3 AND al.ts < $4 AND al.action = ANY(`+acts+`::text[])`)
 	}
