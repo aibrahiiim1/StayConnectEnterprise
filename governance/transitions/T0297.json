@@ -1,0 +1,35 @@
+{
+  "transition_id": "T0297",
+  "seq": 297,
+  "timestamp": "2026-11-04T05:24:46+02:00",
+  "timestamp_derivation": "Read from the workstation clock (UTC+02:00) by the script that wrote this receipt, immediately before the commit that introduces it.",
+  "record_type": "ONEGATE_RENAME_AND_HISTORICAL_MANIFEST_CLEANUP",
+  "authorisation": "The Product Owner's end-to-end mission of 2026-11-04 (complete and merge PR #302, validating the Go module rename against builds, tests, deployment compatibility and runtime identifiers).",
+  "delivery": "The product is named OneGate in human-facing names, docs, comments, UI text, unit descriptions and package names (onegate-hotel-admin, onegate-cloud-admin); the Go module path is github.com/onegate/onegate/... in all four modules. 24 historical delivery manifests are removed and listed in docs/manifests/ARCHIVE.md (Git history keeps them). The merge with master renames the imports of the four Go files added since the PR branched; nothing else from those deliveries needed the rename.",
+  "findings": "Runtime identifiers are unchanged on purpose: /etc|/opt|/run/stayconnect, stayconnect_site and the other database names, stayconnect-* units, STAYCONNECT_* variables, the build tag stayconnect_production, the inet stayconnect nft table, *.stayconnect.local, browser storage keys, CA subjects, the FIAS workstation and PMS user agents, and generated runtime-config headers. Historical records and evidence keep the old module path as recorded. Two compiled scd binaries tracked in Git since July and October (data-plane/scd, data-plane/cmd/scd/scd) are unrelated to this PR and left for a separate clean-up.",
+  "verification": "All four Go modules vet clean (also with the integration tag) and build with -tags stayconnect_production after the merge; data-plane unit tests pass; the Go module rename was earlier checked to change no runtime identifier and to pass vet and unit tests in all four modules on the PR head. The console suites run on master after the merge.",
+  "deployment": {
+    "test_appliance": "Not deployed by this record; the mission deploys master to 172.21.96.97 after this merge.",
+    "central": "Not changed."
+  },
+  "not_touched": "Runtime identifiers, applied migrations, governance transitions and decisions, evidence files, the GitHub repository name, PMS, payments, networking, licences, the production Central.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "df5904fe707be64674ec09a6fb455acc9b3c6da4",
+  "previous_delivery": "T0296",
+  "decision": "none (Product Owner-approved mission)",
+  "go_live": "NOT authorised."
+}
