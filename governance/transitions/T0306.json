@@ -1,0 +1,34 @@
+{
+  "transition_id": "T0306",
+  "seq": 306,
+  "timestamp": "2026-11-05T00:49:46+02:00",
+  "timestamp_derivation": "Read from the workstation clock (UTC+02:00) by the script that wrote this receipt, immediately before the commit that introduces it.",
+  "record_type": "TEST_APPLIANCE_UPGRADE",
+  "authorisation": "The Product Owner's mission of 2026-11-04 (D93): verified deployment of the delivered version to the test appliance 172.21.96.97 under D79.",
+  "delivery": "The test appliance was upgraded with appliance-install.sh --upgrade to master a66d93195320 (the merge of PR #321): migration 0208 behind its verified pre-change backup, every service binary and the Admin Console replaced, Gate-P reconciled.",
+  "verification": "Every binary read back as vcs.revision a66d93195320 with -tags=stayconnect_production and vcs.modified=false, each sha256 equal to DEPLOYED_BINARIES.sha256; schema ledger head 0208 and the sign-in result check carrying AFTER_CHECKOUT_NEW_DEVICE_REJECTED; all OneGate units active (APPLIANCE_UNITS = PASS); 346 sessions stayed active through the upgrade; the Client activity endpoint answered with every source in 0.2-0.3 s; the portal answered; the monitor reported no issue; Kea unchanged with both subnets at 3600 s.",
+  "deployment": {
+    "test_appliance": "onegate-appliance-a66d93195320; console release 20261104-224820, BUILD_ID 0GhzQ5KbKKeb9hhpv-wgb; rollback tree /opt/stayconnect/.previous/20261104T224707Z.",
+    "central": "Not changed."
+  },
+  "not_touched": "DHCP and networking (the VLAN 95 lease stays 3600 s), PMS configuration and postings, payments, licences, the production Central.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "a66d93195320720556c0f1a722a473ae915b7eda",
+  "previous_delivery": "T0305",
+  "decision": "D93",
+  "go_live": "NOT authorised."
+}

@@ -12,6 +12,7 @@
       "/appliance",
       "/audit",
       "/backups",
+      "/client-activity",
       "/client-groups",
       "/commercial-packages",
       "/dashboard",
@@ -119,6 +120,11 @@
       {
         "label": "Devices",
         "route": "/devices",
+        "surface": "sessions"
+      },
+      {
+        "label": "Client activity",
+        "route": "/client-activity",
         "surface": "sessions"
       },
       {

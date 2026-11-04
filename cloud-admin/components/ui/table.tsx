@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 
 type Density = "compact" | "default";
 const DensityContext = React.createContext<Density>("default");
+const RowHintContext = React.createContext<string | null>(null);
 
 export function Table({
   className,
@@ -47,9 +48,12 @@ export function Table({
     };
   }, [maxHeight]);
 
+  const rowHint = React.useId();
   // `relative` makes the scroller the containing block, so an absolute descendant cannot widen the page on phones.
   return (
     <DensityContext.Provider value={density}>
+    <RowHintContext.Provider value={rowHint}>
+      <span id={rowHint} hidden>Opens the details. Press Enter.</span>
       <div
         ref={scroller}
         data-sticky={stickyHeader ? "true" : undefined}
@@ -72,6 +76,7 @@ export function Table({
           {...p}
         />
       </div>
+    </RowHintContext.Provider>
     </DensityContext.Provider>
   );
 }
@@ -105,9 +110,12 @@ export function TR({
   ...p
 }: React.HTMLAttributes<HTMLTableRowElement> & { selected?: boolean }) {
   const clickable = typeof onClick === "function";
+  const hint = React.useContext(RowHintContext);
+  const describedBy = clickable && hint ? [p["aria-describedby"], hint].filter(Boolean).join(" ") : p["aria-describedby"];
   return (
     <tr
       {...p}
+      aria-describedby={describedBy}
       onClick={onClick}
       tabIndex={clickable ? 0 : p.tabIndex}
       onKeyDown={(e) => {

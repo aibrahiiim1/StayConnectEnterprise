@@ -48,7 +48,8 @@ const KIND_ICON = {
 } as const;
 
 const secs = (n?: number | null) => {
-  if (typeof n !== "number" || n <= 0) return "—";
+  if (typeof n !== "number" || n < 0) return "—";
+  if (n === 0) return "0m";
   const h = Math.floor(n / 3600);
   const m = Math.floor((n % 3600) / 60);
   if (h > 0) return `${h}h ${m}m`;
@@ -73,7 +74,8 @@ export default function SessionsPage() {
   const [kind, setKind] = useState<string>("");
   // Ended sessions: the last 30 days by default, the whole history on request (audit AD-56).
   const [history, setHistory] = useState<"recent" | "all">("recent");
-  const [detail, setDetail] = useState<Session | null>(null);
+  const [detailSnap, setDetail] = useState<Session | null>(null);
+  const [disconnecting, setDisconnecting] = useState<ReadonlySet<string>>(() => new Set());
   const [confirm, setConfirm] = useState<Session | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionErr, setActionErr] = useState<unknown>(null);
@@ -116,6 +118,24 @@ export default function SessionsPage() {
 
   usePoll(() => list.reload(), 10_000, { enabled: tab === "active" });
 
+  const detailId = detailSnap?.id ?? null;
+  const liveRow = detailId ? rows?.find((r) => r.id === detailId) : undefined;
+  const detail = liveRow ?? detailSnap;
+  useEffect(() => {
+    if (!detailId || liveRow) return;
+    let stale = false;
+    api.get<Session>(`/sessions/${detailId}`)
+      .then((s) => { if (!stale) setDetail((cur) => (cur && cur.id === s.id ? s : cur)); })
+      .catch(() => {});
+    return () => { stale = true; };
+  }, [detailId, liveRow, updatedAt]);
+
+  useEffect(() => {
+    if (disconnecting.size === 0 || !rows) return;
+    const still = new Set([...disconnecting].filter((id) => rows.some((r) => r.id === id && r.state === "active")));
+    if (still.size !== disconnecting.size) setDisconnecting(still);
+  }, [rows, disconnecting]);
+
   async function onDisconnect(s: Session) {
     setBusy(true); setActionErr(null);
     try {
@@ -123,8 +143,10 @@ export default function SessionsPage() {
       toast.success(`${identifySession(s, multi).title} — device disconnected.`);
       setConfirm(null);
       setDetail(null);
+      setDisconnecting((cur) => new Set(cur).add(s.id));
       // scd enforces asynchronously; reloading immediately would still show the session active.
       setTimeout(() => void list.reload(), 600);
+      setTimeout(() => void list.reload(), 2500);
     } catch (e) {
       setActionErr(e);
     } finally {
@@ -158,8 +180,9 @@ export default function SessionsPage() {
   return (
     <PageShell width="wide">
       <PageHeader
-        title="Active sessions"
-        description="Which devices are online, and whose they are."
+        title={tab === "active" ? "Active sessions" : "Recent sessions"}
+        helpTitle="Sessions"
+        description={tab === "active" ? "Which devices are online, and whose they are." : "Sessions that are online or ended recently, and whose they were."}
         help={
           <>
             <HelpSection title="Sessions, devices and clients">
@@ -231,10 +254,10 @@ export default function SessionsPage() {
           />
         )}
         <StatCard
-          label="Data in this list"
+          label={tab === "active" ? "Data, all sessions online now" : "Data, all recent sessions"}
           value={haveSummary ? formatBytes(summary.bytes) : "—"}
           icon={<ArrowDownUp />}
-          hint={tab === "active" ? "Sessions online now" : "Sessions in this list"}
+          hint={searching ? "Not narrowed by the search or filter" : undefined}
         />
       </StatGrid>
 
@@ -302,7 +325,9 @@ export default function SessionsPage() {
                   ? "Try a different search, or clear the filters."
                   : tab === "active"
                     ? "Connected clients appear here as soon as they sign in."
-                    : undefined
+                    : history === "recent"
+                      ? "Only the last 30 days are listed. Choose All history to look further back."
+                      : undefined
               }
             />
           ) : (
@@ -321,7 +346,14 @@ export default function SessionsPage() {
               </THead>
               <TBody>
                 {rows.map((s) => (
-                  <SessionRow key={s.id} s={s} mayDisconnect={mayDisconnect} onOpen={openDetail} onDisconnect={askDisconnect} />
+                  <SessionRow
+                    key={s.id}
+                    s={s}
+                    pending={disconnecting.has(s.id)}
+                    mayDisconnect={mayDisconnect}
+                    onOpen={openDetail}
+                    onDisconnect={askDisconnect}
+                  />
                 ))}
               </TBody>
             </Table>
@@ -406,9 +438,10 @@ export default function SessionsPage() {
 
 // Memoised: relies on `keepUnchanged` preserving object identity across polls.
 const SessionRow = memo(function SessionRow({
-  s, mayDisconnect, onOpen, onDisconnect,
+  s, pending, mayDisconnect, onOpen, onDisconnect,
 }: {
   s: Session;
+  pending: boolean;
   mayDisconnect: boolean;
   onOpen: (s: Session) => void;
   onDisconnect: (s: Session) => void;
@@ -438,6 +471,10 @@ const SessionRow = memo(function SessionRow({
             {id.subtitle && (
               <span className="block truncate text-xs text-muted-foreground" title={id.subtitle}>{id.subtitle}</span>
             )}
+            <span className="block truncate text-2xs text-muted-foreground lg:hidden">
+              <span className="font-mono">{s.ip}</span>
+              {s.guest_network_name ? ` · ${s.guest_network_name}` : ""}
+            </span>
             {id.anonymous && <span className="sr-only">No client record on this session</span>}
           </span>
         </div>
@@ -452,9 +489,10 @@ const SessionRow = memo(function SessionRow({
             <div className="flex items-center gap-1.5 text-sm">
               <span className="min-w-0 truncate" title={s.package_name || s.package_code || undefined}>{s.package_name || s.package_code}</span>
               {acquisitionOrdinal(s.package_acquisitions) && (
-                <span title="How many times this client has had this package, counting this one">
-                  <Badge tone="warn">{acquisitionOrdinal(s.package_acquisitions)}</Badge>
-                </span>
+                <Badge tone="neutral">
+                  {acquisitionOrdinal(s.package_acquisitions)}
+                  <span className="sr-only"> this client has had this package</span>
+                </Badge>
               )}
             </div>
             <div className="text-2xs text-muted-foreground">
@@ -477,7 +515,11 @@ const SessionRow = memo(function SessionRow({
         <span className="text-muted-foreground"> / {formatBytes(s.bytes_up)}</span>
       </TD>
       <TD nowrap>
-        <StatusBadge tone={st.tone}>{st.label}</StatusBadge>
+        {pending && s.state === "active" ? (
+          <StatusBadge tone="warn">Disconnecting…</StatusBadge>
+        ) : (
+          <StatusBadge tone={st.tone}>{st.label}</StatusBadge>
+        )}
         {s.end_reason && (
           <div className="mt-0.5 text-2xs text-muted-foreground">
             {endReasonWords(s.end_reason)}
@@ -486,7 +528,7 @@ const SessionRow = memo(function SessionRow({
       </TD>
       {mayDisconnect && (
         <TD className="w-0">
-          {s.state === "active" && (
+          {s.state === "active" && !pending && (
             <RowActions
               subject={id.title}
               items={[
@@ -583,9 +625,13 @@ function SessionDetail({ s }: { s: Session }) {
           {
             label: "Internet package",
             value: s.package_name || s.package_code ? (
-              <Link href="/internet-packages" className="text-primary underline underline-offset-2 hover:decoration-2">
+              <>
                 {s.package_name || s.package_code}
-              </Link>
+                {" · "}
+                <Link href="/internet-packages" className="text-primary underline underline-offset-2 hover:decoration-2">
+                  All packages
+                </Link>
+              </>
             ) : "—",
           },
           {
@@ -612,7 +658,7 @@ function SessionDetail({ s }: { s: Session }) {
                 {
                   label: "Stay",
                   value: s.stay_id ? (
-                    <Link href="/stays" className="text-primary underline underline-offset-2 hover:decoration-2">Open in Stays</Link>
+                    <Link href={`/stays?stay=${encodeURIComponent(s.stay_id)}`} className="text-primary underline underline-offset-2 hover:decoration-2">Open this stay</Link>
                   ) : "—",
                 },
               ]
