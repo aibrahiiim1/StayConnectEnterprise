@@ -1,0 +1,34 @@
+{
+  "transition_id": "T0303",
+  "seq": 303,
+  "timestamp": "2026-11-04T16:18:49+02:00",
+  "timestamp_derivation": "Read from the workstation clock (UTC+02:00) by the script that wrote this receipt, immediately before the commit that introduces it.",
+  "record_type": "IMMEDIATE_MOVES_AND_DEVICE_LIMIT_RESULT",
+  "authorisation": "The Product Owner's mission of 2026-11-04 (D92: immediate moves; the DEVICE_LIMIT_REACHED record; deployment to the test appliance under D79).",
+  "delivery": "netd: a move between packages or speed allocations (SHARED to SHARED, SHARED to PER_DEVICE, PER_DEVICE to SHARED) is done in one pass: deny proven, MAC binding restored, class deleted and rebuilt under the right parent, admitted again once verified; the 30 s wait for stored counters, the postponement and acctd's stamping are removed (the plan fields stay accepted and ignored). At most eight moves per pass; a failed denial or removal leaves the device denied, reported and retried. scd records a room sign-in refused at the package's device limit as DEVICE_LIMIT_REACHED (migration 0207); the guest reply is unchanged.",
+  "verification": "netd unit suite (new: PER_DEVICE to SHARED immediate, SHARED to PER_DEVICE immediate with denial first, an unremovable class stays denied and is retried); acctd unit and integration suites; scd phase3/attempt/licence integration tests as svc_scd, the device-limit record failing without the fix; signinattempt tests; console label test and tsc; factory-clean baseline regenerated, PASS.",
+  "deployment": {
+    "test_appliance": "Not deployed by this record; installed after the merge and recorded then.",
+    "central": "Not changed."
+  },
+  "not_touched": "Financial accounting, PMS postings and configuration, payments, networking and topology, licences, the production Central.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "c308851e97c6b3e631ebeb993c113577566d248e",
+  "previous_delivery": "T0302",
+  "decision": "D92",
+  "go_live": "NOT authorised."
+}

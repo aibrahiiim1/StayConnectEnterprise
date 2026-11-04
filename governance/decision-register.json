@@ -1337,6 +1337,19 @@
       "authorization_evidence": "The Product Owner's mission of 2026-11-04: remove the repeated Admin Console password when creating, editing or enabling/disabling SMTP senders; approved configurable Custom Roles with backend enforcement and no privilege escalation; keep the seven built-in roles and their permissions unchanged.",
       "does_not_authorize": "Any change to the built-in roles' permissions (the Product Owner reviews that matrix separately), granting a custom role more than the built-in roles grant, a merge outside the mission, the production Central, PMS or financial configuration, Go-Live.",
       "delivery_status": "Delivered on delivery/roles-and-netd-2026-11-04 (T0299)."
+    },
+    {
+      "id": "D92",
+      "decided_on": "2026-11-04",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-11-04",
+      "status": "ACTIVE",
+      "title": "IMMEDIATE PACKAGE AND SPEED-GROUP MOVES: a client moved to another package or speed allocation (SHARED or PER_DEVICE) is moved in one pass -- denied, its class rebuilt under the right parent, admitted again once shaped -- without waiting for acctd to store the old class's final counters; the usage counted since acctd's last sample is accepted as lost. Entitlement ownership, expiry, device limits, MAC binding, firewall authorization and enforced speeds are kept; the device never forwards unshaped or unauthorized. Financial accounting, PMS postings and payments are not affected.",
+      "authorization_evidence": "The Product Owner's mission of 2026-11-04: prioritize seamless, immediate client package and speed-group transitions over preserving the final uncommitted usage counters; remove the mandatory accounting confirmation, the 30-second wait and the retry/postponement cycle; also record DEVICE_LIMIT_REACHED instead of SERVICE_UNAVAILABLE.",
+      "does_not_authorize": "Any change to financial accounting, PMS postings or payment behaviour; the production Central; Go-Live.",
+      "delivery_status": "Delivered on delivery/immediate-moves-and-device-limit (T0303)."
     }
   ]
 }
