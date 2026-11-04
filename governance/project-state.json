@@ -1362,7 +1362,7 @@
       "dispositions": "docs/AUDIT_DECISION_DISPOSITIONS.md"
     }
   },
-  "latest_transition_id": "T0294",
+  "latest_transition_id": "T0295",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1858,16 +1858,16 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "DECIMAL_DATA_UNITS_2026_11_03",
-    "decision": "Product Owner approval of 2026-11-03 (PR #303: decimal data units in the Admin Console).",
-    "decision_note": "Console wording only; nothing deployed by this record.",
-    "manifest": "docs/manifests/DecimalUnits20261103-change-manifest.md",
-    "base": "e1db6528ca402bb926c7c063147825bc71f6d150",
-    "base_note": "Master after the merge of PR #304.",
-    "transition": "T0294",
-    "previous_delivery": "T0293",
-    "branch": "delivery/decimal-units-2026-11-03",
-    "note": "T0294. Go-Live not authorised."
+    "kind": "ONEGATE_BRAND_KIT_2026_11_03",
+    "decision": "Product Owner mission of 2026-11-04 (PR #305: OneGate brand kit v2).",
+    "decision_note": "Console assets and the certificate probe; nothing deployed by this record.",
+    "manifest": "docs/manifests/BrandKit20261103-change-manifest.md",
+    "base": "90d1b2bea461ac62d61960724517db9da91d1a12",
+    "base_note": "Master after the merge of PR #303.",
+    "transition": "T0295",
+    "previous_delivery": "T0294",
+    "branch": "delivery/onegate-brand-kit-2026-11-03",
+    "note": "T0295. Go-Live not authorised."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
