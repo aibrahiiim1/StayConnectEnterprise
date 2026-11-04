@@ -16,7 +16,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
 )
 
 // archivedSet is the networks that are archived: marked, and still switched off. A network that is serving again is not archived whatever the marker says.

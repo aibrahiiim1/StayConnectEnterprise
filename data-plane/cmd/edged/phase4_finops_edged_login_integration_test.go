@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/stayconnect/enterprise/data-plane/internal/payment"
+	"github.com/onegate/onegate/data-plane/internal/payment"
 )
 
 // Runs as svc_edged with a factory-clean appliance's grants; the superuser-pool API tests would miss a missing

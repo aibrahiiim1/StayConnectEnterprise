@@ -1,6 +1,6 @@
 # PERMANENT RULE — GitHub Execution, Reporting and Delivery (project-wide, mandatory)
 
-**Authoritative, permanent Product-Owner operating rule for the remainder of the StayConnect Enterprise project.** It governs how every future Phase and milestone is executed, verified, reported and delivered through GitHub. It is a companion to, and does not replace, the [Zero-Stale-Leftovers rule](ZERO_STALE_LEFTOVERS_RULE.md) or the machine-readable project-state governance (`governance/project-state.json`, `tools/project-state.py`). Where this rule and the project-state governance overlap, both must pass.
+**Authoritative, permanent Product-Owner operating rule for the remainder of the OneGate project.** It governs how every future Phase and milestone is executed, verified, reported and delivered through GitHub. It is a companion to, and does not replace, the [Zero-Stale-Leftovers rule](ZERO_STALE_LEFTOVERS_RULE.md) or the machine-readable project-state governance (`governance/project-state.json`, `tools/project-state.py`). Where this rule and the project-state governance overlap, both must pass.
 
 <!-- MACHINE ASSERTION - validated by tools/project-state.py -->
 `GIT_OPERATIONS_OWNER: AGENT`  (all Git and GitHub operations are performed by the authorized AI Agent; the Product Owner is never asked to run routine Git or `gh` commands — see §12)

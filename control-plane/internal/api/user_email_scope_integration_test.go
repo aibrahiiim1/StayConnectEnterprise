@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/auth"
+	"github.com/onegate/onegate/control-plane/internal/auth"
 )
 
 // A data export masks other people's emails, and a customer administrator's email correction rewrites only what is

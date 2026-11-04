@@ -35,8 +35,8 @@ run() { # run <dir>
 d="$(newdir failed_unit)"; stub "$d" enabled active "stayconnect-tc-setup.service loaded failed failed"
 printf '[Service]\nExecStart=/opt/stayconnect/bin/acctd\n' > "$d/units/stayconnect-acctd.service"
 printf '#!/bin/sh\n' > "$d/root/opt/stayconnect/bin/acctd"; chmod +x "$d/root/opt/stayconnect/bin/acctd"
-if run "$d"; then no "a failed StayConnect unit was accepted" "$(cat "$d/out")"
-else grep -q "is in a FAILED state" "$d/out" && ok "a failed StayConnect unit is REFUSED" \
+if run "$d"; then no "a failed OneGate unit was accepted" "$(cat "$d/out")"
+else grep -q "is in a FAILED state" "$d/out" && ok "a failed OneGate unit is REFUSED" \
      || no "refused, but not for the failed state" "$(cat "$d/out")"; fi
 
 # 2. A MISSING PROGRAM on an enabled unit — the 203/EXEC that emptied the disk.

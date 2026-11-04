@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/totp"
+	"github.com/onegate/onegate/data-plane/internal/totp"
 )
 
 // A newly enrolled authenticator is labelled with the product's name; the issuer is display only, so an

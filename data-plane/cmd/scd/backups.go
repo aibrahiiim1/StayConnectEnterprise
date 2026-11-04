@@ -26,7 +26,7 @@ import (
 
 	"filippo.io/age"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/backupcrypt"
+	"github.com/onegate/onegate/data-plane/internal/backupcrypt"
 )
 
 // etcStayconnectDir is the configuration and key material archived with the database; a var so tests can use a folder.

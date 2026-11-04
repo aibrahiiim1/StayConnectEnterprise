@@ -19,9 +19,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/authctx"
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
-	"github.com/stayconnect/enterprise/data-plane/internal/poststay"
+	"github.com/onegate/onegate/data-plane/internal/authctx"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/poststay"
 )
 
 // phase5PostStay is scd's post-stay arm. A nil value is inert: the routes are not mounted (absent, not refusing).

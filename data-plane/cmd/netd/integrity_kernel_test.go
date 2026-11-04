@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
+	"github.com/onegate/onegate/data-plane/internal/netcfg"
 )
 
 func requireDisposableKernel(t *testing.T) {

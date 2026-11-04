@@ -10,7 +10,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/assignment"
+	"github.com/onegate/onegate/control-plane/internal/assignment"
 )
 
 // runGenRegistryKey generates the registry root-of-trust key; its public half is the anchor baked into each

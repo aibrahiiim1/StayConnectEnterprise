@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/pms"
+	"github.com/onegate/onegate/data-plane/internal/pms"
 )
 
 // pipePeer reads continuously so the adapter's writer never blocks, forwarding each received record id on recv.

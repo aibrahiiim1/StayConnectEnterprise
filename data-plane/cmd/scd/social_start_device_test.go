@@ -10,9 +10,9 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/metrics"
-	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
-	lic "github.com/stayconnect/enterprise/license"
+	"github.com/onegate/onegate/data-plane/internal/metrics"
+	"github.com/onegate/onegate/data-plane/internal/tenantcfg"
+	lic "github.com/onegate/onegate/license"
 )
 
 // P4 L6 (social/start): scd itself refuses a start without the device's IP and MAC, rather than storing an unbound state.

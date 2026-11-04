@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
 )
 
 func TestIntegration_VerifyingAnEmailAccountGivesItsOpenSignInTheGroup(t *testing.T) {

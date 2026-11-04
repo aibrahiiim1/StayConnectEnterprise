@@ -14,7 +14,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/ledger"
+	"github.com/onegate/onegate/data-plane/internal/ledger"
 )
 
 // Fixtures commit through the real ledger package; the database ledger is shared across the run, so the files are rebuilt from it per fixture.

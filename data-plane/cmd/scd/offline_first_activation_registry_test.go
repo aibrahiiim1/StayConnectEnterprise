@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/activation"
-	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
+	"github.com/onegate/onegate/data-plane/internal/activation"
+	"github.com/onegate/onegate/data-plane/internal/assignment"
 )
 
 // A never-online appliance: the registry root key is pinned, NO registry is on disk and the legacy plain trust file is absent. The signed registry

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/ledger"
+	"github.com/onegate/onegate/data-plane/internal/ledger"
 )
 
 func mirrorServer(t *testing.T, remote string) *server {

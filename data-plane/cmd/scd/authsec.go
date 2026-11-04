@@ -11,11 +11,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
-	"github.com/stayconnect/enterprise/data-plane/internal/keybootstrap"
-	"github.com/stayconnect/enterprise/data-plane/internal/localkeys"
-	"github.com/stayconnect/enterprise/data-plane/internal/otpkey"
-	"github.com/stayconnect/enterprise/data-plane/internal/throttle"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/keybootstrap"
+	"github.com/onegate/onegate/data-plane/internal/localkeys"
+	"github.com/onegate/onegate/data-plane/internal/otpkey"
+	"github.com/onegate/onegate/data-plane/internal/throttle"
 )
 
 const authWindow = time.Minute

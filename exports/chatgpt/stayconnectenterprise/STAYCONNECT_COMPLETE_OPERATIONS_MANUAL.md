@@ -1,6 +1,6 @@
-# StayConnect Enterprise — Complete Operations Manual
+# OneGate — Complete Operations Manual
 
-> **Audience:** an IT engineer who is new to StayConnect and has no knowledge of
+> **Audience:** an IT engineer who is new to OneGate and has no knowledge of
 > how the product was built. If you read this document top to bottom you can take a
 > site from an unpacked appliance to live, licensed client Wi-Fi, and run it day-2.
 >
@@ -57,7 +57,7 @@
 
 ## 1. System architecture at a glance
 
-StayConnect has two tiers:
+OneGate has two tiers:
 
 - **Central Control Plane** ("Cloud Admin", **Control Panel**) — a multi-tenant
   web app (`cloud-admin`, Next.js) backed by a Go API (`ctrlapi`/control-plane).
@@ -1033,7 +1033,7 @@ history**. Client-facing data and secrets are not.
 
 ## 26. Safe deletion & dependency order
 
-StayConnect never silently cascades a customer/site delete. Deletion is **blocked
+OneGate never silently cascades a customer/site delete. Deletion is **blocked
 while owned records still exist**, and the dialog lists exactly what to remove.
 
 **Teardown order:** **Appliances → Site → Customer.**

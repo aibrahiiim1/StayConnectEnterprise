@@ -15,7 +15,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/social"
+	"github.com/onegate/onegate/data-plane/internal/social"
 )
 
 // Extra is the non-secret provider configuration in social_oauth_providers.extra; other keys are ignored.

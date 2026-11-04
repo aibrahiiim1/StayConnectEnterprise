@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/testdb"
+	"github.com/onegate/onegate/control-plane/internal/testdb"
 )
 
 // Audit Phase 1 M13: with the ACME slot held, a request path gives up at its deadline instead of hanging.

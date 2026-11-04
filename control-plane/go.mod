@@ -1,4 +1,4 @@
-module github.com/stayconnect/enterprise/control-plane
+module github.com/onegate/onegate/control-plane
 
 go 1.26.0
 
@@ -9,12 +9,12 @@ require (
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/prometheus/client_golang v1.23.2
 	github.com/redis/go-redis/v9 v9.7.3
-	github.com/stayconnect/enterprise/license v0.0.0
+	github.com/onegate/onegate/license v0.0.0
 	golang.org/x/crypto v0.58.0
 	golang.org/x/net v0.62.0
 )
 
-replace github.com/stayconnect/enterprise/license => ../license
+replace github.com/onegate/onegate/license => ../license
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect

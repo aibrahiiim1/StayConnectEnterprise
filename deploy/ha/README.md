@@ -1,4 +1,4 @@
-# StayConnect — active/passive HA runbook (HISTORICAL DESIGN — NOT CURRENT)
+# OneGate — active/passive HA runbook (HISTORICAL DESIGN — NOT CURRENT)
 
 > **HISTORICAL — NOT a current runbook.** HA failover under the approved two-NIC appliance is **not designed,
 > implemented or accepted** ([TARGET_ARCHITECTURE.md](../../docs/TARGET_ARCHITECTURE.md) §6). This Phase 5.5

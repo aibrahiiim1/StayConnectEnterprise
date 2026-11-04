@@ -8,7 +8,7 @@
 # that exhausted the pilot's memory. A MemoryMax cap is a belt-and-braces
 # guard so the UI process can never starve the box either.
 [Unit]
-Description=StayConnect Hotel Admin UI (Next.js standalone)
+Description=OneGate Hotel Admin UI (Next.js standalone)
 After=network-online.target stayconnect-edged.service
 Wants=network-online.target stayconnect-edged.service
 # Never permanently fail on a start-limit; the UI must always come back.

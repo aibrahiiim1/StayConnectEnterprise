@@ -17,7 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/transfer"
+	"github.com/onegate/onegate/data-plane/internal/transfer"
 )
 
 // destination adds a second PMS interface with an IN_HOUSE Stay: the property a guest is transferred to.

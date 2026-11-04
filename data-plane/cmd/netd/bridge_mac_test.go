@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
+	"github.com/onegate/onegate/data-plane/internal/netcfg"
 )
 
 // A tagged client network's LIVE bridge takes its parent NIC's MAC address (VLAN 90 and VLAN 3: a phone got a lease by

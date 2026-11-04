@@ -13,9 +13,9 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/metrics"
-	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
-	lic "github.com/stayconnect/enterprise/license"
+	"github.com/onegate/onegate/data-plane/internal/metrics"
+	"github.com/onegate/onegate/data-plane/internal/tenantcfg"
+	lic "github.com/onegate/onegate/license"
 )
 
 // Email accounts: the pure decisions (self_service.go); the database journey is self_service_integration_test.go.

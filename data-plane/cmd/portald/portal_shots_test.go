@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
-	"github.com/stayconnect/enterprise/data-plane/internal/portaldesign"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/portaldesign"
 )
 
 func shotsDesign(template string) map[string]any {

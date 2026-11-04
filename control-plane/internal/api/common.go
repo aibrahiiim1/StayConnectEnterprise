@@ -19,10 +19,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	redis "github.com/redis/go-redis/v9"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/auth"
-	"github.com/stayconnect/enterprise/control-plane/internal/licensing"
-	"github.com/stayconnect/enterprise/control-plane/internal/pki"
-	"github.com/stayconnect/enterprise/control-plane/internal/portaltls"
+	"github.com/onegate/onegate/control-plane/internal/auth"
+	"github.com/onegate/onegate/control-plane/internal/licensing"
+	"github.com/onegate/onegate/control-plane/internal/pki"
+	"github.com/onegate/onegate/control-plane/internal/portaltls"
 )
 
 type Base struct {

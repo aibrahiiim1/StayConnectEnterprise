@@ -2,7 +2,7 @@
 # Root-owned; owns netplan/Kea/nftables/unbound for guest networks. Listens
 # only on a protected unix socket. NEVER on TCP.
 [Unit]
-Description=StayConnect Network Daemon (privileged, guest networks + DHCP)
+Description=OneGate Network Daemon (privileged, guest networks + DHCP)
 # NOTE: there is deliberately no postgresql.service here. There is no such unit
 # on this appliance -- Postgres runs in the stayconnect-pg container -- and
 # systemd silently ignores After= on a non-existent unit, so naming it only

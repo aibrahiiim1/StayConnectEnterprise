@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
+	"github.com/onegate/onegate/data-plane/internal/netcfg"
 )
 
 // portalRefreshInterval is not an operator setting; it bounds how soon a device's DHCP answer reflects scd's decision.

@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/conntrack"
-	"github.com/stayconnect/enterprise/data-plane/internal/nft"
+	"github.com/onegate/onegate/data-plane/internal/conntrack"
+	"github.com/onegate/onegate/data-plane/internal/nft"
 )
 
 // gate is the packet-authorization surface; an interface so ordering can be tested without a kernel.

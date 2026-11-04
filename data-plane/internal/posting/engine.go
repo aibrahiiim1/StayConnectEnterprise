@@ -10,7 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/postinghandoff"
+	"github.com/onegate/onegate/data-plane/internal/postinghandoff"
 )
 
 // Engine creates postings under the fail-closed gate and executes them through per-interface outbox lanes.

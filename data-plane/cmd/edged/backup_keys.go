@@ -17,7 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/backupcrypt"
+	"github.com/onegate/onegate/data-plane/internal/backupcrypt"
 )
 
 const restoreTestDefaultMonths = 6

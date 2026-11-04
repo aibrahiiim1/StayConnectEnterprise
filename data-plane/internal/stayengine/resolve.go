@@ -1,7 +1,7 @@
 // Package stayengine resolves durable inbox events (iam_v2.stay_events) into authoritative Stay operations.
 package stayengine
 
-import "github.com/stayconnect/enterprise/data-plane/internal/namenorm"
+import "github.com/onegate/onegate/data-plane/internal/namenorm"
 
 // EventType is the closed set of Protel event types the engine ingests.
 type EventType string

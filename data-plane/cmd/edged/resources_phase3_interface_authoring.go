@@ -24,7 +24,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/pmsprovider"
+	"github.com/onegate/onegate/data-plane/internal/pmsprovider"
 )
 
 // The connector kinds the canonical PMS runtime supports; it agrees with pmsd by construction (both derive from

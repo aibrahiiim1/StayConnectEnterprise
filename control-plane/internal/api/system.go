@@ -15,8 +15,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/assignment"
-	"github.com/stayconnect/enterprise/control-plane/internal/audit"
+	"github.com/onegate/onegate/control-plane/internal/assignment"
+	"github.com/onegate/onegate/control-plane/internal/audit"
 )
 
 func (b *Base) listSecurityAlerts(w http.ResponseWriter, r *http.Request) {

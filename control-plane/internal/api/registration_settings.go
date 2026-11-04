@@ -9,7 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/audit"
+	"github.com/onegate/onegate/control-plane/internal/audit"
 )
 
 // AD-19 / AD-20: limits on unauthenticated appliance registration.
@@ -24,9 +24,9 @@ type registrationSettingsView struct {
 	MaxWaitingAppliances int           `json:"max_waiting_appliances"`
 	MaxWaiting           settingBounds `json:"max_waiting_appliances_bounds"`
 	// Appliances waiting for activation right now (the number the cap is compared with).
-	WaitingAppliances int `json:"waiting_appliances"`
-	UpdatedAt            *time.Time    `json:"updated_at"`
-	UpdatedBy            *string       `json:"updated_by"`
+	WaitingAppliances int        `json:"waiting_appliances"`
+	UpdatedAt         *time.Time `json:"updated_at"`
+	UpdatedBy         *string    `json:"updated_by"`
 }
 
 // Serial and fingerprint an appliance derives when it has no DMI data, machine-id or NIC (AD-19). Proven equal to the

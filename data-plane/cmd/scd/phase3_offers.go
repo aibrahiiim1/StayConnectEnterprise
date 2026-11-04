@@ -12,7 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
 )
 
 // offerDecision is one package the verified Stay qualifies for, with the evidence that decided it.

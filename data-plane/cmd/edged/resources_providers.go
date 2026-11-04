@@ -20,9 +20,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/mail"
-	"github.com/stayconnect/enterprise/data-plane/internal/social"
-	"github.com/stayconnect/enterprise/data-plane/internal/socialloader"
+	"github.com/onegate/onegate/data-plane/internal/mail"
+	"github.com/onegate/onegate/data-plane/internal/social"
+	"github.com/onegate/onegate/data-plane/internal/socialloader"
 )
 
 // WhatsApp is its own channel, never an SMS kind. "ses" is not offered (scd has no adapter) but existing rows are still read and validated.

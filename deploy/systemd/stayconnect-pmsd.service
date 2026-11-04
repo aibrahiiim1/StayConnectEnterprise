@@ -1,5 +1,5 @@
 [Unit]
-Description=StayConnect PMS Connector Daemon (pmsd) — dedicated read-only PMS connector (Phase 3, DARK)
+Description=OneGate PMS Connector Daemon (pmsd) — dedicated read-only PMS connector (Phase 3, DARK)
 # Ordering only (pmsd uses a lazy pool and tolerates a slow DB): after network + the site DB container.
 # postgresql.service removed: no such unit exists here (Postgres is the stayconnect-pg container) and
 # systemd ignores After= on a missing unit, so it never ordered anything. pmsd's lazy pool means it needs

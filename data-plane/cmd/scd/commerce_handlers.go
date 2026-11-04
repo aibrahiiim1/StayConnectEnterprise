@@ -11,7 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
 )
 
 // Guest-portal commerce handlers on scd's Unix socket (root:stayconnect 0660), called only by portald; mounted only when the Phase-2 portal surface is ON.

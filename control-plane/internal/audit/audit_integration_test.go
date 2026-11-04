@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/testdb"
+	"github.com/onegate/onegate/control-plane/internal/testdb"
 )
 
 // Audit Phase 1 M14: a cancelled request context still writes the audit row of a committed change, and Op

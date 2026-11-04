@@ -94,7 +94,7 @@ Numbers that are compared use `tabular` (tabular figures).
 
 `components/brand.tsx` exports `OneGateMark` (two dotted chevrons around a node, drawn inline and filled
 with `currentColor`) and `OneGateLockup` (the mark in its brand tile with "OneGate" and the product line).
-The product name is always set in type beside the mark. No StayConnect branding appears in any redesigned
+The product name is always set in type beside the mark. No OneGate branding appears in any redesigned
 surface.
 
 ## Icons

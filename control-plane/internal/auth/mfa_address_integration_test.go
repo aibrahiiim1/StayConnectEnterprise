@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/testdb"
-	"github.com/stayconnect/enterprise/control-plane/internal/totp"
+	"github.com/onegate/onegate/control-plane/internal/testdb"
+	"github.com/onegate/onegate/control-plane/internal/totp"
 )
 
 // AD-6: wrong second-step codes lock the address they came from; the account locks only at 4x across addresses.

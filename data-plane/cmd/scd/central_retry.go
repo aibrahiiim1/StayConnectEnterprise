@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/applianceauth"
-	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
+	"github.com/onegate/onegate/data-plane/internal/applianceauth"
+	"github.com/onegate/onegate/data-plane/internal/assignment"
 )
 
 // centralMTLS is the mutual-TLS transport both messages ride on. Tests substitute s.centralTransport.

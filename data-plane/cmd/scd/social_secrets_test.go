@@ -14,11 +14,11 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/metrics"
-	"github.com/stayconnect/enterprise/data-plane/internal/sealbox"
-	"github.com/stayconnect/enterprise/data-plane/internal/social"
-	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
-	lic "github.com/stayconnect/enterprise/license"
+	"github.com/onegate/onegate/data-plane/internal/metrics"
+	"github.com/onegate/onegate/data-plane/internal/sealbox"
+	"github.com/onegate/onegate/data-plane/internal/social"
+	"github.com/onegate/onegate/data-plane/internal/tenantcfg"
+	lic "github.com/onegate/onegate/license"
 )
 
 const (

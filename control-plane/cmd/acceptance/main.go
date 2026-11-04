@@ -32,10 +32,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/activation"
-	"github.com/stayconnect/enterprise/control-plane/internal/applianceauth"
-	"github.com/stayconnect/enterprise/control-plane/internal/assignment"
-	"github.com/stayconnect/enterprise/control-plane/internal/opsignin"
+	"github.com/onegate/onegate/control-plane/internal/activation"
+	"github.com/onegate/onegate/control-plane/internal/applianceauth"
+	"github.com/onegate/onegate/control-plane/internal/assignment"
+	"github.com/onegate/onegate/control-plane/internal/opsignin"
 )
 
 var (

@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
+	"github.com/onegate/onegate/data-plane/internal/writerguard"
 )
 
 // Probe asks one interface for its verdict. A probe that doesn't answer in time is UNAVAILABLE, never

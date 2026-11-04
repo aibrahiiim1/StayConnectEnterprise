@@ -16,10 +16,10 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/auth"
-	"github.com/stayconnect/enterprise/control-plane/internal/ratebudget"
-	"github.com/stayconnect/enterprise/control-plane/internal/testdb"
-	"github.com/stayconnect/enterprise/control-plane/internal/totp"
+	"github.com/onegate/onegate/control-plane/internal/auth"
+	"github.com/onegate/onegate/control-plane/internal/ratebudget"
+	"github.com/onegate/onegate/control-plane/internal/testdb"
+	"github.com/onegate/onegate/control-plane/internal/totp"
 )
 
 // Two-step sign-in is optional per account (D68): the password alone opens the session until the operator turns it

@@ -36,7 +36,7 @@ type Hold struct {
 	HeldAt      string
 }
 
-// SystemIdentity comes from pg_control, not anything StayConnect writes: an application-stored value would be restored
+// SystemIdentity comes from pg_control, not anything OneGate writes: an application-stored value would be restored
 // with everything else and agree with itself after the very event it should detect.
 func SystemIdentity(ctx context.Context, pool *pgxpool.Pool) (string, error) {
 	var id string

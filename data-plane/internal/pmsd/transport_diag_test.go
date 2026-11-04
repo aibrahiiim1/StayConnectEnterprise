@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/stayconnect/enterprise/data-plane/internal/pms"
+	"github.com/onegate/onegate/data-plane/internal/pms"
 )
 
 type timeoutErr struct{}

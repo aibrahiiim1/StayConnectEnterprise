@@ -12,7 +12,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/auth"
+	"github.com/onegate/onegate/control-plane/internal/auth"
 )
 
 // installation is one installation of an appliance: the identity key that signs its requests (box) and the separate mTLS key

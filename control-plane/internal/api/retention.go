@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/audit"
+	"github.com/onegate/onegate/control-plane/internal/audit"
 )
 
 // Central's retention periods are bounded settings. central_retention_apply() in the database holds the rules in

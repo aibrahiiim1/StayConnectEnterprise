@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
+	"github.com/onegate/onegate/data-plane/internal/assignment"
 )
 
 // loaderFor leaves the assignment dir empty so only the identity gate decides the outcome.

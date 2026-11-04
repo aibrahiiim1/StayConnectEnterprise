@@ -80,7 +80,7 @@ draft as it is today. Fixing one means updating the draft.
   - ctrlapi connects as the database superuser, and customers are kept apart in the application only, with no
     row-level security.
   - ~~The audit log stores the email typed on a failed sign-in~~: since 2026-10-19 a failure is recorded against the account if one exists, otherwise with no name.
-  - ~~The authenticator app shows "StayConnect Central"~~: "OneGate Central" for new enrolments since 2026-10-19; existing entries keep their old label and their codes still work.
+  - ~~The authenticator app shows "OneGate Central"~~: "OneGate Central" for new enrolments since 2026-10-19; existing entries keep their old label and their codes still work.
 - **Documents:**
   - ~~`ROLE_AND_SCOPE_MATRIX.md` says the IT manager has no access to Operators~~: corrected to read-only, 2026-10-19.
   - ~~`CENTRAL_CONTROL_PLANE.md` still says sessions last 24 hours~~: corrected to 12, 2026-10-19.

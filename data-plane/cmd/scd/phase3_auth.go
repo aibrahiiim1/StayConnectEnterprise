@@ -24,14 +24,14 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/authctx"
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
-	"github.com/stayconnect/enterprise/data-plane/internal/licstate"
-	"github.com/stayconnect/enterprise/data-plane/internal/pmsresolve"
-	"github.com/stayconnect/enterprise/data-plane/internal/signinattempt"
-	"github.com/stayconnect/enterprise/data-plane/internal/staygrant"
+	"github.com/onegate/onegate/data-plane/internal/authctx"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/licstate"
+	"github.com/onegate/onegate/data-plane/internal/pmsresolve"
+	"github.com/onegate/onegate/data-plane/internal/signinattempt"
+	"github.com/onegate/onegate/data-plane/internal/staygrant"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/namenorm"
+	"github.com/onegate/onegate/data-plane/internal/namenorm"
 )
 
 // phase3Auth is scd's Phase-3 arm. A nil value is inert: the routes are not mounted (404).

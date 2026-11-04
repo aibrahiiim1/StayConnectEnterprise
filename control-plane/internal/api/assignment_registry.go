@@ -11,9 +11,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/assignment"
-	"github.com/stayconnect/enterprise/control-plane/internal/audit"
-	"github.com/stayconnect/enterprise/control-plane/internal/auth"
+	"github.com/onegate/onegate/control-plane/internal/assignment"
+	"github.com/onegate/onegate/control-plane/internal/audit"
+	"github.com/onegate/onegate/control-plane/internal/auth"
 )
 
 // RegistryBase builds, signs and serves the assignment trust registry: every signing key and its state, signed by

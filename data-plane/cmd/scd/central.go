@@ -23,13 +23,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/applianceauth"
-	"github.com/stayconnect/enterprise/data-plane/internal/appliancecert"
-	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
-	"github.com/stayconnect/enterprise/data-plane/internal/buildprofile"
-	"github.com/stayconnect/enterprise/data-plane/internal/identity"
-	"github.com/stayconnect/enterprise/data-plane/internal/licstate"
-	lic "github.com/stayconnect/enterprise/license"
+	"github.com/onegate/onegate/data-plane/internal/applianceauth"
+	"github.com/onegate/onegate/data-plane/internal/appliancecert"
+	"github.com/onegate/onegate/data-plane/internal/assignment"
+	"github.com/onegate/onegate/data-plane/internal/buildprofile"
+	"github.com/onegate/onegate/data-plane/internal/identity"
+	"github.com/onegate/onegate/data-plane/internal/licstate"
+	lic "github.com/onegate/onegate/license"
 )
 
 const (

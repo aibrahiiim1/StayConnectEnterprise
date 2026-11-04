@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/nft"
-	"github.com/stayconnect/enterprise/data-plane/internal/nftfoundation"
-	"github.com/stayconnect/enterprise/data-plane/internal/shape"
+	"github.com/onegate/onegate/data-plane/internal/nft"
+	"github.com/onegate/onegate/data-plane/internal/nftfoundation"
+	"github.com/onegate/onegate/data-plane/internal/shape"
 )
 
 // The harness passes the topology via the environment; an unset variable fails the suite rather than running elsewhere.

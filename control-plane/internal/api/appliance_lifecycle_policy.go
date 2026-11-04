@@ -5,7 +5,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/portaltls"
+	"github.com/onegate/onegate/control-plane/internal/portaltls"
 )
 
 // revokeApplianceBoundLicenses revokes every active/suspended licence bound to the appliance and releases its

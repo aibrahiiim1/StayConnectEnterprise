@@ -18,8 +18,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/applianceauth"
-	"github.com/stayconnect/enterprise/data-plane/internal/hwid"
+	"github.com/onegate/onegate/data-plane/internal/applianceauth"
+	"github.com/onegate/onegate/data-plane/internal/hwid"
 )
 
 // Identity is the appliance's resolved identity. TenantID/SiteID are legacy and never read for authority: the signed assignment is the only source of tenant and site.

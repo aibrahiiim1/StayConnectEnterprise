@@ -15,7 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/nft"
+	"github.com/onegate/onegate/data-plane/internal/nft"
 )
 
 // pmsSignInModes are the verification values a site may accept with the room number, mapped to portal/resolver wire values.

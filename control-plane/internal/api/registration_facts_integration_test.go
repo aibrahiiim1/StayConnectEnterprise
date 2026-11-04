@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/activation"
+	"github.com/onegate/onegate/control-plane/internal/activation"
 )
 
 // Audit Phase 1 M11: every self-reported fact is checked.

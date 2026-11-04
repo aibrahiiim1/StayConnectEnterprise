@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
-	"github.com/stayconnect/enterprise/data-plane/internal/nftconverge"
+	"github.com/onegate/onegate/data-plane/internal/netcfg"
+	"github.com/onegate/onegate/data-plane/internal/nftconverge"
 )
 
 // fakeKernel records the commands netd executes: the production invariant is about execution (a steady-state

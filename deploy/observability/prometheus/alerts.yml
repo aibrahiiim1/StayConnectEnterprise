@@ -1,4 +1,4 @@
-# StayConnect alert rules (phase 13).
+# OneGate alert rules (phase 13).
 #
 # Severities:
 #   critical — page immediately (pager / Slack critical channel)

@@ -1,6 +1,6 @@
 # Archive index — files removed from the current tree
 
-Removed on 2026-10-28 by the integrated cleanup mission (D79, T0265) and the retired-targets cleanup (D78, T0264). **Nothing
+Removed on 2026-10-28 by the integrated cleanup mission (D79, T0265) and the retired-targets cleanup (D78, T0264). A second pass on 2026-11-03 removed the historical delivery manifests written since then, by the same rule (restore from `6e3a88a048f7`). **Nothing
 is lost:** Git history is never rewritten, so every file below can be read or restored from the commit given:
 
 ```bash
@@ -52,14 +52,32 @@ Moved, not removed: `docs/EDGE_NETWORKING.md`, `docs/NETWORK_APPLY_AND_ROLLBACK.
 
 | Path | Commit |
 |---|---|
+| `docs/manifests/AdminConsoleHotelUX20261103-change-manifest.md` | `6e3a88a048f7` |
+| `docs/manifests/AdminConsoleSettings20261103-change-manifest.md` | `6e3a88a048f7` |
+| `docs/manifests/AdminConsoleSigninUX20261103-change-manifest.md` | `6e3a88a048f7` |
+| `docs/manifests/AdminConsoleSimplify20261102-change-manifest.md` | `6e3a88a048f7` |
 | `docs/manifests/AdminConsolesRedesign-change-manifest.md` | `1d69508a8472` |
+| `docs/manifests/AdminConsoleUXClosure20261103-change-manifest.md` | `6e3a88a048f7` |
+| `docs/manifests/AuditClosure-change-manifest.md` | `6e3a88a048f7` |
+| `docs/manifests/AuditClosureCapacity-change-manifest.md` | `6e3a88a048f7` |
+| `docs/manifests/AuditClosureDeployment-change-manifest.md` | `6e3a88a048f7` |
+| `docs/manifests/AuditDecisions-change-manifest.md` | `6e3a88a048f7` |
+| `docs/manifests/AuditDecisionsDeployment-change-manifest.md` | `6e3a88a048f7` |
+| `docs/manifests/AuditDecisionsUpgradePath-change-manifest.md` | `6e3a88a048f7` |
+| `docs/manifests/AuditRemediation2-change-manifest.md` | `6e3a88a048f7` |
 | `docs/manifests/AuditRemediationMerge-change-manifest.md` | `1d69508a8472` |
 | `docs/manifests/AuthenticatorBranding-change-manifest.md` | `1d69508a8472` |
+| `docs/manifests/BackupSweepOrder-change-manifest.md` | `6e3a88a048f7` |
+| `docs/manifests/central-licensing-removal-and-pms-departures.md` | `1d69508a8472` |
+| `docs/manifests/CentralLeastPrivilege-change-manifest.md` | `6e3a88a048f7` |
+| `docs/manifests/ChrPmsCommissioning-change-manifest.md` | `6e3a88a048f7` |
 | `docs/manifests/ClientAccessIdentity-change-manifest.md` | `1d69508a8472` |
 | `docs/manifests/ClientNetworking-change-manifest.md` | `1d69508a8472` |
 | `docs/manifests/ClientNetworkingSourceDeviceClosure-change-manifest.md` | `1d69508a8472` |
+| `docs/manifests/ClosureRound2-change-manifest.md` | `6e3a88a048f7` |
 | `docs/manifests/EmailAccountsSelfService-change-manifest.md` | `1d69508a8472` |
 | `docs/manifests/EnrollmentStaleCsr-change-manifest.md` | `1d69508a8472` |
+| `docs/manifests/FinalMission-change-manifest.md` | `6e3a88a048f7` |
 | `docs/manifests/FinancialModulesConfigurable-change-manifest.md` | `1d69508a8472` |
 | `docs/manifests/GdprBackupConsolidationMerge-change-manifest.md` | `1d69508a8472` |
 | `docs/manifests/GuestAccess-change-manifest.md` | `1d69508a8472` |
@@ -75,16 +93,23 @@ Moved, not removed: `docs/EDGE_NETWORKING.md`, `docs/NETWORK_APPLY_AND_ROLLBACK.
 | `docs/manifests/MultiPmsNetworkAdmin-closure-change-manifest.md` | `1d69508a8472` |
 | `docs/manifests/NeutralTerminology-change-manifest.md` | `1d69508a8472` |
 | `docs/manifests/OneGate-change-manifest.md` | `1d69508a8472` |
-| `docs/manifests/PR202AcceptanceCorrection-change-manifest.md` | `1d69508a8472` |
+| `docs/manifests/OperatorRequests20261102-change-manifest.md` | `6e3a88a048f7` |
+| `docs/manifests/OperatorUsernameAlerts20261103-change-manifest.md` | `6e3a88a048f7` |
+| `docs/manifests/PackageControls-change-manifest.md` | `6e3a88a048f7` |
+| `docs/manifests/PackageControlsDeployment-change-manifest.md` | `6e3a88a048f7` |
 | `docs/manifests/Phase6-change-manifest.md` | `1d69508a8472` |
 | `docs/manifests/PmsResilienceAndBranding-change-manifest.md` | `1d69508a8472` |
 | `docs/manifests/PoLedDelivery-change-manifest.md` | `1d69508a8472` |
 | `docs/manifests/PostClosure-change-manifest.md` | `1d69508a8472` |
+| `docs/manifests/PR202AcceptanceCorrection-change-manifest.md` | `1d69508a8472` |
 | `docs/manifests/PreliveCentralAndPolicy-change-manifest.md` | `1d69508a8472` |
 | `docs/manifests/RepositoryCleanup-change-manifest.md` | `1d69508a8472` |
 | `docs/manifests/RestoreRetentionFailsafe-change-manifest.md` | `1d69508a8472` |
 | `docs/manifests/RestoreRetentionFailsafeMerge-change-manifest.md` | `1d69508a8472` |
 | `docs/manifests/RetiredAddressRedaction-change-manifest.md` | `1d69508a8472` |
+| `docs/manifests/RetiredTargetsCleanup-change-manifest.md` | `6e3a88a048f7` |
+| `docs/manifests/RoomResignLiveAccess20261103-change-manifest.md` | `6e3a88a048f7` |
+| `docs/manifests/RoomSignInDrain20261102-change-manifest.md` | `6e3a88a048f7` |
 | `docs/manifests/SameVendorMultiPMS-change-manifest.md` | `1d69508a8472` |
 | `docs/manifests/SameVendorMultiPMS-closure-change-manifest.md` | `1d69508a8472` |
 | `docs/manifests/SiteModulesAcquisition-change-manifest.md` | `1d69508a8472` |
@@ -94,7 +119,6 @@ Moved, not removed: `docs/EDGE_NETWORKING.md`, `docs/NETWORK_APPLY_AND_ROLLBACK.
 | `docs/manifests/VelonetClosure-change-manifest.md` | `1d69508a8472` |
 | `docs/manifests/VelonetPreLive-change-manifest.md` | `1d69508a8472` |
 | `docs/manifests/VelonetRedesign-change-manifest.md` | `1d69508a8472` |
-| `docs/manifests/central-licensing-removal-and-pms-departures.md` | `1d69508a8472` |
 
 ## Merged into consolidated documents (content carried over, unchanged in substance)
 

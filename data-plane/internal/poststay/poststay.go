@@ -37,8 +37,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/throttle"
-	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
+	"github.com/onegate/onegate/data-plane/internal/throttle"
+	"github.com/onegate/onegate/data-plane/internal/writerguard"
 )
 
 // ThrottleMethod is its own method so a post-stay brute force neither consumes nor is masked by the budget for ordinary

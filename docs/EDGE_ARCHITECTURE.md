@@ -111,7 +111,7 @@ direct connection to the appliance.
 
 **This is an authoritative operating rule. Read it before opening an incident about a disconnected PMS.**
 
-StayConnect is **local-first**. The appliance authenticates clients, enforces entitlements and runs sessions
+OneGate is **local-first**. The appliance authenticates clients, enforces entitlements and runs sessions
 from its own site database. The PMS link is how the guest list gets there; it is **not** a dependency of
 serving clients.
 

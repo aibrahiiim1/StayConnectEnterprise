@@ -20,7 +20,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/throttle"
+	"github.com/onegate/onegate/data-plane/internal/throttle"
 )
 
 const (

@@ -10,7 +10,7 @@ import (
 
 	redis "github.com/redis/go-redis/v9"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/auth"
+	"github.com/onegate/onegate/control-plane/internal/auth"
 )
 
 // Audit Phase 1 M16: the offline request import needs a password step-up like every other appliance action.

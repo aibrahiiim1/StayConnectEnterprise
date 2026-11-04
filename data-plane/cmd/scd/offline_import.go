@@ -9,8 +9,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/offline"
-	lic "github.com/stayconnect/enterprise/license"
+	"github.com/onegate/onegate/data-plane/internal/offline"
+	lic "github.com/onegate/onegate/license"
 )
 
 // setupOfflineImport imports an appliance-specific signed offline package: verifies signature, binding and expiry, enforces

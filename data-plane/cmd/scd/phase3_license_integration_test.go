@@ -13,8 +13,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/licstate"
-	"github.com/stayconnect/enterprise/data-plane/internal/signinattempt"
+	"github.com/onegate/onegate/data-plane/internal/licstate"
+	"github.com/onegate/onegate/data-plane/internal/signinattempt"
 )
 
 // otherDeviceBody is a resolve submission from a second device on the same network.

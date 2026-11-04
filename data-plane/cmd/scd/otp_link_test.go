@@ -12,12 +12,12 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/mail"
-	"github.com/stayconnect/enterprise/data-plane/internal/metrics"
-	"github.com/stayconnect/enterprise/data-plane/internal/otp"
-	"github.com/stayconnect/enterprise/data-plane/internal/sms"
-	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
-	lic "github.com/stayconnect/enterprise/license"
+	"github.com/onegate/onegate/data-plane/internal/mail"
+	"github.com/onegate/onegate/data-plane/internal/metrics"
+	"github.com/onegate/onegate/data-plane/internal/otp"
+	"github.com/onegate/onegate/data-plane/internal/sms"
+	"github.com/onegate/onegate/data-plane/internal/tenantcfg"
+	lic "github.com/onegate/onegate/license"
 )
 
 // The SMS carries a tap-to-connect link into the phone's real browser; the email one-time code is removed and these tests pin that it stays removed.

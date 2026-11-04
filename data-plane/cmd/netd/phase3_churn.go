@@ -23,7 +23,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/shape"
+	"github.com/onegate/onegate/data-plane/internal/shape"
 )
 
 const (

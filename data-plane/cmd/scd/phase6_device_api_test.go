@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
 )
 
 // Guest device surface wire contract (no database needed): a request carrying entitlement_id, stay_id, room,

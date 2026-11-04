@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/auth"
+	"github.com/onegate/onegate/control-plane/internal/auth"
 )
 
 // AD-4: outside platform scopes, Central staff appear as "OneGate support" with no reason, address or free text.

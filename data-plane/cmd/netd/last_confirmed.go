@@ -15,7 +15,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
+	"github.com/onegate/onegate/data-plane/internal/netcfg"
 )
 
 // lastConfirmed is the on-disk copy of the configuration the database last recorded as confirmed. It is written only after the database commit, so

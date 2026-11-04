@@ -18,7 +18,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/pki"
+	"github.com/onegate/onegate/control-plane/internal/pki"
 )
 
 // StartMTLS runs the appliance mutual-TLS listener. A client certificate signed by the appliance CA is

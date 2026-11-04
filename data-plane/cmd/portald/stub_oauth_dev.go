@@ -13,7 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/social"
+	"github.com/onegate/onegate/data-plane/internal/social"
 )
 
 func mountStubOAuth(r chi.Router, h *handler) {

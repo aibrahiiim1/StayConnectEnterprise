@@ -14,7 +14,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/stayconnect/enterprise/data-plane/internal/otpkey"
+	"github.com/onegate/onegate/data-plane/internal/otpkey"
 )
 
 const (

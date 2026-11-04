@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
+	"github.com/onegate/onegate/data-plane/internal/netcfg"
 )
 
 // A rollback must not run against a revision just confirmed, on either branch: the watchdog could otherwise

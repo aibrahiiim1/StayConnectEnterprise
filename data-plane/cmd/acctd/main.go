@@ -13,11 +13,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
-	"github.com/stayconnect/enterprise/data-plane/internal/shape"
-	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
-	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
+	"github.com/onegate/onegate/data-plane/internal/assignment"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/shape"
+	"github.com/onegate/onegate/data-plane/internal/startupbackoff"
+	"github.com/onegate/onegate/data-plane/internal/writerguard"
 )
 
 type cfg struct {

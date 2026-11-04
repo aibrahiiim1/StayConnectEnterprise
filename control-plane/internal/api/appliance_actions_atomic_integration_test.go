@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/licensing"
-	"github.com/stayconnect/enterprise/control-plane/internal/testdb"
+	"github.com/onegate/onegate/control-plane/internal/licensing"
+	"github.com/onegate/onegate/control-plane/internal/testdb"
 )
 
 func TestCanonicalMAC(t *testing.T) {

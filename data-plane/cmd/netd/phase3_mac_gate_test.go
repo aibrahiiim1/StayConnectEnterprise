@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/nft"
+	"github.com/onegate/onegate/data-plane/internal/nft"
 )
 
 // fakeSets is a map-backed stand-in for the two Phase-3 sets.

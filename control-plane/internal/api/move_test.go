@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/licensing"
+	"github.com/onegate/onegate/control-plane/internal/licensing"
 )
 
 func TestMoveToAnotherCustomerIsRefused(t *testing.T) {

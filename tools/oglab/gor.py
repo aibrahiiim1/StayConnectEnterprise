@@ -14,7 +14,7 @@ for b in blocks:
     app = [f for f in frames if "stayconnect" in f or "jackc" in f or "main." in f]
     sel = app[:int(sys.argv[3]) if len(sys.argv) > 3 else 6] if app else frames[:4]
     def nm(f):
-        f = f.replace("github.com/stayconnect/enterprise/data-plane/", "")
+        f = f.replace("github.com/onegate/onegate/data-plane/", "")
         if f.endswith(")") and f.rfind("(") > 0: f = f[:f.rfind("(")]
         return f[:70]
     key = hdr + " || " + " <- ".join(nm(f) for f in sel)

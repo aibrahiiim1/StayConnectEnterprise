@@ -13,7 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/assignment"
+	"github.com/onegate/onegate/control-plane/internal/assignment"
 )
 
 // AssignmentBase issues signed appliance-assignment documents and serves the current one to the appliance.

@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/activation"
-	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
-	"github.com/stayconnect/enterprise/data-plane/internal/identity"
+	"github.com/onegate/onegate/data-plane/internal/activation"
+	"github.com/onegate/onegate/data-plane/internal/assignment"
+	"github.com/onegate/onegate/data-plane/internal/identity"
 )
 
 type offlineRig struct {

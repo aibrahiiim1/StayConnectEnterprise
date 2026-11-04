@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/shapeplan"
+	"github.com/onegate/onegate/data-plane/internal/shapeplan"
 )
 
 type churnSess struct {

@@ -13,7 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/ledger"
+	"github.com/onegate/onegate/data-plane/internal/ledger"
 )
 
 func TestIntegration_GuestDataRights_FindExportErase(t *testing.T) {

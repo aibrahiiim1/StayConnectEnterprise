@@ -18,7 +18,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/totp"
+	"github.com/onegate/onegate/control-plane/internal/totp"
 )
 
 const KeyringEnv = "OPERATOR_TOTP_KEYRING"

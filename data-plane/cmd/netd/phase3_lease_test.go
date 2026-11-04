@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/shape"
-	"github.com/stayconnect/enterprise/data-plane/internal/shapeplan"
+	"github.com/onegate/onegate/data-plane/internal/shape"
+	"github.com/onegate/onegate/data-plane/internal/shapeplan"
 )
 
 func leasePlan(gen int64, endsAt *time.Time) shapeplan.Envelope {

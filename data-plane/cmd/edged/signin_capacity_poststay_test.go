@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/poststay"
+	"github.com/onegate/onegate/data-plane/internal/poststay"
 )
 
 // The console lists, validates and explains the post-stay throttle settings from signinCapacityFields; their bounds and

@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/shape"
-	"github.com/stayconnect/enterprise/data-plane/internal/shapeplan"
+	"github.com/onegate/onegate/data-plane/internal/shape"
+	"github.com/onegate/onegate/data-plane/internal/shapeplan"
 )
 
 // A failure is reported, never swallowed: without an origin the traffic before the first observation is lost

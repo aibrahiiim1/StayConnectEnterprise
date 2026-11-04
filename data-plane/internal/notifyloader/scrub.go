@@ -8,7 +8,7 @@ import (
 	"log/slog"
 	"regexp"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/mail"
+	"github.com/onegate/onegate/data-plane/internal/mail"
 )
 
 // OperatorText is the text an operator may read for a provider failure (audit AD-13): an SMTP server's own words are

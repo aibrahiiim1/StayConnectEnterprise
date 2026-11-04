@@ -5,7 +5,7 @@ import (
 	"crypto/rand"
 	"testing"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/assignment"
+	"github.com/onegate/onegate/control-plane/internal/assignment"
 )
 
 // Audit Phase 1 M3: a key-state change that cannot be re-signed into the registry is refused, not reported as done.

@@ -14,15 +14,15 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/api"
-	"github.com/stayconnect/enterprise/control-plane/internal/applianceauth"
-	"github.com/stayconnect/enterprise/control-plane/internal/auth"
-	"github.com/stayconnect/enterprise/control-plane/internal/clientip"
-	"github.com/stayconnect/enterprise/control-plane/internal/licensing"
-	"github.com/stayconnect/enterprise/control-plane/internal/metrics"
-	"github.com/stayconnect/enterprise/control-plane/internal/pki"
-	"github.com/stayconnect/enterprise/control-plane/internal/portaltls"
-	"github.com/stayconnect/enterprise/control-plane/internal/ratebudget"
+	"github.com/onegate/onegate/control-plane/internal/api"
+	"github.com/onegate/onegate/control-plane/internal/applianceauth"
+	"github.com/onegate/onegate/control-plane/internal/auth"
+	"github.com/onegate/onegate/control-plane/internal/clientip"
+	"github.com/onegate/onegate/control-plane/internal/licensing"
+	"github.com/onegate/onegate/control-plane/internal/metrics"
+	"github.com/onegate/onegate/control-plane/internal/pki"
+	"github.com/onegate/onegate/control-plane/internal/portaltls"
+	"github.com/onegate/onegate/control-plane/internal/ratebudget"
 )
 
 type Deps struct {

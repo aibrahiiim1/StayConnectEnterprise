@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
-	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/tenantcfg"
 )
 
 func (f *authFixture) setOverride(t *testing.T, network string, off []string, primary string, remember *int) {

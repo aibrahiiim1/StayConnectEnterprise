@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/pms"
+	"github.com/onegate/onegate/data-plane/internal/pms"
 )
 
 // writeReq: body=="" is an activity-only signal (reset the idle timer, write nothing). A non-nil ack receives

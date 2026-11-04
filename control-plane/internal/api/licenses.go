@@ -10,9 +10,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/audit"
-	"github.com/stayconnect/enterprise/control-plane/internal/auth"
-	"github.com/stayconnect/enterprise/control-plane/internal/licensing"
+	"github.com/onegate/onegate/control-plane/internal/audit"
+	"github.com/onegate/onegate/control-plane/internal/auth"
+	"github.com/onegate/onegate/control-plane/internal/licensing"
 )
 
 // Every licence change is a new signed document with the next licence_version. Licence operations never touch the

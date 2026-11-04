@@ -6,8 +6,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/auth"
-	"github.com/stayconnect/enterprise/control-plane/internal/clientip"
+	"github.com/onegate/onegate/control-plane/internal/auth"
+	"github.com/onegate/onegate/control-plane/internal/clientip"
 )
 
 // Querier is satisfied by both *pgxpool.Pool and pgx.Tx.

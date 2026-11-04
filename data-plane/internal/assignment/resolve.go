@@ -11,7 +11,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/applianceauth"
+	"github.com/onegate/onegate/data-plane/internal/applianceauth"
 )
 
 // The on-disk locations of the assignment chain; deployment facts each daemon reads from its own environment.

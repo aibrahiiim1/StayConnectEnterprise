@@ -20,8 +20,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/applianceauth"
-	lic "github.com/stayconnect/enterprise/license"
+	"github.com/onegate/onegate/data-plane/internal/applianceauth"
+	lic "github.com/onegate/onegate/license"
 )
 
 const (

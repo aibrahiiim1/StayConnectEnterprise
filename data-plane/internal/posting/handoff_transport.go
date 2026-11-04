@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/postinghandoff"
+	"github.com/onegate/onegate/data-plane/internal/postinghandoff"
 )
 
 // handoffTransport hands the posting command to pmsd, which owns the FIAS connection. Only two outcomes

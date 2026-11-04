@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	lic "github.com/stayconnect/enterprise/license"
+	lic "github.com/onegate/onegate/license"
 )
 
 type fixture struct {

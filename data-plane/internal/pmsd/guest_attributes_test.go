@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/pms"
+	"github.com/onegate/onegate/data-plane/internal/pms"
 )
 
 // Protel maps travel agent (AG) to A0 and VIP (VP) to A1 on GI and GC. Package rules need them, but they are

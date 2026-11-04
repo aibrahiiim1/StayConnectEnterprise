@@ -7,7 +7,7 @@ import (
 
 	redis "github.com/redis/go-redis/v9"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/clientip"
+	"github.com/onegate/onegate/control-plane/internal/clientip"
 )
 
 // RateLimit is a fixed-window per-client-IP limiter backed by Redis.

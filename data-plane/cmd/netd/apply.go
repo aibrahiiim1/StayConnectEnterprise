@@ -13,7 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
+	"github.com/onegate/onegate/data-plane/internal/netcfg"
 )
 
 // applier owns the transactional apply/rollback of guest-network config: L2/L3 applied surgically with `ip` (additive, reversible,

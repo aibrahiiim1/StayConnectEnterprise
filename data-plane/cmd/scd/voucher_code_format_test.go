@@ -5,7 +5,7 @@ package main
 import (
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/codegen"
+	"github.com/onegate/onegate/data-plane/internal/codegen"
 )
 
 func TestOnlyTheTwoRequiredModesAreReachable(t *testing.T) {

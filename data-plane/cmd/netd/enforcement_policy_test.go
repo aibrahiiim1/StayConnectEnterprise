@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
+	"github.com/onegate/onegate/data-plane/internal/netcfg"
 )
 
 type fakePolicyStore struct {

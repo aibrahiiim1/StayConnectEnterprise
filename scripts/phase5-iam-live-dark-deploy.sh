@@ -132,7 +132,7 @@ for svc in stayconnect-scd stayconnect-edged stayconnect-netd stayconnect-acctd;
 done
 
 # ---------------------------------------------------------------- pmsd, whose healthy state is NOT running
-# pmsd is the one StayConnect daemon that is HEALTHY WHEN DEAD. Its established Phase-3 DARK contract is: no
+# pmsd is the one OneGate daemon that is HEALTHY WHEN DEAD. Its established Phase-3 DARK contract is: no
 # Phase-3 flag is set, so LoadPMSConfigFromEnv resolves every flag OFF, pmsd.Run returns immediately without
 # loading an assignment, building a database pool, decrypting a secret, starting a worker or opening a PMS
 # socket -- it says so and exits 0. `Restart=on-failure` (not always) means that clean exit does not restart.
@@ -170,7 +170,7 @@ say "  state: $PM_ACT ($PM_SUB) Result=$PM_RES ExecMainStatus=$PM_EXIT"
 #    stays down. A loop would burn CPU, spam the journal and -- once the connector is eventually enabled --
 #    hammer a real PMS.
 PM_NR="$(pm NRestarts)"
-STARTS="$(journalctl -u "$PMSD_UNIT" -b --no-pager 2>/dev/null | grep -c 'Started StayConnect PMS' || true)"
+STARTS="$(journalctl -u "$PMSD_UNIT" -b --no-pager 2>/dev/null | grep -c 'Started OneGate PMS' || true)"
 STORM="$(journalctl -u "$PMSD_UNIT" -b --no-pager 2>/dev/null | grep -Eic 'scheduled restart|start request repeated too quickly|failed with result' || true)"
 say "  restarts: NRestarts=$PM_NR starts-this-boot=$STARTS storm-indicators=$STORM"
 [ "${PM_NR:-0}" = "0" ] || die "$PMSD_UNIT restarted $PM_NR time(s); a clean flags-OFF exit must not restart"

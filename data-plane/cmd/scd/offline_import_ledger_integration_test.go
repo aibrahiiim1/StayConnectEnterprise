@@ -15,9 +15,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/licstate"
-	"github.com/stayconnect/enterprise/data-plane/internal/offline"
-	lic "github.com/stayconnect/enterprise/license"
+	"github.com/onegate/onegate/data-plane/internal/licstate"
+	"github.com/onegate/onegate/data-plane/internal/offline"
+	lic "github.com/onegate/onegate/license"
 )
 
 // AD-18(a): the single-use ledger row is written together with a successful licence install. Needs a Postgres

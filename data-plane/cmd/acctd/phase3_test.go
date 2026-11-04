@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
-	"github.com/stayconnect/enterprise/data-plane/internal/shapeplan"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/shapeplan"
 )
 
 type fakeNetd struct {

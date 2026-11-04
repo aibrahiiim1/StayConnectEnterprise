@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
+	"github.com/onegate/onegate/data-plane/internal/netcfg"
 )
 
 // clearInFlight frees the single in-flight slot and removes this test's rows; nothing else may hold the slot while a test uses it.

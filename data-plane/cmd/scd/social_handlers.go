@@ -15,10 +15,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
-	"github.com/stayconnect/enterprise/data-plane/internal/licstate"
-	"github.com/stayconnect/enterprise/data-plane/internal/social"
-	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/licstate"
+	"github.com/onegate/onegate/data-plane/internal/social"
+	"github.com/onegate/onegate/data-plane/internal/tenantcfg"
 )
 
 type socialStartReq struct {

@@ -1,7 +1,7 @@
 # edged — Hotel Admin API (Edge API) on the appliance.
 # Binds the management loopback only; Caddy exposes it on the management IP.
 [Unit]
-Description=StayConnect Edge API (Hotel Admin backend)
+Description=OneGate Edge API (Hotel Admin backend)
 # Ordering only (best-effort): start after the network, the DB container's
 # supervisor, and scd. These are NOT hard requirements — edged tolerates scd
 # being down (it dials scd's socket lazily, per request) and retries the site

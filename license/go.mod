@@ -1,4 +1,4 @@
-module github.com/stayconnect/enterprise/license
+module github.com/onegate/onegate/license
 
 go 1.26.0
 

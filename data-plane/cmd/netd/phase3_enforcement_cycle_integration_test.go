@@ -21,8 +21,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/enforce"
-	"github.com/stayconnect/enterprise/data-plane/internal/shapeproducer"
+	"github.com/onegate/onegate/data-plane/internal/enforce"
+	"github.com/onegate/onegate/data-plane/internal/shapeproducer"
 )
 
 type cycleFixture struct {

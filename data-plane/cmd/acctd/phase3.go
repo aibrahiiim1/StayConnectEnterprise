@@ -18,10 +18,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/enforce"
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
-	"github.com/stayconnect/enterprise/data-plane/internal/shapeplan"
-	"github.com/stayconnect/enterprise/data-plane/internal/shapeproducer"
+	"github.com/onegate/onegate/data-plane/internal/enforce"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/shapeplan"
+	"github.com/onegate/onegate/data-plane/internal/shapeproducer"
 )
 
 // phase3 is acctd's Phase-3 arm; a nil *phase3 is inert and safe to call.

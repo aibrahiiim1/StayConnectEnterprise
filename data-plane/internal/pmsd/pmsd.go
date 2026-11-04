@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
-	"github.com/stayconnect/enterprise/data-plane/internal/pmsprovider"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/pmsprovider"
 )
 
 type TransportStatus string

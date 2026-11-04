@@ -21,9 +21,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
-	"github.com/stayconnect/enterprise/data-plane/internal/reqlog"
-	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/reqlog"
+	"github.com/onegate/onegate/data-plane/internal/startupbackoff"
 )
 
 // Portal HTTPS certificates come from scd per hostname (portal_https.go) and are served by SNI; there is no static certificate setting.

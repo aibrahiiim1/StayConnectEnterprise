@@ -1,4 +1,4 @@
-# StayConnect Enterprise — line-ending & binary policy (W0, GH-LF-CONSISTENCY).
+# OneGate — line-ending & binary policy (W0, GH-LF-CONSISTENCY).
 #
 # Governance checksums (deterministic export packs, PACK_SHA256SUMS, MANIFEST) are computed
 # over LF content. Without this policy, a Windows checkout (core.autocrlf=true) materializes

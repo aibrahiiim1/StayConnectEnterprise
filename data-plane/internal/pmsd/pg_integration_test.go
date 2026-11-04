@@ -12,7 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/stayengine"
+	"github.com/onegate/onegate/data-plane/internal/stayengine"
 )
 
 func liveRows(t *testing.T, pool *pgxpool.Pool, s seeded) int {

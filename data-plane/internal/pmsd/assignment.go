@@ -8,8 +8,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
-	"github.com/stayconnect/enterprise/data-plane/internal/identity"
+	"github.com/onegate/onegate/data-plane/internal/assignment"
+	"github.com/onegate/onegate/data-plane/internal/identity"
 )
 
 // CentralAssignmentLoader resolves tenant/site from the Central-signed assignment and fails closed:

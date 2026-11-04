@@ -23,9 +23,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/localkeys"
-	"github.com/stayconnect/enterprise/data-plane/internal/sealbox"
-	"github.com/stayconnect/enterprise/data-plane/internal/totp"
+	"github.com/onegate/onegate/data-plane/internal/localkeys"
+	"github.com/onegate/onegate/data-plane/internal/sealbox"
+	"github.com/onegate/onegate/data-plane/internal/totp"
 )
 
 const (

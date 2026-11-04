@@ -1,5 +1,5 @@
 [Unit]
-Description=StayConnect Captive Portal Daemon (portald)
+Description=OneGate Captive Portal Daemon (portald)
 # Soft dependency on scd: portald dials scd's socket lazily per request and
 # returns a transient error when scd is momentarily down, so the captive portal
 # page itself keeps serving. scd being down must NOT stop portald (Wants=, not

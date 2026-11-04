@@ -16,13 +16,13 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
-	"github.com/stayconnect/enterprise/data-plane/internal/licstate"
-	"github.com/stayconnect/enterprise/data-plane/internal/otp"
-	"github.com/stayconnect/enterprise/data-plane/internal/phone"
-	"github.com/stayconnect/enterprise/data-plane/internal/sms"
-	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
-	"github.com/stayconnect/enterprise/data-plane/internal/whatsapp"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/licstate"
+	"github.com/onegate/onegate/data-plane/internal/otp"
+	"github.com/onegate/onegate/data-plane/internal/phone"
+	"github.com/onegate/onegate/data-plane/internal/sms"
+	"github.com/onegate/onegate/data-plane/internal/tenantcfg"
+	"github.com/onegate/onegate/data-plane/internal/whatsapp"
 )
 
 // Read-only mirror of tenants.auth_methods with the methods this appliance considers active; portald polls it to decide tabs.

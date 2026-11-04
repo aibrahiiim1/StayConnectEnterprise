@@ -13,7 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/deviceselfservice"
+	"github.com/onegate/onegate/data-plane/internal/deviceselfservice"
 )
 
 type guestDeviceSettingReq struct {

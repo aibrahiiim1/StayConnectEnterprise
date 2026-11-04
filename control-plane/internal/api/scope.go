@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/auth"
+	"github.com/onegate/onegate/control-plane/internal/auth"
 )
 
 // Scope is what a caller may read: every customer (platform roles) or exactly one, taken from the session and never chosen.

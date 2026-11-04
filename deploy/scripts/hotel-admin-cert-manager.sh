@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# StayConnect — Hotel Admin dual-SAN TLS certificate lifecycle manager.
+# OneGate — Hotel Admin dual-SAN TLS certificate lifecycle manager.
 #
 # Manages ONLY the local Hotel Admin HTTPS leaf certificate (hotel.stayconnect.local
 # + the current Management/WAN IP), issued from Caddy's existing local CA. It does

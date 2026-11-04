@@ -9,11 +9,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	redis "github.com/redis/go-redis/v9"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/applianceauth"
-	"github.com/stayconnect/enterprise/control-plane/internal/auth"
-	"github.com/stayconnect/enterprise/control-plane/internal/licensing"
-	pki "github.com/stayconnect/enterprise/control-plane/internal/pki"
-	"github.com/stayconnect/enterprise/control-plane/internal/portaltls"
+	"github.com/onegate/onegate/control-plane/internal/applianceauth"
+	"github.com/onegate/onegate/control-plane/internal/auth"
+	"github.com/onegate/onegate/control-plane/internal/licensing"
+	pki "github.com/onegate/onegate/control-plane/internal/pki"
+	"github.com/onegate/onegate/control-plane/internal/portaltls"
 )
 
 // ApplianceMTLSRouter builds the appliance API on the mutual-TLS listener. Requests carry both a verified client

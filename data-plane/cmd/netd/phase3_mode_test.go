@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
-	"github.com/stayconnect/enterprise/data-plane/internal/assignment/assignmenttest"
+	"github.com/onegate/onegate/data-plane/internal/assignment"
+	"github.com/onegate/onegate/data-plane/internal/assignment/assignmenttest"
 )
 
 // The scope comes from the verified assignment; a document signed outside the trust registry is refused.

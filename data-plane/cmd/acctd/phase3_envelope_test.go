@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/enforce"
-	"github.com/stayconnect/enterprise/data-plane/internal/shapeplan"
+	"github.com/onegate/onegate/data-plane/internal/enforce"
+	"github.com/onegate/onegate/data-plane/internal/shapeplan"
 )
 
 func testArm(t *testing.T, counterPath string) *phase3 {

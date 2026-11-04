@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/pms"
-	"github.com/stayconnect/enterprise/data-plane/internal/postinghandoff"
+	"github.com/onegate/onegate/data-plane/internal/pms"
+	"github.com/onegate/onegate/data-plane/internal/postinghandoff"
 )
 
 const relayIface = "11111111-2222-3333-4444-555555555555"

@@ -4,8 +4,8 @@ import (
 	"net"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
-	"github.com/stayconnect/enterprise/data-plane/internal/nft"
+	"github.com/onegate/onegate/data-plane/internal/netcfg"
+	"github.com/onegate/onegate/data-plane/internal/nft"
 )
 
 // The converge carries runtime state only: baseline resolver pairs are declared by the render and are not carried; a

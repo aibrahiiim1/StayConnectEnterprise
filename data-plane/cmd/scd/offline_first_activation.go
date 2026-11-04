@@ -20,11 +20,11 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/activation"
-	"github.com/stayconnect/enterprise/data-plane/internal/applianceauth"
-	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
-	"github.com/stayconnect/enterprise/data-plane/internal/hwid"
-	lic "github.com/stayconnect/enterprise/license"
+	"github.com/onegate/onegate/data-plane/internal/activation"
+	"github.com/onegate/onegate/data-plane/internal/applianceauth"
+	"github.com/onegate/onegate/data-plane/internal/assignment"
+	"github.com/onegate/onegate/data-plane/internal/hwid"
+	lic "github.com/onegate/onegate/license"
 )
 
 // activationRequestFile keeps the emitted request beside the identity so the answering package can be matched; a second request would invalidate the first.

@@ -14,7 +14,7 @@ import (
 
 	"filippo.io/age"
 	"github.com/jackc/pgx/v5"
-	"github.com/stayconnect/enterprise/data-plane/internal/backupcrypt"
+	"github.com/onegate/onegate/data-plane/internal/backupcrypt"
 )
 
 // Compliance archive written before a cross-customer purge: the departing tenant's financial and commercial rows are exported, the

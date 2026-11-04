@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/buildprofile"
+	"github.com/onegate/onegate/data-plane/internal/buildprofile"
 )
 
 type Sender interface {

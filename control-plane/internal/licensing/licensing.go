@@ -15,7 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	lic "github.com/stayconnect/enterprise/license"
+	lic "github.com/onegate/onegate/license"
 )
 
 // PlanCode stays in the signed document because deployed appliances verify that exact format.

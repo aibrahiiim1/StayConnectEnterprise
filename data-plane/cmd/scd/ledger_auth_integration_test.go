@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/ledger"
+	"github.com/onegate/onegate/data-plane/internal/ledger"
 )
 
 // AD-3: entries written before the key existed are sealed once the database and both copies agree; a copy written by someone

@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/applianceauth"
-	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
-	"github.com/stayconnect/enterprise/data-plane/internal/identity"
+	"github.com/onegate/onegate/data-plane/internal/applianceauth"
+	"github.com/onegate/onegate/data-plane/internal/assignment"
+	"github.com/onegate/onegate/data-plane/internal/identity"
 )
 
 // assignmentStore is the appliance-local source of truth for tenant/site.

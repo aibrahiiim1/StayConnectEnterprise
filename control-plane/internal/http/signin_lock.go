@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/api"
-	"github.com/stayconnect/enterprise/control-plane/internal/auth"
-	"github.com/stayconnect/enterprise/control-plane/internal/clientip"
+	"github.com/onegate/onegate/control-plane/internal/api"
+	"github.com/onegate/onegate/control-plane/internal/auth"
+	"github.com/onegate/onegate/control-plane/internal/clientip"
 )
 
 func refuseLocked(w http.ResponseWriter, r *http.Request, until time.Time) {

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
+	"github.com/onegate/onegate/data-plane/internal/netcfg"
 )
 
 // A boot that does not converge refuses further changes, even though no rollback ever failed, and the refusal survives a restart.

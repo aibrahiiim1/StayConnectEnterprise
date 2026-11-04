@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/auth"
-	"github.com/stayconnect/enterprise/control-plane/internal/opsignin"
-	"github.com/stayconnect/enterprise/control-plane/internal/ratebudget"
-	"github.com/stayconnect/enterprise/control-plane/internal/testdb"
+	"github.com/onegate/onegate/control-plane/internal/auth"
+	"github.com/onegate/onegate/control-plane/internal/opsignin"
+	"github.com/onegate/onegate/control-plane/internal/ratebudget"
+	"github.com/onegate/onegate/control-plane/internal/testdb"
 )
 
 func TestTestToolsSignInWithOrWithoutTheCode(t *testing.T) {

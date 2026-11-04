@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/portaldesign"
+	"github.com/onegate/onegate/data-plane/internal/portaldesign"
 )
 
 // statusHandler's scd answers branding and status lookups; a nil status body makes scd unreachable for the status call only.

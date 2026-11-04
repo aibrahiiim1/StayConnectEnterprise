@@ -13,7 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/ledger"
+	"github.com/onegate/onegate/data-plane/internal/ledger"
 )
 
 // An erasure survives a restore: the "restore" writes identifying values back and forgets ledger entries after

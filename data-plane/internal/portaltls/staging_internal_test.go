@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/portaltls/portaltlstest"
+	"github.com/onegate/onegate/data-plane/internal/portaltls/portaltlstest"
 )
 
 // A staging chain is named as such in the refusal, but still refused because its roots are in no trust store.

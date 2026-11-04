@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/stayconnect/enterprise/data-plane/internal/checkout"
+	"github.com/onegate/onegate/data-plane/internal/checkout"
 )
 
 // seedPinnedRevision publishes a revision and pins the runtime to it, as for any interface that has connected.

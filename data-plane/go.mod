@@ -1,4 +1,4 @@
-module github.com/stayconnect/enterprise/data-plane
+module github.com/onegate/onegate/data-plane
 
 go 1.26.0
 
@@ -33,10 +33,10 @@ require (
 require (
 	filippo.io/age v1.2.1
 	github.com/pkg/sftp v1.13.9
-	github.com/stayconnect/enterprise/license v0.0.0
+	github.com/onegate/onegate/license v0.0.0
 	golang.org/x/crypto v0.58.0
 	golang.org/x/net v0.62.0
 	golang.org/x/text v0.43.0
 )
 
-replace github.com/stayconnect/enterprise/license => ../license
+replace github.com/onegate/onegate/license => ../license

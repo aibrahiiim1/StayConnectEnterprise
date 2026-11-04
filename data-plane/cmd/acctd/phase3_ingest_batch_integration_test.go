@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/shape"
+	"github.com/onegate/onegate/data-plane/internal/shape"
 )
 
 func minorFor(t *testing.T, ip string) int {

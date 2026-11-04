@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/posting"
+	"github.com/onegate/onegate/data-plane/internal/posting"
 )
 
 func TestNoAssignmentSkipsTheReconcileWithoutClaimingAnything(t *testing.T) {

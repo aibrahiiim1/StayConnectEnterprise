@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
+	"github.com/onegate/onegate/data-plane/internal/netcfg"
 )
 
 // First guest network on a factory-clean appliance. Kea can answer its control socket and report healthy while

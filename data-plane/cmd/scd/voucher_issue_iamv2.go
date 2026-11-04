@@ -22,9 +22,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
-	"github.com/stayconnect/enterprise/data-plane/internal/codegen"
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
-	"github.com/stayconnect/enterprise/data-plane/internal/localkeys"
+	"github.com/onegate/onegate/data-plane/internal/codegen"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/localkeys"
 )
 
 const (

@@ -1,6 +1,6 @@
-# StayConnect - production exposure (Caddy + TLS)
+# OneGate - production exposure (Caddy + TLS)
 
-Caddy terminates TLS in front of the StayConnect services. There is **one Caddyfile per ROLE**, and the
+Caddy terminates TLS in front of the OneGate services. There is **one Caddyfile per ROLE**, and the
 roles do not overlap:
 
 | File | Deployed on | Sites it terminates |

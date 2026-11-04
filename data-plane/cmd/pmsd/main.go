@@ -7,7 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/stayconnect/enterprise/data-plane/internal/postinghandoff"
+	"github.com/onegate/onegate/data-plane/internal/postinghandoff"
 	"log/slog"
 	"net"
 	"os"
@@ -20,12 +20,12 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
-	"github.com/stayconnect/enterprise/data-plane/internal/checkout"
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
-	"github.com/stayconnect/enterprise/data-plane/internal/pmsd"
-	"github.com/stayconnect/enterprise/data-plane/internal/stayengine"
-	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
+	"github.com/onegate/onegate/data-plane/internal/assignment"
+	"github.com/onegate/onegate/data-plane/internal/checkout"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/pmsd"
+	"github.com/onegate/onegate/data-plane/internal/stayengine"
+	"github.com/onegate/onegate/data-plane/internal/writerguard"
 )
 
 func main() {

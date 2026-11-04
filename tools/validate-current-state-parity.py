@@ -1392,7 +1392,7 @@ def main():
     # PROGRESS than the record supports. This one is the mirror image, and nothing caught it: seven rendered
     # surfaces called the legacy public-schema path "the SOLE PRODUCTION authority", one said its rows "grow
     # with normal guest traffic", and two called the deployed voucher system "live and untouched" -- while the
-    # recorded fact is that StayConnect has NOT yet entered real hotel guest/staff operation (D24/T0056).
+    # recorded fact is that OneGate has NOT yet entered real hotel guest/staff operation (D24/T0056).
     #
     # Each of those sentences described the CONFIGURATION correctly. What made them wrong was the operational
     # implication, and an implication is exactly what a keyword gate cannot judge on its own -- so, like the

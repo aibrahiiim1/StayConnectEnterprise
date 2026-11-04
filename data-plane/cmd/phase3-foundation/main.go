@@ -9,7 +9,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/nftfoundation"
+	"github.com/onegate/onegate/data-plane/internal/nftfoundation"
 )
 
 func main() {

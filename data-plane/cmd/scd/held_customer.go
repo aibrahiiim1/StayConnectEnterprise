@@ -13,7 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
+	"github.com/onegate/onegate/data-plane/internal/assignment"
 )
 
 // errHoldsSeveralCustomers refuses registration; its text is shown in Hotel Admin as the last Central error.

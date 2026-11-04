@@ -22,8 +22,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/sealbox"
-	"github.com/stayconnect/enterprise/data-plane/internal/totp"
+	"github.com/onegate/onegate/data-plane/internal/sealbox"
+	"github.com/onegate/onegate/data-plane/internal/totp"
 )
 
 func TestOperatorMFARoutesAreEdgedOnly(t *testing.T) {

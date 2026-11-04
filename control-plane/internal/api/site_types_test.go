@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/assignment"
-	lic "github.com/stayconnect/enterprise/license"
+	"github.com/onegate/onegate/control-plane/internal/assignment"
+	lic "github.com/onegate/onegate/license"
 )
 
 func TestSiteTypeWritesAcceptOnlyKnownTypes(t *testing.T) {

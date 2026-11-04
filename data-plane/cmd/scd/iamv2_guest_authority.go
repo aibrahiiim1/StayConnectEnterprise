@@ -13,7 +13,7 @@ import (
 	"strconv"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
 )
 
 // liveEntitlementForContext returns the ACTIVE, in-window entitlement held by the subject of this auth context, or "". A read

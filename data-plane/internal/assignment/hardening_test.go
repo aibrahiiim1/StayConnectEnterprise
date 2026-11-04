@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
-	"github.com/stayconnect/enterprise/data-plane/internal/assignment/assignmenttest"
+	"github.com/onegate/onegate/data-plane/internal/assignment"
+	"github.com/onegate/onegate/data-plane/internal/assignment/assignmenttest"
 )
 
 // P2 L1: an older signed document written back to assignment.json is not accepted once a newer one was adopted.

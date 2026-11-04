@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/stayconnect/enterprise/data-plane/internal/localkeys"
+	"github.com/onegate/onegate/data-plane/internal/localkeys"
 )
 
 // otpDB connects the disposable OTP database; set OTPBOOT_TEST_DSN to run.

@@ -8,9 +8,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/assignment"
-	"github.com/stayconnect/enterprise/control-plane/internal/audit"
-	"github.com/stayconnect/enterprise/control-plane/internal/auth"
+	"github.com/onegate/onegate/control-plane/internal/assignment"
+	"github.com/onegate/onegate/control-plane/internal/audit"
+	"github.com/onegate/onegate/control-plane/internal/auth"
 )
 
 // Defaults and bounds of the two settings in central_security_settings (migration 0061, AD-54; the table's CHECK

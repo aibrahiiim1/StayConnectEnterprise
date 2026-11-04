@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
+	"github.com/onegate/onegate/data-plane/internal/netcfg"
 )
 
 type Status string

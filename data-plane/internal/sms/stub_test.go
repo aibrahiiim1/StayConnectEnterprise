@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/buildprofile"
+	"github.com/onegate/onegate/data-plane/internal/buildprofile"
 )
 
 // Audit B-13: the stub SMS sender is the fallback for a site with no SMS provider. On a production appliance it

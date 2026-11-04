@@ -154,7 +154,7 @@ Validation is a hard gate before apply — see
 ### 6. DHCP modes
 
 `local` (this document), `external`, `relay`, `disabled`. `external` — the site
-runs DHCP; StayConnect is still gateway + captive portal, see
+runs DHCP; OneGate is still gateway + captive portal, see
 [DHCP.md, Part C](DHCP.md). `relay` is supported in the schema
 (`relay_targets`) but minimal in this release. `disabled` serves no DHCP.
 
@@ -165,7 +165,7 @@ forced onto a conflicting network.
 ## Part B — DHCP option 114, the captive-portal API (RFC 8910)
 
 > The one DHCP option that makes captive-portal sign-in pop automatically across
-> iOS, Android, macOS and Windows. StayConnect generates it per captive local
+> iOS, Android, macOS and Windows. OneGate generates it per captive local
 > network. Renderer: `data-plane/internal/netcfg/render_kea.go`; URL builder:
 > `netcfg.PortalURLFor` (`validate.go`). Overview:
 > [EDGE_NETWORKING.md](EDGE_NETWORKING.md).
@@ -194,7 +194,7 @@ probes, which the appliance still answers.
 
 **Emitted by code 114, never by name.** Kea 2.0 (the appliance runs 2.0.2) maps the name `v4-captive-portal`
 to code **160**, the obsolete RFC 7710 assignment; only Kea 2.2+ maps it to 114. Until 2026-10-13 this renderer
-used the name, so **no StayConnect appliance on Kea 2.0 ever delivered option 114** — found on PRE-LIVE by
+used the name, so **no OneGate appliance on Kea 2.0 ever delivered option 114** — found on PRE-LIVE by
 capturing a real DHCP exchange (the client requested 114; the ACK carried none). The earlier claims in this
 document that option 114 drove the auto-pop were therefore never true on this appliance: the probes did.
 
@@ -237,14 +237,14 @@ The NAME must not be used on Kea 2.0 (it means code 160; see §2).
 ### 6. What to tell an external-DHCP admin
 
 When the site runs its own DHCP server ([DHCP.md, Part C](DHCP.md)),
-StayConnect does not serve the subnet — but the captive portal still needs
-option 114 pointed at the StayConnect gateway. The Admin Console external-DHCP
+OneGate does not serve the subnet — but the captive portal still needs
+option 114 pointed at the OneGate gateway. The Admin Console external-DHCP
 checklist shows the admin the exact values to set on **their** server:
 
 | Setting | Value |
 |---|---|
-| Router / default gateway | the StayConnect gateway for that VLAN, e.g. `10.20.0.1` |
-| DNS | the StayConnect gateway (or the site's resolver, if it can reach the walled garden) |
+| Router / default gateway | the OneGate gateway for that VLAN, e.g. `10.20.0.1` |
+| DNS | the OneGate gateway (or the site's resolver, if it can reach the walled garden) |
 | Option 114 (`Captive-Portal`, RFC 8910) | while the portal is on HTTPS: `https://<canonical hostname>/captive-portal/api` (shown on Admin Console → Network → Portal HTTPS); otherwise `http://10.20.0.1:8380/` |
 
 Vendor syntax examples:
@@ -291,7 +291,7 @@ to load a page" into "the sign-in sheet appears on its own."
 
 ## Part C — External DHCP mode
 
-> When the site keeps its own DHCP server. StayConnect is still the **gateway
+> When the site keeps its own DHCP server. OneGate is still the **gateway
 > and captive portal** for the VLAN, but Kea does **not** serve the subnet.
 > Field: `guest_networks.dhcp_mode`. Renderer:
 > `data-plane/internal/netcfg/render_kea.go`. Overview:
@@ -304,9 +304,9 @@ router) and want to keep addressing there — for reservations tied to their own
 records, or for policy reasons. In that case set the client network's
 `dhcp_mode = external`:
 
-- StayConnect **still** owns the VLAN gateway (`gateway_ip`), captive portal,
+- OneGate **still** owns the VLAN gateway (`gateway_ip`), captive portal,
   NAT, walled garden, DNS (optionally), shaping and internet policy.
-- StayConnect's **Kea does not answer** for the subnet. In `RenderKeaDhcp4` only
+- OneGate's **Kea does not answer** for the subnet. In `RenderKeaDhcp4` only
   `dhcp_mode = local` networks become `subnet4` entries; `external` networks are
   skipped entirely and their interface is excluded from Kea's bind list, so Kea
   will not even listen on that bridge. There is no risk of a rogue second DHCP
@@ -318,29 +318,29 @@ until you switch back to `local`.
 
 ### 2. The four DHCP modes
 
-| Mode | Kea serves the subnet? | Gateway/portal by StayConnect? | Use when |
+| Mode | Kea serves the subnet? | Gateway/portal by OneGate? | Use when |
 |---|---|---|---|
-| `local` | **Yes** — full `subnet4` with pools, reservations, option 114 | Yes | default; StayConnect owns everything ([DHCP.md, Part A](DHCP.md)) |
+| `local` | **Yes** — full `subnet4` with pools, reservations, option 114 | Yes | default; OneGate owns everything ([DHCP.md, Part A](DHCP.md)) |
 | `external` | No | Yes | the site runs its own DHCP server on the VLAN |
 | `relay` | No (relays elsewhere) | Yes | central DHCP on a different L3 segment; **supported in schema, minimal in this release** |
 | `disabled` | No | Yes (no DHCP at all) | static-only / lab segments |
 
-### 3. The checklist StayConnect shows the external-DHCP admin
+### 3. The checklist OneGate shows the external-DHCP admin
 
 Admin Console renders this for an `external` network so the site's DHCP admin can
-configure their server to hand out addresses that route through StayConnect:
+configure their server to hand out addresses that route through OneGate:
 
 | Setting on the site's DHCP server | Value |
 |---|---|
 | **Scope / subnet** | the network's `subnet_cidr`, e.g. `10.20.0.0/22` |
-| **Router / default gateway** | the StayConnect gateway `gateway_ip`, e.g. `10.20.0.1` |
-| **DNS servers** | the StayConnect gateway (`10.20.0.1`) for appliance DNS + walled-garden resolution, or the site's resolver if it can reach the walled garden |
+| **Router / default gateway** | the OneGate gateway `gateway_ip`, e.g. `10.20.0.1` |
+| **DNS servers** | the OneGate gateway (`10.20.0.1`) for appliance DNS + walled-garden resolution, or the site's resolver if it can reach the walled garden |
 | **Option 114 (Captive-Portal, RFC 8910)** | `http://10.20.0.1:8380/` — **plain HTTP**, the gateway IP, port 8380 ([DHCP.md, Part B](DHCP.md)) |
 | **Lease time** | the site's choice; short-ish (e.g. 1–2 h) suits transient clients |
 | **Exclusions** | exclude `gateway_ip` from any dynamic range |
 
 Critical: the **default gateway the external server hands out must be the
-StayConnect gateway** — otherwise client traffic never reaches the captive portal
+OneGate gateway** — otherwise client traffic never reaches the captive portal
 or NAT, and clients bypass the whole system.
 
 ### 4. Relay mode (schema-supported, minimal)
@@ -351,7 +351,7 @@ appliance must forward DHCP requests to it. The schema carries `relay_targets`
 `bad_relay_target`), but the DHCP-relay data path is **minimal in this release**
 and is only surfaced in the UI where it can be tested. For most sites, `external`
 (their DHCP directly on the VLAN) is the right choice today; use `relay` only in
-coordination with StayConnect support.
+coordination with OneGate support.
 
 ### 5. Local vs external — how to decide
 
@@ -369,26 +369,26 @@ same validate → apply → confirm lifecycle
 
 ### 6. Verifying an external-DHCP network
 
-After applying an `external` network, confirm StayConnect is doing its half and
+After applying an `external` network, confirm OneGate is doing its half and
 staying out of the site's DHCP:
 
 | Check | Expected |
 |---|---|
-| StayConnect's Kea is **not** serving the subnet | the network is absent from Kea's `subnet4`; Kea does not bind `br-g<vlan>` |
-| The VLAN gateway is up on StayConnect | `ip -br addr show br-g20` → `10.20.0.1/22` |
-| Clients get leases from the site's server | client IP is in the site's scope, **default gateway = the StayConnect gateway** |
+| OneGate's Kea is **not** serving the subnet | the network is absent from Kea's `subnet4`; Kea does not bind `br-g<vlan>` |
+| The VLAN gateway is up on OneGate | `ip -br addr show br-g20` → `10.20.0.1/22` |
+| Clients get leases from the site's server | client IP is in the site's scope, **default gateway = the OneGate gateway** |
 | Captive portal still intercepts | unauthenticated HTTP redirects to `http://10.20.0.1:8380/` (DNAT is independent of who serves DHCP) |
 | Only one DHCP server answers | run a DHCP discover on the VLAN; exactly one offer, from the site's server |
 
 If clients get an address but no portal and no internet, the site's server is
 almost always handing out the **wrong default gateway** (its own router instead
-of the StayConnect gateway) — fix that first. See
+of the OneGate gateway) — fix that first. See
 [NETWORK_TROUBLESHOOTING.md](NETWORK_TROUBLESHOOTING.md) §1–2.
 
 ### 7. What does not change in external mode
 
 - nftables captive DNAT, masquerade, walled garden, inter-client isolation and
   shaping are all still rendered for the network (they don't depend on `dhcp_mode`).
-- Option 114 is **not** rendered by StayConnect (it renders option-data only for
+- Option 114 is **not** rendered by OneGate (it renders option-data only for
   `local` subnets) — the site's server must carry it, which is why the checklist
   in §3 includes it explicitly.

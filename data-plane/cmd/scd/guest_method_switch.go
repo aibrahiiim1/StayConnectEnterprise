@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
+	"github.com/onegate/onegate/data-plane/internal/tenantcfg"
 )
 
 // Hotel Admin's sign-in method switches (tenants.auth_methods) are enforced here, not only in the portal: a method turned off was hidden but still worked for a directly posted form.

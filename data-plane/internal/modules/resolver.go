@@ -12,8 +12,8 @@ import (
 	"context"
 	"sort"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/deployment"
-	lic "github.com/stayconnect/enterprise/license"
+	"github.com/onegate/onegate/data-plane/internal/deployment"
+	lic "github.com/onegate/onegate/license"
 )
 
 const (

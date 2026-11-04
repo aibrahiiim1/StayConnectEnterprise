@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/portaldesign"
+	"github.com/onegate/onegate/data-plane/internal/portaldesign"
 )
 
 // The hotel's notice is on the sign-in card, readable before signing in, as text (never markup); the remembered-device cookie is explained.

@@ -16,7 +16,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/shape"
+	"github.com/onegate/onegate/data-plane/internal/shape"
 )
 
 // managedClass is what must survive a restart for accounting to continue without a gap or a false reset.

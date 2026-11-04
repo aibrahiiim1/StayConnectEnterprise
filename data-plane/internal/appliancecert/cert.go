@@ -25,7 +25,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/applianceauth"
+	"github.com/onegate/onegate/data-plane/internal/applianceauth"
 )
 
 type Manager struct {

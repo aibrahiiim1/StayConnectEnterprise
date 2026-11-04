@@ -4,7 +4,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
+	"github.com/onegate/onegate/data-plane/internal/assignment"
 )
 
 type acctdScope struct {

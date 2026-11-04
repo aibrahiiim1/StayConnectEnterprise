@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/pmsprovider"
-	"github.com/stayconnect/enterprise/data-plane/internal/pmsrest"
+	"github.com/onegate/onegate/data-plane/internal/pmsprovider"
+	"github.com/onegate/onegate/data-plane/internal/pmsrest"
 )
 
 // RESTDialDeps are the injectable effects of the REST connector.

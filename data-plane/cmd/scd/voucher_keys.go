@@ -12,7 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
 )
 
 // Opened blind-index keys for one (tenant, site), KEYED BY OWNER: a global cache would index codes under the WRONG site's key on a multi-site appliance and

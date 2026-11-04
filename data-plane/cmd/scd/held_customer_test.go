@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
+	"github.com/onegate/onegate/data-plane/internal/assignment"
 )
 
 func TestHeldCustomerFactoryCleanHoldsNone(t *testing.T) {

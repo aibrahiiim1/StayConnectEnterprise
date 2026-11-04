@@ -14,7 +14,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/poststay"
+	"github.com/onegate/onegate/data-plane/internal/poststay"
 )
 
 func (s *server) postStayProfilesRoutes() http.Handler {

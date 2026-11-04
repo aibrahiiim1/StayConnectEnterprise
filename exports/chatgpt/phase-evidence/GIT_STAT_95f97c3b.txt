@@ -1,4 +1,0 @@
-commit 95f97c3b0eccf71fd010b498a73c74dcc397efcb
-Date:   Wed Nov 4 05:13:06 2026 +0200
-
-    Governance: T0296 records the mission requirements

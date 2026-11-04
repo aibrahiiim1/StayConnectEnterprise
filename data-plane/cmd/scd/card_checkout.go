@@ -19,12 +19,12 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/deployment"
-	"github.com/stayconnect/enterprise/data-plane/internal/localkeys"
-	"github.com/stayconnect/enterprise/data-plane/internal/payment"
-	"github.com/stayconnect/enterprise/data-plane/internal/payment/paymob"
-	"github.com/stayconnect/enterprise/data-plane/internal/payment/stripe"
-	lic "github.com/stayconnect/enterprise/license"
+	"github.com/onegate/onegate/data-plane/internal/deployment"
+	"github.com/onegate/onegate/data-plane/internal/localkeys"
+	"github.com/onegate/onegate/data-plane/internal/payment"
+	"github.com/onegate/onegate/data-plane/internal/payment/paymob"
+	"github.com/onegate/onegate/data-plane/internal/payment/stripe"
+	lic "github.com/onegate/onegate/license"
 )
 
 const paymentKeyFile = "payment_dek.key"

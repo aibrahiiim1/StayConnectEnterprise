@@ -1,5 +1,5 @@
 [Unit]
-Description=StayConnect Hotel Admin TLS certificate renewal timer (>=daily, jittered)
+Description=OneGate Hotel Admin TLS certificate renewal timer (>=daily, jittered)
 
 [Timer]
 # After every reboot, then every 6h (>= once daily). Persistent catches runs

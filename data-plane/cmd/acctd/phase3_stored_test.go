@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/shapeplan"
+	"github.com/onegate/onegate/data-plane/internal/shapeplan"
 )
 
 // The plan tells netd what acctd stored, per session, so a regroup deletes a class only after its bytes are accounted.

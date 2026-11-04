@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/pmsprovider"
+	"github.com/onegate/onegate/data-plane/internal/pmsprovider"
 )
 
 // NewRegistryDial routes a Dial by the provider registry: SOCKET kinds go unwrapped to the FIAS dial, REST_POLL to

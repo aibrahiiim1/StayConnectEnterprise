@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/identity"
+	"github.com/onegate/onegate/data-plane/internal/identity"
 )
 
 // fakeClock hands out timer channels the test fires by hand and records the delays asked for.

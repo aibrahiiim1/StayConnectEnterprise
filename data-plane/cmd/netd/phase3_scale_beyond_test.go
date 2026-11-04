@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/shape"
+	"github.com/onegate/onegate/data-plane/internal/shape"
 )
 
 func admitAll(t *testing.T, e *scaleEnv, n int) {

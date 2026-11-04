@@ -12,7 +12,7 @@ import (
 	"sync"
 	"testing"
 
-	lic "github.com/stayconnect/enterprise/license"
+	lic "github.com/onegate/onegate/license"
 )
 
 func licenceServer(t *testing.T, body map[string]any) *httptest.Server {

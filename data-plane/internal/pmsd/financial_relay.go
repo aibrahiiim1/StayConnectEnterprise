@@ -24,8 +24,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/namenorm"
-	"github.com/stayconnect/enterprise/data-plane/internal/postinghandoff"
+	"github.com/onegate/onegate/data-plane/internal/namenorm"
+	"github.com/onegate/onegate/data-plane/internal/postinghandoff"
 )
 
 // These match the posting engine's flag names; pmsd cannot import that package (it imports this one), so it reads them directly and fails closed.

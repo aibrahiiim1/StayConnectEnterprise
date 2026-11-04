@@ -17,8 +17,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/stayconnect/enterprise/data-plane/internal/keybootstrap"
-	"github.com/stayconnect/enterprise/data-plane/internal/localkeys"
+	"github.com/onegate/onegate/data-plane/internal/keybootstrap"
+	"github.com/onegate/onegate/data-plane/internal/localkeys"
 )
 
 func envOr(k, def string) string {

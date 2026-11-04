@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/portaldesign"
+	"github.com/onegate/onegate/data-plane/internal/portaldesign"
 )
 
 // offeredLanguages: the hotel's configured languages, else the six shipped; same rule as the sign-in page's script.

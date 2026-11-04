@@ -1,4 +1,4 @@
-# StayConnect Prometheus scrape config (phase 13).
+# OneGate Prometheus scrape config (phase 13).
 #
 # Targets:
 #   - ctrlapi on the host (port 8080), served by chi middleware

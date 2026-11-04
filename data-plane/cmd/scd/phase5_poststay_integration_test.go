@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/authctx"
-	"github.com/stayconnect/enterprise/data-plane/internal/poststay"
-	"github.com/stayconnect/enterprise/data-plane/internal/throttle"
+	"github.com/onegate/onegate/data-plane/internal/authctx"
+	"github.com/onegate/onegate/data-plane/internal/poststay"
+	"github.com/onegate/onegate/data-plane/internal/throttle"
 )
 
 type postStayFixture struct {

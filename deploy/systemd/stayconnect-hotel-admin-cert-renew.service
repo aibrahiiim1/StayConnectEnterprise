@@ -1,5 +1,5 @@
 [Unit]
-Description=StayConnect Hotel Admin TLS certificate renewal (managed dual-SAN lifecycle)
+Description=OneGate Hotel Admin TLS certificate renewal (managed dual-SAN lifecycle)
 Documentation=file:/etc/caddy/hotel-admin
 # Renewal is a background maintenance job. It is deliberately NOT a dependency of
 # caddy/edged/scd/netd/portald, so a renewal failure can never stop DHCP, DNS,

@@ -9,7 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/mail"
+	"github.com/onegate/onegate/data-plane/internal/mail"
 )
 
 type failingMailer struct{ err error }

@@ -634,7 +634,7 @@ func (s *server) startDependents(ctx context.Context) {
 	}
 }
 
-// restoreIntegrity asks whether what is now live is a usable StayConnect database. Deliberately structural
+// restoreIntegrity asks whether what is now live is a usable OneGate database. Deliberately structural
 // (required tables, migration ledger, readable row count): a deep check is slower and cannot prove the data is right.
 func (s *server) restoreIntegrity(ctx context.Context) (string, bool) {
 	q := func(sql string) string {

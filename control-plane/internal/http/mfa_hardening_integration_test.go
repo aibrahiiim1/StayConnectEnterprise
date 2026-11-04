@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stayconnect/enterprise/control-plane/internal/auth"
-	"github.com/stayconnect/enterprise/control-plane/internal/ratebudget"
-	"github.com/stayconnect/enterprise/control-plane/internal/testdb"
-	"github.com/stayconnect/enterprise/control-plane/internal/totp"
+	"github.com/onegate/onegate/control-plane/internal/auth"
+	"github.com/onegate/onegate/control-plane/internal/ratebudget"
+	"github.com/onegate/onegate/control-plane/internal/testdb"
+	"github.com/onegate/onegate/control-plane/internal/totp"
 )
 
 // enrolledOperator returns the id, secret, step used by the confirming code, and recovery codes.

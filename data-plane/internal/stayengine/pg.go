@@ -10,10 +10,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/checkout"
-	"github.com/stayconnect/enterprise/data-plane/internal/namenorm"
+	"github.com/onegate/onegate/data-plane/internal/checkout"
+	"github.com/onegate/onegate/data-plane/internal/namenorm"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
+	"github.com/onegate/onegate/data-plane/internal/writerguard"
 )
 
 // parseYYMMDD parses a Protel GA/GD date (YYMMDD); nil when absent or malformed, never fabricated.

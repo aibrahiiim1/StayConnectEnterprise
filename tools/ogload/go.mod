@@ -1,3 +1,3 @@
-module github.com/stayconnect/enterprise/tools/ogload
+module github.com/onegate/onegate/tools/ogload
 
 go 1.25

@@ -7,8 +7,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/enforce"
-	"github.com/stayconnect/enterprise/data-plane/internal/shapeplan"
+	"github.com/onegate/onegate/data-plane/internal/enforce"
+	"github.com/onegate/onegate/data-plane/internal/shapeplan"
 )
 
 // Scope is checked field by field by netd against its own resolved scope, so a producer cannot widen its reach.

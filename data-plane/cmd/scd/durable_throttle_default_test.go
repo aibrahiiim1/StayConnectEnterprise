@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/buildprofile"
+	"github.com/onegate/onegate/data-plane/internal/buildprofile"
 )
 
 // AD-32: a production build never runs without the durable throttle, whatever the environment says.

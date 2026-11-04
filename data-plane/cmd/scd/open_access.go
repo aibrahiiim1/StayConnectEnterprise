@@ -15,9 +15,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
-	"github.com/stayconnect/enterprise/data-plane/internal/localkeys"
-	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
+	"github.com/onegate/onegate/data-plane/internal/iamv2"
+	"github.com/onegate/onegate/data-plane/internal/localkeys"
+	"github.com/onegate/onegate/data-plane/internal/tenantcfg"
 )
 
 const anonymousAccessKeyFile = "anonymous_access.key"

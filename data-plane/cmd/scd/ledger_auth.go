@@ -17,8 +17,8 @@ import (
 
 	"filippo.io/age"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/backupcrypt"
-	"github.com/stayconnect/enterprise/data-plane/internal/ledger"
+	"github.com/onegate/onegate/data-plane/internal/backupcrypt"
+	"github.com/onegate/onegate/data-plane/internal/ledger"
 )
 
 // ledgerKeyEscrowPath is the key sealed to the backup key holders. It is not a database dump, so the backup download list does

@@ -15,8 +15,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/namenorm"
-	"github.com/stayconnect/enterprise/data-plane/internal/throttle"
+	"github.com/onegate/onegate/data-plane/internal/namenorm"
+	"github.com/onegate/onegate/data-plane/internal/throttle"
 )
 
 // ErrNoLineage must never be distinguishable from a wrong answer at the API boundary.
