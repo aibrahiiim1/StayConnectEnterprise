@@ -26,6 +26,20 @@ function useChangeCount(signature: string | null) {
   return count;
 }
 
+// Replays the entrance on the same element: remounting it (a changing key) dropped the keyboard focus of whoever was inside.
+function useReplayEntrance<T extends HTMLElement>(changes: number) {
+  const ref = useRef<T | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || changes === 0) return;
+    const classes = ENTER.split(" ");
+    el.classList.remove(...classes);
+    void el.offsetWidth;
+    el.classList.add(...classes);
+  }, [changes]);
+  return ref;
+}
+
 export function AttentionBar({
   rows, notes, ready,
 }: {
@@ -39,13 +53,15 @@ export function AttentionBar({
   const empty = rows.length === 0 && notes.length === 0;
   const signature = !ready && empty ? null : `${rows.length}|${notes.length}|${err}|${rows[0]?.text ?? ""}`;
   const changes = useChangeCount(signature);
+  const normalRef = useReplayEntrance<HTMLDivElement>(changes);
+  const barRef = useReplayEntrance<HTMLDetailsElement>(changes);
 
   if (empty) {
     if (!ready) return null;
     return (
       <div
-        key={changes}
-        className={cn("flex h-10 items-center gap-2 rounded-lg border border-border bg-card px-3.5 text-sm text-muted-foreground shadow-card", changes > 0 && ENTER)}
+        ref={normalRef}
+        className="flex h-10 items-center gap-2 rounded-lg border border-border bg-card px-3.5 text-sm text-muted-foreground shadow-card"
         data-testid="all-normal"
       >
         <CheckCircle2 className="size-4 text-success" aria-hidden />
@@ -61,13 +77,12 @@ export function AttentionBar({
   const first = rows[0]?.text ?? notes[0]?.text;
   return (
     <details
-      key={changes}
+      ref={barRef}
       open={open}
       onToggle={(e) => setOpen(e.currentTarget.open)}
       className={cn(
         "disclosure-motion group rounded-lg border bg-card shadow-card",
         rows.length === 0 ? "border-border" : err ? "border-destructive/40" : "border-warning/40",
-        changes > 0 && ENTER,
       )}
       // Closed by default, errors included: the one line names the count and the first item; the arrow opens the list.
     >
