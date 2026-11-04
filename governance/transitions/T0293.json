@@ -1,0 +1,35 @@
+{
+  "transition_id": "T0293",
+  "seq": 293,
+  "timestamp": "2026-11-04T03:10:24+02:00",
+  "timestamp_derivation": "Read from the workstation clock (UTC+02:00) by the script that wrote this receipt, immediately before the commit that introduces it.",
+  "record_type": "NETD_REVIEW_FIXES_PERFORMANCE_ACCOUNTING_AND_PORTAL_HTTPS_RECOVERY",
+  "authorisation": "The Product Owner's end-to-end mission of 2026-11-04 (resolve the netd security, MAC-binding, accounting, continuity and performance findings; fix the portal HTTPS recovery delay; remove the one-time migration scripts; complete and merge the open PRs; test-appliance deployment under D79).",
+  "delivery": "netd: a regroup denies the device and proves it before deleting its class (Codex P1), re-binds the verified MAC after the revocation (Codex P2), and deletes the class only once the plan shows acctd stored its final counters, bounded at 30 s (Codex P2); acctd stamps the counters it stored onto the plan (Observed epoch/up/down, not hashed). An unchanged SHARED session is renewed with the batch instead of being rewritten every pass. scd re-checks the portal HTTPS state after 10 s while a usable certificate waits only for the portal address. The one-time Full Stay grant scripts and their test are removed; the grants, their audit rows and T0292 remain.",
+  "findings": "Live before: 411 SHARED devices took 4.6 s of a 4.8 s netd pass, past portald's 2.5 s room sign-in budget, and 399 room sign-ins answered service unavailable before enforcement was confirmed (310 of the 311 devices got online on a retry). After the 4-vCPU reboot the portal served the HTTP fallback for 5 min (22:20:38-22:25:53 UTC) because scd decided before netd had brought the portal address up. acctd's unit tests report a data race under -race that is identical on master (loops.go, pre-existing). Deploy order is netd before acctd: netd decodes plans with DisallowUnknownFields, so an older netd refuses the new acctd's plans.",
+  "verification": "Fake-kernel test: an unchanged SHARED pass makes no class change and no database call, at the same cost for 50 and 400 devices (the old rule: 34 class changes and 50 database calls for 50). Regroup tests: revoke before delete; denied on a failed allocation; MAC binding kept; waits for the stored counters; the wait is bounded; a bulk move is spread over passes. acctd stamps only stored sessions and the plan hash is unchanged. scd re-check cadence test. netd, acctd, scd, shape and shapeplan packages pass on Linux; each new test fails without its change. Live on the test appliance after the deploy: netd pass 246-255 ms (was 2.7-5.9 s) with 372 of 373 sessions on the batched steady path, 0 failures, every open session in the gate through each restart, no plan refused after acctd.",
+  "deployment": {
+    "test_appliance": "172.21.96.97: netd, acctd and scd from b86f5f1bca484684e3b1d33c2dee18a7316c8bad (read back: -tags=stayconnect_production, vcs.modified=false; backups netd.bak-pre-b86f5f1b, acctd.bak-pre-b86f5f1b, scd.bak-pre-b86f5f1b; DEPLOYED_BINARIES.sha256 updated and checked), deployed in the order netd, acctd, scd.",
+    "central": "Not changed."
+  },
+  "not_touched": "PMS configuration and posting, payments and financial settings, package and plan definitions, networking and topology, licences, the production Central. The 13 unmatched stays were not granted.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "6e3a88a048f77f388a2969197d279bfa1f5d4e6b",
+  "previous_delivery": "T0292",
+  "decision": "none (Product Owner-approved mission)",
+  "go_live": "NOT authorised."
+}

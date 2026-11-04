@@ -1,4 +1,0 @@
-commit 502e02c064244cd7fe8b74122b71c4313f173a6c
-Date:   Tue Nov 3 15:39:42 2026 +0200
-
-    Governance: T0291 records the accepted, merged room re-sign-in fix and its read-back

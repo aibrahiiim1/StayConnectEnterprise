@@ -1,0 +1,4 @@
+commit 8098a220a69e0f5a94cf6829358199b42de29fff
+Date:   Wed Nov 4 04:36:50 2026 +0200
+
+    Governance: T0294 records the decimal data units

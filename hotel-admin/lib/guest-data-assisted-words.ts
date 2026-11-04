@@ -3,6 +3,8 @@
  * test/guest-data-assisted-words.
  */
 
+import { formatBytes } from "./utils";
+
 export type RecordClass = "ATTRIBUTABLE" | "CLAIMABLE" | "SHARED" | "CONFLICTING" | "UNVERIFIABLE";
 
 export const CLASS_WORDS: Record<RecordClass, { label: string; tone: "ok" | "info" | "warn" | "err" | "neutral"; help: string }> = {
@@ -123,10 +125,7 @@ export function isGroupAddress(mac: string): boolean {
 function bytes(n: unknown): string {
   const v = typeof n === "number" ? n : Number(n);
   if (!Number.isFinite(v) || v < 0) return "";
-  if (v < 1024) return `${v} B`;
-  if (v < 1024 ** 2) return `${(v / 1024).toFixed(1)} KB`;
-  if (v < 1024 ** 3) return `${(v / 1024 ** 2).toFixed(1)} MB`;
-  return `${(v / 1024 ** 3).toFixed(2)} GB`;
+  return formatBytes(v);
 }
 
 export function describeDetail(kind: string, d: Record<string, unknown> | null | undefined): string {

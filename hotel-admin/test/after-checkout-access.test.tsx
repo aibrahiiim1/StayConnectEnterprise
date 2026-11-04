@@ -7,6 +7,7 @@ import {
   describePublishFailure,
   draftFromState,
   draftToTerms,
+  fmtData,
   fmtHours,
   isSwitchEvent,
   normaliseReasonCode,
@@ -26,7 +27,7 @@ vi.mock("@/lib/api", () => ({
   ApiError: class ApiError extends Error {},
 }));
 
-const GB = 1024 ** 3;
+const GB = 1_000_000_000;
 const policy = {
   duration_hours: 12, duration_seconds: 43200, down_kbps: 5000, up_kbps: 2000,
   data_quota_bytes: GB, device_limit: 5, device_policy: "REJECT_NEW_DEVICE",
@@ -35,7 +36,7 @@ const bounds = {
   duration_hours: { min: 1, max: 72, default: 12, unit: "hours" },
   down_kbps: { min: 64, max: 1000000, default: 5000, unit: "kbps" },
   up_kbps: { min: 64, max: 1000000, default: 2000, unit: "kbps" },
-  data_quota_bytes: { min: 10485760, max: 107374182400, default: GB, unit: "bytes" },
+  data_quota_bytes: { min: 10485760, max: 107374182400, default: GB, unit: "bytes" }, // server limits stay binary
   device_limit: { min: 1, max: 20, default: 5, unit: "devices" },
 };
 const base: AccessState = {
@@ -47,7 +48,7 @@ const base: AccessState = {
 };
 const unconfigured: AccessState = {
   ...base, configured: false, config_version: 0, policy: null,
-  effective: { source: "EMERGENCY_FALLBACK", policy: { ...policy, duration_hours: 1, duration_seconds: 3600, data_quota_bytes: 500 * 1024 * 1024 } },
+  effective: { source: "EMERGENCY_FALLBACK", policy: { ...policy, duration_hours: 1, duration_seconds: 3600, data_quota_bytes: 500_000_000 } },
   emergency_history: { count: 2, last_at: "2026-10-01T10:00:00Z" },
 };
 const disabled: AccessState = { ...base, enabled: false, effective: { source: "DISABLED" } };
@@ -99,13 +100,24 @@ describe("After Check-out Access: pure rules", () => {
   });
 
   it("converts the draft to the API's units once", () => {
-    const t = draftToTerms({ ...draftFromState(base, ["REJECT_NEW_DEVICE"]), downMbps: "7.5", quotaMb: "2048" });
+    const t = draftToTerms({ ...draftFromState(base, ["REJECT_NEW_DEVICE"]), downMbps: "7.5", quotaMb: "2000" });
     expect(t).toMatchObject({ duration_hours: 12, down_kbps: 7500, up_kbps: 2000, data_quota_bytes: 2 * GB, device_limit: 5 });
+  });
+
+  it("shows a stored quota in decimal units and saves it back to the exact byte", () => {
+    const gib = 1024 ** 3;
+    const stored = { ...base, policy: { ...base.policy!, data_quota_bytes: gib } };
+    const d = draftFromState(stored, ["REJECT_NEW_DEVICE"]);
+    expect(d.quotaMb).toBe("1073.741824");
+    expect(draftToTerms(d).data_quota_bytes).toBe(gib);
+    expect(fmtData(gib)).toBe("1.07 GB");
+    expect(fmtData(GB)).toBe("1 GB");
+    expect(fmtData(10485760)).toBe("10.5 MB");
   });
 
   it("seeds an unconfigured site from the API defaults", () => {
     const d = draftFromState(unconfigured, ["REJECT_NEW_DEVICE"]);
-    expect(d).toMatchObject({ hours: "12", downMbps: "5", upMbps: "2", quotaMb: "1024", deviceLimit: "5" });
+    expect(d).toMatchObject({ hours: "12", downMbps: "5", upMbps: "2", quotaMb: "1000", deviceLimit: "5" });
   });
 
   it("words hours and reasons", () => {
@@ -163,7 +175,7 @@ describe("After Check-out Access page", () => {
   it("shows the emergency terms as the appliance sends them, with a way to publish the site's own", async () => {
     const asSent = {
       source: "EMERGENCY_FALLBACK", duration_seconds: 3600, down_kbps: 5000, up_kbps: 2000,
-      data_quota_bytes: 500 * 1024 * 1024, device_limit: 0, device_limit_policy: "REJECT_NEW_DEVICE",
+      data_quota_bytes: 500_000_000, device_limit: 0, device_limit_policy: "REJECT_NEW_DEVICE",
       policy_version: "EMERGENCY_GRACE_V1",
     };
     mockApi([{ ...unconfigured, effective: { source: "EMERGENCY_FALLBACK", policy: asSent as any } }]);

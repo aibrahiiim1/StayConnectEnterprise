@@ -55,14 +55,16 @@ export type AccessHistoryItem = {
 
 export type AccessHistoryResp = { data?: AccessHistoryItem[]; available?: boolean };
 
-export const MB = 1024 * 1024;
-const GB = 1024 * MB;
+export const MB = 1_000_000;
+const GB = 1000 * MB;
+const MiB = 1024 * 1024;
 
 export const DEFAULT_BOUNDS: AccessBounds = {
   duration_hours: { min: 1, max: 72, default: 12, unit: "hours" },
   down_kbps: { min: 64, max: 1_000_000, default: 5000, unit: "kbps" },
   up_kbps: { min: 64, max: 1_000_000, default: 2000, unit: "kbps" },
-  data_quota_bytes: { min: 10 * MB, max: 100 * GB, default: GB, unit: "bytes" },
+  // Byte values match the server's (grace.go: 10 MiB, 100 GiB, 1 GiB); only the display is decimal.
+  data_quota_bytes: { min: 10 * MiB, max: 100 * 1024 * MiB, default: 1024 * MiB, unit: "bytes" },
   device_limit: { min: 1, max: 20, default: 5, unit: "devices" },
 };
 
@@ -103,11 +105,15 @@ function trim1(n: number): string {
   return s.endsWith(".0") ? s.slice(0, -2) : s;
 }
 
+function trim(n: number, digits: number): string {
+  return String(+n.toFixed(digits));
+}
+
 export function fmtData(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return "no data";
-  if (bytes >= GB) return trim1(bytes / GB) + " GB";
-  if (bytes >= MB) return Math.round(bytes / MB) + " MB";
-  return Math.max(1, Math.round(bytes / 1024)) + " KB";
+  if (bytes >= GB) return trim(bytes / GB, 2) + " GB";
+  if (bytes >= MB) return trim(bytes / MB, 1) + " MB";
+  return Math.max(1, Math.round(bytes / 1000)) + " KB";
 }
 
 export function fmtSpeed(kbps: number): string {
@@ -287,7 +293,8 @@ export function draftFromState(s: AccessState, supported: string[]): AccessDraft
     hours: String(p ? Math.round(p.duration_hours) || b.duration_hours.default : b.duration_hours.default),
     downMbps: String((p?.down_kbps ?? b.down_kbps.default) / 1000),
     upMbps: String((p?.up_kbps ?? b.up_kbps.default) / 1000),
-    quotaMb: String(Math.round((p?.data_quota_bytes ?? b.data_quota_bytes.default) / MB)),
+    // Six decimals of MB is byte precision, so saving other changes keeps the stored quota exactly.
+    quotaMb: String(+((p?.data_quota_bytes ?? b.data_quota_bytes.default) / MB).toFixed(6)),
     deviceLimit: String(p?.device_limit ?? b.device_limit.default),
     devicePolicy: policy,
   };

@@ -16,7 +16,7 @@ import { SCHEDULE_SETTING_KEYS, backupHeadline, backupKindLabel, type BackupStat
 
 export const EARLIER_CONFIRMATION = "remove earlier backups";
 
-const mb = (n: number) => `${(n / 1048576).toFixed(1)} MB`;
+const mb = (n: number) => `${(n / 1_000_000).toFixed(1)} MB`;
 
 export function ScheduledBackupsCard({ writable }: { writable: boolean }) {
   const toast = useToast();

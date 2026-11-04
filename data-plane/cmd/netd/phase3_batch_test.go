@@ -66,6 +66,38 @@ func TestSteadyPassCostDoesNotGrowWithTheNumberOfSessions(t *testing.T) {
 	}
 }
 
+// The same for SHARED sessions, the hotel's usual allocation: an unchanged pass rewrites no class and no group, so its cost does not grow with
+// the number of devices (live, 411 SHARED devices took 4.6 s of a 4.8 s pass because each was re-rated every pass).
+func TestSteadySharedPassCostDoesNotGrowWithTheNumberOfSessions(t *testing.T) {
+	var costs []int
+	for _, n := range []int{50, 400} {
+		k := newKernelFake(time.Now())
+		e := newScaleEnv(t, k)
+		e.addSessions(0, n)
+		for i := range e.sessions {
+			e.sessions[i].SpeedAllocation = speedAllocationShared
+			e.sessions[i].EntitlementID = fmt.Sprintf("ent-%05d", i/3) // three devices to a stay
+		}
+		for i := 0; i < 5 && e.activeCount() < n; i++ {
+			if st := e.pass(); st.res.Failed != 0 {
+				t.Fatalf("n=%d admission: %v", n, st.res.Problems)
+			}
+			e.tick(5 * time.Second)
+		}
+		st := e.pass()
+		if st.res.Failed != 0 || st.res.Shaped != n {
+			t.Fatalf("n=%d: shaped=%d failed=%d %v", n, st.res.Shaped, st.res.Failed, st.res.Problems)
+		}
+		if st.cnt.TCClassChange != 0 || st.cnt.NFTScript != 0 || st.db != 0 {
+			t.Fatalf("n=%d: an unchanged SHARED pass rewrote state: class changes=%d nft transactions=%d database calls=%d", n, st.cnt.TCClassChange, st.cnt.NFTScript, st.db)
+		}
+		costs = append(costs, st.cnt.total())
+	}
+	if costs[0] > 12 || costs[0] != costs[1] {
+		t.Fatalf("steady SHARED pass process count = %v for 50 and 400 sessions; want the same small constant", costs)
+	}
+}
+
 // Renewal writes every due lease in one transaction, never longer than the lease the pass asks for.
 func TestDueLeasesAreRenewedInOneTransactionAndKeepTheirLength(t *testing.T) {
 	e, k := newFakeScale(t, 200, false)
