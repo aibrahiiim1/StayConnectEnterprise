@@ -1,0 +1,4 @@
+commit b1f20b9609f31b789677a934eb649ef0c66ffa98
+Date:   Wed Nov 4 14:09:52 2026 +0200
+
+    Governance: T0302 records netd 5ba8eea9 on the test appliance
