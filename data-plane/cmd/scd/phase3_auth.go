@@ -1017,6 +1017,10 @@ func (p *phase3Auth) grantHandler(w http.ResponseWriter, r *http.Request) {
 				DeviceID: dev.DeviceID, GuestNetworkID: dev.GuestNetwork})
 			return
 		}
+		// After Check-out Access refuses a device the stay never used: the database's rule, recorded as itself and never as an outage.
+		if strings.Contains(err.Error(), "AFTER_CHECKOUT_NEW_DEVICE_REJECTED") {
+			grantResult = signinattempt.AfterCheckoutNewDeviceRejected
+		}
 		notVerified(w, grantResult, "grant: "+err.Error())
 		return
 	}
