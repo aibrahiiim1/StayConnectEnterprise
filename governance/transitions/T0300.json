@@ -1,0 +1,35 @@
+{
+  "transition_id": "T0300",
+  "seq": 300,
+  "timestamp": "2026-11-04T10:38:27+02:00",
+  "timestamp_derivation": "Read from the workstation clock (UTC+02:00) by the script that wrote this receipt, immediately before the commit that introduces it.",
+  "record_type": "TEST_APPLIANCE_UPGRADE_TO_CUSTOM_ROLES_MASTER",
+  "authorisation": "The Product Owner's mission of 2026-11-04 (authorized deployment to the test appliance 172.21.96.97 with backup, rollback and verification) and the standing authorization D79.",
+  "delivery": "Master 14251898 (PR #308: custom roles D91, sender confirmation, staff re-pin, netd group slots and regroup accounting) installed on the test appliance with appliance-install.sh --upgrade: migration 0206 behind its verified pre-change backup and the Gate-P reconcile, every service restarted in dependency order, the Admin Console release and scripts from the same master.",
+  "findings": "NOT VERIFIED: room sign-in at the evening peak (observed only at morning load: 0 service-unavailable answers at about 400 online); portal HTTPS recovery after a full reboot (not rebooted, to keep about 400 devices online; unit-tested); a live erasure (no secondary storage for the erasure ledger on this appliance); the group re-pin and the Wi-Fi wording in a real email (no self-registration or staff verification since the deploy). The nightly backup cleanup now reports the Admin Console rollback pointer as invalid because the installer deliberately wires no previous console release; the cleanup is fail-safe (deletes nothing on that finding); recorded as backlog.",
+  "verification": "Release built from a clean clone (APPLIANCE_BUILD = PASS, 583 files in SHA256SUMS), checksum verified on the appliance. After the upgrade: every binary 1425189806cb, clean, production-tagged, matching DEPLOYED_BINARIES.sha256; HOTEL_ADMIN_INTEGRITY = PASS; schema 0206; units active; netd 422 sessions, passes 151-424 ms; health sweep 0 issues; pmsd reconnected and published roster generation 489. Live checks: 402 active sessions in 150 SHARED groups, none shared by two packages (before: 6 stays in 3 groups); a test custom role (View for sessions and usage) let its test operator read sessions and refused vouchers, roles, guest data and staff-account creation, an edit applied on the next request, a role managing staff accounts was refused, and the role and test operator were removed; a sender saved without the password (200) while removal still asks for it (401).",
+  "deployment": {
+    "test_appliance": "172.21.96.97: release onegate-appliance-1425189806cb, read back (see test_appliance.release); rollback /opt/stayconnect/.previous/20261104T075726Z and bin/*.bak-20261104T075726Z.",
+    "central": "Not changed."
+  },
+  "not_touched": "The production Central, PMS configuration and posting, payments, networking and topology, licences, the built-in roles.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "1425189806cbc11dc7b1071edc1888e0fb3be35d",
+  "previous_delivery": "T0299",
+  "decision": "none (Product Owner-approved mission; D79)",
+  "go_live": "NOT authorised."
+}
