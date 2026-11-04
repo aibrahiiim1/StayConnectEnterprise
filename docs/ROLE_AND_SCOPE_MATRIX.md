@@ -226,6 +226,30 @@ License-state gates apply **on top of** roles: e.g. in Restricted state even
 site_admin cannot create GuestAccessPlans or voucher batches
 ([LICENSING_AND_ENTITLEMENTS.md](LICENSING_AND_ENTITLEMENTS.md) §5).
 
+## 3a. Custom roles (migration 0206, Product Owner 2026-11-04)
+
+A Site admin can define roles of their own in **Admin Console → Roles**. A role has a name, a description and, per feature, one of
+three levels: **No access**, **View** (`read`) or **Manage** (`write`). Every resource edged enforces is a feature; the catalogue is
+`roleFeatures` in `data-plane/cmd/edged/custom_roles.go`, and a test fails if it and the enforced resources drift apart. Staff
+receive a custom role from **Operators**, as they receive a built-in one; a staff account can hold built-in and custom roles together.
+
+- **The seven built-in roles are unchanged** and stay compiled in `rolePerms` (`auth.go`). The Roles page shows them read-only.
+- **No escalation.** A custom role grants a feature at most at the highest level any built-in role *other than Site admin* grants it.
+  Whatever only Site admin can do today stays Site admin's: managing staff accounts (`operators` is View at most), switching
+  modules, room-charge onboarding, PMS routing and checkout reconciliation. The cap is applied when a role is saved and again
+  when edged loads the roles, so a row edited in the database cannot exceed it either.
+- **Only Site admin manages roles.** No role, built-in or custom, holds the `roles` resource, and assigning a role is staff
+  management (`operators` WRITE, Site admin only).
+- **Safeguards stay where they are.** A feature that holds personal data, money, secrets or the whole database is marked in the
+  editor. Its routes keep their own password step-up, reasons and audit, whoever holds the feature.
+- **Enforcement.** edged checks custom roles in the same `permFor` as built-in ones, from an in-process copy that is reloaded on every
+  change and every minute. An edit applies to everyone holding the role from their next request; assigning or removing a role
+  ends that person's sessions, as for built-in roles.
+- **Audit.** Creating, changing and removing a role ask for the operator's password and are recorded as `role.created`,
+  `role.updated` (with the permissions before and after) and `role.deleted`. A role that is still assigned cannot be removed.
+- **Data.** `public.custom_roles` (tenant-scoped) and `public.operator_custom_roles`. A cross-tenant move purges a previous
+  customer's custom roles with its staff accounts. Role names and descriptions describe a job, not a person, and are not personal data.
+
 ## 4. Isolation guarantees
 
 1. **Credential isolation** — site operators exist only in that site's DB;

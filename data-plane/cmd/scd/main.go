@@ -810,6 +810,7 @@ func main() {
 	r.Post("/v1/auth/account/forgot", s.accountForgot)
 	r.Post("/v1/auth/account/reset", s.accountReset)
 	r.Post("/v1/admin/accounts/{id}/resend-verification", s.adminAccountResendVerification)
+	r.Post("/v1/admin/accounts/{id}/repin-group", s.adminAccountRepinGroup)
 	// The Admin Console operator's authenticator: edged only, under /v1/admin/.
 	s.operatorMFARoutes(r)
 	r.Post("/v1/auth/social/start", s.socialStart)

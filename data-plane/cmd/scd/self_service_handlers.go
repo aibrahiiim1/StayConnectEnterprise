@@ -726,3 +726,41 @@ func (s *server) accountReset(w http.ResponseWriter, r *http.Request) {
 	slog.Info("email accounts: password reset completed", "sessions_ended", ended)
 	writeJSON(w, http.StatusOK, map[string]any{"reset": true})
 }
+
+// adminAccountRepinGroup gives a verified account's open sign-in the client group its address earns, after staff marked the address
+// verified in the Admin Console (edged cannot write sign-ins). An account whose address is not verified changes nothing.
+func (s *server) adminAccountRepinGroup(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(chi.URLParam(r, "id"))
+	if !uuidShape.MatchString(id) {
+		ssErr(w, http.StatusNotFound, "unknown_account")
+		return
+	}
+	if s.db == nil {
+		ssErr(w, http.StatusServiceUnavailable, "no database")
+		return
+	}
+	n := 0
+	err := pgx.BeginFunc(r.Context(), s.db, func(tx pgx.Tx) error {
+		var verified bool
+		if err := tx.QueryRow(r.Context(), `SELECT email_verified_at IS NOT NULL FROM iam_v2.guest_access_accounts
+		     WHERE id = $1::uuid AND tenant_id = $2 AND site_id = $3`, id, s.tenID, s.siteID).Scan(&verified); err != nil {
+			return err
+		}
+		if !verified {
+			return nil
+		}
+		var err error
+		n, err = iamv2.RepinAccountGroup(r.Context(), tx, s.tenID, s.siteID, id)
+		return err
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		ssErr(w, http.StatusNotFound, "unknown_account")
+		return
+	}
+	if err != nil {
+		slog.Warn("email accounts: the open sign-in could not be given its group", "err", err)
+		ssErr(w, http.StatusInternalServerError, "repin_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"repinned": n})
+}
