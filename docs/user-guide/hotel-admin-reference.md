@@ -278,6 +278,21 @@ several.
 - **Who can change it:** Site admin, Site IT manager, Client services, Client relations. **Read-only:** Voucher
   operator, Payments operator, Site viewer.
 
+### Client activity — `/client-activity`
+One timeline of what happened to clients, newest first, a page at a time.
+
+- **Listed:** connections and disconnections with the reason (for example, left the Wi-Fi after its address lease
+  ended), packages started and ended and why, device replacements and released places, client accounts created and
+  verified, and staff actions on clients. Where the Hotel module is on: room sign-in attempts and their result
+  (attempts refused while a device's sign-in is paused show as Too many attempts; a staff release is a staff
+  action), stays received from the PMS and check-outs. On other sites those are not read at all.
+- **Filters:** period (last hour to 30 days), Problems, a category, and search by room, username, MAC, IP, package or
+  staff member. Select a row for its details.
+- **Who sees what:** anyone who can read Active sessions. Each kind of event is listed only when the role can read its
+  own screen (accounts, room sign-ins, stays); staff actions need Activity. Opening the page is
+  recorded as a guest-data read.
+- **Not listed:** failed voucher, account and code sign-ins are not recorded by the appliance.
+
 ### Usage explorer — `/usage`
 Settles data-usage questions by drilling from an access source or a device down to sessions and the
 accounting samples behind them.
@@ -841,6 +856,7 @@ W = can change, R = read-only, — = not shown. The appliance enforces these on 
 | Vouchers (code format, keys) | W | W | R | R | R | — | R |
 | Client accounts | W | W | W | W | W | — | R |
 | Active sessions | W | W | W | W | R | R | R |
+| Client activity (per event kind, as its own screen) | R | R | R | R | R | R | R |
 | Usage explorer | R | R | R | R | — | R | R |
 | Online-time budgets | R | R | R | R | R | R | R |
 | Sign-in methods | W | W | R | R | — | — | R |

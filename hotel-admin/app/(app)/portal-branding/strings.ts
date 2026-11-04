@@ -170,6 +170,7 @@ export const PORTAL_STRINGS: PortalString[] = [
   { group: "Messages", key: "err.account.invalid", english: "The username or password is incorrect." },
   { group: "Messages", key: "err.account.devices", english: "Every device place on this account is in use. On a device that is online with it, remove one under “Your devices”, or contact the site team." },
   { group: "Messages", key: "err.room.devices", english: "Every device place for this room is in use. On a device that is online with it, remove one under “Your devices”, or contact the site team.", module: "hospitality" },
+  { group: "Messages", key: "err.room.checkedout", english: "After check-out, Internet access continues only on the devices that were connected during your stay. Please use one of those devices, or contact the site team.", module: "hospitality" },
   { group: "Messages", key: "err.method.disabled", english: "This sign-in method is not available. Please contact the site team for assistance." },
   { group: "Messages", key: "err.capacity", english: "The Wi-Fi network is at capacity. Please try again shortly." },
   { group: "Messages", key: "err.device.network", english: "Your device isn't connected to this Wi-Fi network." },

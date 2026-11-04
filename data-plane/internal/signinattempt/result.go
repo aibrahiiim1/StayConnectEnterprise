@@ -47,6 +47,9 @@ const (
 	// DeviceLimitReached: the guest is verified but the stay's package already holds its device limit (0207); the guest is asked to
 	// disconnect another device.
 	DeviceLimitReached Result = "DEVICE_LIMIT_REACHED"
+	// AfterCheckoutNewDeviceRejected: the departed guest is verified, but After Check-out Access admits only the devices the stay
+	// used before check-out and this is another one (0208).
+	AfterCheckoutNewDeviceRejected Result = "AFTER_CHECKOUT_NEW_DEVICE_REJECTED"
 )
 
 // AllResults is every Result in operator-filter order; tests use it to prove none lacks a label or class.
@@ -54,6 +57,7 @@ var AllResults = []Result{
 	Verified, CredentialMismatch, RoomNotInMirror, StayNotEligible, AmbiguousRoomCandidates,
 	MirrorStaleOrMissingChange, RateLimited, RoutingOrInterfaceFailure, ServiceUnavailable,
 	SpentRequestID, MalformedSubmission, VerifiedNoEligiblePackage, LicenseRefused, LicenseCapacityReached, DeviceLimitReached,
+	AfterCheckoutNewDeviceRejected,
 }
 
 type MatchedField string
@@ -79,6 +83,8 @@ const (
 	GuestCapacity GuestClass = "CAPACITY"
 	// GuestDeviceLimit follows a verified sign-in, so it says nothing the guest did not just prove.
 	GuestDeviceLimit GuestClass = "DEVICE_LIMIT"
+	// GuestAfterCheckoutDevice also follows a verified sign-in, so it tells a departed guest nothing they did not just prove.
+	GuestAfterCheckoutDevice GuestClass = "AFTER_CHECKOUT_DEVICE"
 )
 
 // GuestClass maps a Result to the message class the guest may see. The split avoids an occupancy oracle:
@@ -113,6 +119,8 @@ func (r Result) GuestClass() GuestClass {
 		return GuestCapacity
 	case DeviceLimitReached:
 		return GuestDeviceLimit
+	case AfterCheckoutNewDeviceRejected:
+		return GuestAfterCheckoutDevice
 	default:
 		// An unrecognised Result is never blamed on the guest.
 		return GuestTechnical
@@ -123,21 +131,22 @@ func (r Result) Succeeded() bool { return r == Verified }
 
 // labels are the plain-language reasons operators read; kept here beside the codes so there is one list.
 var labels = map[Result]string{
-	Verified:                   "Verified",
-	CredentialMismatch:         "Room found, submitted value did not match",
-	RoomNotInMirror:            "Room not in the local mirror",
-	StayNotEligible:            "Stay is not currently eligible",
-	AmbiguousRoomCandidates:    "More than one stay matched",
-	MirrorStaleOrMissingChange: "Mirror cannot authorise (stale or incomplete)",
-	RateLimited:                "Rate limited",
-	RoutingOrInterfaceFailure:  "Network or PMS interface routing failure",
-	ServiceUnavailable:         "Internal service failure",
-	SpentRequestID:             "Request ID already used by a refused attempt",
-	MalformedSubmission:        "Submission could not be read",
-	VerifiedNoEligiblePackage:  "Verified, but no package is available to this stay",
-	LicenseRefused:             "The appliance licence does not permit new guests",
-	LicenseCapacityReached:     "Verified, but the licensed guest capacity is full",
-	DeviceLimitReached:         "Verified, but the package's device limit is reached",
+	Verified:                       "Verified",
+	CredentialMismatch:             "Room found, submitted value did not match",
+	RoomNotInMirror:                "Room not in the local mirror",
+	StayNotEligible:                "Stay is not currently eligible",
+	AmbiguousRoomCandidates:        "More than one stay matched",
+	MirrorStaleOrMissingChange:     "Mirror cannot authorise (stale or incomplete)",
+	RateLimited:                    "Rate limited",
+	RoutingOrInterfaceFailure:      "Network or PMS interface routing failure",
+	ServiceUnavailable:             "Internal service failure",
+	SpentRequestID:                 "Request ID already used by a refused attempt",
+	MalformedSubmission:            "Submission could not be read",
+	VerifiedNoEligiblePackage:      "Verified, but no package is available to this stay",
+	LicenseRefused:                 "The appliance licence does not permit new guests",
+	LicenseCapacityReached:         "Verified, but the licensed guest capacity is full",
+	DeviceLimitReached:             "Verified, but the package's device limit is reached",
+	AfterCheckoutNewDeviceRejected: "Verified, but after check-out only the stay's own devices may connect",
 }
 
 // Label returns the code itself for an unknown Result rather than an empty string.
