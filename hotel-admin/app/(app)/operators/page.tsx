@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, ListResp, Whoami, EdgeOperator } from "@/lib/api";
+import { api, ListResp, Whoami, EdgeOperator, type RolesResponse } from "@/lib/api";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
@@ -18,7 +18,7 @@ import { RowActions } from "@/components/ui/row-actions";
 import { DetailsDrawer, DetailsSection } from "@/components/ui/details-drawer";
 import { DescriptionList } from "@/components/ui/data";
 import { Plus, Smartphone, UserCog, UserMinus, Users, X } from "lucide-react";
-import { canWrite, SITE_ROLES, ROLE_LABELS, SiteRole } from "@/lib/roles";
+import { canRead, canWrite, roleLabel, SITE_ROLES, ROLE_LABELS, SiteRole } from "@/lib/roles";
 import { formatRelative } from "@/lib/utils";
 import { HelpList, HelpSection } from "@/components/help";
 import { OperatorSigninProtection } from "@/components/operator-signin-protection";
@@ -60,6 +60,16 @@ export default function OperatorsPage() {
   const [yourPw, setYourPw] = useState("");
 
   const writable = canWrite("operators", me?.roles ?? []);
+  // Custom roles a Site admin defined (Roles), offered beside the built-in ones.
+  const [customRoles, setCustomRoles] = useState<{ key: string; name: string }[]>([]);
+  useEffect(() => {
+    if (!me || !canRead("roles", me.roles)) return;
+    api.get<RolesResponse>("/roles").then((r) => setCustomRoles(r.custom.map((c) => ({ key: c.key, name: c.name })))).catch(() => setCustomRoles([]));
+  }, [me]);
+  const roleChoices = [
+    ...SITE_ROLES.map((r) => ({ key: r as string, name: ROLE_LABELS[r as SiteRole] })),
+    ...customRoles,
+  ];
 
   async function load() {
     try { setRows((await api.get<ListResp<EdgeOperator>>("/operators")).data); }
@@ -92,7 +102,7 @@ export default function OperatorsPage() {
       });
       setShowNew(false);
       setPassword(""); setYourPw("");
-      toast.success("Operator added", `${email.trim()} can now sign in as ${ROLE_LABELS[role as SiteRole] ?? role}.`);
+      toast.success("Operator added", `${email.trim()} can now sign in as ${roleChoices.find((c) => c.key === role)?.name ?? roleLabel(role)}.`);
       await load();
     } catch (e) { setFormErr(e); }
     finally { setBusy(false); }
@@ -149,7 +159,7 @@ export default function OperatorsPage() {
     setBusy(true); setFormErr(null);
     try {
       await api.post(`/operators/${op.id}/roles`, { role, your_password: password });
-      toast.success("Role added", `${op.email} is now also ${ROLE_LABELS[role as SiteRole] ?? role}.`);
+      toast.success("Role added", `${op.email} is now also ${roleChoices.find((c) => c.key === role)?.name ?? roleLabel(role)}.`);
       setAddingRole(null);
       await load();
     } catch (e) { setFormErr(e); }
@@ -170,7 +180,7 @@ export default function OperatorsPage() {
 
   const selected = rows?.find((o) => o.id === selectedId) ?? null;
   const nameOf = (op: EdgeOperator) => op.display_name || op.email;
-  const roleName = (r: string) => ROLE_LABELS[r as SiteRole] ?? r;
+  const roleName = (r: string, op?: EdgeOperator) => roleLabel(r, op?.role_names ?? Object.fromEntries(customRoles.map((c) => [c.key, c.name])));
 
   function openReset(op: EdgeOperator) {
     setFormErr(null); setNewPw(""); setConfirmPw(""); setYourPw(""); setRequireChangeReset(true); setPwFor(op);
@@ -281,7 +291,7 @@ export default function OperatorsPage() {
                         <span className="text-xs text-muted-foreground">No role</span>
                       ) : (
                         <div className="flex flex-wrap gap-1">
-                          {op.roles.map((r) => <Badge key={r} tone="neutral" size="sm">{roleName(r)}</Badge>)}
+                          {op.roles.map((r) => <Badge key={r} tone="neutral" size="sm">{roleName(r, op)}</Badge>)}
                         </div>
                       )}
                     </TD>
@@ -399,13 +409,13 @@ export default function OperatorsPage() {
                 <ul className="space-y-1.5">
                   {selected.roles.map((r) => (
                     <li key={r} className="flex min-h-9 items-center justify-between gap-3 rounded-md border border-border px-3 py-1">
-                      <span className="text-sm">{roleName(r)}</span>
+                      <span className="text-sm">{roleName(r, selected)}</span>
                       {writable && (
                         <Button
                           size="icon-xs"
                           variant="ghost"
-                          title={`Remove ${roleName(r)}`}
-                          aria-label={`Remove ${roleName(r)} from ${selected.email}`}
+                          title={`Remove ${roleName(r, selected)}`}
+                          aria-label={`Remove ${roleName(r, selected)} from ${selected.email}`}
                           onClick={() => askRemoveRole(selected, r)}
                         >
                           <X />
@@ -415,7 +425,7 @@ export default function OperatorsPage() {
                   ))}
                 </ul>
               )}
-              {writable && SITE_ROLES.some((r) => !selected.roles.includes(r)) && (
+              {writable && roleChoices.some((c) => !selected.roles.includes(c.key)) && (
                 <Select
                   value=""
                   aria-label={`Give ${selected.email} another role`}
@@ -427,8 +437,8 @@ export default function OperatorsPage() {
                   className="w-full sm:w-auto"
                 >
                   <option value="" disabled>Add a role…</option>
-                  {SITE_ROLES.filter((r) => !selected.roles.includes(r)).map((r) => (
-                    <option key={r} value={r}>{ROLE_LABELS[r as SiteRole]}</option>
+                  {roleChoices.filter((c) => !selected.roles.includes(c.key)).map((c) => (
+                    <option key={c.key} value={c.key}>{c.name}</option>
                   ))}
                 </Select>
               )}
@@ -494,7 +504,7 @@ export default function OperatorsPage() {
         </Field>
         <Field label="Role" hint="What they are allowed to see and change. It can be changed afterwards.">
           <Select value={role} onChange={(e) => setRole(e.target.value)}>
-            {SITE_ROLES.map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
+            {roleChoices.map((c) => <option key={c.key} value={c.key}>{c.name}</option>)}
           </Select>
         </Field>
         <RequireChangeBox checked={requireChangeNew} onChange={setRequireChangeNew} />
@@ -564,7 +574,7 @@ export default function OperatorsPage() {
         title="Give this role?"
         description={
           addingRole
-            ? `${addingRole.op.display_name || addingRole.op.email} will also be able to do everything the ${ROLE_LABELS[addingRole.role as SiteRole] ?? addingRole.role} role allows, from their next action.`
+            ? `${addingRole.op.display_name || addingRole.op.email} will also be able to do everything the ${roleName(addingRole.role, addingRole.op)} role allows, from their next action.`
             : undefined
         }
         confirmLabel="Add role"
@@ -581,7 +591,7 @@ export default function OperatorsPage() {
         title="Remove this role?"
         description={
           removingRole
-            ? `${removingRole.op.display_name || removingRole.op.email} will lose everything the ${ROLE_LABELS[removingRole.role as SiteRole] ?? removingRole.role} role allows. If it is their only role they will be able to sign in and see nothing.`
+            ? `${removingRole.op.display_name || removingRole.op.email} will lose everything the ${roleName(removingRole.role, removingRole.op)} role allows. If it is their only role they will be able to sign in and see nothing.`
             : undefined
         }
         confirmLabel="Remove role"

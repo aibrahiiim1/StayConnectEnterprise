@@ -119,6 +119,7 @@ const SECTIONS: Section[] = [
       { href: "/backups",            label: "Backups",     icon: Archive,    resource: "backups", keywords: "restore snapshot database retention schedule" },
       { href: "/guest-data",         label: "Guest data requests", icon: UserSearch, resource: "guest-data-rights", keywords: "gdpr privacy personal data erase delete forget export copy access request subject" },
       { href: "/operators",          label: "Operators",   icon: Users,      resource: "operators", keywords: "staff users roles password" },
+      { href: "/roles",              label: "Roles",       icon: ShieldCheck, resource: "roles", keywords: "custom role permissions access no access view manage staff" },
     ],
   },
 ];

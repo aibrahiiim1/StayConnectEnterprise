@@ -35,13 +35,30 @@ const MATRIX: Matrix = generated.roles as Matrix;
 
 const rank: Record<Perm, number> = { none: 0, read: 1, write: 2 };
 
+/** A custom role (`custom:<id>`) a site administrator defined; what it allows comes from whoami, which edged answers from the same table it enforces. */
+export type CustomRoleInfo = { name: string; permissions: Record<string, Perm> };
+
+let customRoles: Record<string, CustomRoleInfo> = {};
+
+/** Records what whoami says the session's custom roles allow (api.ts calls it on every whoami answer). */
+export function rememberCustomRoles(m: Record<string, CustomRoleInfo> | null | undefined): void {
+  if (m) customRoles = { ...customRoles, ...m };
+}
+
+export const CUSTOM_ROLE_PREFIX = "custom:";
+
+/** A role's name for people: built-in labels, then the custom role names a list carried (role_names), then what whoami said. */
+export function roleLabel(role: string, names?: Record<string, string> | null): string {
+  return ROLE_LABELS[role as SiteRole] ?? names?.[role] ?? customRoles[role]?.name ?? (role.startsWith(CUSTOM_ROLE_PREFIX) ? "Custom role" : role);
+}
+
 function has(roles: string[], resource: string, want: Perm): boolean {
   for (let role of roles) {
     // site_admin (and the legacy tenant_admin mapping) can do everything;
     // legacy tenant_operator maps to hotel_it_manager.
     if (role === "site_admin" || role === "tenant_admin") return true;
     if (role === "tenant_operator") role = "hotel_it_manager";
-    const p = MATRIX[role]?.[resource];
+    const p = role.startsWith(CUSTOM_ROLE_PREFIX) ? customRoles[role]?.permissions[resource] : MATRIX[role]?.[resource];
     if (p && rank[p] >= rank[want]) return true;
   }
   return false;

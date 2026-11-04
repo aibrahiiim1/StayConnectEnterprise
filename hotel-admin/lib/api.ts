@@ -1,5 +1,7 @@
 // Client for /api/edge/v1/*, which Next rewrites to edged. The site is implicit, so no tenant/site params.
 
+import { rememberCustomRoles, type CustomRoleInfo } from "./roles";
+
 export class ApiError extends Error {
   status: number;
   code: string;          // machine-readable, e.g. "forbidden"
@@ -65,6 +67,8 @@ async function request<T>(
   const contentType = res.headers.get("content-type") ?? "";
   const payload = contentType.includes("application/json") ? await res.json() : await res.text();
   if (!res.ok) throw new ApiError(res.status, payload);
+  // Every whoami answer tells the role checks what the session's custom roles allow.
+  if (method === "GET" && path === "/auth/whoami" && payload && typeof payload === "object") rememberCustomRoles((payload as { custom_roles?: Record<string, CustomRoleInfo> }).custom_roles);
   return payload as T;
 }
 
@@ -126,6 +130,8 @@ export type Whoami = {
   email: string;
   display_name?: string;
   roles: string[];
+  /** The session's custom roles (`custom:<id>`): their names and what they allow. */
+  custom_roles?: Record<string, CustomRoleInfo>;
   site_id: string;
   expires_at: string;
   must_change_password?: boolean;
@@ -561,6 +567,21 @@ export type EdgeOperator = {
   created_at: string;
   must_change_password?: boolean;
   two_step_enrolled?: boolean;
+  /** Names of the custom roles in roles. */
+  role_names?: Record<string, string>;
+};
+
+export type RoleFeature = { key: string; group: string; label: string; help: string; sensitive?: string };
+export type CustomRole = {
+  id: string; key: string; name: string; description: string;
+  permissions: Record<string, "read" | "write">; members: number; updated_at: string;
+};
+export type RolesResponse = {
+  features: RoleFeature[];
+  /** The highest level a custom role may hold for each feature. */
+  max: Record<string, "none" | "read" | "write">;
+  built_in: { key: string; all?: boolean; permissions: Record<string, "read" | "write"> }[];
+  custom: CustomRole[];
 };
 
 export type SessionPolicy = {
