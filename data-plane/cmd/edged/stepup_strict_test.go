@@ -29,7 +29,7 @@ var strictStepUpHandlers = []string{
 	"testPMSConnection",
 	"createSocialProvider", "patchSocialProvider", "stepUpFromBody",
 	"getSignInAttemptCredentials", "revealCode", "voucherCodeStepUp", "rotateVoucherKeyGeneration",
-	"confirmYourPassword", "executeStayTransfer", "revokePostStayProfile", "sysNetApply", "sysNetRollback",
+	"confirmYourPassword", "roleWriteActor", "executeStayTransfer", "revokePostStayProfile", "sysNetApply", "sysNetRollback",
 	"postReviewAction", "decideReviewEvent", "putReviewExpirySettings", "updateReconciliationSettings", "requestFullResync",
 	"publishServicePlan", "publishCommercialPackage", "setCommercialPackageActive", "setGraceConfig", "enforcementStepUp",
 	"runDatabaseBackup", "setGuestDeviceSetting",

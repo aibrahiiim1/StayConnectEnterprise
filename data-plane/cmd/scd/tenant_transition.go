@@ -28,7 +28,8 @@ var tenantOwnedTables = []string{
 	"pms_providers",
 	"social_oauth_providers",
 	"operator_roles",
-	"operators",
+	"operators", // its custom role assignments go with it (ON DELETE CASCADE)
+	"custom_roles",
 	"tenant_effective_limits",
 }
 

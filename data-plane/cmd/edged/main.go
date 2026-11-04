@@ -310,6 +310,7 @@ func main() {
 	}
 
 	go s.healthMonitorLoop(rootCtx)
+	go s.keepCustomRolesFresh(rootCtx)
 
 	s.reads = newReadRecorder(s.writeReadEntry)
 	go s.reads.run(rootCtx, time.Second)
@@ -367,6 +368,8 @@ func main() {
 			r.With(s.requireRole("network", permWrite)).Post("/hotel-admin-cert/rotate", s.hotelAdminCertRotate)
 
 			mountResource(r, s, "operators", s.operatorsRoutes)
+			// Custom roles: no role holds this resource, so only Site admin reaches it.
+			mountResource(r, s, "roles", s.rolesRoutes)
 			// Always mounted: it is how an operator learns what the licence authorises and the site may use.
 			mountResource(r, s, "modules", s.modulesRoutes)
 			mountResource(r, s, "guest-accounts", s.guestAccountsRoutes)

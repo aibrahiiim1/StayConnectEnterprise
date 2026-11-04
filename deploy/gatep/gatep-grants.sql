@@ -101,6 +101,7 @@ GRANT SELECT,DELETE               ON public.accounting_records      TO svc_scd; 
 GRANT SELECT,DELETE               ON public.stripe_events           TO svc_scd; -- cross-tenant detect + purge
 GRANT SELECT,DELETE               ON public.operator_roles          TO svc_scd; -- cross-tenant detect + purge
 GRANT SELECT,DELETE               ON public.operators               TO svc_scd; -- cross-tenant detect + purge
+GRANT SELECT,DELETE               ON public.custom_roles            TO svc_scd; -- cross-tenant detect + purge (0206)
 -- ONE COLUMN, NOT THE TABLE. scd binds the appliance's local operators to the tenant its SIGNED assignment
 -- names (cmd/scd/assignment.go, seedTenantSiteMirror), because iam_v2.p4_assert_financial_actor decides who
 -- may act on financial recovery by reading operators.tenant_id -- and on an appliance that column was NULL,
@@ -143,6 +144,8 @@ GRANT SELECT,INSERT               ON public.network_apply_events        TO svc_e
 GRANT SELECT,INSERT               ON public.network_health_checks       TO svc_edged;
 GRANT SELECT,INSERT,UPDATE,DELETE ON public.notification_providers     TO svc_edged;
 GRANT SELECT,INSERT,DELETE        ON public.operator_roles             TO svc_edged;
+GRANT SELECT,INSERT,UPDATE,DELETE ON public.custom_roles               TO svc_edged; -- 0206: roles a site administrator defines
+GRANT SELECT,INSERT,UPDATE,DELETE ON public.operator_custom_roles      TO svc_edged;
 GRANT SELECT,INSERT,UPDATE        ON public.operators                  TO svc_edged;
 GRANT SELECT,INSERT,UPDATE,DELETE ON public.pms_providers              TO svc_edged;
 GRANT SELECT,INSERT,UPDATE,DELETE ON public.social_oauth_providers     TO svc_edged;

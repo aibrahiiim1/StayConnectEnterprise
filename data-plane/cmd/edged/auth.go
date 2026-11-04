@@ -328,6 +328,12 @@ func permFor(roles []string, resource string, want perm) bool {
 		case "tenant_operator":
 			role = "hotel_it_manager"
 		}
+		if strings.HasPrefix(role, customRolePrefix) {
+			if customRolePerm(role, resource) >= want {
+				return true
+			}
+			continue
+		}
 		if p, ok := rolePerms[role][resource]; ok && p >= want {
 			return true
 		}
@@ -426,7 +432,13 @@ func (s *server) requireRole(resource string, want perm) func(http.Handler) http
 
 func (s *server) loadRoles(ctx context.Context, operatorID string) ([]string, error) {
 	rows, err := s.db.Query(ctx,
-		`SELECT role FROM operator_roles WHERE operator_id = $1 ORDER BY role`, operatorID)
+		`SELECT role FROM operator_roles WHERE operator_id = $1
+		  UNION ALL SELECT '`+customRolePrefix+`' || role_id::text FROM operator_custom_roles WHERE operator_id = $1
+		  ORDER BY 1`, operatorID)
+	if isUndefinedObject(err) {
+		// A database before 0206 has no custom roles; sign-in must not depend on them.
+		rows, err = s.db.Query(ctx, `SELECT role FROM operator_roles WHERE operator_id = $1 ORDER BY role`, operatorID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -466,6 +478,7 @@ func (s *server) whoami(w http.ResponseWriter, r *http.Request) {
 		"email":                sess.Email,
 		"display_name":         sess.DisplayName,
 		"roles":                sess.Roles,
+		"custom_roles":         sessionCustomRoles(sess.Roles),
 		"site_id":              s.siteID,
 		"expires_at":           sessionEnds(sess, pol).UTC(),
 		"idle_timeout_minutes": pol.IdleTimeoutMinutes,
