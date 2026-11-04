@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `6e3a88a048f77f388a2969197d279bfa1f5d4e6b`
-- **HEAD commit:** `2ed7eeba`
-- **Provenance (generation HEAD = inventory_head):** `2ed7eebaa30c36fa29b908b4c33f065f28eb1993`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `3805ce78`
+- **Provenance (generation HEAD = inventory_head):** `3805ce7891006d0636800bd9ccfe1781e83f3b4b`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/fullstay-migration-2026-11-03`
 - **Remote branch:** `origin/delivery/fullstay-migration-2026-11-03`
 - **Changed files:** 35
@@ -18,10 +18,10 @@
 | `data-plane/cmd/netd/phase3_batch.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | netd renews an unchanged SHARED session with the batch |
 | `data-plane/cmd/netd/phase3_batch_test.go` | MODIFIED | `M` | tests/tooling | RUNTIME | rollback RESTORES prior content | netd renews an unchanged SHARED session with the batch |
 | `data-plane/cmd/netd/phase3_fastpath.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | netd keeps the fast path off while the regroup cap defers moves |
-| `data-plane/cmd/netd/phase3_provision.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | netd keeps the fast path off while the regroup cap defers moves |
-| `data-plane/cmd/netd/phase3_shaping.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | netd keeps the fast path off while the regroup cap defers moves |
+| `data-plane/cmd/netd/phase3_provision.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | netd budgets regroup rebuilds and reports a failed regroup denial |
+| `data-plane/cmd/netd/phase3_shaping.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | netd budgets regroup rebuilds and reports a failed regroup denial |
 | `data-plane/cmd/netd/phase3_shaping_test.go` | MODIFIED | `M` | tests/tooling | RUNTIME | rollback RESTORES prior content | netd renews an unchanged SHARED session with the batch |
-| `data-plane/cmd/netd/phase3_speed_allocation_test.go` | MODIFIED | `M` | tests/tooling | RUNTIME | rollback RESTORES prior content | netd keeps the fast path off while the regroup cap defers moves |
+| `data-plane/cmd/netd/phase3_speed_allocation_test.go` | MODIFIED | `M` | tests/tooling | RUNTIME | rollback RESTORES prior content | netd budgets regroup rebuilds and reports a failed regroup denial |
 | `data-plane/cmd/scd/portal_tls.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | scd re-checks the portal HTTPS state within seconds while only the address is missing |
 | `data-plane/cmd/scd/portal_tls_wait_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | scd re-checks the portal HTTPS state within seconds while only the address is missing |
 | `data-plane/internal/shape/shape.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | netd renews an unchanged SHARED session with the batch |
@@ -53,13 +53,13 @@
  data-plane/cmd/acctd/phase3.go                     |   4 +
  data-plane/cmd/acctd/phase3_accounting.go          |  23 ++
  data-plane/cmd/acctd/phase3_stored_test.go         |  25 ++
- data-plane/cmd/netd/phase3_batch.go                |  60 ++++-
- data-plane/cmd/netd/phase3_batch_test.go           |  32 +++
+ data-plane/cmd/netd/phase3_batch.go                |  60 +++-
+ data-plane/cmd/netd/phase3_batch_test.go           |  32 ++
  data-plane/cmd/netd/phase3_fastpath.go             |   3 +-
- data-plane/cmd/netd/phase3_provision.go            | 109 ++++++++
- data-plane/cmd/netd/phase3_shaping.go              |  15 +-
- data-plane/cmd/netd/phase3_shaping_test.go         |  48 ++++
- .../cmd/netd/phase3_speed_allocation_test.go       | 283 +++++++++++++++++++++
+ data-plane/cmd/netd/phase3_provision.go            | 121 +++++++
+ data-plane/cmd/netd/phase3_shaping.go              |  17 +-
+ data-plane/cmd/netd/phase3_shaping_test.go         |  48 +++
+ .../cmd/netd/phase3_speed_allocation_test.go       | 373 +++++++++++++++++++++
  data-plane/cmd/scd/portal_tls.go                   |  21 +-
  data-plane/cmd/scd/portal_tls_wait_test.go         |  28 ++
  data-plane/internal/shape/shape.go                 |  20 +-
@@ -68,7 +68,7 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   2 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   2 +-
  docs/context/StayConnect-IAM-Handoff.md            |   2 +-
- .../OnetimeFullStay20261103-change-manifest.md     | 123 +++++++++
+ .../OnetimeFullStay20261103-change-manifest.md     | 123 +++++++
  .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 354560 -> 354563 bytes
  .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 178001 -> 178017 bytes
  .../chatgpt/phase-evidence/GIT_STAT_162ebedc.txt   |   4 +
@@ -76,25 +76,27 @@
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   4 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   4 +-
  .../chatgpt/stayconnectenterprise/00-START-HERE.md |   2 +-
- exports/chatgpt/stayconnectenterprise/MANIFEST.md  |  60 ++---
+ exports/chatgpt/stayconnectenterprise/MANIFEST.md  |  60 ++--
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   2 +-
  .../StayConnect-IAM-Handoff.md                     |   2 +-
  .../StayConnect-IAM-Phase0-Contract.md             |   2 +-
  .../StayConnect-IAM-Phase1A-Plan.md                |   2 +-
  .../StayConnect-IAM-Phase1B-Plan.md                |   2 +-
  governance/project-state.json                      |  22 +-
- governance/transitions/T0292.json                  |  36 +++
- governance/transitions/T0293.json                  |  35 +++
- 35 files changed, 918 insertions(+), 70 deletions(-)
+ governance/transitions/T0292.json                  |  36 ++
+ governance/transitions/T0293.json                  |  35 ++
+ 35 files changed, 1022 insertions(+), 70 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
 ```text
-M  docs/manifests/OnetimeFullStay20261103-change-manifest.md
+(clean)
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 3805ce78 netd budgets regroup rebuilds and reports a failed regroup denial
+HISTORICAL: 21e82c75 Governance: manifest regenerated for the delivery head
 HISTORICAL: 2ed7eeba netd keeps the fast path off while the regroup cap defers moves
 HISTORICAL: ca4114c4 netd keeps the plan fast path off while a regroup waits for stored counters
 HISTORICAL: 93b1989e Governance: manifest regenerated for the delivery head
