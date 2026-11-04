@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 
+const BRAND_ASSET_PREFIXES = ["/favicon", "/apple-touch-icon", "/android-chrome", "/maskable-icon", "/site.webmanifest"];
+
 // The HttpOnly cookie's presence is only a hint; whoami verifies the session.
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const hasSession = req.cookies.has("sc_session");
 
   const isLogin = pathname === "/login";
-  const isPublic = isLogin || pathname.startsWith("/_next") || pathname.startsWith("/favicon") || pathname.startsWith("/icon");
+  const isPublic = isLogin || pathname.startsWith("/_next") || BRAND_ASSET_PREFIXES.some((p) => pathname.startsWith(p));
 
   if (!hasSession && !isPublic) {
     const url = req.nextUrl.clone();

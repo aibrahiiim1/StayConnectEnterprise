@@ -7,6 +7,14 @@ import { SIDEBAR_INIT_SCRIPT } from "@/lib/sidebar-state";
 export const metadata: Metadata = {
   title: "OneGate Central",
   description: "OneGate vendor console: customers, sites, appliance activation and licenses",
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "48x48" },
+      { url: "/favicon.svg", type: "image/svg+xml" },
+    ],
+    apple: "/apple-touch-icon.png",
+  },
+  manifest: "/site.webmanifest",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

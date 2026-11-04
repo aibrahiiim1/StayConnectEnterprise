@@ -8,6 +8,7 @@ import { Nav, NAV_ITEMS, NAV_SECTION_OF, activeNavHref } from "@/components/nav"
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ApplianceStatus } from "@/components/appliance-status";
 import { Skeleton } from "@/components/ui/misc";
+import { OneGateLoader } from "@/components/brand";
 import { api, type Whoami } from "@/lib/api";
 import { loginAfterExpiry } from "@/lib/safe-next";
 import { IdleWarning } from "@/components/idle-warning";
@@ -106,8 +107,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     return (
       <div className="flex h-screen overflow-hidden">
         {/* The width token, so the placeholder matches the real column. */}
-        <div className="hidden w-[var(--sidebar-width)] shrink-0 border-e border-sidebar-border bg-sidebar lg:block" />
+        <div className="hidden w-[var(--sidebar-width)] shrink-0 border-e border-sidebar-border bg-sidebar px-4 py-3.5 lg:block">
+          <OneGateLoader appIcon className="size-9" label="Loading OneGate" />
+        </div>
         <div className="flex-1 space-y-4 p-6">
+          <OneGateLoader appIcon className="size-9 lg:hidden" />
           <Skeleton className="h-7 w-48" />
           <Skeleton className="h-4 w-72" />
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

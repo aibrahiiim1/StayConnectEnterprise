@@ -44,9 +44,13 @@ test.describe("the authentication gate", () => {
 
   test("leaves the favicon alone, so the login page can render itself", async ({ page }) => {
     await page.context().clearCookies();
-    const resp = await page.request.get("/icon.svg");
+    const resp = await page.request.get("/favicon.svg");
     expect(resp.status()).toBe(200);
     expect(resp.headers()["content-type"]).toContain("svg");
+    for (const path of ["/favicon.ico", "/apple-touch-icon.png", "/site.webmanifest"]) {
+      const asset = await page.request.get(path, { maxRedirects: 0 });
+      expect(asset.status(), path).toBe(200);
+    }
   });
 
   test("redirects with an absolute Location, which is what the framework requires of middleware", async ({
