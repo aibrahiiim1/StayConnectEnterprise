@@ -1,4 +1,0 @@
-commit 3466fba722873507579f3bb47b0c09511cf84295
-Date:   Wed Nov 4 00:41:36 2026 +0200
-
-    Governance: current delivery names the deployed netd
