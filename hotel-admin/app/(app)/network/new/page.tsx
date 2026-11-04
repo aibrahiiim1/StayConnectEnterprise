@@ -1,15 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   api, ListResp, Interface, Pool, NetRevision, GuestNetwork,
   GuestNetworkInput, ValidateResult, ApplyResult, ValidationIssue,
 } from "@/lib/api";
-import { Card, CardBody, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardBody, CardFooter, CardHeader, CardDescription } from "@/components/ui/card";
 import { Button, LinkButton } from "@/components/ui/button";
-import { Field, FieldGrid, Input, InputGroup, Select } from "@/components/ui/input";
+import { Field, Input, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { ErrorBanner, Callout } from "@/components/ui/error-banner";
@@ -19,10 +19,12 @@ import { Segmented } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/misc";
 import { NotAvailable, PendingChangeBanner } from "@/components/ui/patterns";
 import { EmptyState } from "@/components/ui/empty-state";
-import { ArrowLeft, ArrowRight, Cable, Plus, Radio, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Cable, Plus, Radio, RefreshCw, X } from "lucide-react";
 import { errMsg } from "@/lib/utils";
 import { HelpList, HelpSection } from "@/components/help";
-import { HealthCheckList, SwitchRow, ValidationIssueList, useNetworkAccess } from "@/components/network/shared";
+import {
+  HealthCheckList, LeaseFields, SwitchRow, ValidationIssueList, leaseProblems, revisionStateLabel, useLeaveGuard, useNetworkAccess,
+} from "@/components/network/shared";
 import { isReauth, useNetworkChangeStepUp } from "@/components/network/change-step-up";
 import { SUBNET_SIZE_HINT, subnetSizeProblem } from "@/lib/network-subnet";
 import { addressingFor, overlapping, suggestSubnet } from "@/lib/network-trunk";
@@ -57,7 +59,13 @@ export default function NewGuestNetworkPage() {
   const router = useRouter();
   const { known, writable } = useNetworkAccess();
   const [step, setStep] = useState(0);
+  const [forward, setForward] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [fieldErr, setFieldErr] = useState<{ field: string; message: string } | null>(null);
+  const [ifaceErr, setIfaceErr] = useState<string | null>(null);
+  const [rolledBack, setRolledBack] = useState(false);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const moved = useRef(false);
   const [busy, setBusy] = useState(false);
 
   const [name, setName] = useState("");
@@ -76,9 +84,7 @@ export default function NewGuestNetworkPage() {
   const [dnsMode, setDnsMode] = useState<"appliance" | "custom">("appliance");
   const [dnsServers, setDnsServers] = useState("");
   const [domainName, setDomainName] = useState("guest.local");
-  const [leaseDefault, setLeaseDefault] = useState("3600");
-  const [leaseMin, setLeaseMin] = useState("900");
-  const [leaseMax, setLeaseMax] = useState("7200");
+  const [lease, setLease] = useState({ def: "3600", min: "900", max: "7200" });
   const [captivePortal, setCaptivePortal] = useState(true);
   const [internetAccess, setInternetAccess] = useState(true);
   const [nat, setNat] = useState(true);
@@ -98,12 +104,23 @@ export default function NewGuestNetworkPage() {
   }, []);
 
   useEffect(() => {
-    if (step === 1 && interfaces === null) {
+    if (step === 1 && interfaces === null && ifaceErr === null) {
       api.get<{ interfaces: Interface[] }>("/network/interfaces")
         .then((r) => setInterfaces(r.interfaces ?? []))
-        .catch((e) => setErr(errMsg(e)));
+        .catch((e) => setIfaceErr(errMsg(e)));
     }
-  }, [step, interfaces]);
+  }, [step, interfaces, ifaceErr]);
+
+  useEffect(() => {
+    if (!moved.current) return;
+    headingRef.current?.focus();
+  }, [step]);
+
+  useEffect(() => {
+    if (!fieldErr) return;
+    const el = document.getElementById(`nw-${fieldErr.field}`);
+    el?.focus();
+  }, [fieldErr]);
 
   // A native network starts from the same /19 suggestion as a VLAN does; the operator may change every value.
   useEffect(() => {
@@ -134,54 +151,72 @@ export default function NewGuestNetworkPage() {
     }));
   }
 
-  function stepError(i: number): string | null {
+  const leaseErr = leaseProblems(lease);
+
+  function stepError(i: number): { field: string; message: string } | null {
+    const at = (field: string, message: string) => ({ field, message });
     switch (i) {
       case 0:
-        if (!name.trim()) return "Name is required.";
+        if (!name.trim()) return at("name", "Name is required.");
         return null;
       case 1:
-        if (!parentInterface) return "Pick a port.";
+        if (!parentInterface) return at("parent", "Pick a port.");
         if (!vlanTagged && untaggedHere) {
-          return `${parentInterface} already carries an untagged client network (${untaggedHere.name}). ` +
-            "A port carries at most one untagged network — add this one as a tagged VLAN instead.";
+          return at("parent", `${parentInterface} already carries an untagged client network (${untaggedHere.name}). ` +
+            "A port carries at most one untagged network — add this one as a tagged VLAN instead.");
         }
         if (vlanTagged) {
           const first = vlans.find((r) => vlanProblems[r.key]);
-          if (first) return vlanProblems[first.key];
+          if (first) return at("vlans", vlanProblems[first.key]);
         }
         return null;
       case 2:
         if (vlanTagged) {
           const first = vlans.find((r) => vlanProblems[r.key]);
-          if (first) return vlanProblems[first.key];
+          if (first) return at("vlans", vlanProblems[first.key]);
           return null;
         }
-        if (!subnetCidr.trim()) return "Subnet CIDR is required (e.g. 10.20.0.0/19).";
-        if (subnetSizeProblem(subnetCidr)) return subnetSizeProblem(subnetCidr);
-        if (!gatewayIp.trim()) return "Gateway IP is required.";
+        if (!subnetCidr.trim()) return at("subnet", "Subnet CIDR is required (e.g. 10.20.0.0/19).");
+        if (subnetSizeProblem(subnetCidr)) return at("subnet", subnetSizeProblem(subnetCidr)!);
         {
           const clash = overlapping(subnetCidr, usedSubnets);
-          if (clash) return `That subnet overlaps ${clash}, which another client network uses.`;
+          if (clash) return at("subnet", `That subnet overlaps ${clash}, which another client network uses.`);
         }
+        if (!gatewayIp.trim()) return at("gateway", "Gateway IP is required.");
         return null;
       case 3:
-        if (separate) return null; // each VLAN carries its own, checked on the addressing step
+        if (separate) return null;
         if (!vlanTagged && (pools.length === 0 || pools.some((p) => !p.start_ip.trim() || !p.end_ip.trim())))
-          return "Add at least one DHCP pool with a start and end address.";
-        if (dnsMode === "custom" && !dnsServers.trim()) return "Provide at least one DNS server.";
+          return at("pools", "Add at least one DHCP pool with a start and end address.");
+        if (dnsMode === "custom" && !dnsServers.trim()) return at("dns", "Provide at least one DNS server.");
+        for (const k of ["def", "min", "max"] as const) {
+          if (leaseErr[k]) return at(`lease-${k}`, leaseErr[k]!);
+        }
         return null;
       default:
         return null;
     }
   }
 
+  const errFor = (field: string) => (fieldErr?.field === field ? fieldErr.message : undefined);
+
+  function goTo(i: number) {
+    moved.current = true;
+    setForward(i > step);
+    setErr(null);
+    setFieldErr(null);
+    setStep(i);
+  }
+
   function next() {
     const e = stepError(step);
-    if (e) { setErr(e); return; }
-    setErr(null);
-    setStep((s) => Math.min(STEPS.length - 1, s + 1));
+    if (e) { setFieldErr({ ...e }); return; }
+    goTo(Math.min(STEPS.length - 1, step + 1));
   }
-  function back() { setErr(null); setStep((s) => Math.max(0, s - 1)); }
+  function back() { goTo(Math.max(0, step - 1)); }
+
+  const touched = name.trim() !== "" || step > 0;
+  const leaveDialog = useLeaveGuard(touched && !created, "What you entered for this client network has not been created yet.");
 
   const shared = () => ({
     description: description.trim() || undefined,
@@ -207,9 +242,9 @@ export default function NewGuestNetworkPage() {
         dns_mode: dnsMode,
         dns_servers: dnsList(dnsMode, dnsServers),
         domain_name: domainName.trim() || "guest.local",
-        lease_default_seconds: Number(leaseDefault) || 3600,
-        lease_min_seconds: Number(leaseMin) || 900,
-        lease_max_seconds: Number(leaseMax) || 7200,
+        lease_default_seconds: Number(lease.def),
+        lease_min_seconds: Number(lease.min),
+        lease_max_seconds: Number(lease.max),
         pools: pools.filter((p) => p.start_ip && p.end_ip),
       }];
     }
@@ -227,9 +262,9 @@ export default function NewGuestNetworkPage() {
         dns_mode: mode,
         dns_servers: dnsList(mode, servers),
         domain_name: (useOwn ? r.domainName : domainName).trim() || "guest.local",
-        lease_default_seconds: Number(useOwn ? r.leaseDefault : leaseDefault) || 3600,
-        lease_min_seconds: Number(useOwn ? r.leaseMin : leaseMin) || 900,
-        lease_max_seconds: Number(useOwn ? r.leaseMax : leaseMax) || 7200,
+        lease_default_seconds: useOwn ? Number(r.leaseDefault) || 3600 : Number(lease.def),
+        lease_min_seconds: useOwn ? Number(r.leaseMin) || 900 : Number(lease.min),
+        lease_max_seconds: useOwn ? Number(r.leaseMax) || 7200 : Number(lease.max),
         pools: [{ start_ip: r.poolStart.trim(), end_ip: r.poolEnd.trim() }],
       };
     });
@@ -251,7 +286,7 @@ export default function NewGuestNetworkPage() {
   }
 
   async function runApply(password: string) {
-    setBusy(true); setErr(null); setIssues(null);
+    setBusy(true); setErr(null); setIssues(null); setRolledBack(false);
     try {
       let c = created;
       if (!c) {
@@ -301,7 +336,7 @@ export default function NewGuestNetworkPage() {
     const id = applied.revision_id;
     stepUp.ask("rollback", async (password) => {
       setActing("rollback"); setErr(null);
-      try { await api.post(`/network/revisions/${id}/rollback`, { password }); setApplied(null); setDeadline(null); }
+      try { await api.post(`/network/revisions/${id}/rollback`, { password }); setApplied(null); setDeadline(null); setRolledBack(true); }
       catch (e) { if (isReauth(e)) throw e; setErr(errMsg(e)); }
       finally { setActing(null); }
     });
@@ -381,7 +416,7 @@ export default function NewGuestNetworkPage() {
       />
 
       <nav aria-label="Steps">
-        <Stepper steps={STEPS} current={step} onStep={applied ? undefined : (i) => { setErr(null); setStep(i); }} />
+        <Stepper steps={STEPS} current={step} onStep={applied || created ? undefined : goTo} />
       </nav>
 
       <ErrorBanner err={err} className="mb-0" />
@@ -389,17 +424,23 @@ export default function NewGuestNetworkPage() {
       <Card>
         <CardHeader>
           <div className="space-y-1">
-            <CardTitle>
+            <h2 ref={headingRef} tabIndex={-1} className="inline-block align-middle text-emphasis text-foreground outline-none">
               <span className="text-muted-foreground">Step {step + 1} of {STEPS.length} · </span>{STEPS[step]}
-            </CardTitle>
+            </h2>
             <CardDescription>{STEP_HINT[step]}</CardDescription>
           </div>
         </CardHeader>
-        <CardBody className="space-y-4">
+        <CardBody
+          key={step}
+          className={
+            "space-y-4 animate-in fade-in-0 duration-base ease-onegate motion-reduce:slide-in-from-left-0 motion-reduce:slide-in-from-right-0 " +
+            (forward ? "slide-in-from-right-2 rtl:slide-in-from-left-2" : "slide-in-from-left-2 rtl:slide-in-from-right-2")
+          }
+        >
           {step === 0 && (
             <>
-              <Field label="Name" required>
-                <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Client Wi-Fi" />
+              <Field label="Name" required error={errFor("name")}>
+                <Input id="nw-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Client Wi-Fi" />
               </Field>
               <Field label="Description" optional hint="Shown under the name in the list.">
                 <Input value={description} onChange={(e) => setDescription(e.target.value)} />
@@ -412,11 +453,19 @@ export default function NewGuestNetworkPage() {
 
           {step === 1 && (
             <>
-              <fieldset className="space-y-2">
+              <fieldset id="nw-parent" tabIndex={-1} className="space-y-2 outline-none" aria-describedby={errFor("parent") ? "nw-parent-err" : undefined}>
                 <legend className="mb-1.5 text-label">
-                  Parent interface<span className="ms-0.5 text-destructive">*</span>
+                  Parent interface<span aria-hidden="true" className="ms-0.5 text-destructive">*</span>
                 </legend>
-                {interfaces === null ? (
+                {errFor("parent") && <p id="nw-parent-err" className="text-xs text-destructive">{errFor("parent")}</p>}
+                {interfaces === null && ifaceErr ? (
+                  <EmptyState
+                    icon={<Cable />}
+                    title="The ports could not be loaded"
+                    hint={ifaceErr}
+                    action={<Button variant="secondary" onClick={() => setIfaceErr(null)}><RefreshCw /> Try again</Button>}
+                  />
+                ) : interfaces === null ? (
                   <div className="space-y-2" aria-busy="true">
                     <span className="sr-only">Loading interfaces</span>
                     <Skeleton className="h-16 w-full" />
@@ -482,8 +531,9 @@ export default function NewGuestNetworkPage() {
                 onChange={setVlanTagged}
               />
               {vlanTagged && (
-                <fieldset className="space-y-2">
+                <fieldset id="nw-vlans" tabIndex={-1} className="space-y-2 outline-none" aria-describedby={errFor("vlans") ? "nw-vlans-err" : undefined}>
                   <legend className="mb-1.5 text-label">VLANs on this trunk</legend>
+                  {errFor("vlans") && <p id="nw-vlans-err" className="text-xs text-destructive">{errFor("vlans")}</p>}
                   <VlanIdList rows={vlans} onChange={setVlanRows} problems={vlanProblems} />
                   <p className="text-xs text-muted-foreground">
                     Your switch must carry these VLAN ids on
@@ -497,7 +547,8 @@ export default function NewGuestNetworkPage() {
           {step === 2 && (
             <>
               {vlanTagged ? (
-                <div className="space-y-3">
+                <div id="nw-vlans" tabIndex={-1} className="space-y-3 outline-none">
+                  {errFor("vlans") && <p className="text-xs text-destructive">{errFor("vlans")}</p>}
                   {multi && (
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-label">DHCP and DNS</span>
@@ -520,15 +571,16 @@ export default function NewGuestNetworkPage() {
                 </div>
               ) : (
                 <>
-                  <Field label="Subnet (CIDR)" required hint={`The whole address range of this network, e.g. 10.20.0.0/22. ${SUBNET_SIZE_HINT}`}>
-                    <Input value={subnetCidr} onChange={(e) => setSubnetCidr(e.target.value)} placeholder="10.20.0.0/19" className="font-mono" />
+                  <Field label="Subnet (CIDR)" required error={errFor("subnet")} hint={`The whole address range of this network, e.g. 10.20.0.0/22. ${SUBNET_SIZE_HINT}`}>
+                    <Input id="nw-subnet" value={subnetCidr} onChange={(e) => setSubnetCidr(e.target.value)} placeholder="10.20.0.0/19" className="font-mono" />
                   </Field>
                   <Field
                     label="Gateway IP"
                     required
+                    error={errFor("gateway")}
                     hint="The appliance owns this address on the network; clients use it as their default gateway and DNS."
                   >
-                    <Input value={gatewayIp} onChange={(e) => setGatewayIp(e.target.value)} placeholder="10.20.0.1" className="font-mono" />
+                    <Input id="nw-gateway" value={gatewayIp} onChange={(e) => setGatewayIp(e.target.value)} placeholder="10.20.0.1" className="font-mono" />
                   </Field>
                 </>
               )}
@@ -548,10 +600,11 @@ export default function NewGuestNetworkPage() {
                   Each VLAN keeps its own pool; the DNS, search domain and lease times below apply to all of them.
                 </Callout>
               ) : (
-              <fieldset className="space-y-2">
+              <fieldset id="nw-pools" tabIndex={-1} className="space-y-2 outline-none" aria-describedby={errFor("pools") ? "nw-pools-err" : undefined}>
                 <legend className="mb-1.5 text-label">
-                  Address pools<span className="ms-0.5 text-destructive">*</span>
+                  Address pools<span aria-hidden="true" className="ms-0.5 text-destructive">*</span>
                 </legend>
+                {errFor("pools") && <p id="nw-pools-err" className="text-xs text-destructive">{errFor("pools")}</p>}
                 {pools.map((p, i) => (
                   <div key={i} className="flex items-center gap-2">
                     <Input
@@ -583,24 +636,19 @@ export default function NewGuestNetworkPage() {
                 </Select>
               </Field>
               {dnsMode === "custom" && (
-                <Field label="DNS servers" required hint="Separate several with commas.">
-                  <Input value={dnsServers} onChange={(e) => setDnsServers(e.target.value)} placeholder="1.1.1.1, 9.9.9.9" className="font-mono" />
+                <Field label="DNS servers" required error={errFor("dns")} hint="Separate several with commas.">
+                  <Input id="nw-dns" value={dnsServers} onChange={(e) => setDnsServers(e.target.value)} placeholder="1.1.1.1, 9.9.9.9" className="font-mono" />
                 </Field>
               )}
               <Field label="Domain name">
                 <Input value={domainName} onChange={(e) => setDomainName(e.target.value)} placeholder="guest.local" />
               </Field>
-              <FieldGrid cols={3}>
-                <Field label="Lease time">
-                  <InputGroup suffix="s"><Input type="number" value={leaseDefault} onChange={(e) => setLeaseDefault(e.target.value)} /></InputGroup>
-                </Field>
-                <Field label="Shortest lease">
-                  <InputGroup suffix="s"><Input type="number" value={leaseMin} onChange={(e) => setLeaseMin(e.target.value)} /></InputGroup>
-                </Field>
-                <Field label="Longest lease">
-                  <InputGroup suffix="s"><Input type="number" value={leaseMax} onChange={(e) => setLeaseMax(e.target.value)} /></InputGroup>
-                </Field>
-              </FieldGrid>
+              <LeaseFields
+                idPrefix="nw-lease"
+                value={lease}
+                onChange={setLease}
+                problems={fieldErr?.field.startsWith("lease-") ? leaseErr : undefined}
+              />
             </>
           )}
 
@@ -682,6 +730,20 @@ export default function NewGuestNetworkPage() {
 
           {step === 6 && (
             <div className="space-y-4">
+              {rolledBack && (
+                <Callout tone="info" title="Rolled back — the network is still staged">
+                  Clients are back on the previous configuration. The new network still exists as a staged change: apply
+                  again here, or change it on{" "}
+                  {created ? <Link href={`/network/${created.id}`} className="font-medium underline">its own page</Link> : "its own page"}.
+                </Callout>
+              )}
+              {created && !applied && !rolledBack && !issues?.length && (
+                <p className="text-sm text-muted-foreground">
+                  The network is already created, so the earlier steps can no longer change it. To change its settings,
+                  use{" "}
+                  <Link href={`/network/${created.id}`} className="font-medium underline">its own page</Link>.
+                </p>
+              )}
               {!created && !applied && (
                 <p className="text-sm text-muted-foreground">
                   Ready to create, validate and apply. Keep the change afterwards, or it rolls back automatically.
@@ -736,7 +798,7 @@ export default function NewGuestNetworkPage() {
                   title={
                     applied.state === "rolled_back" ? "Apply rolled back"
                       : applied.state === "failed" ? "Apply failed"
-                        : `Apply state: ${applied.state}`
+                        : revisionStateLabel(applied.state)
                   }
                 >
                   {applied.message && <p>{applied.message}</p>}
@@ -754,7 +816,7 @@ export default function NewGuestNetworkPage() {
             </>
           ) : !applied ? (
             <>
-              <Button variant="ghost" onClick={back} disabled={busy}><ArrowLeft className="rtl:rotate-180" /> Back</Button>
+              {created ? <span /> : <Button variant="ghost" onClick={back} disabled={busy}><ArrowLeft className="rtl:rotate-180" /> Back</Button>}
               <Button disabled={busy} onClick={onRunApply}>
                 {busy ? "Working…" : created ? "Re-validate & apply" : "Create, validate & apply"}
               </Button>
@@ -769,6 +831,7 @@ export default function NewGuestNetworkPage() {
         </CardFooter>
       </Card>
       {stepUp.dialog}
+      {leaveDialog}
     </PageShell>
   );
 }

@@ -2,12 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { SectionCard } from "@/components/ui/card";
-import { Callout } from "@/components/ui/error-banner";
+import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { useToast } from "@/components/ui/toast";
 import { RoutingEditor, usePmsRouting } from "@/components/pms/routing-editor";
 import { errMsg } from "@/lib/utils";
@@ -62,7 +62,7 @@ export function DefaultNetworkCard({ reloadKey }: { reloadKey: number }) {
 
       {(info.packages_pinned_to_other_networks ?? []).length > 0 && (
         <Callout tone="warning" title="Packages limited to other networks">
-          <ul className="list-disc pl-5">
+          <ul className="list-disc ps-5">
             {(info.packages_pinned_to_other_networks ?? []).map((p) => (
               <li key={p.code}>{p.code} (revision {p.revision}) is limited to {p.networks.join(", ")}.</li>
             ))}
@@ -81,7 +81,6 @@ export function DefaultNetworkCard({ reloadKey }: { reloadKey: number }) {
 export function ArchivedNetworks({ writable, reloadKey, onRestored }: { writable: boolean; reloadKey: number; onRestored: () => void }) {
   const toast = useToast();
   const [items, setItems] = useState<ArchivedNetwork[]>([]);
-  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -106,16 +105,14 @@ export function ArchivedNetworks({ writable, reloadKey, onRestored }: { writable
   }
 
   return (
-    <div className="rounded-lg border border-border bg-card">
-      <button type="button" aria-expanded={open} aria-controls="archived-networks" onClick={() => setOpen(!open)}
-        className="flex w-full items-center gap-2 px-4 py-3 text-start text-sm font-medium">
-        {open ? <ChevronDown className="size-4" aria-hidden /> : <ChevronRight className="size-4 rtl:rotate-180" aria-hidden />}
+    <details className="disclosure-motion group rounded-lg border border-border bg-card">
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-start text-sm font-medium [&::-webkit-details-marker]:hidden">
+        <ChevronRight className="size-4 transition-transform duration-base ease-onegate group-open:rotate-90 rtl:rotate-180 rtl:group-open:rotate-90 motion-reduce:transition-none" aria-hidden />
         Archived networks ({items.length})
-      </button>
-      {open && (
-        <div id="archived-networks" className="border-t border-border px-4 py-3">
+      </summary>
+        <div className="border-t border-border px-4 py-3">
           <p className="mb-3 text-sm text-muted-foreground">Switched off by a confirmed reset. They keep their history, settings and audit trail, and are not served. Nothing was deleted.</p>
-          {err && <p className="mb-2 text-sm text-danger">{err}</p>}
+          <ErrorBanner err={err} className="mb-2" />
           <ul className="space-y-2">
             {items.map((n) => (
               <li key={n.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
@@ -131,7 +128,6 @@ export function ArchivedNetworks({ writable, reloadKey, onRestored }: { writable
             ))}
           </ul>
         </div>
-      )}
-    </div>
+    </details>
   );
 }
