@@ -409,6 +409,7 @@ const RESULTS: Record<string, string> = {
   MALFORMED_SUBMISSION: "Incomplete form",
   LICENSE_REFUSED: "Licence does not admit new clients",
   LICENSE_CAPACITY_REACHED: "Licensed client capacity full",
+  DEVICE_LIMIT_REACHED: "Package device limit reached",
 };
 export const resultLabel = (r: string) => RESULTS[r] ?? r.replace(/_/g, " ").toLowerCase();
 

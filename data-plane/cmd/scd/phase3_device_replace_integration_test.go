@@ -15,6 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/onegate/onegate/data-plane/internal/metrics"
+	"github.com/onegate/onegate/data-plane/internal/signinattempt"
 )
 
 func TestIntegration_Phase3_ARoomGuestAtTheLimitReplacesADevice(t *testing.T) {
@@ -89,6 +90,10 @@ func TestIntegration_Phase3_ARoomGuestAtTheLimitReplacesADevice(t *testing.T) {
 	_, refused := grant(resB, f.net.otherIP, macB)
 	if refused.Outcome != outcomeNotVerified || refused.FailureClass != "DEVICE_LIMIT" || refused.DeviceID == "" || refused.GuestNetworkID != f.network {
 		t.Fatalf("the device-limit refusal must name the placed device and network: %+v", refused)
+	}
+	// Recorded as what it is, not as an internal failure (0207): Guest sign-in attempts and the appliance monitor read this.
+	if got := f.attemptResult(t, "00000006-0000-4000-8000-00000000000b"); got != string(signinattempt.DeviceLimitReached) {
+		t.Fatalf("the device-limit refusal was recorded as %s, want DEVICE_LIMIT_REACHED", got)
 	}
 
 	// The replacement page lists the stay's devices for B's verified sign-in...

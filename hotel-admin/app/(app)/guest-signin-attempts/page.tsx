@@ -78,6 +78,11 @@ const RESULT_WORDS: Record<string, { tone: "ok" | "warn" | "err" | "info" | "neu
     meaning:
       "The guest's details were right, but the appliance was already at the number of clients online its licence allows. The same limit applies to every sign-in method.",
   },
+  DEVICE_LIMIT_REACHED: {
+    tone: "warn",
+    meaning:
+      "The guest's details were right, but the stay's package already had its maximum number of devices online. The guest was asked to disconnect or replace one.",
+  },
 };
 
 const RESULT_FILTER_LABELS: Record<string, string> = {
@@ -95,6 +100,7 @@ const RESULT_FILTER_LABELS: Record<string, string> = {
   VERIFIED_NO_ELIGIBLE_PACKAGE: "Right details, no package to offer",
   LICENSE_REFUSED: "Licence refused new clients",
   LICENSE_CAPACITY_REACHED: "Licensed capacity full",
+  DEVICE_LIMIT_REACHED: "Device limit reached",
 };
 
 const RESULT_FILTERS = [

@@ -44,13 +44,16 @@ const (
 	// LicenseCapacityReached: the guest is verified but admitting the device would exceed the licensed
 	// concurrent-guest cap.
 	LicenseCapacityReached Result = "LICENSE_CAPACITY_REACHED"
+	// DeviceLimitReached: the guest is verified but the stay's package already holds its device limit (0207); the guest is asked to
+	// disconnect another device.
+	DeviceLimitReached Result = "DEVICE_LIMIT_REACHED"
 )
 
 // AllResults is every Result in operator-filter order; tests use it to prove none lacks a label or class.
 var AllResults = []Result{
 	Verified, CredentialMismatch, RoomNotInMirror, StayNotEligible, AmbiguousRoomCandidates,
 	MirrorStaleOrMissingChange, RateLimited, RoutingOrInterfaceFailure, ServiceUnavailable,
-	SpentRequestID, MalformedSubmission, VerifiedNoEligiblePackage, LicenseRefused, LicenseCapacityReached,
+	SpentRequestID, MalformedSubmission, VerifiedNoEligiblePackage, LicenseRefused, LicenseCapacityReached, DeviceLimitReached,
 }
 
 type MatchedField string
@@ -74,6 +77,8 @@ const (
 	// disclosing them reveals nothing about a room.
 	GuestLicense  GuestClass = "LICENSE"
 	GuestCapacity GuestClass = "CAPACITY"
+	// GuestDeviceLimit follows a verified sign-in, so it says nothing the guest did not just prove.
+	GuestDeviceLimit GuestClass = "DEVICE_LIMIT"
 )
 
 // GuestClass maps a Result to the message class the guest may see. The split avoids an occupancy oracle:
@@ -106,6 +111,8 @@ func (r Result) GuestClass() GuestClass {
 		return GuestLicense
 	case LicenseCapacityReached:
 		return GuestCapacity
+	case DeviceLimitReached:
+		return GuestDeviceLimit
 	default:
 		// An unrecognised Result is never blamed on the guest.
 		return GuestTechnical
@@ -130,6 +137,7 @@ var labels = map[Result]string{
 	VerifiedNoEligiblePackage:  "Verified, but no package is available to this stay",
 	LicenseRefused:             "The appliance licence does not permit new guests",
 	LicenseCapacityReached:     "Verified, but the licensed guest capacity is full",
+	DeviceLimitReached:         "Verified, but the package's device limit is reached",
 }
 
 // Label returns the code itself for an unknown Result rather than an empty string.
