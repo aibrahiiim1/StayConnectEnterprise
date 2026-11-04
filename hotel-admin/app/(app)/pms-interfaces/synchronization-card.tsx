@@ -3,7 +3,7 @@
 // Protel FIAS sends no record total before the end of a sync, so never show a progress bar, percentage or
 // "X of Y": only the real count received so far.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { api, type PmsInterfaceHealth } from "@/lib/api";
 import { connectionEndWords } from "@/lib/api/pms-connections";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,6 +15,7 @@ import { HelpSection, HelpTip } from "@/components/help";
 import { Separator } from "@/components/ui/misc";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { RefreshCw } from "lucide-react";
+import { usePoll } from "@/lib/use-poll";
 
 // The server sends the token; the staff wording lives here and an unrecognised token falls back rather than rendering raw.
 const STAGE_WORDS: Record<string, string> = {
@@ -46,6 +47,8 @@ const REASONS: { value: string; label: string }[] = [
 
 const when = (t?: string | null) => (t ? new Date(t).toLocaleString() : "—");
 
+export const SyncPollingContext = createContext<(on: boolean) => void>(() => {});
+
 export function SynchronizationCard({
   id,
   health,
@@ -64,8 +67,20 @@ export function SynchronizationCard({
   const stage = effectiveStage(health?.sync_stage ?? "", health?.materialization_ready);
   const active = ACTIVE_STAGES.has(stage);
 
+  // Poll whenever mounted (slowly when idle, quickly during a sync): the connection coming up and the automatic
+  // sync starting happen before any stage is active. One interval whose delay changes, never two effects.
+  // onRefreshed is held in a ref because in the dependency array the parent's re-render on every poll would reset the timer before it fires.
   const refreshRef = useRef(onRefreshed);
   refreshRef.current = onRefreshed;
+  const delay = active ? 3000 : 10000;
+  usePoll(() => refreshRef.current(), delay);
+
+  const ownPolling = useContext(SyncPollingContext);
+  useEffect(() => {
+    ownPolling(true);
+    return () => ownPolling(false);
+  }, [ownPolling]);
+
   useEffect(() => {
     if (active) setNote(null);
   }, [active]);

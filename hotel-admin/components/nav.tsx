@@ -78,7 +78,7 @@ const SECTIONS: Section[] = [
   {
     title: "Hotel",
     items: [
-      { href: "/pms-interfaces",       label: "PMS connections",       icon: Plug,  resource: "pms-interfaces", keywords: "protel fias connect sync resync opera status property management system hotel" },
+      { href: "/pms-interfaces",       label: "PMS connection",       icon: Plug,  resource: "pms-interfaces", keywords: "protel fias connect sync resync opera status property management system hotel" },
       { href: "/room-sign-in",         label: "Room sign-in",         icon: DoorClosed, resource: "auth-methods", capability: "pms-interfaces", keywords: "room number surname first name reservation what the guest types credential pms sign-in" },
       { href: "/stays",                label: "Stays",                icon: BedDouble,    resource: "pms-stays", keywords: "rooms reservations in house occupancy guest list guests hotel" },
       { href: "/stay-events",          label: "PMS activity",         icon: Inbox,   resource: "pms-events", keywords: "feed messages check in out log property management system hotel" },

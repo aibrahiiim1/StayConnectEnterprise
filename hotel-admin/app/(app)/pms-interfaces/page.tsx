@@ -25,6 +25,7 @@ import {
 import { ConnectionCard, ProviderTile, providerLabel } from "./connection-card";
 import { ConnectionSheet, type SheetTab } from "./connection-sheet";
 import { AddConnectionWizard } from "./add-connection-wizard";
+import { SyncPollingContext } from "./synchronization-card";
 import { HelpList, HelpSection } from "@/components/help";
 import { ChevronDown, ChevronRight, Hotel, Plus, RefreshCw } from "lucide-react";
 import { usePoll } from "@/lib/use-poll";
@@ -53,6 +54,7 @@ export default function PMSInterfacesPage() {
   const [applianceTz, setApplianceTz] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
+  const [cardPolling, setCardPolling] = useState(false);
 
   const load = useCallback(async () => {
     setRefreshing(true);
@@ -96,7 +98,7 @@ export default function PMSInterfacesPage() {
 
   const anySyncing = Object.values(health).some(isSyncing);
   const pollMs = anySyncing ? 4000 : selected ? 10000 : 20000;
-  usePoll(() => load(), pollMs);
+  usePoll(() => load(), pollMs, { enabled: !cardPolling });
 
   const writable = canWrite("pms-interfaces", roles);
   const list = rows ?? [];
@@ -126,7 +128,7 @@ export default function PMSInterfacesPage() {
   return (
     <PageShell width="wide">
       <PageHeader
-        title="PMS connections"
+        title="PMS connection"
         description="Links to the site's property management systems."
         help={
           <>
@@ -172,7 +174,7 @@ export default function PMSInterfacesPage() {
       <LiveStatus
         updatedAt={updatedAt}
         refreshing={refreshing && rows !== null}
-        intervalSeconds={pollMs / 1000}
+        intervalSeconds={cardPolling ? undefined : pollMs / 1000}
         error={!!err && rows !== null}
         onRefresh={() => void load()}
       />
@@ -352,6 +354,7 @@ export default function PMSInterfacesPage() {
 
       {list.length > 0 && <AdvancedDiagnostics reviewEvents={reviewEvents} />}
 
+      <SyncPollingContext.Provider value={setCardPolling}>
       <ConnectionSheet
         open={selected !== null && selectedRow !== null}
         onOpenChange={(v) => { if (!v) setSelected(null); }}
@@ -364,6 +367,7 @@ export default function PMSInterfacesPage() {
         onChanged={load}
         applianceTimezone={applianceTz}
       />
+      </SyncPollingContext.Provider>
 
       <RemoveConnectionDialog
         open={removing !== null}
