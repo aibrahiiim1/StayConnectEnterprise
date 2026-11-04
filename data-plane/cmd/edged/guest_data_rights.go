@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -215,10 +216,23 @@ func (s *server) eraseGuestData(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), guestDataEraseTimeout)
 	defer cancel()
 	var res struct {
-		Ref    string         `json:"erasure_ref"`
-		Counts map[string]any `json:"counts"`
+		Ref           string         `json:"erasure_ref"`
+		Counts        map[string]any `json:"counts"`
+		PackagesEnded int            `json:"packages_ended"`
+		SessionsEnded int            `json:"sessions_ended"`
 	}
-	err := s.ledgerQuery(ctx, &res, `SELECT public.guest_data_erase($1::uuid,$2::uuid,$3,$4::uuid,$5,$6)`,
+	var opID string
+	if sess := sessFrom(r.Context()); sess != nil {
+		opID = sess.OperatorID
+	}
+	var packages int
+	var ended []string
+	endOwn := func(tx pgx.Tx) error {
+		var err error
+		packages, ended, err = s.endOwnAccessForErasure(ctx, tx, in.Kind, in.ID, opID)
+		return err
+	}
+	err := s.ledgerQueryAfter(ctx, endOwn, &res, `SELECT public.guest_data_erase($1::uuid,$2::uuid,$3,$4::uuid,$5,$6)`,
 		s.tenantID, s.siteID, in.Kind, in.ID, actor, in.Reason)
 	if err != nil && writeLedgerRefusal(w, err) {
 		s.audit(r, "guest_data.erase_failed", in.Kind, in.ID, map[string]any{"why": "ledger"})
@@ -235,9 +249,48 @@ func (s *server) eraseGuestData(w http.ResponseWriter, r *http.Request) {
 		guestDataDBError(w, err, "the erasure failed")
 		return
 	}
+	// The access was ended in the erasure's own transaction; this only takes the devices off the network at once.
+	kernel := s.withdrawKernel(r, ended)
+	res.PackagesEnded, res.SessionsEnded = packages, len(ended)
 	s.audit(r, "guest_data.erased", "guest_data_erasure", res.Ref, map[string]any{
-		"subject_kind": in.Kind, "reason": in.Reason, "counts": res.Counts})
+		"subject_kind": in.Kind, "reason": in.Reason, "counts": res.Counts,
+		"packages_ended": packages, "sessions_ended": len(ended), "kernel": kernel["summary"]})
 	writeJSON(w, http.StatusOK, res)
+}
+
+// erasureEndReason is stored with each ended package; the guest's own reason is kept with the erasure only.
+const erasureEndReason = "Ended to erase the guest's data"
+
+// endOwnAccessForErasure ends, through the staff End Package writer, the access whose subject is the account or identity being
+// erased: its own entitlements and their sessions. A room's access belongs to everyone in the room and is never ended here
+// (0145); a stay therefore stays refused while its room access runs. Returns the packages ended and the sessions they ended.
+func (s *server) endOwnAccessForErasure(ctx context.Context, tx pgx.Tx, kind, id, operator string) (int, []string, error) {
+	col := map[string]string{"account": "guest_account_id", "principal": "guest_principal_id"}[kind]
+	if col == "" {
+		return 0, nil, nil
+	}
+	rows, err := tx.Query(ctx, `SELECT id::text FROM iam_v2.entitlements
+	     WHERE tenant_id=$1 AND site_id=$2 AND `+col+`=$3::uuid AND status <> 'TERMINATED' ORDER BY id`, s.tenantID, s.siteID, id)
+	if err != nil {
+		return 0, nil, err
+	}
+	ents, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil || len(ents) == 0 {
+		return 0, nil, err
+	}
+	if !uuidRe.MatchString(operator) {
+		return 0, nil, errors.New("the erasure could not be attributed to an operator")
+	}
+	var ended []string
+	for _, ent := range ents {
+		var sessions []string
+		if err := tx.QueryRow(ctx, `SELECT sessions::text[] FROM iam_v2.admin_end_package($1,$2,$3::uuid,$4::uuid,$5,gen_random_uuid())`,
+			s.tenantID, s.siteID, ent, operator, erasureEndReason).Scan(&sessions); err != nil {
+			return 0, nil, err
+		}
+		ended = append(ended, sessions...)
+	}
+	return len(ents), ended, nil
 }
 
 // writeGuestDataLive answers a refusal the database gave with its reasons (55006): the guest is still live, the
