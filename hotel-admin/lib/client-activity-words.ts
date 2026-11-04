@@ -33,8 +33,6 @@ const TITLES: Record<string, string> = {
   ACCOUNT_CREATED: "Account created",
   ACCOUNT_VERIFIED: "Email address verified",
   ROOM_SIGN_IN: "Room sign-in",
-  SIGN_IN_PAUSED: "Sign-in paused on this device",
-  SIGN_IN_RESUMED: "Sign-in allowed again",
   STAY_RECEIVED: "Stay received from the PMS",
   CHECKED_OUT: "Checked out",
 };
@@ -96,10 +94,6 @@ export function activityWords(e: ActivityEvent): { title: string; detail?: strin
       return { title, detail: d === "SELF" ? "Registered on the portal" : "Created by staff" };
     case "ROOM_SIGN_IN":
       return { title, detail: d ? resultLabel(d) : undefined };
-    case "SIGN_IN_PAUSED":
-      return { title, detail: d === "FAILED_CREDENTIAL_THRESHOLD" || d === "FAILED_ATTEMPTS" ? "Too many failed attempts" : humanize(d) };
-    case "SIGN_IN_RESUMED":
-      return { title, detail: d ? `Reason: ${d}` : undefined };
     default:
       return { title, detail: d ? humanize(d) : undefined };
   }

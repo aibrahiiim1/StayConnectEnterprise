@@ -127,19 +127,18 @@ const clientActivitySearchHeader = "X-Client-Activity-Search"
 
 // clientActivityScope is what the reader may see: each flag is a source.
 type clientActivityScope struct {
-	Hotel, SignIns, Protection, Stays, Accounts, Staff bool
-	StaffActions                                       []string
+	Hotel, SignIns, Stays, Accounts, Staff bool
+	StaffActions                           []string
 }
 
 func clientActivityScopeFor(roles []string, hotel bool) clientActivityScope {
 	can := func(res string) bool { return permFor(roles, res, permRead) }
 	sc := clientActivityScope{
-		Hotel:      hotel,
-		SignIns:    hotel && can("guest-signin-attempts"),
-		Protection: hotel && can("guest-signin-protection"),
-		Stays:      hotel && can("pms-stays"),
-		Accounts:   can("guest-accounts"),
-		Staff:      can("audit"),
+		Hotel:    hotel,
+		SignIns:  hotel && can("guest-signin-attempts"),
+		Stays:    hotel && can("pms-stays"),
+		Accounts: can("guest-accounts"),
+		Staff:    can("audit"),
 	}
 	if sc.Staff {
 		for _, a := range clientStaffActions {
@@ -248,17 +247,6 @@ func clientActivitySources(sc clientActivityScope, args *[]any) string {
 	  FROM iam_v2.sign_in_attempts sia
 	  LEFT JOIN iam_v2.stays st ON st.tenant_id = $1 AND st.site_id = $2 AND st.id = sia.matched_stay_id
 	 WHERE sia.tenant_id = $1 AND sia.site_id = $2 AND sia.occurred_at >= $3 AND sia.occurred_at < $4`)
-	}
-	if sc.Protection {
-		parts = append(parts,
-			`SELECT gsr.restricted_at, 'sign_in', 'SIGN_IN_PAUSED', 'warning', COALESCE(NULLIF(gsr.reason,''), 'FAILED_ATTEMPTS'),
-	       'room', COALESCE(gsr.last_submitted_room,''), '', gsr.device_mac::text, '', COALESCE(gsr.guest_network_name,''), '', '', '', '', 'r2' || gsr.id::text
-	  FROM iam_v2.guest_signin_restrictions gsr
-	 WHERE gsr.tenant_id = $1 AND gsr.site_id = $2 AND gsr.restricted_at >= $3 AND gsr.restricted_at < $4`,
-			`SELECT gsr.released_at, 'sign_in', 'SIGN_IN_RESUMED', 'info', COALESCE(gsr.release_reason,''),
-	       'room', COALESCE(gsr.last_submitted_room,''), '', gsr.device_mac::text, '', COALESCE(gsr.guest_network_name,''), '', '', '', COALESCE(gsr.released_by,''), 'r3' || gsr.id::text
-	  FROM iam_v2.guest_signin_restrictions gsr
-	 WHERE gsr.tenant_id = $1 AND gsr.site_id = $2 AND gsr.released_at >= $3 AND gsr.released_at < $4`)
 	}
 	if sc.Stays {
 		parts = append(parts,
@@ -373,7 +361,7 @@ func (s *server) listClientActivity(w http.ResponseWriter, r *http.Request) {
 
 	out := clientActivityResponse{Data: []clientActivityRow{}, Categories: map[string]int64{},
 		Range: activityRange{From: f.From, To: f.To},
-		Sources: map[string]bool{"hotel": sc.Hotel, "room_sign_ins": sc.SignIns, "sign_in_protection": sc.Protection,
+		Sources: map[string]bool{"hotel": sc.Hotel, "room_sign_ins": sc.SignIns,
 			"stays": sc.Stays, "accounts": sc.Accounts, "staff_actions": sc.Staff}}
 	out.Meta.Limit, out.Meta.Offset = f.Limit, f.Offset
 

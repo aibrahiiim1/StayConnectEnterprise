@@ -28,7 +28,7 @@ type Resp = PagedFields & {
   data?: ActivityEvent[];
   categories?: Record<string, number>;
   problems?: number;
-  sources?: { hotel?: boolean; room_sign_ins?: boolean; sign_in_protection?: boolean; stays?: boolean; accounts?: boolean; staff_actions?: boolean };
+  sources?: { hotel?: boolean; room_sign_ins?: boolean; stays?: boolean; accounts?: boolean; staff_actions?: boolean };
 };
 
 const RANGES = [
@@ -73,7 +73,7 @@ export default function ClientActivityPage() {
     { value: "package", label: "Packages", count: cats.package ?? 0 },
     { value: "device", label: "Devices", count: cats.device ?? 0 },
     ...(src.accounts ? [{ value: "account" as Chip, label: "Accounts", count: cats.account ?? 0 }] : []),
-    ...(src.room_sign_ins || src.sign_in_protection ? [{ value: "sign_in" as Chip, label: "Room sign-ins", count: cats.sign_in ?? 0 }] : []),
+    ...(src.room_sign_ins ? [{ value: "sign_in" as Chip, label: "Room sign-ins", count: cats.sign_in ?? 0 }] : []),
     ...(src.stays ? [{ value: "stay" as Chip, label: "Stays", count: cats.stay ?? 0 }] : []),
     ...(src.staff_actions ? [{ value: "staff" as Chip, label: "Staff actions", count: cats.staff ?? 0 }] : []),
   ];
@@ -93,7 +93,7 @@ export default function ClientActivityPage() {
               "Packages started and ended, and why",
               "Device replacements and released places",
               ...(src.accounts ? ["Client accounts created and verified"] : []),
-              ...(src.hotel ? ["Room sign-in attempts, sign-in pauses and stays"] : []),
+              ...(src.hotel ? ["Room sign-in attempts (including those refused while a device's sign-in was paused) and stays"] : []),
               ...(src.staff_actions ? ["Staff actions on clients"] : []),
               "Failed voucher, account and code sign-ins are not recorded",
             ]} />

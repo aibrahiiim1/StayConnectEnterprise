@@ -52,7 +52,7 @@ func TestClientActivityFilterBounds(t *testing.T) {
 
 func TestClientActivityHidesHotelSourcesOffHotelSites(t *testing.T) {
 	sc := clientActivityScopeFor([]string{"site_admin"}, false)
-	if sc.SignIns || sc.Protection || sc.Stays {
+	if sc.SignIns || sc.Stays {
 		t.Fatalf("hotel sources offered on a site without the Hotel module: %+v", sc)
 	}
 	for _, a := range sc.StaffActions {
@@ -75,7 +75,7 @@ func TestClientActivityHidesHotelSourcesOffHotelSites(t *testing.T) {
 func TestClientActivityAddsOnlyWhatTheReaderMayRead(t *testing.T) {
 	// A role without audit, account or sign-in-attempt access sees connections, packages and devices only.
 	sc := clientActivityScopeFor([]string{"custom:none"}, true)
-	if sc.Accounts || sc.Staff || sc.SignIns || sc.Protection || sc.Stays || len(sc.StaffActions) != 0 {
+	if sc.Accounts || sc.Staff || sc.SignIns || sc.Stays || len(sc.StaffActions) != 0 {
 		t.Fatalf("scope wider than the role: %+v", sc)
 	}
 	var args []any
@@ -106,6 +106,10 @@ func TestClientActivitySQLReadsOnlyGrantedTablesAndRealColumns(t *testing.T) {
 		if strings.Contains(list, forbidden) {
 			t.Errorf("client activity reads %q", forbidden)
 		}
+	}
+	// The restriction row is overwritten by each new pause, so it is never history: pauses come from the attempts and staff releases.
+	if strings.Contains(list, "guest_signin_restrictions") {
+		t.Fatal("the timeline reads the mutable restriction row as if it were history")
 	}
 	// A staff action on a client account names that account, so it can be read and searched like any other client.
 	if !strings.Contains(list, "gat.id::text = al.target_id") || !strings.Contains(list, "COALESCE(gat.username,") {
