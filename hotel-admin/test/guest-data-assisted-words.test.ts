@@ -80,10 +80,10 @@ describe("device addresses", () => {
 
 describe("the line that says what a record would disclose", () => {
   it("shows the address, volume and the number of usage samples of a session", () => {
-    const s = describeDetail("session", { ip: "10.1.2.3", mac_address: "3c:22:fb:0a:11:7e", bytes_down: 5 * 1024 ** 2, bytes_up: 2048, usage_samples: [{}, {}] });
+    const s = describeDetail("session", { ip: "10.1.2.3", mac_address: "3c:22:fb:0a:11:7e", bytes_down: 5_000_000, bytes_up: 2048, usage_samples: [{}, {}] });
     expect(s).toContain("10.1.2.3");
     expect(s).toContain("3c:22:fb:0a:11:7e");
-    expect(s).toContain("5.0 MB");
+    expect(s).toContain("5.00 MB");
     expect(s).toContain("2 usage samples");
   });
   it("is empty for a record whose detail is not shown", () => {
