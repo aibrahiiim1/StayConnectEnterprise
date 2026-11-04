@@ -160,6 +160,11 @@ export function DialogForm({
   const formId = React.useId();
   const reasonId = React.useId();
   const explain = disabled && !busy && Boolean(disabledReason);
+  const errorRef = React.useRef<HTMLDivElement>(null);
+  // An error raised after scrolling down to the submit button must not sit unseen above the fold.
+  React.useEffect(() => {
+    if (error) errorRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [error]);
   return (
     <Dialog open={open} onOpenChange={(v) => !busy && onOpenChange(v)}>
       <DialogContent size={size}>
@@ -168,7 +173,7 @@ export function DialogForm({
           {description && <DialogDescription>{description}</DialogDescription>}
         </DialogHeader>
         <DialogBody>
-          <ErrorBanner err={error} />
+          <div ref={errorRef}><ErrorBanner err={error} /></div>
           <form
             id={formId}
             onSubmit={(e) => {

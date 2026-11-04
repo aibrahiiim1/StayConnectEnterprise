@@ -39,11 +39,23 @@ describe("what a guest-data request says it covers", () => {
     }
   });
 
-  it("every erasure still warns it cannot be undone and is refused while the guest is live", () => {
+  it("every erasure still warns it cannot be undone; a stay is refused while live, a person's own access is ended", () => {
     for (const kind of ["account", "principal", "stay", "stay_guest", undefined]) {
       const text = eraseConsequences(kind).join(" ");
       expect(text).toMatch(/cannot be undone/);
-      expect(text).toMatch(/Refused while the guest is in-house/);
+      expect(text).toMatch(/Refused while/);
+    }
+    for (const kind of ["stay", "stay_guest"]) {
+      expect(eraseConsequences(kind).join(" ")).toMatch(/Refused while the guest is in-house or the room’s internet access is still running/);
+    }
+    for (const kind of ["account", "principal"]) {
+      expect(eraseConsequences(kind).join(" ")).toMatch(/Their own internet access ends now and those devices are disconnected/);
+    }
+  });
+
+  it("the erasure warning stays short", () => {
+    for (const kind of ["account", "principal", "stay", "stay_guest"]) {
+      expect(eraseConsequences(kind).join(" ").length).toBeLessThan(800);
     }
   });
 
