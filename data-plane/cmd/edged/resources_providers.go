@@ -111,8 +111,8 @@ type notifyWriteReq struct {
 	FromName    *string           `json:"from_name,omitempty"`
 	Region      *string           `json:"region,omitempty"`
 	Extra       map[string]string `json:"extra,omitempty"` // WhatsApp template settings; an empty value removes a key
-	// The operator's own password (audit P9 M2): a sender decides where sign-in codes and account emails go, so adding, changing or
-	// removing one is re-authenticated like the other security settings. Never stored or audited.
+	// Adding, changing or switching a sender is an ordinary authorised change, confirmed in the console (Product Owner, 2026-11-04);
+	// a password sent by an older console is still verified. Removing one keeps the strict check (stepUpFromBody). Never stored or audited.
 	Password string `json:"password,omitempty"`
 }
 
@@ -353,7 +353,7 @@ func (s *server) createNotifyProvider(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
 		return
 	}
-	if !s.reauthStrict(r, in.Password) {
+	if !s.reauth(r, in.Password) {
 		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
@@ -427,7 +427,7 @@ func (s *server) patchNotifyProvider(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
 		return
 	}
-	if !s.reauthStrict(r, in.Password) {
+	if !s.reauth(r, in.Password) {
 		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}

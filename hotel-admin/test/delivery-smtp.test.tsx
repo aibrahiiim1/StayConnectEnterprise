@@ -92,23 +92,33 @@ describe("the page", () => {
     expect(screen.queryByText("In use")).toBeNull();
   });
 
-  // Every change is confirmed with the operator's own password, and a browser cannot fill that saved login into the sender's secret.
-  it("asks for the Admin Console password apart from the mail server's, and keeps autofill out of the secret", async () => {
+  // Adding, changing or switching a sender is confirmed once, without the Admin Console password; the secret still refuses autofill.
+  it("never asks for the Admin Console password, and keeps autofill out of the secret", async () => {
     routes([SMTP]);
+    patch.mockResolvedValue({ ...SMTP, enabled: false });
     render(<NotificationsPage />);
     await screen.findByText("Site relay");
     fireEvent.click(screen.getByRole("button", { name: /^Edit\b/ }));
     const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).queryByLabelText(/Admin Console password/)).toBeNull();
     const secret = within(dialog).getByLabelText(/^Login password/) as HTMLInputElement;
-    const confirm = within(dialog).getByLabelText(/Your Admin Console password/) as HTMLInputElement;
     expect(secret.autocomplete).toBe("new-password");
-    expect(confirm.autocomplete).toBe("current-password");
-    expect(secret.name).not.toBe(confirm.name);
-    expect(within(dialog).getByRole("button", { name: /Save changes/ })).toBeDisabled();
-    fireEvent.change(confirm, { target: { value: "op-pw" } });
-    expect(within(dialog).getByRole("button", { name: /Save changes/ })).toBeEnabled();
+    fireEvent.click(within(dialog).getByRole("switch", { name: /Use this sender/ }));
+    const save = within(dialog).getByRole("button", { name: /Save changes/ });
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+    const confirm = await screen.findByRole("dialog", { name: /Switch this sender off\?/ });
+    expect(within(confirm).queryByLabelText(/password/i)).toBeNull();
+    fireEvent.click(within(confirm).getByRole("button", { name: /^Save$/ }));
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
+    expect(patch.mock.calls[0][1]).not.toHaveProperty("password");
+    expect(patch.mock.calls[0][1].enabled).toBe(false);
   });
 });
+async function confirmIn(title: RegExp, button: RegExp) {
+  const confirm = await screen.findByRole("dialog", { name: title });
+  fireEvent.click(within(confirm).getByRole("button", { name: button }));
+}
 
 describe("an SMTP sender", () => {
   it("posts kind smtp with the relay in extra and the password as the write-only api_key", async () => {
@@ -131,8 +141,8 @@ describe("an SMTP sender", () => {
     fireEvent.change(within(dialog).getByLabelText(/From name/), { target: { value: "Wi-Fi Access" } });
     fireEvent.change(within(dialog).getByLabelText(/^Timeout/), { target: { value: "20" } });
 
-    fireEvent.change(within(dialog).getByLabelText(/Your Admin Console password/), { target: { value: "op-pw" } });
     fireEvent.click(within(dialog).getByRole("button", { name: /^Add sender$/ }));
+    await confirmIn(/Add this sender\?/, /^Add sender$/);
     await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
     expect(post.mock.calls[0][0]).toBe("/notification-providers");
     expect(post.mock.calls[0][1]).toEqual({
@@ -140,7 +150,7 @@ describe("an SMTP sender", () => {
       api_key: "s3cret", api_user: undefined,
       from_address: "codes@example.com", from_name: "Wi-Fi Access",
       extra: { host: "smtp.example.com", port: "", security: "tls", username: "codes@example.com", timeout_seconds: "20" },
-      enabled: true, password: "op-pw", // the operator's own password confirms the change (audit P9 M2)
+      enabled: true,
     });
   });
 
@@ -154,10 +164,10 @@ describe("an SMTP sender", () => {
     expect((within(dialog).getByLabelText(/Mail server/) as HTMLInputElement).value).toBe("smtp.example.com");
     expect((within(dialog).getByLabelText(/^Port/) as HTMLInputElement).value).toBe("587");
     fireEvent.change(within(dialog).getByLabelText(/^Port/), { target: { value: "2525" } });
-    fireEvent.change(within(dialog).getByLabelText(/Your Admin Console password/), { target: { value: "op-pw" } });
     fireEvent.click(within(dialog).getByRole("button", { name: /Save changes/ }));
+    await confirmIn(/Save this sender\?/, /^Save$/);
     await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
-    expect(patch.mock.calls[0][1].password).toBe("op-pw");
+    expect(patch.mock.calls[0][1]).not.toHaveProperty("password");
     expect(patch.mock.calls[0][0]).toBe("/notification-providers/p1");
     expect(patch.mock.calls[0][1]).not.toHaveProperty("api_key");
     expect(patch.mock.calls[0][1].extra).toEqual({ host: "smtp.example.com", port: "2525", security: "starttls", username: "codes@example.com", timeout_seconds: "10" });
@@ -173,8 +183,8 @@ describe("an SMTP sender", () => {
     fireEvent.change(within(dialog).getByLabelText("Service"), { target: { value: "smtp" } });
     fireEvent.change(within(dialog).getByLabelText(/Mail server/), { target: { value: "smtp.example.com" } });
     fireEvent.change(within(dialog).getByLabelText(/^Username/), { target: { value: "codes" } });
-    fireEvent.change(within(dialog).getByLabelText(/Your Admin Console password/), { target: { value: "op-pw" } });
     fireEvent.click(within(dialog).getByRole("button", { name: /^Add sender$/ }));
+    await confirmIn(/Add this sender\?/, /^Add sender$/);
     expect(await within(dialog).findByText("a username requires a password")).toBeInTheDocument();
   });
 });

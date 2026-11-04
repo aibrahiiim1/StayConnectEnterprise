@@ -26,8 +26,8 @@ func callWithSession(f *apiFixture, h http.HandlerFunc, method, id, body string)
 	return rec
 }
 
-// Audit P9 M2 / P9 L16: email, SMS and social sign-in senders and the client device self-service switch change only on the
-// operator's password, like the other security settings.
+// Audit P9 M2 / P9 L16: removing a sender, social sign-in and the client device self-service switch change only on the operator's password.
+// Adding, changing or switching a notification sender is confirmed in the console without it (Product Owner, 2026-11-04), and audited.
 func TestIntegration_ProviderAndDeviceSettingChangesNeedThePassword(t *testing.T) {
 	f := newAPI(t, "site_admin")
 	_, client := newFakeSCD(t, f)
@@ -52,8 +52,6 @@ func TestIntegration_ProviderAndDeviceSettingChangesNeedThePassword(t *testing.T
 		body string
 	}
 	for _, c := range []call{
-		{"create sender", f.app.createNotifyProvider, http.MethodPost, "", `{"channel":"email","kind":"stub"}`},
-		{"change sender", f.app.patchNotifyProvider, http.MethodPatch, id, `{"display_name":"After"}`},
 		{"remove sender", f.app.deleteNotifyProvider, http.MethodDelete, id, ``},
 		{"create social", f.app.createSocialProvider, http.MethodPost, "", `{"provider":"google","client_id":"c","client_secret":"s"}`},
 		{"change social", f.app.patchSocialProvider, http.MethodPatch, sid, `{"display_name":"After"}`},
@@ -70,11 +68,20 @@ func TestIntegration_ProviderAndDeviceSettingChangesNeedThePassword(t *testing.T
 	}
 	var name string
 	if err := f.pool.QueryRow(ctx, `SELECT display_name FROM notification_providers WHERE id=$1::uuid`, id).Scan(&name); err != nil || name != "Before" {
-		t.Fatalf("the sender changed without step-up: %q (%v)", name, err)
+		t.Fatalf("the sender changed on a wrong password: %q (%v)", name, err)
 	}
-	// With the password the change goes through (a delete carries it in its body).
-	if rec := callWithSession(f, f.app.patchNotifyProvider, http.MethodPatch, id, `{"display_name":"After","password":"`+f.password+`"}`); rec.Code != http.StatusOK {
-		t.Errorf("a confirmed change = %d %s", rec.Code, rec.Body.String())
+	// Adding, changing and switching a sender need no password, and each is audited.
+	if rec := callWithSession(f, f.app.createNotifyProvider, http.MethodPost, "", `{"channel":"email","kind":"stub"}`); rec.Code != http.StatusCreated {
+		t.Errorf("adding a sender without a password = %d %s", rec.Code, rec.Body.String())
+	}
+	for _, body := range []string{`{"display_name":"After"}`, `{"enabled":false}`} {
+		if rec := callWithSession(f, f.app.patchNotifyProvider, http.MethodPatch, id, body); rec.Code != http.StatusOK {
+			t.Errorf("changing a sender without a password (%s) = %d %s", body, rec.Code, rec.Body.String())
+		}
+	}
+	var audited int
+	if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action LIKE 'notification_provider.%'`).Scan(&audited); err != nil || audited < 3 {
+		t.Errorf("sender changes audited = %d (%v), want at least 3", audited, err)
 	}
 	if rec := callWithSession(f, f.app.deleteNotifyProvider, http.MethodDelete, id, `{"password":"`+f.password+`"}`); rec.Code != http.StatusNoContent {
 		t.Errorf("a confirmed removal = %d %s", rec.Code, rec.Body.String())
