@@ -1,0 +1,4 @@
+commit 30ec0621f51b98169b054715b24f12db8ddb3f93
+Date:   Wed Nov 4 16:19:24 2026 +0200
+
+    Governance: D92 and T0303 for immediate moves and the device-limit record
