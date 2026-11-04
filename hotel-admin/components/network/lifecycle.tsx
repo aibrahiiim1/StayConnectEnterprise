@@ -290,11 +290,11 @@ export function PortModeCard({ writable, reloadKey, onStaged }: { writable: bool
             {rows.map((r, i) => (
               <div key={i} className="grid grid-cols-[7rem_1fr_auto] items-end gap-2">
                 <Field label={i === 0 ? "VLAN id" : undefined}>
-                  <Input inputMode="numeric" value={r.vlan} aria-label={`VLAN id, row ${i + 1}`}
+                  <Input inputMode="numeric" value={r.vlan} aria-label={`VLAN id ${i + 1}`}
                     onChange={(e) => { setPlan(null); setRows(rows.map((x, j) => (j === i ? { ...x, vlan: e.target.value } : x))); }} />
                 </Field>
                 <Field label={i === 0 ? "Name" : undefined} optional={i === 0}>
-                  <Input value={r.name} aria-label={`Name, row ${i + 1}`}
+                  <Input value={r.name} aria-label={`Name ${i + 1}`}
                     onChange={(e) => { setPlan(null); setRows(rows.map((x, j) => (j === i ? { ...x, name: e.target.value } : x))); }} />
                 </Field>
                 <Button

@@ -81,6 +81,7 @@ export function DefaultNetworkCard({ reloadKey }: { reloadKey: number }) {
 export function ArchivedNetworks({ writable, reloadKey, onRestored }: { writable: boolean; reloadKey: number; onRestored: () => void }) {
   const toast = useToast();
   const [items, setItems] = useState<ArchivedNetwork[]>([]);
+  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -105,12 +106,23 @@ export function ArchivedNetworks({ writable, reloadKey, onRestored }: { writable
   }
 
   return (
-    <details className="disclosure-motion group rounded-lg border border-border bg-card">
-      <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-start text-sm font-medium [&::-webkit-details-marker]:hidden">
-        <ChevronRight className="size-4 transition-transform duration-base ease-onegate group-open:rotate-90 rtl:rotate-180 rtl:group-open:rotate-90 motion-reduce:transition-none" aria-hidden />
+    <div className="rounded-lg border border-border bg-card">
+      <button type="button" aria-expanded={open} aria-controls="archived-networks" onClick={() => setOpen(!open)}
+        className="flex w-full items-center gap-2 px-4 py-3 text-start text-sm font-medium">
+        <ChevronRight
+          aria-hidden
+          className={
+            "size-4 transition-transform duration-base ease-onegate motion-reduce:transition-none " +
+            (open ? "rotate-90" : "rtl:rotate-180")
+          }
+        />
         Archived networks ({items.length})
-      </summary>
-        <div className="border-t border-border px-4 py-3">
+      </button>
+      {open && (
+        <div
+          id="archived-networks"
+          className="border-t border-border px-4 py-3 animate-in fade-in-0 slide-in-from-top-1 duration-base ease-onegate motion-reduce:slide-in-from-top-0"
+        >
           <p className="mb-3 text-sm text-muted-foreground">Switched off by a confirmed reset. They keep their history, settings and audit trail, and are not served. Nothing was deleted.</p>
           <ErrorBanner err={err} className="mb-2" />
           <ul className="space-y-2">
@@ -128,6 +140,7 @@ export function ArchivedNetworks({ writable, reloadKey, onRestored }: { writable
             ))}
           </ul>
         </div>
-    </details>
+      )}
+    </div>
   );
 }

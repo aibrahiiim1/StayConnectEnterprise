@@ -457,7 +457,7 @@ export default function NewGuestNetworkPage() {
                 <legend className="mb-1.5 text-label">
                   Parent interface<span aria-hidden="true" className="ms-0.5 text-destructive">*</span>
                 </legend>
-                {errFor("parent") && <p id="nw-parent-err" className="text-xs text-destructive">{errFor("parent")}</p>}
+                {errFor("parent") && <p id="nw-parent-err" role="alert" className="text-xs text-destructive">{errFor("parent")}</p>}
                 {interfaces === null && ifaceErr ? (
                   <EmptyState
                     icon={<Cable />}
@@ -533,7 +533,7 @@ export default function NewGuestNetworkPage() {
               {vlanTagged && (
                 <fieldset id="nw-vlans" tabIndex={-1} className="space-y-2 outline-none" aria-describedby={errFor("vlans") ? "nw-vlans-err" : undefined}>
                   <legend className="mb-1.5 text-label">VLANs on this trunk</legend>
-                  {errFor("vlans") && <p id="nw-vlans-err" className="text-xs text-destructive">{errFor("vlans")}</p>}
+                  {errFor("vlans") && <p id="nw-vlans-err" role="alert" className="text-xs text-destructive">{errFor("vlans")}</p>}
                   <VlanIdList rows={vlans} onChange={setVlanRows} problems={vlanProblems} />
                   <p className="text-xs text-muted-foreground">
                     Your switch must carry these VLAN ids on
@@ -548,7 +548,7 @@ export default function NewGuestNetworkPage() {
             <>
               {vlanTagged ? (
                 <div id="nw-vlans" tabIndex={-1} className="space-y-3 outline-none">
-                  {errFor("vlans") && <p className="text-xs text-destructive">{errFor("vlans")}</p>}
+                  {errFor("vlans") && <p role="alert" className="text-xs text-destructive">{errFor("vlans")}</p>}
                   {multi && (
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-label">DHCP and DNS</span>
@@ -604,7 +604,7 @@ export default function NewGuestNetworkPage() {
                 <legend className="mb-1.5 text-label">
                   Address pools<span aria-hidden="true" className="ms-0.5 text-destructive">*</span>
                 </legend>
-                {errFor("pools") && <p id="nw-pools-err" className="text-xs text-destructive">{errFor("pools")}</p>}
+                {errFor("pools") && <p id="nw-pools-err" role="alert" className="text-xs text-destructive">{errFor("pools")}</p>}
                 {pools.map((p, i) => (
                   <div key={i} className="flex items-center gap-2">
                     <Input
