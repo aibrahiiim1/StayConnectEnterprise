@@ -113,6 +113,8 @@ type phase3Shaping struct {
 	// endedTorn remembers torn-down sessions the plan still lists so their teardown is not repeated each pass.
 	endedTorn   map[string]bool
 	passClasses map[string]map[int]shape.ClassBytes
+	// passGroupClasses caches SHARED group classes per device for the same step (sharedMatchesPlan).
+	passGroupClasses map[string]map[int]shape.ClassBytes
 	// passGroups records the SHARED group classes already re-rated in this pass, so a group is re-rated once per pass, not once per device.
 	passGroups map[string]bool
 	// passRegroups counts classes rebuilt under another group in this pass (regroupedAway); capped so renewals are never starved.
@@ -409,8 +411,8 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 		}}
 		defer func() { p.owner = saved }()
 	}
-	p.passClasses, p.passGroups = nil, nil
-	defer func() { p.passClasses, p.passGroups = nil, nil }()
+	p.passClasses, p.passGroups, p.passGroupClasses = nil, nil, nil
+	defer func() { p.passClasses, p.passGroups, p.passGroupClasses = nil, nil, nil }()
 	p.pruneLeaseMemory(now)
 	p.mark("setup")
 	if p.batching() {
@@ -690,6 +692,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 	// 3. Shape what must be forwarded, staged and fail-closed (see provisionSession); tc class inventories are read once per device per pass.
 	p.passClasses = strayReads
 	p.passGroups = map[string]bool{}
+	p.passGroupClasses = map[string]map[int]shape.ClassBytes{}
 	p.passRegroups = 0
 	for _, bridge := range sortedKeys(bridges) {
 		byMinor := desired[bridge]

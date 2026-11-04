@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -201,6 +202,12 @@ func (f *fakeTC) ReRateSessionIn(ctx context.Context, bridge string, ip net.IP, 
 	if _, u := f.installed[ifb][minor]; !u {
 		return fmt.Errorf("re-rate: no upload class for minor %d", minor)
 	}
+	// The kernel takes the new rates and ignores a new parent.
+	for _, dev := range []string{bridge, ifb} {
+		c := f.installed[dev][minor]
+		c.down, c.up = down, up
+		f.installed[dev][minor] = c
+	}
 	return nil
 }
 
@@ -248,10 +255,36 @@ func (f *fakeTC) ReadClasses(ctx context.Context, device string) (map[int]shape.
 				continue
 			}
 			if minor, ok := shape.MinorForIP(net.ParseIP(ip)); ok {
-				if _, installed := out[minor]; installed {
-					out[minor] = shape.ClassBytes{Params: true, Parent: parent}
+				if c, installed := f.installed[device][minor]; installed {
+					kbps := c.down
+					if device != bridge {
+						kbps = c.up
+					}
+					rate, ceil := kbps, kbps
+					if parent != shape.RootParent {
+						rate, ceil = shape.SharedLeafRates(kbps)
+					}
+					out[minor] = shape.ClassBytes{Params: true, Parent: parent, RateKbit: rate, CeilKbit: ceil}
 				}
 			}
+		}
+	}
+	return out, nil
+}
+
+// ReadGroupClasses reports the group classes EnsureGroupClass installed, as the kernel does (directly under the root, rate = ceil).
+func (f *fakeTC) ReadGroupClasses(ctx context.Context, device string) (map[int]shape.ClassBytes, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, tcCall{op: "read-groups", bridge: device})
+	out := map[int]shape.ClassBytes{}
+	for k, kbps := range f.groups {
+		ifc, cid, _ := strings.Cut(k, "|")
+		if ifc != device {
+			continue
+		}
+		if m, err := strconv.ParseInt(strings.TrimPrefix(cid, shape.RootMajor+":"), 16, 32); err == nil {
+			out[int(m)] = shape.ClassBytes{Params: true, Parent: shape.RootParent, RateKbit: kbps, CeilKbit: kbps}
 		}
 	}
 	return out, nil
