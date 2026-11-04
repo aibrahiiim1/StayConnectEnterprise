@@ -45,8 +45,6 @@ const DISMISS_AFTER_MS: Partial<Record<Tone, number>> = { ok: 5000, info: 5000, 
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [items, setItems] = React.useState<ToastItem[]>([]);
-  const [polite, setPolite] = React.useState("");
-  const [urgent, setUrgent] = React.useState("");
   const seq = React.useRef(0);
 
   const dismiss = React.useCallback((id: number) => {
@@ -58,9 +56,6 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     const toast: ToastApi["toast"] = ({ tone = "info", title, description }) => {
       const id = ++seq.current;
       setItems((xs) => [...xs.filter((x) => !x.leaving).slice(-3), { id, tone, title, description }]);
-      const spoken = `${title}${description ? `. ${description}` : ""}${id % 2 ? "​" : ""}`;
-      if (tone === "err") setUrgent(spoken);
-      else setPolite(spoken);
     };
     return {
       toast,
@@ -72,12 +67,17 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   return (
     <Ctx.Provider value={api}>
       {children}
-      <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">{polite}</div>
-      <div role="alert" aria-live="assertive" aria-atomic="true" className="sr-only">{urgent}</div>
       <div data-toast-region className="pointer-events-none fixed inset-x-0 bottom-0 z-[60] flex flex-col items-center gap-2 p-4 sm:items-end sm:p-6">
-        {items.map((t) => (
-          <ToastCard key={t.id} item={t} onDismiss={dismiss} />
-        ))}
+        <div role="alert" aria-live="assertive" aria-atomic="false" aria-relevant="additions" className="flex w-full flex-col items-center gap-2 empty:hidden sm:items-end">
+          {items.filter((t) => t.tone === "err").map((t) => (
+            <ToastCard key={t.id} item={t} onDismiss={dismiss} />
+          ))}
+        </div>
+        <div role="status" aria-live="polite" aria-atomic="false" aria-relevant="additions" className="flex w-full flex-col items-center gap-2 empty:hidden sm:items-end">
+          {items.filter((t) => t.tone !== "err").map((t) => (
+            <ToastCard key={t.id} item={t} onDismiss={dismiss} />
+          ))}
+        </div>
       </div>
     </Ctx.Provider>
   );

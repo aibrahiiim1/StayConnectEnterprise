@@ -19,11 +19,18 @@ const SIZES = {
   xl: "max-w-5xl",
 } as const;
 
+export function fromToastRegion(e: Event): boolean {
+  const target = e.target as Element | null;
+  return !!target?.closest?.("[data-toast-region]");
+}
+
 export function DialogContent({
   size = "md",
   className,
   children,
   onOpenAutoFocus,
+  onPointerDownOutside,
+  onInteractOutside,
   ...props
 }: React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & { size?: keyof typeof SIZES }) {
   const contentRef = React.useRef<HTMLDivElement>(null);
@@ -31,8 +38,8 @@ export function DialogContent({
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay
         className={cn(
-          "fixed inset-0 z-50 bg-scrim/50 backdrop-blur-[1px]",
-          "data-[state=open]:animate-in data-[state=closed]:animate-out",
+          "fixed inset-0 z-50 bg-scrim/50",
+          "data-[state=open]:animate-in data-[state=closed]:animate-out duration-base ease-onegate",
           "data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 motion-reduce:animate-none",
         )}
       />
@@ -44,7 +51,7 @@ export function DialogContent({
             // dvh accounts for a mobile browser's collapsing toolbar; vh is the fallback.
             "max-h-[calc(100vh-2rem)] sm:max-h-[calc(100vh-3rem)]",
             "supports-[height:100dvh]:max-h-[calc(100dvh-2rem)] sm:supports-[height:100dvh]:max-h-[calc(100dvh-3rem)]",
-            "data-[state=open]:animate-in data-[state=closed]:animate-out",
+            "data-[state=open]:animate-in data-[state=closed]:animate-out duration-base ease-onegate",
             "data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0",
             "data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95 motion-reduce:animate-none",
             SIZES[size],
@@ -52,6 +59,14 @@ export function DialogContent({
           )}
           {...props}
           ref={contentRef}
+          onPointerDownOutside={(e) => {
+            if (fromToastRegion(e)) { e.preventDefault(); return; }
+            onPointerDownOutside?.(e);
+          }}
+          onInteractOutside={(e) => {
+            if (fromToastRegion(e)) { e.preventDefault(); return; }
+            onInteractOutside?.(e);
+          }}
           onOpenAutoFocus={(e) => {
             onOpenAutoFocus?.(e);
             if (e.defaultPrevented) return;
@@ -66,8 +81,8 @@ export function DialogContent({
             className={cn(
               "absolute end-3 top-3 inline-flex size-8 items-center justify-center rounded-md text-muted-foreground",
               "pointer-coarse:end-1.5 pointer-coarse:top-1.5 pointer-coarse:size-11",
-              "transition-colors hover:bg-surface hover:text-foreground",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+              "transition-colors hover:bg-accent hover:text-foreground",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             )}
           >
             <X className="size-4" />
@@ -136,6 +151,8 @@ export function DialogForm({
   disabled = false,
   disabledReason,
   extraFooter,
+  guardUnsaved = true,
+  dirty: dirtyProp,
   onSubmit,
   children,
 }: {
@@ -144,6 +161,8 @@ export function DialogForm({
   title: React.ReactNode;
   description?: React.ReactNode;
   size?: keyof typeof SIZES;
+  guardUnsaved?: boolean;
+  dirty?: boolean;
   submitLabel?: string;
   submitVariant?: React.ComponentProps<typeof Button>["variant"];
   cancelLabel?: string;
@@ -165,9 +184,28 @@ export function DialogForm({
   React.useEffect(() => {
     if (error) errorRef.current?.scrollIntoView?.({ block: "nearest" });
   }, [error]);
+
+  const [edited, setEdited] = React.useState(false);
+  const [asking, setAsking] = React.useState(false);
+  const keepRef = React.useRef<HTMLButtonElement>(null);
+  React.useEffect(() => {
+    setEdited(false);
+    setAsking(false);
+  }, [open]);
+  React.useEffect(() => {
+    if (asking) keepRef.current?.focus();
+  }, [asking]);
+  const unsaved = guardUnsaved && (dirtyProp ?? edited);
+
+  const requestClose = () => {
+    if (busy) return;
+    if (unsaved && !asking) { setAsking(true); return; }
+    onOpenChange(false);
+  };
+
   return (
-    <Dialog open={open} onOpenChange={(v) => !busy && onOpenChange(v)}>
-      <DialogContent size={size}>
+    <Dialog open={open} onOpenChange={(v) => (v ? !busy && onOpenChange(true) : requestClose())}>
+      <DialogContent size={size} {...(description ? {} : { "aria-describedby": undefined })}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           {description && <DialogDescription>{description}</DialogDescription>}
@@ -180,28 +218,44 @@ export function DialogForm({
               e.preventDefault();
               void onSubmit(e);
             }}
+            onInput={() => setEdited(true)}
+            onChange={() => setEdited(true)}
             className="space-y-4"
           >
             {children}
           </form>
         </DialogBody>
         <DialogFooter>
-          {extraFooter && <div className="me-auto flex items-center gap-2">{extraFooter}</div>}
-          {explain && (
-            <p id={reasonId} className="me-auto text-caption text-muted-foreground">{disabledReason}</p>
+          {asking ? (
+            <>
+              <p role="status" className="me-auto text-caption text-foreground">Discard the changes you made?</p>
+              <Button ref={keepRef} type="button" variant="secondary" onClick={() => setAsking(false)}>
+                Keep editing
+              </Button>
+              <Button type="button" variant="danger" onClick={() => onOpenChange(false)}>
+                Discard changes
+              </Button>
+            </>
+          ) : (
+            <>
+              {extraFooter && <div className="me-auto flex items-center gap-2">{extraFooter}</div>}
+              {explain && (
+                <p id={reasonId} className="me-auto text-caption text-muted-foreground">{disabledReason}</p>
+              )}
+              <Button type="button" variant="ghost" disabled={busy} onClick={() => onOpenChange(false)}>
+                {cancelLabel}
+              </Button>
+              <Button
+                type="submit"
+                form={formId}
+                variant={submitVariant}
+                disabled={busy || disabled}
+                aria-describedby={explain ? reasonId : undefined}
+              >
+                {busy ? busyLabel ?? `${submitLabel}…` : submitLabel}
+              </Button>
+            </>
           )}
-          <Button type="button" variant="ghost" disabled={busy} onClick={() => onOpenChange(false)}>
-            {cancelLabel}
-          </Button>
-          <Button
-            type="submit"
-            form={formId}
-            variant={submitVariant}
-            disabled={busy || disabled}
-            aria-describedby={explain ? reasonId : undefined}
-          >
-            {busy ? busyLabel ?? `${submitLabel}…` : submitLabel}
-          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -323,6 +377,7 @@ export function ConfirmDialog({
       submitVariant={confirmVariant}
       busy={busy}
       error={error}
+      guardUnsaved={false}
       disabled={!ready}
       disabledReason={notReady}
       onSubmit={() => onConfirm({ reason: reason.trim() || (requireReason && confirmOnly ? "Confirmed in the console" : ""), password })}
@@ -419,7 +474,7 @@ export function DetailDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size={size}>
+      <DialogContent size={size} {...(description ? {} : { "aria-describedby": undefined })}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           {description && <DialogDescription>{description}</DialogDescription>}
@@ -466,9 +521,15 @@ export function InfoDialog({
     warning: <AlertTriangle className="size-4 shrink-0 text-warning" aria-hidden />,
     danger: <AlertCircle className="size-4 shrink-0 text-destructive" aria-hidden />,
   }[tone];
+  const alert = tone === "danger" || tone === "warning";
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size={size} role={tone === "danger" || tone === "warning" ? "alertdialog" : "dialog"}>
+      <DialogContent
+        size={size}
+        role={alert ? "alertdialog" : "dialog"}
+        onPointerDownOutside={alert ? (e) => e.preventDefault() : undefined}
+        onInteractOutside={alert ? (e) => e.preventDefault() : undefined}
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             {icon}
