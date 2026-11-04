@@ -8,7 +8,8 @@
 // same audited endpoint as the manual path, so validation, duplicate-source protection and the lifecycle rules apply
 // unchanged.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ExternalLink } from "lucide-react";
 import { api } from "@/lib/api";
 import {
   Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -36,6 +37,7 @@ export function AddConnectionWizard({
   onOpenChange,
   providers,
   catalogueAvailable,
+  applianceTimezone = "",
   onChanged,
   onOpenConnection,
 }: {
@@ -43,6 +45,7 @@ export function AddConnectionWizard({
   onOpenChange: (v: boolean) => void;
   providers: PmsProvider[];
   catalogueAvailable: boolean;
+  applianceTimezone?: string;
   onChanged: () => void | Promise<void>;
   onOpenConnection: (id: string) => void;
 }) {
@@ -50,7 +53,7 @@ export function AddConnectionWizard({
   const [kind, setKind] = useState<string>("");
   const [step, setStep] = useState(0);
   const [name, setName] = useState("");
-  const [timezone, setTimezone] = useState("Africa/Cairo");
+  const [timezone, setTimezone] = useState(applianceTimezone);
   const [values, setValues] = useState<FormValues>({});
   const [creds, setCreds] = useState<Record<string, string>>({});
   const [secretReason] = useState("INITIAL_COMMISSIONING");
@@ -60,6 +63,8 @@ export function AddConnectionWizard({
   const [err, setErr] = useState<unknown>(null);
   const [progress, setProgress] = useState<Progress>({});
   const [done, setDone] = useState(false);
+  const [touched, setTouched] = useState(false);
+  const [asking, setAsking] = useState(false);
 
   const provider = providers.find((p) => p.kind === kind) ?? null;
   const fields = useMemo(() => (provider ? fieldsFor(provider) : []), [provider]);
@@ -76,7 +81,7 @@ export function AddConnectionWizard({
     setKind(only);
     setStep(0);
     setName("");
-    setTimezone("Africa/Cairo");
+    setTimezone(applianceTimezone);
     setValues(only ? initialValues(fieldsFor(providers[0])) : {});
     setCreds({});
     setPassword("");
@@ -84,9 +89,12 @@ export function AddConnectionWizard({
     setErr(null);
     setProgress({});
     setDone(false);
-  }, [open, providers]);
+    setTouched(false);
+    setAsking(false);
+  }, [open, providers, applianceTimezone]);
 
   function choose(k: string) {
+    setTouched(true);
     setKind(k);
     const p = providers.find((x) => x.kind === k);
     setValues(p ? initialValues(fieldsFor(p)) : {});
@@ -165,6 +173,15 @@ export function AddConnectionWizard({
     }
   }
 
+  const keepRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => { if (asking) keepRef.current?.focus(); }, [asking]);
+
+  function requestClose() {
+    if (busy) return;
+    if (touched && !done && !progress.id && !asking) { setAsking(true); return; }
+    onOpenChange(false);
+  }
+
   const failedStepWords = !progress.id ? null
     : !progress.revisionId ? "The connection was created, but its configuration was not saved."
       : withCreds && !progress.secretStored ? "The connection and its configuration were saved, but the credential was not stored."
@@ -173,14 +190,14 @@ export function AddConnectionWizard({
             : null;
 
   return (
-    <Dialog open={open} onOpenChange={(v) => !busy && onOpenChange(v)}>
+    <Dialog open={open} onOpenChange={(v) => (v ? onOpenChange(true) : requestClose())}>
       <DialogContent size="lg">
         <DialogHeader>
           <DialogTitle>{done ? "Connection activated" : "Add a PMS connection"}</DialogTitle>
           <DialogDescription>
             {done
-              ? "It is live and connecting. Point a client network at it on the PMS routing screen so Clients can use it."
-              : "Link the appliance to the Site's PMS so Clients can sign in with their room number."}
+              ? "It is live and connecting. Point a client network at it on the PMS routing screen so clients can use it."
+              : "Link the appliance to the site's PMS so clients can sign in with their room number."}
           </DialogDescription>
           {!done && <Stepper className="pt-3" steps={steps} current={step} onStep={progress.revisionId ? undefined : (i) => !busy && setStep(i)} />}
         </DialogHeader>
@@ -236,8 +253,10 @@ export function AddConnectionWizard({
                       </ol>
                       {provider.docs_url && (
                         <a href={provider.docs_url} target="_blank" rel="noreferrer"
-                          className="mt-1 inline-block font-medium underline underline-offset-2">
+                          className="mt-1 inline-flex items-center gap-1 font-medium underline underline-offset-2">
                           Provider documentation
+                          <ExternalLink className="size-3.5" aria-hidden />
+                          <span className="sr-only"> (opens in a new tab)</span>
                         </a>
                       )}
                     </Callout>
@@ -246,19 +265,19 @@ export function AddConnectionWizard({
                     <Field label="Name" required hint="How this connection appears throughout the admin."
                       error={showErrors ? nameError : undefined}>
                       <Input value={name} maxLength={120} placeholder="Front office PMS"
-                        onChange={(e) => setName(e.target.value)} />
+                        onChange={(e) => { setTouched(true); setName(e.target.value); }} />
                     </Field>
-                    <Field label="PMS time zone" required hint="Time zone name, for example Europe/Berlin. Arrivals and departures are read in it."
+                    <Field label="PMS time zone" required hint="Time zone name, for example Europe/Berlin. Starts as the appliance's own time zone. Arrivals and departures are read in it."
                       error={showErrors ? tzError : undefined}>
                       <Input value={timezone} placeholder="Africa/Cairo" spellCheck={false}
-                        onChange={(e) => setTimezone(e.target.value)} />
+                        onChange={(e) => { setTouched(true); setTimezone(e.target.value); }} />
                     </Field>
                   </FieldGrid>
                   <ProviderFieldsForm
                     fields={fields}
                     values={values}
                     errors={showErrors ? fieldErrors : {}}
-                    onChange={(k, v) => setValues((s) => ({ ...s, [k]: v }))}
+                    onChange={(k, v) => { setTouched(true); setValues((s) => ({ ...s, [k]: v })); }}
                   />
                   {provider.kind === PROTEL_KIND && (
                     <Callout tone="neutral" title="Fixed for this connection">
@@ -290,7 +309,7 @@ export function AddConnectionWizard({
                           autoComplete={f.secret === false ? "off" : "new-password"}
                           spellCheck={false}
                           value={creds[f.key] ?? ""}
-                          onChange={(e) => setCreds((c) => ({ ...c, [f.key]: e.target.value }))}
+                          onChange={(e) => { setTouched(true); setCreds((c) => ({ ...c, [f.key]: e.target.value })); }}
                         />
                       </Field>
                     ))}
@@ -355,6 +374,12 @@ export function AddConnectionWizard({
               <Button onClick={() => { onOpenChange(false); if (progress.id) onOpenConnection(progress.id); }}>
                 Open the connection
               </Button>
+            </>
+          ) : asking ? (
+            <>
+              <p role="status" className="me-auto text-caption text-foreground">Discard what you entered for this connection?</p>
+              <Button ref={keepRef} variant="secondary" onClick={() => setAsking(false)}>Keep editing</Button>
+              <Button variant="danger" onClick={() => onOpenChange(false)}>Discard</Button>
             </>
           ) : (
             <>

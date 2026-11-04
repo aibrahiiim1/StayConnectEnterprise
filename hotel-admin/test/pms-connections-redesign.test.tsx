@@ -68,7 +68,7 @@ function mockBackend(over: {
 } = {}) {
   get.mockImplementation((path: string) => {
     if (path === "/auth/whoami") return Promise.resolve({ roles: over.roles ?? ["site_admin"] });
-    if (path === "/pms-interfaces" || path === "/pms-interfaces?include=retired") return Promise.resolve({ interfaces: over.interfaces ?? [protel] });
+    if (path === "/pms-interfaces" || path === "/pms-interfaces?include=retired") return Promise.resolve({ interfaces: over.interfaces ?? [protel], appliance_timezone: "Africa/Cairo" });
     if (path === "/pms-providers") {
       return over.providers
         ? Promise.resolve({ providers: over.providers })

@@ -12,6 +12,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, Notice, ErrorBanner } from "@/components/ui/error-banner";
 import { FilterChips } from "@/components/ui/data";
 import { Skeleton } from "@/components/ui/misc";
+import { LiveStatus } from "@/components/ui/patterns";
 import { canWrite } from "@/lib/roles";
 import { formatDate, formatRelative } from "@/lib/utils";
 import { useRoomSignInReadiness } from "@/components/room-sign-in-readiness";
@@ -49,12 +50,17 @@ export default function PMSInterfacesPage() {
   const [filter, setFilter] = useState<Filter>("all");
   const [showInactive, setShowInactive] = useState(false);
   const [removing, setRemoving] = useState<{ id: string; display_label: string } | null>(null);
+  const [applianceTz, setApplianceTz] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
 
   const load = useCallback(async () => {
+    setRefreshing(true);
     try {
-      const r = await api.get<{ interfaces: PmsConnection[] }>("/pms-interfaces?include=retired");
+      const r = await api.get<{ interfaces: PmsConnection[]; appliance_timezone?: string }>("/pms-interfaces?include=retired");
       const list = r.interfaces ?? [];
       setRows(list);
+      setApplianceTz(r.appliance_timezone ?? "");
       setErr(null);
       const [, results] = await Promise.all([
         reloadReadiness(),
@@ -73,9 +79,11 @@ export default function PMSInterfacesPage() {
       ]);
       setHealth(Object.fromEntries(results.filter((x) => x && x[1]) as [string, PmsInterfaceHealth][]));
       setHealthLoaded(true);
+      setUpdatedAt(Date.now());
     } catch (e) {
       setErr(e);
-      setRows((x) => x ?? []);
+    } finally {
+      setRefreshing(false);
     }
   }, [reloadReadiness]);
 
@@ -87,7 +95,8 @@ export default function PMSInterfacesPage() {
   }, []);
 
   const anySyncing = Object.values(health).some(isSyncing);
-  usePoll(() => load(), anySyncing ? 4000 : 20000);
+  const pollMs = anySyncing ? 4000 : selected ? 10000 : 20000;
+  usePoll(() => load(), pollMs);
 
   const writable = canWrite("pms-interfaces", roles);
   const list = rows ?? [];
@@ -99,6 +108,10 @@ export default function PMSInterfacesPage() {
   const reviewEvents = Object.values(health).reduce((a, h) => a + (h.review_events ?? 0), 0);
   const heard = Object.values(health).map(lastCommunication).filter(Boolean)
     .sort((a, b) => new Date(b!).getTime() - new Date(a!).getTime())[0] ?? null;
+  const unread = healthLoaded ? live.filter((i) => !health[i.id]).length : 0;
+  const unreadNote = unread > 0
+    ? `Not counting ${unread} connection${unread === 1 ? "" : "s"} whose status could not be read`
+    : null;
 
   const routingFor = useCallback((i: PmsConnection): AssessmentInterfaceSummary | null =>
     assessment?.interfaces.find((x) => x.pms_interface_id === i.id) ?? null, [assessment]);
@@ -113,7 +126,7 @@ export default function PMSInterfacesPage() {
   return (
     <PageShell width="wide">
       <PageHeader
-        title="PMS connection"
+        title="PMS connections"
         description="Links to the site's property management systems."
         help={
           <>
@@ -148,17 +161,20 @@ export default function PMSInterfacesPage() {
           </>
         }
         actions={
-          <>
-            <Button variant="secondary" size="sm" onClick={() => void load()}>
-              <RefreshCw /> Refresh
+          writable ? (
+            <Button size="sm" onClick={() => setAdding(true)}>
+              <Plus /> Add connection
             </Button>
-            {writable && (
-              <Button size="sm" onClick={() => setAdding(true)}>
-                <Plus /> Add connection
-              </Button>
-            )}
-          </>
+          ) : undefined
         }
+      />
+
+      <LiveStatus
+        updatedAt={updatedAt}
+        refreshing={refreshing && rows !== null}
+        intervalSeconds={pollMs / 1000}
+        error={!!err && rows !== null}
+        onRefresh={() => void load()}
       />
 
       <ErrorBanner err={pmsErrorText(err)} />
@@ -176,14 +192,14 @@ export default function PMSInterfacesPage() {
           <StatCard
             label="Connections"
             value={<span>{active.length}<span className="text-sm font-normal text-muted-foreground"> active</span></span>}
-            hint={`${live.length} set up${inactive.length ? ` · ${inactive.length} inactive` : ""}`}
+            hint={`${live.length} set up${inactive.length ? ` · ${inactive.length} inactive` : ""}${unread ? ` · ${unread} status unknown` : ""}`}
           />
           <RoomSignInStat signIn={signIn} activeCount={active.length} ready={ready}
             fromLastRoster={active.some((i) => health[i.id]?.room_auth_ready && health[i.id]?.room_auth_source === "LAST_GOOD_ROSTER")} />
           <StatCard
             label="Guests in house"
             value={inHouse.toLocaleString()}
-            hint={anySyncing ? "A guest list is loading now" : "Mirrored from the PMS"}
+            hint={unreadNote ?? (anySyncing ? "A guest list is loading now" : "Mirrored from the PMS")}
           />
           <StatCard
             label="Last heard from a PMS"
@@ -197,7 +213,18 @@ export default function PMSInterfacesPage() {
         </StatGrid>
       )}
 
-      {rows === null ? (
+      {rows === null && err ? (
+        <Card>
+          <CardBody>
+            <EmptyState
+              icon={<Hotel />}
+              title="The PMS connections could not be loaded"
+              hint="Whether any connection exists is not known until they load."
+              action={<Button variant="secondary" onClick={() => void load()}><RefreshCw /> Try again</Button>}
+            />
+          </CardBody>
+        </Card>
+      ) : rows === null ? (
         <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
           {[0, 1].map((k) => <Skeleton key={k} className="h-72 w-full rounded-lg" />)}
         </div>
@@ -335,6 +362,7 @@ export default function PMSInterfacesPage() {
         tab={tab}
         onTab={setTab}
         onChanged={load}
+        applianceTimezone={applianceTz}
       />
 
       <RemoveConnectionDialog
@@ -349,6 +377,7 @@ export default function PMSInterfacesPage() {
         onOpenChange={setAdding}
         providers={providers}
         catalogueAvailable={catalogueAvailable}
+        applianceTimezone={applianceTz}
         onChanged={load}
         onOpenConnection={(id) => open(id, "configuration")}
       />
