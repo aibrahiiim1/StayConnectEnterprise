@@ -459,19 +459,21 @@ type postponedRegroup struct {
 	wait  time.Duration
 }
 
-// regroup handles a SHARED class left under another entitlement's group (HTB cannot re-parent; `tc class change` keeps the old one). The device is
+// regroup handles a class left under the wrong parent: a SHARED one under another entitlement's group, or a PER_DEVICE one under a group (HTB
+// cannot re-parent; `tc class change` keeps the old one). The device is
 // denied first, then its frozen counters are kept until the plan shows acctd stored them, so deleting the class loses no bytes. A class whose counters are
 // not confirmed in time is never deleted: the device goes back on it, still counted, and the move is retried later (regroupPostponed; the string is
 // the parent it stays under).
 func (p *phase3Shaping) regroup(ctx context.Context, bridge string, ip net.IP, minor int, epoch int64, s shapeplan.Session, now time.Time) (regroupAction, string) {
 	key := classKey(bridge, s.SessionID)
 	since, waiting := p.regroupWaiting[key]
-	if s.SpeedAllocation != speedAllocationShared {
-		return regroupNone, ""
-	}
-	want := p.groupClassFor(s.EntitlementID)
-	if want == "" {
-		return regroupNone, ""
+	// A PER_DEVICE session belongs directly under the root: one moved from a SHARED package must leave its old group too, or it stays
+	// capped by that group and is rewritten every pass.
+	want := shape.RootParent
+	if s.SpeedAllocation == speedAllocationShared {
+		if want = p.groupClassFor(s.EntitlementID); want == "" {
+			return regroupNone, ""
+		}
 	}
 	down, err := p.readClassesForPass(ctx, bridge)
 	if err != nil {
