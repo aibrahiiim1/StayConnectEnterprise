@@ -115,15 +115,16 @@ export default function RevisionsPage() {
 
   usePoll(() => load(), pending ? 5000 : 30000, { enabled: busy === null && rows !== null });
 
+  const loadRef = useRef(load);
+  loadRef.current = load;
   const left = useSecondsLeft(pending?.confirm_deadline ?? null);
   const reloadedFor = useRef<string | null>(null);
   useEffect(() => {
     if (pending && left === 0 && reloadedFor.current !== pending.id) {
       reloadedFor.current = pending.id;
-      const t = setTimeout(() => void inBackground(load), 2000);
+      const t = setTimeout(() => void inBackground(() => loadRef.current()), 2000);
       return () => clearTimeout(t);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [left, pending]);
 
   async function fetchDetail(r: NetRevision) {
@@ -140,10 +141,12 @@ export default function RevisionsPage() {
     if (detail[r.id]?.state !== r.state) void fetchDetail(r);
   }
 
+  const fetchRef = useRef(fetchDetail);
+  fetchRef.current = fetchDetail;
+  const staleDetail = !!open && !!detail[open.id] && detail[open.id].state !== open.state;
   useEffect(() => {
-    if (open && detail[open.id] && detail[open.id].state !== open.state) void fetchDetail(open);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open?.id, open?.state]);
+    if (staleDetail && open) void fetchRef.current(open);
+  }, [staleDetail, open]);
 
   const stepUp = useNetworkChangeStepUp();
 
