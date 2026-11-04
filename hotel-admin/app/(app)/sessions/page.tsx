@@ -180,8 +180,9 @@ export default function SessionsPage() {
   return (
     <PageShell width="wide">
       <PageHeader
-        title="Sessions"
-        description="Which devices are online now, whose they are, and the sessions that ended recently."
+        title={tab === "active" ? "Active sessions" : "Recent sessions"}
+        helpTitle="Sessions"
+        description={tab === "active" ? "Which devices are online, and whose they are." : "Sessions that are online or ended recently, and whose they were."}
         help={
           <>
             <HelpSection title="Sessions, devices and clients">
