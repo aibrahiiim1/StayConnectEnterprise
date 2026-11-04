@@ -410,6 +410,7 @@ const RESULTS: Record<string, string> = {
   LICENSE_REFUSED: "Licence does not admit new clients",
   LICENSE_CAPACITY_REACHED: "Licensed client capacity full",
   DEVICE_LIMIT_REACHED: "Package device limit reached",
+  AFTER_CHECKOUT_NEW_DEVICE_REJECTED: "New device refused after check-out",
 };
 export const resultLabel = (r: string) => RESULTS[r] ?? r.replace(/_/g, " ").toLowerCase();
 

@@ -59,6 +59,7 @@ const SECTIONS: Section[] = [
       { href: "/guest-accounts", label: "Client accounts",  icon: KeyRound, resource: "guest-accounts", keywords: "username password login credentials voucher guest accounts self-service email verification resend" },
       { href: "/sessions",       label: "Active sessions", icon: Monitor,  resource: "sessions", keywords: "online now devices connected who is on wifi disconnect guests" },
       { href: "/devices",        label: "Devices",         icon: Smartphone, resource: "sessions", keywords: "device mac phone laptop place slot release replace disconnect sign in again test reset remembered" },
+      { href: "/client-activity", label: "Client activity", icon: Activity, resource: "sessions", keywords: "log logs events history timeline issues problems connected disconnected sign in attempts voucher account device package what happened guests" },
       { href: "/usage",          label: "Usage explorer",  icon: ChartColumn, resource: "usage", keywords: "data used quota dispute how much room device mac gigabytes consumption investigate guests" },
       { href: "/online-time",    label: "Online-time budgets", icon: Hourglass, resource: "sessions", capability: "sessions.aggregate-time", keywords: "time remaining allowance hours guests" },
     ],

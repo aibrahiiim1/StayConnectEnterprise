@@ -357,6 +357,7 @@ function AccountsCard({
                           label: testing === a.id ? "Testing…" : "Test connection",
                           icon: <PlugZap />,
                           disabled: testing !== null || !a.has_credentials,
+                          reason: !a.has_credentials ? "Add the account's credentials first." : undefined,
                           onSelect: () => void test(a),
                         }]}
                       />
