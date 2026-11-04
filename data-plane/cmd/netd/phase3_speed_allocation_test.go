@@ -156,6 +156,30 @@ func TestSpeedAllocation_ARegroupWaitsForTheFinalCountersToBeStored(t *testing.T
 	}
 }
 
+// The stored counters are not in the plan hash, so a waiting regroup must keep the fast path off or the device stays denied for a full-walk interval.
+func TestSpeedAllocation_AWaitingRegroupKeepsTheFastPathOff(t *testing.T) {
+	tc, g := newFakeTC(), newFakeGate()
+	tc.reportParents = true
+	p := allocWriter(t, tc, g, "10.0.0.11")
+	p.fastPath = true
+	s := allocSession("a", "10.0.0.11", "ent-free", "SHARED")
+	t0 := time.Now()
+	if res, err := p.submit(context.Background(), envelope(1, s), t0); err != nil || res.Shaped != 1 {
+		t.Fatalf("first pass: %+v %v", res, err)
+	}
+	s.EntitlementID = "ent-fullstay"
+	if _, err := p.submit(context.Background(), envelope(2, s), t0.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	stampStored(p, &s)
+	if _, err := p.submit(context.Background(), envelope(2, s), t0.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if !g.isAuthorized("br-guest", "10.0.0.11") || tc.parentOf("br-guest", "10.0.0.11") != shape.GroupClassid("ent-fullstay") {
+		t.Fatal("the stored counters did not finish the regroup on the next submission")
+	}
+}
+
 // If acctd never confirms (an older acctd, or accounting down), the wait is bounded: the device is rebuilt after regroupAccountingWait.
 func TestSpeedAllocation_ARegroupWaitIsBounded(t *testing.T) {
 	tc, g := newFakeTC(), newFakeGate()
