@@ -558,6 +558,10 @@ func (s *server) accountVerify(w http.ResponseWriter, r *http.Request) {
 		     WHERE account_id = $1::uuid AND purpose = 'VERIFY' AND used_at IS NULL AND superseded_at IS NULL`, id); err != nil {
 			return err
 		}
+		// Registration signed the client in before the address was verified (no group); its open sign-in now gets the group the address earns.
+		if _, err := iamv2.RepinAccountGroup(ctx, tx, s.tenID, s.siteID, id); err != nil {
+			return err
+		}
 		verified = true
 		return nil
 	})
