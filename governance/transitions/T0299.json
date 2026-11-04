@@ -1,0 +1,34 @@
+{
+  "transition_id": "T0299",
+  "seq": 299,
+  "timestamp": "2026-11-04T09:24:48+02:00",
+  "timestamp_derivation": "Read from the workstation clock (UTC+02:00) by the script that wrote this receipt, immediately before the commit that introduces it.",
+  "record_type": "CUSTOM_ROLES_SENDER_CONFIRMATION_AND_NETD_GROUP_SLOTS",
+  "authorisation": "The Product Owner's mission of 2026-11-04 (custom roles approved, sender password removed, netd collision and accounting risk to be resolved, verification and deployment to the test appliance 172.21.96.97 under D79).",
+  "delivery": "Custom Admin Console roles (D91, migration 0206): Roles page, per-feature No access/View/Manage, assignment from Operators, enforcement in edged's permFor with a ceiling at the built-in roles other than Site admin, password-confirmed and audited changes, cross-tenant purge. Senders: add/change/switch confirmed once without the password; removal keeps it. Staff marking an address verified re-pins the open sign-in's client group through scd. netd: every SHARED package gets its own group slot (probing from its hash; kept across restarts by reading the installed parents; adopted in place when the old package has no other device); a regroup whose final counters are not confirmed is postponed with the device back on its counted class, never deleted.",
+  "verification": "Go vet (also integration tag) for edged, scd, netd; unit tests pass in edged, scd, netd and shape, including the catalogue-covers-every-enforced-resource test, the no-escalation cap tests and a collision test that fails on the old hash-only code. Integration: custom roles end to end and as svc_edged; the svc_scd tenant purge; the staff re-pin as svc_scd; sender step-up; the personal-column tripwire. Factory-clean baseline regenerated, FACTORY_CLEAN_BASELINE = PASS. hotel-admin unit tests and tsc pass.",
+  "deployment": {
+    "test_appliance": "Not deployed by this record; deployed after the merge and recorded then.",
+    "central": "Not changed."
+  },
+  "not_touched": "The seven built-in roles' permissions, the production Central, PMS configuration and posting, payments, networking and topology, licences.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "c64252baa134c44cc30ebe2b922054b3c0277dd5",
+  "previous_delivery": "T0298",
+  "decision": "D91",
+  "go_live": "NOT authorised."
+}
