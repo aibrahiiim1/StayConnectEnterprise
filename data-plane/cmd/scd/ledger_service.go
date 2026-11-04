@@ -695,7 +695,12 @@ func (s *server) ledgerDestinationProbe(w http.ResponseWriter, r *http.Request) 
 	d := &ledger.SFTPDest{Host: in.Host, Port: in.Port}
 	fp, err := d.ProbeHostKey(ctx)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "unreachable", "message": err.Error()})
+		code := ledger.ProbeOther
+		var pe *ledger.ProbeError
+		if errors.As(err, &pe) {
+			code = pe.Kind
+		}
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": code, "message": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"fingerprint": fp})
