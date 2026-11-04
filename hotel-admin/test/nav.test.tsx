@@ -187,6 +187,21 @@ describe("authorized consolidations stay reachable", () => {
   });
 });
 
+// A section of one destination is that link alone: no Overview heading to open or close, and the page stays one click away.
+describe("the Overview entry", () => {
+  afterEach(() => { cleanup(); CAPS.surfaces = null; CAPS.modules = ALL_MODULES; });
+
+  it("is a link on its own, not a section with a toggle", async () => {
+    await renderNavWith(SERVED, ["site_admin"]);
+    expect(screen.getByRole("link", { name: "Overview" })).toHaveAttribute("href", "/dashboard");
+    expect(screen.queryByRole("button", { name: "Overview" })).toBeNull();
+    // The other sections keep their headings.
+    for (const title of ["Internet offering", "Clients", "Client access", "Hotel", "System"]) {
+      expect(screen.getByRole("button", { name: title }), title).toBeInTheDocument();
+    }
+  });
+});
+
 // The industry-neutral core comes first and everything hospitality/PMS-dependent sits in ONE Hotel section after it
 // (docs/PRODUCT_TERMINOLOGY.md).
 describe("the Hotel module in the navigation", () => {

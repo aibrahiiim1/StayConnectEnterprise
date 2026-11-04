@@ -32,11 +32,13 @@ type Item = {
   modules?: string[];
   keywords?: string;
 };
-type Section = { title: string; items: Item[] };
+// headless: a section of one destination is shown as that link alone, with no heading to open or close.
+type Section = { title: string; items: Item[]; headless?: boolean };
 
 const SECTIONS: Section[] = [
   {
     title: "Overview",
+    headless: true,
     items: [
       { href: "/dashboard", label: "Overview", icon: LayoutDashboard, resource: "reports", keywords: "home tonight summary stats" },
     ],
@@ -179,6 +181,7 @@ export function Nav({
     const hotel = moduleLicensed(caps, "hospitality");
     return SECTIONS.map((sec) => ({
       title: sec.title,
+      headless: sec.headless,
       items: sec.items.filter((it) => {
         if (sec.title === "Hotel" && !hotel) return false;
         if (!canRead(it.resource, roles)) return false;
@@ -333,11 +336,11 @@ export function Nav({
           </p>
         ) : (
           visibleSections.map((sec) => {
-            const open = collapsed || filtering || openSections.has(sec.title);
+            const open = sec.headless || collapsed || filtering || openSections.has(sec.title);
             const listId = `${sectionId(sec.title)}-list`;
             return (
             <div key={sec.title} className={cn(collapsed ? "mb-3 last:mb-0" : "mb-0.5")}>
-              {collapsed ? (
+              {sec.headless ? null : collapsed ? (
                 // Keep hidden heading text for assistive technology when the rail collapses.
                 <>
                   <div className="mx-2 mb-1.5 mt-1 border-t border-sidebar-border/70 first:mt-0 first:border-t-0" aria-hidden />
@@ -371,7 +374,8 @@ export function Nav({
                   </button>
                 </h2>
               )}
-              <ul id={listId} hidden={!open} className={cn("space-y-0.5", !collapsed && "pb-2")} aria-labelledby={sectionId(sec.title)}>
+              <ul id={listId} hidden={!open} className={cn("space-y-0.5", !collapsed && "pb-2")}
+                aria-labelledby={sec.headless ? undefined : sectionId(sec.title)} aria-label={sec.headless ? sec.title : undefined}>
                 {sec.items.map((it) => {
                   const active = it.href === activeHref;
                   const Icon = it.icon;
