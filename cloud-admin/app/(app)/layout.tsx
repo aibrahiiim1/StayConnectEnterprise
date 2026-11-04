@@ -8,6 +8,7 @@ import Link from "next/link";
 import { Nav, crumbs } from "@/components/nav";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Skeleton } from "@/components/ui/misc";
+import { OneGateLoader } from "@/components/brand";
 import { ToastProvider } from "@/components/ui/toast";
 import { StepUpProvider } from "@/components/step-up";
 import { SessionExpiryWarning } from "@/components/session-expiry";
@@ -79,8 +80,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   if (loading) {
     return (
       <div className="flex h-screen overflow-hidden" aria-busy="true">
-        <div className="hidden w-[var(--sidebar-width)] shrink-0 border-e border-sidebar-border bg-sidebar lg:block" />
+        <div className="hidden w-[var(--sidebar-width)] shrink-0 border-e border-sidebar-border bg-sidebar px-4 py-3.5 lg:block">
+          <OneGateLoader appIcon className="size-9" label="Loading OneGate" />
+        </div>
         <div className="flex-1 space-y-4 p-6">
+          <OneGateLoader appIcon className="size-9 lg:hidden" />
           <span className="sr-only">Loading</span>
           <Skeleton className="h-7 w-48" />
           <Skeleton className="h-4 w-72" />

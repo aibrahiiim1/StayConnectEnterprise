@@ -558,6 +558,24 @@ var sentRe = regexp.MustCompile(`^\s*Sent\s+(\d+)\s+bytes\s+(\d+)\s+pkt\b`)
 // ReadClasses returns counters for every guest-session class on a device, keyed by full minor. tc has no
 // JSON for class stats, so the text form is parsed.
 func (c *Client) ReadClasses(ctx context.Context, device string) (map[int]ClassBytes, error) {
+	return c.readClassesWhere(ctx, device, IsGuestMinor)
+}
+
+// ReadGroupClasses returns the SHARED group classes on a device, keyed by full minor; kept apart from ReadClasses so the
+// stray sweep, which reads only session classes, can never take a group for a stray.
+func (c *Client) ReadGroupClasses(ctx context.Context, device string) (map[int]ClassBytes, error) {
+	return c.readClassesWhere(ctx, device, func(m int) bool { return m >= GroupMinorBase && m <= GroupMinorMax })
+}
+
+// SharedLeafRates is the (rate, ceiling) ReRateSessionIn installs for a session under a SHARED group of the given plan rate.
+func SharedLeafRates(kbps int) (int, int) {
+	if kbps <= 0 {
+		kbps = 1_000_000
+	}
+	return sharedFloorKbps(kbps), kbps
+}
+
+func (c *Client) readClassesWhere(ctx context.Context, device string, keep func(int) bool) (map[int]ClassBytes, error) {
 	out, err := c.exec(ctx, c.TCPath, "-s", "class", "show", "dev", device)
 	if err != nil {
 		// Only an absent device means "no classes". Any other failure must be an error: treating it as empty
@@ -579,7 +597,7 @@ func (c *Client) ReadClasses(ctx context.Context, device string) (map[int]ClassB
 				continue
 			}
 			minor := int(minor64)
-			if !IsGuestMinor(minor) {
+			if !keep(minor) {
 				continue
 			}
 			curMinor = minor

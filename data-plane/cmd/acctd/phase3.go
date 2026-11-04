@@ -58,6 +58,9 @@ type phase3 struct {
 	// lastIngested holds, per live session, the observation the database last accepted, so an unchanged counter is not sent again
 	// (accountingPass; touched only by the accounting ticker).
 	lastIngested map[string]ingestMark
+	// stored is lastIngested published for the shaping ticker, which tells netd what is accounted before it deletes a class (a regroup).
+	storedMu sync.Mutex
+	stored   map[string]ingestMark
 
 	// contWindow is the outage-continuity window in seconds (enforcement_policy.outage_continuity_minutes * 60). Zero is strict:
 	// no continuity block is sent and netd behaves as before. Held here by watchContinuity, so an unreadable setting keeps the
@@ -280,6 +283,7 @@ func (p *phase3) reconcileShaping(ctx context.Context, netd planSubmitter, fallb
 	env, err := p.buildEnvelope(plan, p.managedBridges(ctx), fallbackBridge, time.Now())
 	if err == nil {
 		env.Continuity = p.continuityFor(ctx, plan, time.Now())
+		p.stampStored(env.Sessions)
 	}
 	if err != nil {
 		// Audit P6 M2: never submit a generation that is not durably saved; report it on health instead.

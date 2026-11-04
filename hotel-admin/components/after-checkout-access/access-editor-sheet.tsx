@@ -202,7 +202,7 @@ export function AccessEditorSheet({
                     </Field>
                     <Field
                       label="Shared data quota (MB)"
-                      hint={`One quota shared by all of the stay's devices, not per device. Allowed: ${fmtData(qb.min)} to ${fmtData(qb.max)}. Default ${fmtData(qb.default)}. 1 GB = 1024 MB.`}
+                      hint={`One quota shared by all of the stay's devices, not per device. Allowed: ${fmtData(qb.min)} to ${fmtData(qb.max)}. Default ${fmtData(qb.default)}. 1 GB = 1000 MB.`}
                       error={err("quotaMb")}
                       className="sm:col-span-2"
                     >

@@ -1,0 +1,4 @@
+commit ad47dde1321d8af902ffa101bec23bc3635a5ebe
+Date:   Wed Nov 4 04:45:15 2026 +0200
+
+    Governance: T0295 records the OneGate brand kit v2

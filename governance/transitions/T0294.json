@@ -1,0 +1,34 @@
+{
+  "transition_id": "T0294",
+  "seq": 294,
+  "timestamp": "2026-11-04T04:36:17+02:00",
+  "timestamp_derivation": "Read from the workstation clock (UTC+02:00) by the script that wrote this receipt, immediately before the commit that introduces it.",
+  "record_type": "ADMIN_CONSOLE_DECIMAL_DATA_UNITS",
+  "authorisation": "The Product Owner's approval of decimal data units on 2026-11-03, delivered under the end-to-end mission of 2026-11-04 (complete and merge the open PRs).",
+  "delivery": "Every Admin Console screen shows data amounts in decimal units (1 GB = 1,000,000,000 bytes), as the guest portal and the plan limits already count: one formatter in lib/bytes.ts used by the backups card, After Check-out Access and the assisted guest-data words.",
+  "verification": "The PR's unit tests (bytes-decimal, after-checkout-access, guest-data-assisted-words). Codex found no issues on 17e2d663. The whole hotel-admin suite runs on master after the mission's merges.",
+  "deployment": {
+    "test_appliance": "Not deployed by this record; the mission deploys master to 172.21.96.97 after the last merge.",
+    "central": "Not changed."
+  },
+  "not_touched": "Stored counters, quotas and plan limits (values unchanged; only how the console writes them), PMS, payments, networking, licences, the production Central.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "e1db6528ca402bb926c7c063147825bc71f6d150",
+  "previous_delivery": "T0293",
+  "decision": "none (Product Owner-approved)",
+  "go_live": "NOT authorised."
+}
