@@ -463,12 +463,15 @@ export default function NetworkSettingsPage() {
               <Button variant="secondary" onClick={doValidate} disabled={busy !== null || pendingNow || formBlocked}>
                 <CheckCircle2 /> {busy === "validate" ? "Validating…" : "Validate & preview"}
               </Button>
-              <Button onClick={() => { setApplyErr(null); setApplying(true); }} disabled={busy !== null || pendingNow || !valid?.validation.ok}>
-                Apply change…
-              </Button>
-              {!pendingNow && !valid?.validation.ok && (
+              {valid?.validation.ok && !pendingNow ? (
+                <Button onClick={() => { setApplyErr(null); setApplying(true); }} disabled={busy !== null}>
+                  Apply change…
+                </Button>
+              ) : !pendingNow && (
                 <span className="text-caption text-muted-foreground">
-                  {validation && validatedFor !== formKey ? "The settings changed since the last check. Validate again." : "Validate the change first."}
+                  {validation && validatedFor !== formKey
+                    ? "The settings changed since the last check. Validate again to apply."
+                    : "Apply appears once the change passes validation."}
                 </span>
               )}
             </>
@@ -485,15 +488,15 @@ export default function NetworkSettingsPage() {
                 WAN / management <span className="ms-1 font-mono text-xs font-normal text-muted-foreground">{state.wan.interface}</span>
               </legend>
               <FieldGrid cols={2}>
-                <Field label="IP address" required error={wanIp.trim() ? undefined : wanIpErr}>
-                  <Input value={wanIp} onChange={(e) => setWanIp(e.target.value)} className="font-mono" />
+                <Field label="IP address" error={wanIpErr}>
+                  <Input aria-required="true" value={wanIp} onChange={(e) => setWanIp(e.target.value)} className="font-mono" />
                 </Field>
-                <Field label="Prefix length" required hint="1 to 32." error={wanPrefixErr}>
+                <Field label="Prefix length" hint="1 to 32." error={wanPrefixErr}>
                   <Input type="number" inputMode="numeric" min={1} max={32} value={wanPrefix} onChange={(e) => setWanPrefix(e.target.value)} />
                 </Field>
               </FieldGrid>
-              <Field label="Default gateway" required error={wanGwErr}>
-                <Input value={wanGw} onChange={(e) => setWanGw(e.target.value)} className="font-mono" />
+              <Field label="Default gateway" error={wanGwErr}>
+                <Input aria-required="true" value={wanGw} onChange={(e) => setWanGw(e.target.value)} className="font-mono" />
               </Field>
               <Field label="DNS servers" optional hint="Separate several with commas.">
                 <Input value={wanDns} onChange={(e) => setWanDns(e.target.value)} className="font-mono" />
@@ -504,10 +507,10 @@ export default function NetworkSettingsPage() {
                 Base LAN / legacy bridge <span className="ms-1 font-mono text-xs font-normal text-muted-foreground">{state.lan.bridge}</span>
               </legend>
               <FieldGrid cols={2}>
-                <Field label="Base gateway IP" required>
-                  <Input value={lanIp} onChange={(e) => setLanIp(e.target.value)} className="font-mono" />
+                <Field label="Base gateway IP">
+                  <Input aria-required="true" value={lanIp} onChange={(e) => setLanIp(e.target.value)} className="font-mono" />
                 </Field>
-                <Field label="Prefix length" required hint="19 to 30. /19 (8,190 addresses) is the widest a client network can be." error={lanPrefixErr}>
+                <Field label="Prefix length" hint="19 to 30. /19 (8,190 addresses) is the widest a client network can be." error={lanPrefixErr}>
                   <Input type="number" inputMode="numeric" min={19} max={30} value={lanPrefix} onChange={(e) => setLanPrefix(e.target.value)} />
                 </Field>
               </FieldGrid>
