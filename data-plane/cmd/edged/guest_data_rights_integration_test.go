@@ -6,11 +6,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/ledger"
 )
 
 func TestIntegration_GuestDataRights_FindExportErase(t *testing.T) {
@@ -121,17 +124,67 @@ func TestIntegration_GuestDataRights_FindExportErase(t *testing.T) {
 		t.Fatal("the export was not audited by record id")
 	}
 
-	// Erasure is refused while the guest is live: access still running, a device online.
+	accessOf := func(acct string) (ent, sess string) {
+		t.Helper()
+		_ = f.pool.QueryRow(ctx, `SELECT e.status || COALESCE(':'||e.terminal_reason,''), COALESCE(max(s.state),'')
+			FROM iam_v2.entitlements e LEFT JOIN iam_v2.sessions s ON s.entitlement_id = e.id
+			WHERE e.guest_account_id=$1 GROUP BY e.status, e.terminal_reason`, acct).Scan(&ent, &sess)
+		return ent, sess
+	}
+	// An erasure the secondary storage cannot record ends nothing and reports no success: the access is ended in the erasure's
+	// own transaction, which the failed ledger write rolls back.
+	heldEmail := "held-" + sfx + "@example.com"
+	heldAcct, _, _ := seedAccountWithSessions(t, f, heldEmail, 0, "10.88.0.12")
+	f.app.ledgerC = secondaryDownLedger{f.ledgerC}
+	st, body = f.do(t, "POST", "/guest-data-rights/erase", req("account", heldAcct, "guest asked", f.password))
+	f.app.ledgerC = f.ledgerC
+	if st != 503 || body["error"] != "ledger_unavailable" || body["erasure_ref"] != nil {
+		t.Fatalf("erasing while the secondary storage is down = %d %v, want 503 ledger_unavailable and no reference", st, body)
+	}
+	if ent, sess := accessOf(heldAcct); ent != "ACTIVE" || sess != "active" {
+		t.Fatalf("a failed erasure ended the access: entitlement %q, session %q", ent, sess)
+	}
+	var heldName string
+	_ = f.pool.QueryRow(ctx, `SELECT username FROM iam_v2.guest_access_accounts WHERE id=$1`, heldAcct).Scan(&heldName)
+	if heldName != heldEmail {
+		t.Fatalf("a refused erasure changed the account: %q", heldName)
+	}
+
+	// An authorised erasure of a guest who is online ends their own access and disconnects them, then erases.
 	liveEmail := "live-" + sfx + "@example.com"
-	liveAcct, _, _ := seedAccountWithSessions(t, f, liveEmail, 0, "10.88.0.11")
+	liveAcct, _, liveSess := seedAccountWithSessions(t, f, liveEmail, 0, "10.88.0.11")
+	// Self-registered: its device is the person's own, so the erasure clears the session's address too.
+	if _, err := f.pool.Exec(ctx, `UPDATE iam_v2.guest_access_accounts SET self_registered = true, email_verified_at = now() WHERE id=$1`, liveAcct); err != nil {
+		t.Fatalf("mark self-registered: %v", err)
+	}
+	scd, rec := fakeLedgerSCD(t)
+	f.app.scd = scd
 	st, body = f.do(t, "POST", "/guest-data-rights/erase", req("account", liveAcct, "guest asked", f.password))
-	if st != 409 || body["error"] != "guest_data_live" {
-		t.Fatalf("erasing a live guest = %d %v, want 409 guest_data_live", st, body)
+	f.app.scd = nil
+	// The erasure clears the session's address, so the withdrawal carries the one read before it, from memory only.
+	if c := rec.last("/v1/admin/sessions/withdraw"); c == nil ||
+		fmt.Sprint(c.Body["addresses"]) != fmt.Sprint(map[string]any{liveSess[0].id: "10.88.0.11"}) {
+		t.Fatalf("the erased guest's device was not withdrawn by its address: %+v", c)
+	}
+	// The fake scd confirms no withdrawal, so none is claimed.
+	if body["devices_withdrawn"] != float64(0) {
+		t.Fatalf("an unconfirmed withdrawal was reported as %v devices disconnected", body["devices_withdrawn"])
+	}
+	var keptIP string
+	_ = f.pool.QueryRow(ctx, `SELECT COALESCE(host(ip),'') FROM iam_v2.sessions WHERE id=$1::uuid`, liveSess[0].id).Scan(&keptIP)
+	if keptIP != "" {
+		t.Fatalf("the erased session kept its address %q", keptIP)
+	}
+	if st != 200 || body["packages_ended"] != float64(1) || body["sessions_ended"] != float64(1) {
+		t.Fatalf("erasing an online guest = %d %v, want 200 with one package and one session ended", st, body)
+	}
+	if ent, sess := accessOf(liveAcct); ent != "TERMINATED:ADMIN" || sess != "ended" {
+		t.Fatalf("after the erasure: entitlement %q, session %q, want TERMINATED:ADMIN and ended", ent, sess)
 	}
 	var liveName string
 	_ = f.pool.QueryRow(ctx, `SELECT username FROM iam_v2.guest_access_accounts WHERE id=$1`, liveAcct).Scan(&liveName)
-	if liveName != liveEmail {
-		t.Fatalf("a refused erasure changed the account: %q", liveName)
+	if liveName == liveEmail {
+		t.Fatal("the online guest's account was not erased")
 	}
 
 	// ...and while the PMS still has the stay open.
@@ -187,7 +240,8 @@ func TestIntegration_GuestDataRights_FindExportErase(t *testing.T) {
 	expect("erasure audit names nobody", str(`SELECT (payload::text NOT LIKE '%'||$2||'%')::text FROM public.audit_log WHERE action='guest_data.erased' AND target_id=$1`, ref, email), "true")
 	st, body = f.do(t, "GET", "/guest-data-rights/erasures", nil)
 	list, _ := body["erasures"].([]any)
-	if st != 200 || len(list) != 1 || list[0].(map[string]any)["erasure_ref"] != ref {
+	// The online guest erased above comes first in time; the newest is listed first.
+	if st != 200 || len(list) != 2 || list[0].(map[string]any)["erasure_ref"] != ref {
 		t.Fatalf("erasures = %d %v", st, body)
 	}
 	if _, err := f.pool.Exec(ctx, `DELETE FROM iam_v2.guest_data_erasures WHERE erasure_ref=$1`, ref); err == nil {
@@ -613,4 +667,12 @@ func TestIntegration_GuestDataRights_AnOpenStayWithNoDepartureLeftOffTheRoomList
 	if st, body := erase(); st != 200 {
 		t.Fatalf("a stay left off the room list must be erasable: %d %v", st, body)
 	}
+}
+
+// secondaryDownLedger is a ledger whose secondary copy cannot be written: every commit is refused as scd refuses it.
+type secondaryDownLedger struct{ ledgerClient }
+
+func (secondaryDownLedger) Commit(context.Context, []ledger.Entry) ([]string, error) {
+	return nil, &ledgerRefusal{http.StatusServiceUnavailable, "ledger_unavailable",
+		"The secondary storage could not be written, so nothing was erased."}
 }

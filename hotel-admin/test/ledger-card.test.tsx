@@ -84,11 +84,25 @@ describe("Ledger card", () => {
     expect(save.disabled).toBe(true);
     expect(test.disabled).toBe(true);
     fireEvent.change(screen.getByLabelText("Server"), { target: { value: "nas.hotel.example" } });
-    fireEvent.click(screen.getByRole("button", { name: /check the server.s identity/i }));
+    fireEvent.click(screen.getByRole("button", { name: /get the server.s key/i }));
     const box = await screen.findByRole("checkbox");
     expect(post).toHaveBeenCalledWith("/backups/ledger/destination/probe", { host: "nas.hotel.example", port: 22 });
     fireEvent.click(box);
     await waitFor(() => expect((screen.getByRole("button", { name: /^save and copy the ledger…$/i }) as HTMLButtonElement).disabled).toBe(false));
+  });
+
+  it("forgets an accepted SFTP key when the port changes, since another port may be another server", async () => {
+    ledger = { ...base, state: "not_configured", erasure_available: false, secondary: { ...base.secondary, configured: false, in_sync: false } };
+    post.mockResolvedValue({ fingerprint: "SHA256:abcdef" });
+    await renderCards();
+    fireEvent.change(await screen.findByLabelText("Kind of secondary storage"), { target: { value: "sftp" } });
+    fireEvent.change(screen.getByLabelText("Server"), { target: { value: "nas.hotel.example" } });
+    fireEvent.click(screen.getByRole("button", { name: /get the server.s key/i }));
+    fireEvent.click(await screen.findByRole("checkbox"));
+    expect(screen.getByText(/tick only if it matches the key read on the server itself/i)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Port"), { target: { value: "2222" } });
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect((screen.getByRole("button", { name: /^save and copy the ledger…$/i }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("sends an SFTP server's password under its own name, apart from the operator's step-up password", async () => {
@@ -101,7 +115,7 @@ describe("Ledger card", () => {
     fireEvent.change(screen.getByLabelText("User name"), { target: { value: "ledger" } });
     fireEvent.change(screen.getByLabelText("Folder on the server"), { target: { value: "/ledger" } });
     fireEvent.change(screen.getByLabelText("Password"), { target: { value: "SERVER-PW" } });
-    fireEvent.click(screen.getByRole("button", { name: /check the server.s identity/i }));
+    fireEvent.click(screen.getByRole("button", { name: /get the server.s key/i }));
     fireEvent.click(await screen.findByRole("checkbox"));
     await waitFor(() => expect((screen.getByRole("button", { name: /^save and copy the ledger…$/i }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole("button", { name: /^save and copy the ledger…$/i }));

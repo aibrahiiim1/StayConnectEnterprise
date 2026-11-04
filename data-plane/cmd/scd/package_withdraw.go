@@ -14,6 +14,9 @@ import (
 
 type withdrawReq struct {
 	Sessions []string `json:"sessions"`
+	// Addresses: an erasure clears an ended session's address in the same transaction, so the caller sends what it read before.
+	// Used only for an ended session whose own row holds no address any more.
+	Addresses map[string]string `json:"addresses,omitempty"`
 }
 
 type withdrawResult struct {
@@ -52,22 +55,40 @@ func (s *server) withdrawEndedSessions(w http.ResponseWriter, r *http.Request) {
 			res.State, res.Detail = "failed", "the session could not be read"
 		case state != "ended":
 			res.State = "not_ended"
-		case ip == nil || *ip == "":
+		case (ip == nil || *ip == "") && in.Addresses[id] == "":
 			res.State = "no_address"
-		case reused:
-			// Another live session holds the address now: withdrawing it would cut off that guest.
-			res.State = "address_reused"
-		default:
-			addr := net.ParseIP(*ip)
-			if addr == nil {
-				res.State = "no_address"
-			} else if gerr := s.denyAtGateChecked(ctx, addr); gerr != nil {
-				res.State, res.Detail = "failed", gerr.Error()
-			} else {
-				res.State = "withdrawn"
+		case ip == nil || *ip == "":
+			// The row was erased: the sent address is withdrawn only if no live session of this site holds it now.
+			given := in.Addresses[id]
+			if err := s.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM iam_v2.sessions o
+				WHERE o.tenant_id = $2 AND o.site_id = $3 AND o.ip = $1::inet AND o.ended IS NULL AND o.state IN ('active','PENDING_ENFORCEMENT'))`,
+				given, s.tenID, s.siteID).Scan(&reused); err != nil {
+				res.State, res.Detail = "failed", "the address could not be checked"
+				break
 			}
+			res = s.withdrawAddress(ctx, res, given, reused)
+		default:
+			res = s.withdrawAddress(ctx, res, *ip, reused)
 		}
 		out = append(out, res)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"results": out})
+}
+
+func (s *server) withdrawAddress(ctx context.Context, res withdrawResult, ip string, reused bool) withdrawResult {
+	addr := net.ParseIP(ip)
+	switch {
+	case reused:
+		// Another live session holds the address now: withdrawing it would cut off that guest.
+		res.State = "address_reused"
+	case addr == nil:
+		res.State = "no_address"
+	default:
+		if gerr := s.denyAtGateChecked(ctx, addr); gerr != nil {
+			res.State, res.Detail = "failed", gerr.Error()
+		} else {
+			res.State = "withdrawn"
+		}
+	}
+	return res
 }

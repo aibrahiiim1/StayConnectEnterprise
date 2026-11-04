@@ -1,0 +1,34 @@
+{
+  "transition_id": "T0296",
+  "seq": 296,
+  "timestamp": "2026-11-04T05:12:47+02:00",
+  "timestamp_derivation": "Read from the workstation clock (UTC+02:00) by the script that wrote this receipt, immediately before the commit that introduces it.",
+  "record_type": "ADMIN_CONSOLE_AND_GUEST_ERASURE_MISSION_REQUIREMENTS",
+  "authorisation": "The Product Owner's end-to-end mission of 2026-11-04 (requirements 1-9: Delivery status and confirmation password, permissions, email-domain groups, Wi-Fi instructions, navigation, SFTP server identity, Guest Erasure confirmation and behaviour).",
+  "delivery": "Delivery (SMTP): status reads Active or Off, health Not tested yet; every sender change is confirmed with the operator's own Admin Console password, labelled apart from the mail server's login password. Verifying a self-registered email account re-pins its open sign-in to the group its verified domain matches (writer-guarded, in the verification's transaction). Verify and reset emails say the link works only on the property's Wi-Fi. The Overview entry stands without a section heading. SFTP: reading a server's key names the cause (name not found, refused, no answer, no SSH greeting, not SSH) with a stable error code; a changed key says what to do; a port change clears the accepted key; pinning unchanged. Guest Erasure: a shorter warning that keeps its obligations, dialogs scroll errors into view; erasing an account or identity ends that person's own packages through the staff End Package writer in the erasure's own transaction, so a refusal or a failed secondary-storage write rolls both back; the devices are withdrawn by the addresses read before the erasure cleared them, and a disconnection is reported only where scd confirmed it. Room access is never ended (0145). Requirement 3 (configurable permissions) is not built: roles are a fixed compiled matrix, so it is held for a Product Owner decision. After T0293, PR #304 also received four netd review fixes (fast path kept off while a regroup waits or the cap defers moves, rebuilds budgeted per pass, a failed regroup denial reported).",
+  "verification": "edged: 97 guest-data, ledger and package-control integration tests, the svc_edged privilege proof (End Package yes, raw entitlement writer no), the failing-secondary rollback test. scd: 57 self-service, group, ledger and withdraw integration tests incl. the svc_scd verify-repin test and the erased-session withdraw test. ledger probe classification on real listeners. All Go modules vet clean (incl. integration tag); data-plane unit tests pass. hotel-admin 1090 and cloud-admin 261 unit tests and both type checks pass on the merged tree (master after #305 plus this branch). Codex found no issues on e8f26374.",
+  "deployment": {
+    "test_appliance": "Not deployed by this record; the mission deploys master to 172.21.96.97 after the last merge, scd before edged.",
+    "central": "Not changed."
+  },
+  "not_touched": "Role permissions (requirement 3 held as a decision), PMS configuration and posting, payments, networking and topology, licences, the production Central. No migration, no new database grant.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "604ae866aff916837e1fea36dc8fcb6e0d55b397",
+  "previous_delivery": "T0295",
+  "decision": "none (Product Owner-approved mission); requirement 3 recorded as an open Product Owner decision",
+  "go_live": "NOT authorised."
+}

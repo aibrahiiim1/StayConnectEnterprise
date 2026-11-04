@@ -252,7 +252,7 @@ export function LedgerCard({ writable }: { writable: boolean }) {
             {form.kind === "sftp" && (
               <div className="grid gap-3 sm:grid-cols-2">
                 <Field label="Server"><Input value={form.host} onChange={(e) => { set("host", e.target.value); set("fingerprint", ""); setProbed(null); }} placeholder="nas.example.org" /></Field>
-                <Field label="Port"><Input value={form.port} onChange={(e) => set("port", e.target.value)} inputMode="numeric" /></Field>
+                <Field label="Port"><Input value={form.port} onChange={(e) => { set("port", e.target.value); set("fingerprint", ""); setProbed(null); }} inputMode="numeric" /></Field>
                 <Field label="User name"><Input value={form.user} onChange={(e) => set("user", e.target.value)} autoComplete="off" /></Field>
                 <Field label="Folder on the server" hint="Absolute, or relative to the account’s login folder. The folder actually written to is shown after a test.">
                   <Input value={form.dir} onChange={(e) => set("dir", e.target.value)} placeholder="/backups/onegate" />
@@ -260,12 +260,12 @@ export function LedgerCard({ writable }: { writable: boolean }) {
                 <Field label="Password" hint={savedSecretHint(sec?.secrets?.password)}><Input type="password" value={form.password} onChange={(e) => set("password", e.target.value)} autoComplete="new-password" /></Field>
                 <Field label="…or SSH private key" hint={savedSecretHint(sec?.secrets?.private_key) ?? "Paste instead of a password (OpenSSH or PEM format)."}><Textarea rows={2} className="font-mono text-xs" value={form.private_key} onChange={(e) => set("private_key", e.target.value)} spellCheck={false} /></Field>
                 <div className="sm:col-span-2 space-y-2">
-                  <Button variant="secondary" size="sm" disabled={probing || !form.host.trim()} onClick={() => void probe()}>Check the server’s identity</Button>
-                  {form.fingerprint && !probed && <p className="text-xs text-muted-foreground">Confirmed key <span className="break-all font-mono">{form.fingerprint}</span>. Check again only if the server’s key has changed.</p>}
+                  <Button variant="secondary" size="sm" disabled={probing || !form.host.trim()} onClick={() => void probe()}>{probing ? "Reading the server’s key…" : "Get the server’s key"}</Button>
+                  {form.fingerprint && !probed && <p className="text-xs text-muted-foreground">Accepted key <span className="break-all font-mono">{form.fingerprint}</span>. The appliance connects only to a server with this key; changing the server or port clears it.</p>}
                   {probed && (
                     <label className="flex items-start gap-2 text-sm">
                       <input type="checkbox" className="mt-1" checked={form.fingerprint === probed} onChange={(e) => set("fingerprint", e.target.checked ? probed : "")} />
-                      <span>This is my server. Its key fingerprint is <span className="break-all font-mono text-xs">{probed}</span>; the appliance will refuse any server that presents another.</span>
+                      <span>The server presented the key <span className="break-all font-mono text-xs">{probed}</span>. Tick only if it matches the key read on the server itself (ask its administrator); the appliance will then refuse any other key.</span>
                     </label>
                   )}
                 </div>

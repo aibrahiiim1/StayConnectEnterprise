@@ -72,7 +72,7 @@ describe("Guest data requests", () => {
     fillDialog(dialog, "ERASE");
     fireEvent.click(go);
     await within(dialog).findByText(/the PMS still shows this stay as reserved or in-house/);
-    expect(within(dialog).getByText(/device is online right now on this record/)).toBeTruthy();
+    expect(within(dialog).getByText(/a device is online on access that is not only this guest/)).toBeTruthy();
   });
 
   it("shows the erasure reference to give the guest", async () => {
@@ -87,5 +87,17 @@ describe("Guest data requests", () => {
     expect(post).toHaveBeenCalledWith("/guest-data-rights/erase",
       { kind: "account", id: account.id, reason: "written request", password: "pw" });
     expect(screen.queryByText("guest@example.com")).toBeNull();
+  });
+
+  it("says when the erasure ended the guest's own access", async () => {
+    post.mockResolvedValue({ erasure_ref: "ER-0A1B2C3D4E60", counts: { client_accounts: 1 }, packages_ended: 1, sessions_ended: 2, devices_withdrawn: 0 });
+    await renderPage();
+    fireEvent.keyDown(screen.getByRole("button", { name: /^Actions for Client account/ }), { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^Erase/ }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/Their own internet access ends now and those devices are disconnected/)).toBeTruthy();
+    fillDialog(dialog, "ERASE");
+    fireEvent.click(within(dialog).getByRole("button", { name: /erase guest/i }));
+    await screen.findByText(/Their access was ended \(1 package, 2 device sessions\)\. The disconnection is not confirmed yet/);
   });
 });

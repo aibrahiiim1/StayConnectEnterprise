@@ -310,7 +310,7 @@ export const PORTAL_STRINGS: PortalString[] = [
   { group: "Email account: links in the emails", key: "acct.verify.lead", english: "Tap the button to confirm this email address for your Wi-Fi account.", module: "email_otp" },
   { group: "Email account: links in the emails", key: "acct.verify.btn", english: "Verify email", module: "email_otp" },
   { group: "Email account: links in the emails", key: "acct.verified.title", english: "Email verified", module: "email_otp" },
-  { group: "Email account: links in the emails", key: "acct.verified", english: "Your email address is verified. Your Internet access continues as normal.", module: "email_otp" },
+  { group: "Email account: links in the emails", key: "acct.verified", english: "Your email address is verified. Your Internet access continues as normal. If your organisation has its own Internet package, go back to the Wi-Fi page to see it.", module: "email_otp" },
   { group: "Email account: links in the emails", key: "acct.verify.expired", english: "This link has expired or has already been used. Sign in and ask for a new verification email.", module: "email_otp" },
   { group: "Email account: links in the emails", key: "acct.reset.title", english: "Choose a new password", module: "email_otp" },
   { group: "Email account: links in the emails", key: "acct.reset.new", english: "New password", module: "email_otp" },

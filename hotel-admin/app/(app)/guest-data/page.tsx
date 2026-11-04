@@ -1,7 +1,7 @@
 "use client";
 
 // Only site_admin and the IT manager reach this page; every export and erasure asks for the password and a reason
-// and is recorded by id, never by name. Erasure anonymises and is refused while the guest is staying or online.
+// and is recorded by id, never by name. Erasure ends the person's own access and anonymises; it is refused while the guest is staying.
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
@@ -23,7 +23,7 @@ import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { useToast } from "@/components/ui/toast";
 import { errMsg, formatDate } from "@/lib/utils";
 import { Download, Eraser, Search } from "lucide-react";
-import { LIVE_REASONS, eraseConsequences, exportDescription } from "@/lib/guest-data-words";
+import { LIVE_REASONS, eraseConsequences, erasedAccessWords, exportDescription } from "@/lib/guest-data-words";
 import { ledgerHeadline, type LedgerStatus } from "@/lib/ledger-words";
 
 type Kind = "account" | "principal" | "stay" | "stay_guest";
@@ -69,7 +69,7 @@ export default function GuestDataPage() {
   const [erasing, setErasing] = useState<Match | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionErr, setActionErr] = useState<string | null>(null);
-  const [done, setDone] = useState<{ ref: string; counts: Record<string, number> } | null>(null);
+  const [done, setDone] = useState<{ ref: string; counts: Record<string, number>; access: string } | null>(null);
   const [record, setRecord] = useState<Erasure | null>(null);
 
   const loadErasures = useCallback(async () => {
@@ -114,10 +114,10 @@ export default function GuestDataPage() {
     if (!erasing) return;
     setBusy(true); setActionErr(null);
     try {
-      const r = await api.post<{ erasure_ref: string; counts: Record<string, number> }>(
+      const r = await api.post<{ erasure_ref: string; counts: Record<string, number>; packages_ended?: number; sessions_ended?: number; devices_withdrawn?: number }>(
         "/guest-data-rights/erase", { kind: erasing.kind, id: erasing.id, reason, password });
       setErasing(null);
-      setDone({ ref: r.erasure_ref, counts: r.counts });
+      setDone({ ref: r.erasure_ref, counts: r.counts, access: erasedAccessWords(r.packages_ended, r.sessions_ended, r.devices_withdrawn) });
       setMatches(null); setMatchesCut(false); setQ("");
       await loadErasures();
     } catch (e) {
@@ -150,7 +150,7 @@ export default function GuestDataPage() {
               <p>Keep track of each request and its deadline in the request register.</p>
             </HelpSection>
             <HelpSection title="Erasures">
-              <p>Erasure anonymises the records and is refused while the guest is staying or online. Each erasure has a reference to give the guest as proof.</p>
+              <p>Erasure ends the person&rsquo;s own internet access, disconnects their devices and anonymises the records. It is refused while the guest is staying or the room&rsquo;s shared access is running. Each erasure has a reference to give the guest as proof.</p>
             </HelpSection>
           </>
         }
@@ -177,7 +177,7 @@ export default function GuestDataPage() {
       {done && (
         <Callout tone="success">
           Erased. Reference <strong className="font-mono">{done.ref}</strong>: give it to the guest as proof. {""}
-          {countWords(done.counts)}.
+          {countWords(done.counts)}. {done.access}
         </Callout>
       )}
 

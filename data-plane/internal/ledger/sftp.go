@@ -11,6 +11,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/pkg/sftp"
@@ -85,14 +86,47 @@ func (d *SFTPDest) ProbeHostKey(ctx context.Context) (string, error) {
 	nd := net.Dialer{Timeout: d.timeout()}
 	conn, err := nd.DialContext(ctx, "tcp", net.JoinHostPort(d.Host, strconv.Itoa(d.port())))
 	if err != nil {
-		return "", fmt.Errorf("the server cannot be reached: %w", err)
+		return "", d.dialError(err)
 	}
 	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(d.timeout()))
 	_, _, _, err = ssh.NewClientConn(conn, d.Host, cfg)
 	if fp != "" {
 		return fp, nil
 	}
-	return "", fmt.Errorf("the server did not present a host key: %v", err)
+	if ne, ok := errors.AsType[net.Error](err); ok && ne.Timeout() {
+		return "", &ProbeError{Kind: ProbeTimeout, Msg: fmt.Sprintf("%s accepted the connection on port %d but sent no SSH greeting within %s: check the port", d.Host, d.port(), d.timeout())}
+	}
+	return "", &ProbeError{Kind: ProbeNotSSH, Msg: fmt.Sprintf("something answered on port %d of %s, but it is not an SSH (SFTP) server: check the port", d.port(), d.Host)}
+}
+
+// ProbeError says why a server's key could not be read, in words an operator can act on; Kind is a stable code for the API.
+type ProbeError struct {
+	Kind string
+	Msg  string
+}
+
+func (e *ProbeError) Error() string { return e.Msg }
+
+const (
+	ProbeNotFound = "not_found"
+	ProbeRefused  = "refused"
+	ProbeTimeout  = "timeout"
+	ProbeNotSSH   = "not_ssh"
+	ProbeOther    = "unreachable"
+)
+
+func (d *SFTPDest) dialError(err error) error {
+	var dns *net.DNSError
+	switch {
+	case errors.As(err, &dns) && dns.IsNotFound:
+		return &ProbeError{Kind: ProbeNotFound, Msg: fmt.Sprintf("the name %s could not be found: check the server name", d.Host)}
+	case errors.Is(err, syscall.ECONNREFUSED):
+		return &ProbeError{Kind: ProbeRefused, Msg: fmt.Sprintf("nothing accepts connections on port %d of %s: check the port and that the SFTP service is running", d.port(), d.Host)}
+	case errors.Is(err, context.DeadlineExceeded) || os.IsTimeout(err):
+		return &ProbeError{Kind: ProbeTimeout, Msg: fmt.Sprintf("%s did not answer on port %d within %s: check the address and any firewall between the appliance and the server", d.Host, d.port(), d.timeout())}
+	}
+	return &ProbeError{Kind: ProbeOther, Msg: fmt.Sprintf("%s could not be reached on port %d: %v", d.Host, d.port(), err)}
 }
 
 func (d *SFTPDest) connect(ctx context.Context) (*sftp.Client, func(), error) {
@@ -104,11 +138,14 @@ func (d *SFTPDest) connect(ctx context.Context) (*sftp.Client, func(), error) {
 		return nil, nil, err
 	}
 	want := d.Fingerprint
+	var keyErr error
 	cfg := &ssh.ClientConfig{
 		User: d.User, Auth: auth, Timeout: d.timeout(),
 		HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
 			if got := ssh.FingerprintSHA256(key); got != want {
-				return fmt.Errorf("the server's host key changed (expected %s, got %s)", want, got)
+				keyErr = fmt.Errorf("the server's host key changed: it presented %s, not the accepted %s, so the appliance did not connect. "+
+					"If the server's key really changed, get its key again and accept it; otherwise this may not be your server", got, want)
+				return keyErr
 			}
 			return nil
 		},
@@ -116,12 +153,15 @@ func (d *SFTPDest) connect(ctx context.Context) (*sftp.Client, func(), error) {
 	nd := net.Dialer{Timeout: d.timeout()}
 	conn, err := nd.DialContext(ctx, "tcp", net.JoinHostPort(d.Host, strconv.Itoa(d.port())))
 	if err != nil {
-		return nil, nil, fmt.Errorf("the server cannot be reached: %w", err)
+		return nil, nil, d.dialError(err)
 	}
 	sc, chans, reqs, err := ssh.NewClientConn(conn, d.Host, cfg)
 	if err != nil {
 		conn.Close()
-		return nil, nil, fmt.Errorf("the server refused the connection: %w", err)
+		if keyErr != nil {
+			return nil, nil, keyErr
+		}
+		return nil, nil, fmt.Errorf("the server did not accept the SSH connection or sign-in (check the user name, password or key): %w", err)
 	}
 	cl, err := sftp.NewClient(ssh.NewClient(sc, chans, reqs))
 	if err != nil {

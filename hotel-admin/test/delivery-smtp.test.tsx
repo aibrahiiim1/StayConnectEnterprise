@@ -78,6 +78,36 @@ describe("the page", () => {
     expect(screen.getByText("Failing")).toBeInTheDocument();
     expect(screen.getByText("smtp.example.com:587")).toBeInTheDocument();
   });
+
+  // Status says whether a sender is switched on (Active / Off); Health says whether it works. "In use" said neither clearly.
+  it("separates on/off from working: Status Active or Off, Health Sending, Failing or Not tested yet", async () => {
+    const UNTESTED = { ...SMTP, id: "p3", display_name: "New relay", last_success_at: undefined };
+    routes([SMTP, SENDGRID, UNTESTED]);
+    render(<NotificationsPage />);
+    await screen.findByText("Site relay");
+    expect(screen.getByRole("columnheader", { name: "Status" })).toBeInTheDocument();
+    expect(screen.getAllByText("Active")).toHaveLength(2);
+    expect(screen.getByText("Off")).toBeInTheDocument();
+    expect(screen.getByText("Not tested yet")).toBeInTheDocument();
+    expect(screen.queryByText("In use")).toBeNull();
+  });
+
+  // Every change is confirmed with the operator's own password, and a browser cannot fill that saved login into the sender's secret.
+  it("asks for the Admin Console password apart from the mail server's, and keeps autofill out of the secret", async () => {
+    routes([SMTP]);
+    render(<NotificationsPage />);
+    await screen.findByText("Site relay");
+    fireEvent.click(screen.getByRole("button", { name: /^Edit\b/ }));
+    const dialog = await screen.findByRole("dialog");
+    const secret = within(dialog).getByLabelText(/^Login password/) as HTMLInputElement;
+    const confirm = within(dialog).getByLabelText(/Your Admin Console password/) as HTMLInputElement;
+    expect(secret.autocomplete).toBe("new-password");
+    expect(confirm.autocomplete).toBe("current-password");
+    expect(secret.name).not.toBe(confirm.name);
+    expect(within(dialog).getByRole("button", { name: /Save changes/ })).toBeDisabled();
+    fireEvent.change(confirm, { target: { value: "op-pw" } });
+    expect(within(dialog).getByRole("button", { name: /Save changes/ })).toBeEnabled();
+  });
 });
 
 describe("an SMTP sender", () => {
@@ -94,14 +124,14 @@ describe("an SMTP sender", () => {
     fireEvent.change(within(dialog).getByLabelText(/^Security/), { target: { value: "tls" } });
     expect(within(dialog).getByText(/Leave blank for the usual port for the security chosen \(465\)/)).toBeInTheDocument();
     fireEvent.change(within(dialog).getByLabelText(/^Username/), { target: { value: "codes@example.com" } });
-    const pw = within(dialog).getByLabelText(/^Password/) as HTMLInputElement;
+    const pw = within(dialog).getByLabelText(/^Login password/) as HTMLInputElement;
     expect(pw.type).toBe("password");
     fireEvent.change(pw, { target: { value: "s3cret" } });
     fireEvent.change(within(dialog).getByLabelText(/From address/), { target: { value: "codes@example.com" } });
     fireEvent.change(within(dialog).getByLabelText(/From name/), { target: { value: "Wi-Fi Access" } });
     fireEvent.change(within(dialog).getByLabelText(/^Timeout/), { target: { value: "20" } });
 
-    fireEvent.change(within(dialog).getByLabelText(/Your password/), { target: { value: "op-pw" } });
+    fireEvent.change(within(dialog).getByLabelText(/Your Admin Console password/), { target: { value: "op-pw" } });
     fireEvent.click(within(dialog).getByRole("button", { name: /^Add sender$/ }));
     await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
     expect(post.mock.calls[0][0]).toBe("/notification-providers");
@@ -124,7 +154,7 @@ describe("an SMTP sender", () => {
     expect((within(dialog).getByLabelText(/Mail server/) as HTMLInputElement).value).toBe("smtp.example.com");
     expect((within(dialog).getByLabelText(/^Port/) as HTMLInputElement).value).toBe("587");
     fireEvent.change(within(dialog).getByLabelText(/^Port/), { target: { value: "2525" } });
-    fireEvent.change(within(dialog).getByLabelText(/Your password/), { target: { value: "op-pw" } });
+    fireEvent.change(within(dialog).getByLabelText(/Your Admin Console password/), { target: { value: "op-pw" } });
     fireEvent.click(within(dialog).getByRole("button", { name: /Save changes/ }));
     await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
     expect(patch.mock.calls[0][1].password).toBe("op-pw");
@@ -143,7 +173,7 @@ describe("an SMTP sender", () => {
     fireEvent.change(within(dialog).getByLabelText("Service"), { target: { value: "smtp" } });
     fireEvent.change(within(dialog).getByLabelText(/Mail server/), { target: { value: "smtp.example.com" } });
     fireEvent.change(within(dialog).getByLabelText(/^Username/), { target: { value: "codes" } });
-    fireEvent.change(within(dialog).getByLabelText(/Your password/), { target: { value: "op-pw" } });
+    fireEvent.change(within(dialog).getByLabelText(/Your Admin Console password/), { target: { value: "op-pw" } });
     fireEvent.click(within(dialog).getByRole("button", { name: /^Add sender$/ }));
     expect(await within(dialog).findByText("a username requires a password")).toBeInTheDocument();
   });
