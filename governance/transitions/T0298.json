@@ -1,0 +1,35 @@
+{
+  "transition_id": "T0298",
+  "seq": 298,
+  "timestamp": "2026-11-04T05:46:29+02:00",
+  "timestamp_derivation": "Read from the workstation clock (UTC+02:00) by the script that wrote this receipt, immediately before the commit that introduces it.",
+  "record_type": "TEST_APPLIANCE_DEPLOYMENT_OF_THE_MISSION_MASTER",
+  "authorisation": "The Product Owner's end-to-end mission of 2026-11-04 (deployment to the test appliance 172.21.96.97 with backup, rollback readiness and live verification) and the standing authorization D79.",
+  "delivery": "Master 7a36f484 (after PRs #304, #303, #305, #306 and #302) deployed to the test appliance: netd, acctd, scd, edged and portald in that order (netd before acctd for the plan fields, scd before edged for the withdrawal addresses), the Admin Console bundle, and the Admin Console certificate manager.",
+  "findings": "NOT VERIFIED: room sign-in at an evening peak (only overnight volume has been seen since the fix); portal HTTPS recovery after a full appliance reboot (not rebooted, to keep 374 online devices connected; covered by its unit test); a live erasure (the erasure ledger's secondary storage is not set up on this appliance, so erasure is refused before anything changes); the email-domain group re-pin and the Wi-Fi wording in a real email on a real device. One acctd expiry deadlock was logged at 03:41:43 UTC, before the deploy; it is the known intermittent one, retried by the next pass.",
+  "verification": "Build: clean clone of master, scripts/build-appliance-binaries.sh, every binary names 7a36f484ad8d with -tags=stayconnect_production and vcs.modified=false; checksums verified on the appliance before install. After the deploy: all units active; DEPLOYED_BINARIES.sha256 rewritten and every line matches the installed bytes; netd 374 sessions, passes 256-395 ms, 0 failed, no plan refused; health sweep 0 issues; edged health ok; console login 200; the portal reports HTTPS active right after the scd restart; the SFTP key probe through the live API answers not_found and refused with their plain messages; the certificate manager's static probe /favicon.svg answers 200 on the DNS and IP addresses (the retired /icon.svg answers 307, which would have rolled renewals back); the new console wording is in the served bundle. Room sign-ins since the netd fix and the 4-vCPU change: 3 SERVICE_UNAVAILABLE of 61 after 22:00 UTC and none since 00:00 UTC, at overnight volume; netd pass median 324 ms with about 370 devices online, inside portald's 2.5 s budget.",
+  "deployment": {
+    "test_appliance": "172.21.96.97: netd, acctd, scd, edged, portald, Admin Console 20261104-034421 and the certificate manager from 7a36f484ad8d41a270a45f4984654f660a0999f0, read back; rollback: <svc>.bak-pre-7a36f484-*, hotel-admin.previous, cert manager .bak-pre-7a36f484-*.",
+    "central": "Not changed."
+  },
+  "not_touched": "The production Central, PMS configuration and posting, payments, networking and topology, licences, the database schema. No migration.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "7a36f484ad8d41a270a45f4984654f660a0999f0",
+  "previous_delivery": "T0297",
+  "decision": "none (Product Owner-approved mission; D79)",
+  "go_live": "NOT authorised."
+}
