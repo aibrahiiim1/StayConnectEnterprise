@@ -111,6 +111,14 @@ func TestClientActivitySQLReadsOnlyGrantedTablesAndRealColumns(t *testing.T) {
 	if strings.Contains(list, "guest_signin_restrictions") {
 		t.Fatal("the timeline reads the mutable restriction row as if it were history")
 	}
+	// A reinstatement clears the stay's checkout time, so check-outs come from the check-out messages themselves.
+	if strings.Contains(list, "effective_checkout_at") || !strings.Contains(list, "sevt.event_type = 'GO'") {
+		t.Fatal("check-outs are read from the stay's mutable checkout time")
+	}
+	// A sign-in release names the device by its MAC, which is its audit target.
+	if !strings.Contains(list, "al.target_type = 'guest_device' THEN al.target_id") {
+		t.Fatal("staff sign-in releases do not carry the device")
+	}
 	// A staff action on a client account names that account, so it can be read and searched like any other client.
 	if !strings.Contains(list, "gat.id::text = al.target_id") || !strings.Contains(list, "COALESCE(gat.username,") {
 		t.Fatal("staff actions on client accounts are not resolved to the account")

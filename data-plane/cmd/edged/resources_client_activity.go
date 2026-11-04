@@ -258,17 +258,21 @@ func clientActivitySources(sc clientActivityScope, args *[]any) string {
 	                       WHERE sevt.tenant_id = $1 AND sevt.site_id = $2 AND sevt.stay_id = st.id ORDER BY sevt.received_at LIMIT 1) fe
 	  LEFT JOIN iam_v2.pms_interfaces pi ON pi.tenant_id = $1 AND pi.site_id = $2 AND pi.id = st.pms_interface_id
 	 WHERE st.tenant_id = $1 AND st.site_id = $2 AND fe.at >= $3 AND fe.at < $4`,
-			`SELECT st.effective_checkout_at, 'stay', 'CHECKED_OUT', 'info', '', 'room', COALESCE(st.normalized_room_number,''), '', '', '',
-	       COALESCE(pi.display_label,''), '', '', st.id::text, '', 's2' || st.id::text
-	  FROM iam_v2.stays st
+			// Every applied check-out message is history (a reinstatement clears the stay's own checkout time); resends share the PMS time.
+			`SELECT DISTINCT ON (sevt.stay_id, sevt.pms_timestamp_utc) COALESCE(sevt.pms_timestamp_utc, sevt.received_at), 'stay', 'CHECKED_OUT', 'info', '',
+	       'room', COALESCE(st.normalized_room_number,''), '', '', '', COALESCE(pi.display_label,''), '', '', st.id::text, '', 's2' || sevt.id::text
+	  FROM iam_v2.stay_events sevt
+	  JOIN iam_v2.stays st ON st.tenant_id = $1 AND st.site_id = $2 AND st.id = sevt.stay_id
 	  LEFT JOIN iam_v2.pms_interfaces pi ON pi.tenant_id = $1 AND pi.site_id = $2 AND pi.id = st.pms_interface_id
-	 WHERE st.tenant_id = $1 AND st.site_id = $2 AND st.effective_checkout_at >= $3 AND st.effective_checkout_at < $4`)
+	 WHERE sevt.tenant_id = $1 AND sevt.site_id = $2 AND sevt.event_type = 'GO' AND sevt.processing_status = 'APPLIED'
+	   AND sevt.received_at >= $3 AND sevt.received_at < $4`)
 	}
 	if sc.Staff && len(sc.StaffActions) > 0 {
 		acts := arg(sc.StaffActions)
 		parts = append(parts,
 			`SELECT al.ts, 'staff', al.action, 'info', COALESCE(al.payload->>'reason',''), `+staffClientOf+`,
-	       COALESCE(s.mac::text, d.mac::text, ''), COALESCE(host(s.ip),''), '', COALESCE(s.id::text,''), COALESCE(e.id::text,''), COALESCE(st.id::text,''),
+	       COALESCE(s.mac::text, d.mac::text, CASE WHEN al.target_type = 'guest_device' THEN al.target_id END, ''), COALESCE(host(s.ip),''), '',
+	       COALESCE(s.id::text,''), COALESCE(e.id::text,''), COALESCE(st.id::text,''),
 	       COALESCE(NULLIF(op.display_name,''), op.email, al.actor_type, ''), 'x1' || al.ts::text || al.action || COALESCE(al.target_id,'')
 	  FROM public.audit_log al
 	  LEFT JOIN public.operators op ON al.actor_type = 'operator' AND op.id::text = al.actor_id
