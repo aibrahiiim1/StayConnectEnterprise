@@ -117,17 +117,10 @@ type phase3Shaping struct {
 	passGroupClasses map[string]map[int]shape.ClassBytes
 	// passGroups records the SHARED group classes already re-rated in this pass, so a group is re-rated once per pass, not once per device.
 	passGroups map[string]bool
-	// passRegroups counts regroups begun in this pass (regroup); capped so renewals are never starved.
+	// passRegroups counts moves made in this pass (regroup); capped so renewals are never starved.
 	passRegroups int
 	// passRegroupsDeferred counts regroups the cap left for a later pass; while any remain the fast path stays off.
 	passRegroupsDeferred int
-	// passRebuilds counts regroup rebuilds done in this pass, resumed waits included; capped like the starts.
-	passRebuilds int
-	// regroupWaiting holds, per class, when a regroup denied the device to wait for acctd to store its final counters.
-	regroupWaiting map[string]time.Time
-	// regroupPostponed holds, per class, a regroup given up because the final counters were not confirmed: the device is back on its
-	// counted class until the time, and the wait doubles each time (regroup).
-	regroupPostponed map[string]postponedRegroup
 	// groupSlots gives each SHARED entitlement in the plan its own group minor (assignGroups); a hash alone let two share one.
 	groupSlots map[string]int
 
@@ -242,8 +235,6 @@ func (p *phase3Shaping) endSeries(bridge, sessionID string) {
 	delete(p.pending, classKey(bridge, sessionID))
 	delete(p.leaseMem, classKey(bridge, sessionID))
 	delete(p.provenAt, classKey(bridge, sessionID))
-	delete(p.regroupWaiting, classKey(bridge, sessionID))
-	delete(p.regroupPostponed, classKey(bridge, sessionID))
 	// The quarantine deliberately outlives the series: clearing it would let the next pass re-admit the guest.
 }
 
@@ -706,7 +697,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 	p.passClasses = strayReads
 	p.passGroups = map[string]bool{}
 	p.passGroupClasses = map[string]map[int]shape.ClassBytes{}
-	p.passRegroups, p.passRegroupsDeferred, p.passRebuilds = 0, 0, 0
+	p.passRegroups, p.passRegroupsDeferred = 0, 0
 	p.assignGroups(ctx, desired)
 	for _, bridge := range sortedKeys(bridges) {
 		byMinor := desired[bridge]
