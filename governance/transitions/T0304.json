@@ -1,0 +1,35 @@
+{
+  "transition_id": "T0304",
+  "seq": 304,
+  "timestamp": "2026-11-04T17:13:50+02:00",
+  "timestamp_derivation": "Read from the workstation clock (UTC+02:00) by the script that wrote this receipt, immediately before the commit that introduces it.",
+  "record_type": "TEST_APPLIANCE_UPGRADE_TO_IMMEDIATE_MOVES_MASTER",
+  "authorisation": "The Product Owner's mission of 2026-11-04 (D92) and the standing authorization D79.",
+  "delivery": "Master 9dc357ef (PR #312: immediate moves, DEVICE_LIMIT_REACHED, the room sign-in label, the per-pass budget fix) installed on the test appliance with appliance-install.sh --upgrade; migration 0207 behind its verified pre-change backup.",
+  "findings": "Room 2108 (investigated for the PO): the room's free package (SHARED, 10 devices) ended for DATA at 11:35:57 UTC; at 11:37 the guest signed in by room and chose STAFF-9KFM, which allows one device (REJECT_NEW_DEVICE) and has no audience rule beyond once-per-guest, so it is offered to room guests; the guest then replaced devices three times, which recorded PRINCIPAL (fixed here) and so showed as Email, phone or social login. Whether the Staff package should be offered to room guests is a package-configuration decision for the PO. Separately, an operator disabled a guest network at 14:51 and applied the change at 14:54 UTC, before this upgrade. NOT VERIFIED live: an actual package move under the new immediate rule (none observed since the upgrade; covered by unit tests).",
+  "verification": "Every binary 9dc357ef4fa2, clean, matching DEPLOYED_BINARIES.sha256; HOTEL_ADMIN_INTEGRITY = PASS; schema 0207; netd 344 sessions, passes 197-427 ms; health sweep 0 issues. Live: after scd was installed (15:04:40 UTC) every device-limit refusal is recorded DEVICE_LIMIT_REACHED (5 by 15:12; the SERVICE_UNAVAILABLE ones all precede it), and every room session started since is recorded PMS (the one PRINCIPAL, 15:01, precedes it).",
+  "deployment": {
+    "test_appliance": "172.21.96.97: onegate-appliance-9dc357ef4fa2, read back.",
+    "central": "Not changed."
+  },
+  "not_touched": "Package configuration (including the Staff package), PMS, payments, networking, licences, the production Central.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "9dc357ef4fa2b10a6fd4150f2e00793f36a8a01f",
+  "previous_delivery": "T0303",
+  "decision": "none (Product Owner-approved mission; D79)",
+  "go_live": "NOT authorised."
+}
