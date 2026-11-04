@@ -149,6 +149,7 @@ iam_v2.voucher_revocations.reason
 iam_v2.vouchers.code_hmac
 iam_v2.vouchers.notes
 iam_v2.walled_garden_settings_changes.change_reason
+public.custom_roles.name
 public.appliance_recovery_events.actor
 public.appliance_service_health.last_failure_reason
 public.appliances.identity_verified_at
