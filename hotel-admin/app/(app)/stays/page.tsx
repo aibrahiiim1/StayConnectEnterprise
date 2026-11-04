@@ -140,6 +140,13 @@ export default function StaysPage() {
     finally { setDetailBusy(false); }
   }
 
+  const openRef = useRef(open);
+  openRef.current = open;
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("stay");
+    if (id && /^[0-9a-fA-F-]{8,64}$/.test(id)) void openRef.current(id);
+  }, []);
+
   async function changeAdminBlock(action: "SET" | "CLEAR", reason: string, password: string) {
     if (!detail) return;
     setBlockBusy(true); setBlockErr(null);
