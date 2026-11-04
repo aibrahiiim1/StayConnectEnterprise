@@ -84,7 +84,7 @@ export const SearchInput = React.forwardRef<
           "placeholder:text-muted-foreground/80 hover:border-input",
           "focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/15",
           "[&::-webkit-search-cancel-button]:appearance-none [&::-webkit-search-decoration]:appearance-none",
-          size === "sm" ? "h-8" : "h-9 pointer-coarse:h-11",
+          size === "sm" ? "h-8 pointer-coarse:pe-11" : "h-9 pointer-coarse:h-11 pointer-coarse:pe-11",
         )}
       />
       {local && (
@@ -94,7 +94,7 @@ export const SearchInput = React.forwardRef<
             setLocal("");
             onChange("");
           }}
-          className="absolute end-1.5 top-1/2 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="absolute end-1.5 top-1/2 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:end-0 pointer-coarse:size-11"
         >
           <X className="size-3.5" aria-hidden />
           <span className="sr-only">Clear search</span>
@@ -247,8 +247,8 @@ export function Pagination({
   const to = offset + shown;
   const hasNext = total != null ? to < total : hasMore ?? shown >= limit;
   return (
-    <div className={cn("flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground", className)}>
-      <span className="tabular">
+    <nav aria-label="Pagination" className={cn("flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground", className)}>
+      <span role="status" aria-live="polite" className="tabular">
         {shown === 0
           ? "No rows"
           : total != null
@@ -268,7 +268,7 @@ export function Pagination({
           Next <ChevronRight />
         </Button>
       </div>
-    </div>
+    </nav>
   );
 }
 
@@ -383,12 +383,12 @@ export function Timeline({
   };
   if (items.length === 0) return <p className="text-sm text-muted-foreground">{emptyLabel}</p>;
   return (
-    <ol className={cn("relative space-y-4 border-l border-border pl-5", className)}>
+    <ol className={cn("relative space-y-4 border-s border-border ps-5", className)}>
       {items.map((it, i) => (
         <li key={it.key ?? i} className="relative">
           <span
             className={cn(
-              "absolute -left-[25px] top-1.5 size-2.5 rounded-full ring-4 ring-card",
+              "absolute -start-[25px] top-1.5 size-2.5 rounded-full ring-4 ring-card",
               dot[it.tone ?? "neutral"],
             )}
             aria-hidden
@@ -442,10 +442,13 @@ export function Stepper({
                   done && "border-primary/40 bg-primary-subtle text-primary-subtle-foreground",
                   !active && !done && "border-border bg-card",
                 )}
+                aria-hidden
               >
                 {done ? "✓" : i + 1}
               </span>
+              <span className="sr-only">{`Step ${i + 1} of ${steps.length}: `}</span>
               {s}
+              <span className="sr-only">{done ? " (completed)" : active ? " (current step)" : ""}</span>
             </button>
             {i < steps.length - 1 && <span className="h-px w-6 bg-border" aria-hidden />}
           </li>
