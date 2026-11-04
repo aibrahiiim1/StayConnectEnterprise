@@ -12,7 +12,8 @@ func TestEveryResultHasALabelAndAGuestClass(t *testing.T) {
 			t.Errorf("%s falls back to its raw code; an operator would read the enum", r)
 		}
 		switch r.GuestClass() {
-		case GuestSuccess, GuestCredential, GuestTechnical, GuestRateLimited, GuestLicense, GuestCapacity, GuestDeviceLimit:
+		case GuestSuccess, GuestCredential, GuestTechnical, GuestRateLimited, GuestLicense, GuestCapacity, GuestDeviceLimit,
+			GuestAfterCheckoutDevice:
 		default:
 			t.Errorf("%s maps to an unknown guest class %q", r, r.GuestClass())
 		}
@@ -40,6 +41,18 @@ func TestSiteWideConditionsAreTechnical(t *testing.T) {
 	for _, r := range []Result{MirrorStaleOrMissingChange, RoutingOrInterfaceFailure, ServiceUnavailable, SpentRequestID} {
 		if got := r.GuestClass(); got != GuestTechnical {
 			t.Errorf("%s is guest-class %q, want TECHNICAL", r, got)
+		}
+	}
+}
+
+// A refusal of the guest's own rules is never an internal failure, and never a wrong credential that counts toward a restriction.
+func TestRefusalsAfterAVerifiedSignInAreNamed(t *testing.T) {
+	for r, want := range map[Result]GuestClass{DeviceLimitReached: GuestDeviceLimit, AfterCheckoutNewDeviceRejected: GuestAfterCheckoutDevice} {
+		if got := r.GuestClass(); got != want {
+			t.Errorf("%s is guest-class %q, want %q", r, got, want)
+		}
+		if r.CountsAsCredentialFailure() {
+			t.Errorf("%s counts toward the sign-in restriction", r)
 		}
 	}
 }

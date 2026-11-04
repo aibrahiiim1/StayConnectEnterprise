@@ -349,6 +349,7 @@ var serverMessageKeys = map[string]string{
 	"Invalid username or password.":            "err.account.invalid",
 	msgAccountDevices:                          "err.account.devices",
 	guestRoomDeviceLimitMessage:                "err.room.devices",
+	guestAfterCheckoutDeviceMessage:            "err.room.checkedout",
 	"This sign-in method is not available. Please contact the site team for assistance.": "err.method.disabled",
 	"Too many attempts. Please wait a minute and try again.":                             "err.attempts",
 	"The Wi-Fi network is at capacity. Please try again shortly.":                        "err.capacity",

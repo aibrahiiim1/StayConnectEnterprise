@@ -170,15 +170,15 @@ func clientActivitySources(sc clientActivityScope, args *[]any) string {
 	parts := []string{
 		`SELECT s.started, 'connection', 'CONNECTED', 'ok', COALESCE(s.credential_method,''), ` + clientOf + `,
 	       COALESCE(s.mac::text,''), COALESCE(host(s.ip),''), COALESCE(gn.name,''), s.id::text, COALESCE(e.id::text,''), COALESCE(st.id::text,''), '', 'c1' || s.id::text
-	  FROM iam_v2.sessions s` + entitlementJoins("s.entitlement_id") + sessionNetworkJoin + `
-	 WHERE s.tenant_id = $1 AND s.site_id = $2 AND s.started >= $3 AND s.started < $4`,
+	  FROM (SELECT * FROM iam_v2.sessions s0 WHERE s0.tenant_id = $1 AND s0.site_id = $2 AND s0.started >= $3 AND s0.started < $4) s` +
+			entitlementJoins("s.entitlement_id") + sessionNetworkJoin,
 
 		`SELECT s.ended, 'connection', 'DISCONNECTED',
 	       CASE WHEN s.end_reason IN ('ADMIN','ENFORCEMENT_TORN_DOWN','DEVICE_LIMIT_OLDEST_DISCONNECTED') THEN 'warning' ELSE 'info' END,
 	       COALESCE(s.end_reason,''), ` + clientOf + `,
 	       COALESCE(s.mac::text,''), COALESCE(host(s.ip),''), COALESCE(gn.name,''), s.id::text, COALESCE(e.id::text,''), COALESCE(st.id::text,''), '', 'c2' || s.id::text
-	  FROM iam_v2.sessions s` + entitlementJoins("s.entitlement_id") + sessionNetworkJoin + `
-	 WHERE s.tenant_id = $1 AND s.site_id = $2 AND s.ended >= $3 AND s.ended < $4`,
+	  FROM (SELECT * FROM iam_v2.sessions s0 WHERE s0.tenant_id = $1 AND s0.site_id = $2 AND s0.ended >= $3 AND s0.ended < $4) s` +
+			entitlementJoins("s.entitlement_id") + sessionNetworkJoin,
 
 		`SELECT e.activated_at, 'package', 'PACKAGE_STARTED', 'ok', COALESCE(p.trigger,''), ` + clientOf + `,
 	       '', '', '', '', e.id::text, COALESCE(st.id::text,''), '', 'p1' || e.id::text
@@ -252,13 +252,13 @@ func clientActivitySources(sc clientActivityScope, args *[]any) string {
 	       COALESCE(pi.display_label,''), '', '', st.id::text, '', 's1' || st.id::text
 	  FROM iam_v2.stays st
 	  CROSS JOIN LATERAL (SELECT sevt.received_at AS at FROM iam_v2.stay_events sevt
-	                       WHERE sevt.stay_id = st.id ORDER BY sevt.received_at LIMIT 1) fe
-	  LEFT JOIN iam_v2.pms_interfaces pi ON pi.id = st.pms_interface_id
+	                       WHERE sevt.tenant_id = $1 AND sevt.site_id = $2 AND sevt.stay_id = st.id ORDER BY sevt.received_at LIMIT 1) fe
+	  LEFT JOIN iam_v2.pms_interfaces pi ON pi.tenant_id = $1 AND pi.site_id = $2 AND pi.id = st.pms_interface_id
 	 WHERE st.tenant_id = $1 AND st.site_id = $2 AND fe.at >= $3 AND fe.at < $4`,
 			`SELECT st.effective_checkout_at, 'stay', 'CHECKED_OUT', 'info', '', 'room', COALESCE(st.normalized_room_number,''), '', '', '',
 	       COALESCE(pi.display_label,''), '', '', st.id::text, '', 's2' || st.id::text
 	  FROM iam_v2.stays st
-	  LEFT JOIN iam_v2.pms_interfaces pi ON pi.id = st.pms_interface_id
+	  LEFT JOIN iam_v2.pms_interfaces pi ON pi.tenant_id = $1 AND pi.site_id = $2 AND pi.id = st.pms_interface_id
 	 WHERE st.tenant_id = $1 AND st.site_id = $2 AND st.effective_checkout_at >= $3 AND st.effective_checkout_at < $4`)
 	}
 	if sc.Staff && len(sc.StaffActions) > 0 {
