@@ -628,7 +628,8 @@ type groupReader interface {
 // sharedMatchesPlan: the session's class is under its own group at the floor and plan ceiling, and the group itself is at the plan rate, on both devices.
 func (p *phase3Shaping) sharedMatchesPlan(ctx context.Context, bridge string, minor int, s shapeplan.Session, groupCid string) bool {
 	gr, ok := p.shp.(groupReader)
-	gminor, gok := shape.GroupMinorFor(s.EntitlementID)
+	// The group this walk assigned (assignGroups), which after a collision or an adoption is not the hash slot.
+	gminor, gok := groupMinorOf(groupCid)
 	if !ok || !gok || s.DownKbps <= 0 || s.UpKbps <= 0 {
 		return false
 	}
