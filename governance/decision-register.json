@@ -1324,6 +1324,19 @@
       "authorization_evidence": "The Product Owner's mission of 2026-11-02 (HIGH PRIORITY: fix PMS sign-in blocking and unresponsive package selection on the test appliance 172.21.96.97, under the existing test deployment authority, with tests and the protected delivery process), and the PO's instructions earlier the same day for the Yes/No room-charge approval with a USD default and for live room-charge posting on the test appliance.",
       "does_not_authorize": "A merge (the PO's approval of the exact head is required), Go-Live, PMS configuration changes, networking topology, financial execution permission changes, additional real PMS charges by the agent, the production Central.",
       "delivery_status": "MERGED 2026-11-02 as 080f2b4f9e63 (PR #290) and accepted by the Product Owner on a mobile device; see T0282. The title records the state at decision time."
+    },
+    {
+      "id": "D91",
+      "decided_on": "2026-11-04",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-11-04",
+      "status": "ACTIVE",
+      "title": "CUSTOM ADMIN CONSOLE ROLES AND A SIMPLER SENDER CONFIRMATION: a Site admin may define roles of their own (per feature No access, View or Manage), enforced by edged beside the seven built-in roles, which stay unchanged; a custom role grants a feature at most at the highest level a built-in role other than Site admin grants it, only Site admin manages and assigns roles, and changes are password-confirmed and audited (migration 0206). Adding, changing or switching a notification sender is confirmed in the console without the operator's password; removing one still asks for it.",
+      "authorization_evidence": "The Product Owner's mission of 2026-11-04: remove the repeated Admin Console password when creating, editing or enabling/disabling SMTP senders; approved configurable Custom Roles with backend enforcement and no privilege escalation; keep the seven built-in roles and their permissions unchanged.",
+      "does_not_authorize": "Any change to the built-in roles' permissions (the Product Owner reviews that matrix separately), granting a custom role more than the built-in roles grant, a merge outside the mission, the production Central, PMS or financial configuration, Go-Live.",
+      "delivery_status": "Delivered on delivery/roles-and-netd-2026-11-04 (T0299)."
     }
   ]
 }

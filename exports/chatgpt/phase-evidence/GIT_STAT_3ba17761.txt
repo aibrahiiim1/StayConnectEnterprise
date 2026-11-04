@@ -1,0 +1,4 @@
+commit 3ba17761d48ed67e3f66c13d6a4352385a9fe06d
+Date:   Wed Nov 4 09:25:10 2026 +0200
+
+    Governance: D91 and T0299 for custom roles, the sender confirmation and netd group slots

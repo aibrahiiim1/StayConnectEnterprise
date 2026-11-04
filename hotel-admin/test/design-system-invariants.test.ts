@@ -192,7 +192,8 @@ describe("the sidebar and the role matrix stay in step with the server", () => {
     };
     const resources = new Set([...nav.matchAll(/resource:\s*"([^"]+)"/g)].map((m) => m[1]));
     const known = new Set(Object.values(generated.roles).flatMap((row) => Object.keys(row)));
-    const adminOnly = new Set(["operators"]);
+    // Roles is Site admin only by design: no role, built-in or custom, may manage roles.
+    const adminOnly = new Set(["operators", "roles"]);
     const missing = [...resources].filter((r) => !known.has(r) && !adminOnly.has(r));
     expect(missing, `nav resources absent from lib/roles.ts — unreachable for every non-admin role: ${missing.join(", ")}`).toEqual([]);
   });

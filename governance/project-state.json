@@ -344,7 +344,7 @@
   "next_authorized_action": "Work normal missions under the PRODUCT-OWNER-LED DELIVERY model D42 (2026-09-26): implement, target-test, deploy routine software to the test appliance 172.21.96.97 under its standing deployment authorization (current_state_facts.standing_test_appliance_deployment_authorization) (the production Central only when a mission names it), stop at READY FOR PRODUCT OWNER TESTING, and merge only after explicit Product Owner acceptance (po-merge-approved). The comprehensive validation runs only on 'FULL CHECK THE WHOLE CODE'. Retired hosts (current_state_facts.retired_hosts) are never contacted.",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase7-Plan.md",
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
-  "latest_accepted_po_decision": "D90",
+  "latest_accepted_po_decision": "D91",
   "current_state_facts": {
     "_note": "MACHINE-READABLE CURRENT STATE. Every current-state surface in this repository is validated against these fields by tools/validate-current-state-parity.py, which runs in the Project Governance gate. They exist because prose alone let a contradiction survive a green gate: current_maturity still said an authorization was awaited and iam_v2 was 49/0 while this file already recorded 63 tables and an executed Live Increment 9. A fact that is only asserted in sentences cannot be diffed; a fact recorded here can be.",
     "phase": "7",
@@ -1362,7 +1362,7 @@
       "dispositions": "docs/AUDIT_DECISION_DISPOSITIONS.md"
     }
   },
-  "latest_transition_id": "T0298",
+  "latest_transition_id": "T0299",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1858,16 +1858,16 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "TEST_APPLIANCE_DEPLOYMENT_2026_11_04",
-    "decision": "Product Owner mission of 2026-11-04: deployment of master 7a36f484 to the test appliance.",
-    "decision_note": "Deployed and read back; see test_appliance.release.",
-    "manifest": "docs/manifests/TestApplianceDeploy20261104-change-manifest.md",
-    "base": "7a36f484ad8d41a270a45f4984654f660a0999f0",
-    "base_note": "Master after the merge of PR #302.",
-    "transition": "T0298",
-    "previous_delivery": "T0297",
-    "branch": "governance/test-appliance-deploy-2026-11-04",
-    "note": "T0298. Go-Live not authorised."
+    "kind": "CUSTOM_ROLES_AND_NETD_2026_11_04",
+    "decision": "D91: custom Admin Console roles and the sender confirmation; netd group slots and regroup accounting.",
+    "decision_note": "Migration 0206; nothing deployed by this record.",
+    "manifest": "docs/manifests/CustomRoles20261104-change-manifest.md",
+    "base": "c64252baa134c44cc30ebe2b922054b3c0277dd5",
+    "base_note": "Master after the merge of PR #307.",
+    "transition": "T0299",
+    "previous_delivery": "T0298",
+    "branch": "delivery/roles-and-netd-2026-11-04",
+    "note": "T0299. Go-Live not authorised."
   },
   "onboarding_reconciliation": {
     "decision": "D37",

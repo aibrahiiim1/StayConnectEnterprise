@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0205, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0206, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -24159,6 +24159,33 @@ CREATE TABLE public.backup_records (
 
 
 --
+-- Name: custom_roles; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.custom_roles (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    name text NOT NULL,
+    description text DEFAULT ''::text NOT NULL,
+    permissions jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_by uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_by uuid,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT custom_roles_description_check CHECK ((length(description) <= 300)),
+    CONSTRAINT custom_roles_name_check CHECK (((length(btrim(name)) >= 2) AND (length(btrim(name)) <= 60))),
+    CONSTRAINT custom_roles_permissions_check CHECK ((jsonb_typeof(permissions) = 'object'::text))
+);
+
+
+--
+-- Name: TABLE custom_roles; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.custom_roles IS 'Admin Console roles a site administrator defines (0206): per feature No access (absent), View (read) or Manage (write). Enforced by edged beside the built-in roles.';
+
+
+--
 -- Name: dhcp_pools; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -24559,6 +24586,25 @@ CREATE TABLE public.operator_account_retention_changes (
 --
 
 COMMENT ON TABLE public.operator_account_retention_changes IS 'Append-only history of public.operator_account_retention (0138).';
+
+
+--
+-- Name: operator_custom_roles; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.operator_custom_roles (
+    operator_id uuid NOT NULL,
+    role_id uuid NOT NULL,
+    assigned_by uuid,
+    assigned_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: TABLE operator_custom_roles; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.operator_custom_roles IS 'Which staff accounts hold which custom role (0206).';
 
 
 --
@@ -27591,6 +27637,14 @@ ALTER TABLE ONLY public.backup_records
 
 
 --
+-- Name: custom_roles custom_roles_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.custom_roles
+    ADD CONSTRAINT custom_roles_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: dhcp_pools dhcp_pools_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -27756,6 +27810,14 @@ ALTER TABLE ONLY public.operator_account_retention_changes
 
 ALTER TABLE ONLY public.operator_account_retention
     ADD CONSTRAINT operator_account_retention_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: operator_custom_roles operator_custom_roles_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.operator_custom_roles
+    ADD CONSTRAINT operator_custom_roles_pkey PRIMARY KEY (operator_id, role_id);
 
 
 --
@@ -29154,6 +29216,13 @@ CREATE INDEX bkhe_site ON public.backup_key_holder_events USING btree (tenant_id
 
 
 --
+-- Name: custom_roles_name_uniq; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX custom_roles_name_uniq ON public.custom_roles USING btree (tenant_id, lower(btrim(name)));
+
+
+--
 -- Name: dhcp_pools_network_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -29235,6 +29304,13 @@ CREATE UNIQUE INDEX notification_providers_tenant_channel_enabled_idx ON public.
 --
 
 CREATE INDEX operator_account_retention_changes_at ON public.operator_account_retention_changes USING btree (changed_at DESC);
+
+
+--
+-- Name: operator_custom_roles_role; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX operator_custom_roles_role ON public.operator_custom_roles USING btree (role_id);
 
 
 --
@@ -32304,6 +32380,30 @@ ALTER TABLE ONLY public.backup_key_holder_events
 
 
 --
+-- Name: custom_roles custom_roles_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.custom_roles
+    ADD CONSTRAINT custom_roles_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.operators(id) ON DELETE SET NULL;
+
+
+--
+-- Name: custom_roles custom_roles_tenant_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.custom_roles
+    ADD CONSTRAINT custom_roles_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id) ON DELETE CASCADE;
+
+
+--
+-- Name: custom_roles custom_roles_updated_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.custom_roles
+    ADD CONSTRAINT custom_roles_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES public.operators(id) ON DELETE SET NULL;
+
+
+--
 -- Name: dhcp_pools dhcp_pools_guest_network_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -32341,6 +32441,30 @@ ALTER TABLE ONLY public.network_health_checks
 
 ALTER TABLE ONLY public.notification_providers
     ADD CONSTRAINT notification_providers_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id) ON DELETE CASCADE;
+
+
+--
+-- Name: operator_custom_roles operator_custom_roles_assigned_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.operator_custom_roles
+    ADD CONSTRAINT operator_custom_roles_assigned_by_fkey FOREIGN KEY (assigned_by) REFERENCES public.operators(id) ON DELETE SET NULL;
+
+
+--
+-- Name: operator_custom_roles operator_custom_roles_operator_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.operator_custom_roles
+    ADD CONSTRAINT operator_custom_roles_operator_id_fkey FOREIGN KEY (operator_id) REFERENCES public.operators(id) ON DELETE CASCADE;
+
+
+--
+-- Name: operator_custom_roles operator_custom_roles_role_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.operator_custom_roles
+    ADD CONSTRAINT operator_custom_roles_role_id_fkey FOREIGN KEY (role_id) REFERENCES public.custom_roles(id) ON DELETE CASCADE;
 
 
 --
@@ -34883,6 +35007,7 @@ GRANT ALL ON FUNCTION iam_v2.rebind_session_entitlement(p_session uuid, p_ent uu
 --
 
 REVOKE ALL ON FUNCTION iam_v2.record_alert_action(p_tenant uuid, p_site uuid, p_audit uuid, p_action text, p_actor uuid, p_reason text, p_expected_state text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.record_alert_action(p_tenant uuid, p_site uuid, p_audit uuid, p_action text, p_actor uuid, p_reason text, p_expected_state text) TO svc_edged;
 
 
 --
@@ -37252,6 +37377,14 @@ GRANT SELECT ON TABLE public.backup_records TO svc_edged;
 
 
 --
+-- Name: TABLE custom_roles; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,DELETE ON TABLE public.custom_roles TO svc_scd;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.custom_roles TO svc_edged;
+
+
+--
 -- Name: TABLE dhcp_pools; Type: ACL; Schema: public; Owner: -
 --
 
@@ -37355,6 +37488,13 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.notification_providers TO svc_
 --
 
 GRANT SELECT ON TABLE public.operator_account_retention_changes TO svc_edged;
+
+
+--
+-- Name: TABLE operator_custom_roles; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.operator_custom_roles TO svc_edged;
 
 
 --

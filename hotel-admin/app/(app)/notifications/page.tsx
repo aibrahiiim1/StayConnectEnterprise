@@ -106,8 +106,8 @@ export default function NotificationsPage() {
   const roles = useOperatorRoles();
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
-  // Step-up password; never stored.
-  const [pw, setPw] = useState("");
+  // Save asks once, without a password (Product Owner, 2026-11-04); removing a sender still asks for it.
+  const [confirming, setConfirming] = useState(false);
   const [formErr, setFormErr] = useState<unknown>(null);
 
   const [mode, setMode] = useState<"closed" | "new" | "edit">("closed");
@@ -136,7 +136,7 @@ export default function NotificationsPage() {
   function openNew() {
     const first = channels[0] ?? "email";
     setF({ ...EMPTY, channel: first, kind: KINDS[first][1] ?? KINDS[first][0] });
-    setEditing(null); setFormErr(null); setPw(""); setMode("new");
+    setEditing(null); setFormErr(null); setMode("new");
   }
   function openEdit(n: NotificationProvider) {
     const sec = n.extra?.security;
@@ -158,7 +158,7 @@ export default function NotificationsPage() {
       timeout_seconds: n.extra?.timeout_seconds !== undefined && n.extra?.timeout_seconds !== null ? String(n.extra.timeout_seconds) : "",
       enabled: n.enabled,
     });
-    setEditing(n); setFormErr(null); setPw(""); setMode("edit");
+    setEditing(n); setFormErr(null); setMode("edit");
   }
 
   async function onSubmit() {
@@ -175,7 +175,6 @@ export default function NotificationsPage() {
           from_name: f.from_name.trim() || undefined,
           extra: extraOf(f),
           enabled: f.enabled,
-          password: pw,
         });
       } else if (editing) {
         const body: Record<string, unknown> = {
@@ -184,7 +183,6 @@ export default function NotificationsPage() {
           from_address: f.from_address,
           from_name: f.from_name,
           enabled: f.enabled,
-          password: pw,
         };
         const extra = extraOf(f);
         if (extra) body.extra = extra;
@@ -192,7 +190,7 @@ export default function NotificationsPage() {
         await api.patch(`/notification-providers/${editing.id}`, body);
       }
       toast.success(mode === "new" ? "Sender added" : "Sender saved", "The change is live: no restart is needed.");
-      setMode("closed"); setEditing(null); setPw("");
+      setMode("closed"); setEditing(null);
       await load();
     } catch (e) { setFormErr(e); }
     finally { setBusy(false); }
@@ -357,9 +355,7 @@ export default function NotificationsPage() {
         submitLabel={mode === "edit" ? "Save changes" : "Add sender"}
         busy={busy}
         error={formErr}
-        disabled={pw === ""}
-        disabledReason="Enter your Admin Console password to save."
-        onSubmit={onSubmit}
+        onSubmit={() => { setFormErr(null); setConfirming(true); }}
       >
         <QuietHints>
         <FormSection title="Sender">
@@ -497,9 +493,6 @@ export default function NotificationsPage() {
           </div>
           <Switch checked={f.enabled} onCheckedChange={(v) => set("enabled", v)} label="Use this sender" />
         </div>
-        <Field label="Your Admin Console password" required hint="Every change to a sender is confirmed with the password you sign in with. It is not stored.">
-          <Input type="password" autoComplete="current-password" name="admin-confirm-password" value={pw} onChange={(e) => setPw(e.target.value)} />
-        </Field>
         </QuietHints>
       </DialogForm>
 
@@ -559,6 +552,16 @@ export default function NotificationsPage() {
         error={formErr}
         requirePassword strictPassword
         onConfirm={onDelete}
+      />
+
+      <ConfirmDialog
+        open={confirming}
+        onOpenChange={(v) => !v && setConfirming(false)}
+        title={mode === "new" ? "Add this sender?" : editing && editing.enabled !== f.enabled ? (f.enabled ? "Switch this sender on?" : "Switch this sender off?") : "Save this sender?"}
+        description={f.enabled ? "The change is live at once: client codes and account emails may go through it." : "It is saved switched off, so nothing is sent through it."}
+        confirmLabel={mode === "new" ? "Add sender" : "Save"}
+        busy={busy}
+        onConfirm={async () => { setConfirming(false); await onSubmit(); }}
       />
     </PageShell>
   );

@@ -7,6 +7,7 @@ package main
 // DELETE would fail on the auth-context foreign key, or cascade-erase the package history.
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -301,7 +302,31 @@ func (s *server) markGuestAccountEmailVerified(w http.ResponseWriter, r *http.Re
 	}
 	s.audit(r, "guest_account.email_marked_verified", "guest_account", id,
 		map[string]any{"username": username, "authority": "iam_v2", "by": "staff", "reason": reason})
-	writeJSON(w, http.StatusOK, map[string]any{"status": "verified"})
+	out := map[string]any{"status": "verified"}
+	// A sign-in opened before the address was verified carries no group; scd, which owns sign-ins, gives it the one the address earns.
+	if repinned, ok := s.repinAccountGroup(r, id); ok {
+		out["sign_ins_regrouped"] = repinned
+	} else {
+		out["notice"] = "The address is verified. A sign-in the client already started keeps its offers until they sign in again."
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *server) repinAccountGroup(r *http.Request, id string) (int, bool) {
+	if s.scd == nil {
+		return 0, false
+	}
+	st, raw, err := s.scd.call(r.Context(), http.MethodPost, "/v1/admin/accounts/"+id+"/repin-group", map[string]any{})
+	if err != nil || st != http.StatusOK {
+		return 0, false
+	}
+	var res struct {
+		Repinned int `json:"repinned"`
+	}
+	if json.Unmarshal(raw, &res) != nil {
+		return 0, false
+	}
+	return res.Repinned, true
 }
 
 // restartGuestAccountVerification moves the deadline to now plus the site setting and restores the grace hour.

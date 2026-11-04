@@ -98,6 +98,36 @@ func TestSteadySharedPassCostDoesNotGrowWithTheNumberOfSessions(t *testing.T) {
 	}
 }
 
+// A package on a probed slot (its hash collided with another's) is verified against the group it was given, so an unchanged pass
+// rewrites nothing for it either.
+func TestSteadySharedPassVerifiesTheAssignedGroupNotTheHashSlot(t *testing.T) {
+	a, b := collidingEntitlements(t)
+	k := newKernelFake(time.Now())
+	e := newScaleEnv(t, k)
+	e.addSessions(0, 4)
+	for i := range e.sessions {
+		e.sessions[i].SpeedAllocation = speedAllocationShared
+		e.sessions[i].EntitlementID = a
+		if i%2 == 1 {
+			e.sessions[i].EntitlementID = b
+			e.sessions[i].DownKbps, e.sessions[i].UpKbps = e.sessions[i].DownKbps*2, e.sessions[i].UpKbps*2
+		}
+	}
+	for i := 0; i < 5 && e.activeCount() < 4; i++ {
+		if st := e.pass(); st.res.Failed != 0 {
+			t.Fatalf("admission: %v", st.res.Problems)
+		}
+		e.tick(5 * time.Second)
+	}
+	st := e.pass()
+	if st.res.Failed != 0 || st.res.Shaped != 4 {
+		t.Fatalf("shaped=%d failed=%d %v", st.res.Shaped, st.res.Failed, st.res.Problems)
+	}
+	if st.cnt.TCClassChange != 0 {
+		t.Fatalf("an unchanged pass re-rated %d classes: the probed group was checked against the hash slot", st.cnt.TCClassChange)
+	}
+}
+
 // Renewal writes every due lease in one transaction, never longer than the lease the pass asks for.
 func TestDueLeasesAreRenewedInOneTransactionAndKeepTheirLength(t *testing.T) {
 	e, k := newFakeScale(t, 200, false)

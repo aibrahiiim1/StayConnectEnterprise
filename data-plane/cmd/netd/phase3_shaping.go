@@ -125,6 +125,11 @@ type phase3Shaping struct {
 	passRebuilds int
 	// regroupWaiting holds, per class, when a regroup denied the device to wait for acctd to store its final counters.
 	regroupWaiting map[string]time.Time
+	// regroupPostponed holds, per class, a regroup given up because the final counters were not confirmed: the device is back on its
+	// counted class until the time, and the wait doubles each time (regroup).
+	regroupPostponed map[string]postponedRegroup
+	// groupSlots gives each SHARED entitlement in the plan its own group minor (assignGroups); a hash alone let two share one.
+	groupSlots map[string]int
 
 	// fastPath enables AD-53 (phase3_fastpath.go): an unchanged plan only refreshes validity between full walks.
 	fastPath bool
@@ -238,6 +243,7 @@ func (p *phase3Shaping) endSeries(bridge, sessionID string) {
 	delete(p.leaseMem, classKey(bridge, sessionID))
 	delete(p.provenAt, classKey(bridge, sessionID))
 	delete(p.regroupWaiting, classKey(bridge, sessionID))
+	delete(p.regroupPostponed, classKey(bridge, sessionID))
 	// The quarantine deliberately outlives the series: clearing it would let the next pass re-admit the guest.
 }
 
@@ -701,6 +707,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 	p.passGroups = map[string]bool{}
 	p.passGroupClasses = map[string]map[int]shape.ClassBytes{}
 	p.passRegroups, p.passRegroupsDeferred, p.passRebuilds = 0, 0, 0
+	p.assignGroups(ctx, desired)
 	for _, bridge := range sortedKeys(bridges) {
 		byMinor := desired[bridge]
 		if len(byMinor) == 0 {

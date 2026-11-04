@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type edgeOperator struct {
@@ -23,12 +24,17 @@ type edgeOperator struct {
 	MustChangePassword bool `json:"must_change_password"`
 	// Without an authenticator, the next sign-in sets one up.
 	TwoStepEnrolled bool `json:"two_step_enrolled"`
+	// RoleNames names the custom roles in Roles ("custom:<id>").
+	RoleNames map[string]string `json:"role_names,omitempty"`
 }
 
-// Includes the legacy tenant_* roles kept for migrated operators.
-func isValidEdgeRole(role string) bool {
+// Includes the legacy tenant_* roles kept for migrated operators, and the site's custom roles.
+func (s *server) isValidEdgeRole(role string) bool {
 	if role == "site_admin" {
 		return true
+	}
+	if strings.HasPrefix(role, customRolePrefix) {
+		return s.customRoleExists(role)
 	}
 	_, ok := rolePerms[role]
 	return ok
@@ -86,7 +92,8 @@ func (s *server) loadEdgeOperator(ctx context.Context, id string) (*edgeOperator
 	var op edgeOperator
 	err := s.db.QueryRow(ctx, `
         SELECT o.id, o.email, COALESCE(o.display_name,''), o.status, o.created_at,
-               COALESCE(array_agg(r.role ORDER BY r.role) FILTER (WHERE r.role IS NOT NULL), '{}'::text[]),
+               COALESCE(array_agg(r.role ORDER BY r.role) FILTER (WHERE r.role IS NOT NULL), '{}'::text[]) ||
+                 `+customRoleArraySQL+`,
                o.must_change_password
           FROM operators o
           LEFT JOIN operator_roles r ON r.operator_id = o.id
@@ -96,6 +103,7 @@ func (s *server) loadEdgeOperator(ctx context.Context, id string) (*edgeOperator
 	if err != nil {
 		return nil, err
 	}
+	op.RoleNames = roleNamesFor(op.Roles, customRoleNames(ctx, s))
 	return &op, nil
 }
 
@@ -104,7 +112,8 @@ func (s *server) listEdgeOperators(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	rows, err := s.db.Query(ctx, `
         SELECT o.id, o.email, COALESCE(o.display_name,''), o.status, o.created_at,
-               COALESCE(array_agg(r.role ORDER BY r.role) FILTER (WHERE r.role IS NOT NULL), '{}'::text[]),
+               COALESCE(array_agg(r.role ORDER BY r.role) FILTER (WHERE r.role IS NOT NULL), '{}'::text[]) ||
+                 `+customRoleArraySQL+`,
                o.must_change_password, (SELECT m.enrolled FROM public.operator_mfa_status(o.id) m)
           FROM operators o
           LEFT JOIN operator_roles r ON r.operator_id = o.id
@@ -125,6 +134,10 @@ func (s *server) listEdgeOperators(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		out = append(out, op)
+	}
+	names := customRoleNames(ctx, s)
+	for i := range out {
+		out[i].RoleNames = roleNamesFor(out[i].Roles, names)
 	}
 	writeList(w, out)
 }
@@ -155,7 +168,7 @@ func (s *server) createEdgeOperator(w http.ResponseWriter, r *http.Request) {
 	if in.Role == "" {
 		in.Role = "site_viewer"
 	}
-	if !isValidEdgeRole(in.Role) {
+	if !s.isValidEdgeRole(in.Role) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "invalid role")
 		return
 	}
@@ -198,10 +211,7 @@ func (s *server) createEdgeOperator(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "insert failed")
 		return
 	}
-	if _, err := tx.Exec(ctx, `
-        INSERT INTO operator_roles (operator_id, tenant_id, role)
-        VALUES ($1, NULL, $2)
-    `, id, in.Role); err != nil {
+	if err := s.insertOperatorRole(ctx, tx, id, in.Role); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "role insert failed")
 		return
 	}
@@ -332,7 +342,7 @@ func (s *server) addEdgeOperatorRole(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
 		return
 	}
-	if !isValidEdgeRole(in.Role) {
+	if !s.isValidEdgeRole(in.Role) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "invalid role")
 		return
 	}
@@ -353,11 +363,7 @@ func (s *server) addEdgeOperatorRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := s.db.Exec(ctx, `
-        INSERT INTO operator_roles (operator_id, tenant_id, role)
-        SELECT $1, NULL, $2
-         WHERE NOT EXISTS (SELECT 1 FROM operator_roles WHERE operator_id = $1 AND role = $2)
-    `, id, in.Role); err != nil {
+	if err := s.insertOperatorRole(ctx, s.db, id, in.Role); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "role insert failed")
 		return
 	}
@@ -374,7 +380,7 @@ func (s *server) removeEdgeOperatorRole(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	role := chi.URLParam(r, "role")
-	if !isValidEdgeRole(role) {
+	if !s.isValidEdgeRole(role) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "invalid role")
 		return
 	}
@@ -394,8 +400,12 @@ func (s *server) removeEdgeOperatorRole(w http.ResponseWriter, r *http.Request) 
 	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
-	ct, err := s.db.Exec(ctx,
-		`DELETE FROM operator_roles WHERE operator_id = $1 AND role = $2`, id, role)
+	q := `DELETE FROM operator_roles WHERE operator_id = $1 AND role = $2`
+	arg := role
+	if rid := roleID(role); rid != "" {
+		q, arg = `DELETE FROM operator_custom_roles WHERE operator_id = $1 AND role_id = $2::uuid`, rid
+	}
+	ct, err := s.db.Exec(ctx, q, id, arg)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "delete failed")
 		return
@@ -409,6 +419,24 @@ func (s *server) removeEdgeOperatorRole(w http.ResponseWriter, r *http.Request) 
 	s.pending.dropOperator(id) // a password step taken before the change must not complete after it
 	s.audit(r, "operator.role_removed", "operator", id, map[string]any{"role": role})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// insertOperatorRole assigns a built-in role (operator_roles) or a custom one (operator_custom_roles); repeating an assignment is a no-op.
+func (s *server) insertOperatorRole(ctx context.Context, db interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+}, operatorID, role string) error {
+	if rid := roleID(role); rid != "" {
+		var by any
+		if sess := sessFrom(ctx); sess != nil && uuidRe.MatchString(sess.OperatorID) {
+			by = sess.OperatorID
+		}
+		_, err := db.Exec(ctx, `INSERT INTO operator_custom_roles (operator_id, role_id, assigned_by) VALUES ($1, $2::uuid, $3::uuid)
+		     ON CONFLICT DO NOTHING`, operatorID, rid, by)
+		return err
+	}
+	_, err := db.Exec(ctx, `INSERT INTO operator_roles (operator_id, tenant_id, role)
+	    SELECT $1, NULL, $2 WHERE NOT EXISTS (SELECT 1 FROM operator_roles WHERE operator_id = $1 AND role = $2)`, operatorID, role)
+	return err
 }
 
 var operatorUsername = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{2,63}$`)

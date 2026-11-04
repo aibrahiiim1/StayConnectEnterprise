@@ -13,7 +13,8 @@ import (
 
 // strictStepUpHandlers re-verify the operator's password however the console confirms: keys and secrets, money,
 // personal data, certificates and trust, PMS configuration, operator management, and the appliance's own network.
-// Ordinary settings use the confirm-only reauth. Moving a handler off this list is a security decision.
+// Ordinary settings use the confirm-only reauth. Moving a handler off this list is a security decision: adding and changing a notification
+// sender left it on the Product Owner's decision of 2026-11-04 (removing one still verifies the password, through stepUpFromBody).
 var strictStepUpHandlers = []string{
 	"changeOwnPassword", "setupOwnMFA", "disableOwnMFA", "newOwnRecoveryCodes", "resetEdgeOperatorMFA",
 	"backupDownloadTicket", "restoreDatabaseBackup", "backupSettingsSet", "readLedgerBody",
@@ -26,9 +27,9 @@ var strictStepUpHandlers = []string{
 	"hotelAdminCertRotate", "portalHTTPSPutAddress", "portalHTTPSPutDomain", "portalHTTPSDeleteDomain", "portalHTTPSRenew",
 	"rotatePMSInterfaceSecret", "publishPMSInterfaceRevision", "setPMSInterfaceLifecycle", "removePMSInterface",
 	"testPMSConnection",
-	"createNotifyProvider", "patchNotifyProvider", "createSocialProvider", "patchSocialProvider", "stepUpFromBody",
+	"createSocialProvider", "patchSocialProvider", "stepUpFromBody",
 	"getSignInAttemptCredentials", "revealCode", "voucherCodeStepUp", "rotateVoucherKeyGeneration",
-	"confirmYourPassword", "executeStayTransfer", "revokePostStayProfile", "sysNetApply", "sysNetRollback",
+	"confirmYourPassword", "roleWriteActor", "executeStayTransfer", "revokePostStayProfile", "sysNetApply", "sysNetRollback",
 	"postReviewAction", "decideReviewEvent", "putReviewExpirySettings", "updateReconciliationSettings", "requestFullResync",
 	"publishServicePlan", "publishCommercialPackage", "setCommercialPackageActive", "setGraceConfig", "enforcementStepUp",
 	"runDatabaseBackup", "setGuestDeviceSetting",
