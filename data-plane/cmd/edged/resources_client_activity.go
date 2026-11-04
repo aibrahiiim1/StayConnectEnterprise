@@ -265,7 +265,7 @@ func clientActivitySources(sc clientActivityScope, args *[]any) string {
 	  JOIN iam_v2.stays st ON st.tenant_id = $1 AND st.site_id = $2 AND st.id = sevt.stay_id
 	  LEFT JOIN iam_v2.pms_interfaces pi ON pi.tenant_id = $1 AND pi.site_id = $2 AND pi.id = st.pms_interface_id
 	 WHERE sevt.tenant_id = $1 AND sevt.site_id = $2 AND sevt.event_type = 'GO' AND sevt.processing_status = 'APPLIED'
-	   AND sevt.received_at >= $3 AND sevt.received_at < $4`)
+	   AND COALESCE(sevt.pms_timestamp_utc, sevt.received_at) >= $3 AND COALESCE(sevt.pms_timestamp_utc, sevt.received_at) < $4`)
 	}
 	if sc.Staff && len(sc.StaffActions) > 0 {
 		acts := arg(sc.StaffActions)
@@ -296,7 +296,8 @@ func clientActivitySQL(f clientActivityFilter, sc clientActivityScope, tenantID,
 	args := []any{tenantID, siteID, f.From, f.To}
 	arg := func(v any) string { args = append(args, v); return "$" + strconv.Itoa(len(args)) }
 	src := clientActivitySources(sc, &args)
-	where := []string{"a.at IS NOT NULL"}
+	// Every source is bounded again by the time it shows, so no source can list an event outside the chosen period.
+	where := []string{"a.at >= $3", "a.at < $4"}
 	if withCategory && f.Category != "" {
 		where = append(where, "a.cat = "+arg(f.Category))
 	}

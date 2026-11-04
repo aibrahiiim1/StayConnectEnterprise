@@ -115,6 +115,10 @@ func TestClientActivitySQLReadsOnlyGrantedTablesAndRealColumns(t *testing.T) {
 	if strings.Contains(list, "effective_checkout_at") || !strings.Contains(list, "sevt.event_type = 'GO'") {
 		t.Fatal("check-outs are read from the stay's mutable checkout time")
 	}
+	// The period applies to the time an event shows, whatever its source.
+	if !strings.Contains(list, "a.at >= $3") || !strings.Contains(list, "a.at < $4") {
+		t.Fatal("events are not bounded by the time they show")
+	}
 	// A sign-in release names the device by its MAC, which is its audit target.
 	if !strings.Contains(list, "al.target_type = 'guest_device' THEN al.target_id") {
 		t.Fatal("staff sign-in releases do not carry the device")
