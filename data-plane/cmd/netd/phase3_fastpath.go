@@ -65,8 +65,8 @@ func (p *phase3Shaping) noteRenewable(key, bridge string, ip net.IP, s shapeplan
 
 // fastPathApplies reports whether this submission only refreshes validity. Caller holds p.mu.
 func (p *phase3Shaping) fastPathApplies(env shapeplan.Envelope, now time.Time) bool {
-	// A regroup waiting on acctd's stored counters is finished only by a walk; the counters are not in the plan hash.
-	return p.fastPath && p.hasConverged && p.memo.clean && len(p.regroupWaiting) == 0 &&
+	// A waiting or cap-deferred regroup is finished only by a walk; neither the stored counters nor the cap are in the plan hash.
+	return p.fastPath && p.hasConverged && p.memo.clean && len(p.regroupWaiting) == 0 && p.passRegroupsDeferred == 0 &&
 		env.DesiredStateHash == p.memo.hash && env.DesiredStateHash == p.lastConverged.Hash &&
 		now.Sub(p.memo.at) < phase3FullWalkEvery && now.Sub(p.memo.at) >= 0
 }

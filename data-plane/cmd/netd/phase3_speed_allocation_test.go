@@ -276,6 +276,40 @@ func TestSpeedAllocation_ARegroupKeepsTheMACBinding(t *testing.T) {
 }
 
 // A bulk move is spread over passes, and every session stays shaped and authorized in each of them.
+// Regroups the per-pass cap left behind keep the fast path off, so an unchanged plan resubmitted still finishes a bulk move.
+func TestSpeedAllocation_ACappedBulkMoveIsNotStalledByTheFastPath(t *testing.T) {
+	tc, g := newFakeTC(), newFakeGate()
+	tc.reportParents = true
+	var ips []string
+	for i := 10; i < 30; i++ {
+		ips = append(ips, fmt.Sprintf("10.0.0.%d", i))
+	}
+	p := allocWriter(t, tc, g, ips...)
+	p.fastPath = true
+	sessions := make([]shapeplan.Session, len(ips))
+	for i, ip := range ips {
+		sessions[i] = allocSession(fmt.Sprintf("s%d", i), ip, fmt.Sprintf("old-%d", i), "SHARED")
+	}
+	t0 := time.Now()
+	if _, err := p.submit(context.Background(), envelope(1, sessions...), t0); err != nil {
+		t.Fatal(err)
+	}
+	for i := range sessions {
+		sessions[i].EntitlementID = fmt.Sprintf("new-%d", i)
+		stampStored(p, &sessions[i])
+	}
+	for n := 1; n <= 3; n++ {
+		if _, err := p.submit(context.Background(), envelope(2, sessions...), t0.Add(time.Duration(n)*time.Second)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, ip := range ips {
+		if tc.parentOf("br-guest", ip) != shape.GroupClassid(fmt.Sprintf("new-%d", i)) {
+			t.Fatalf("%s is still under its old group after three submissions of the same plan", ip)
+		}
+	}
+}
+
 func TestSpeedAllocation_ABulkMoveIsRebuiltAFewSessionsPerPass(t *testing.T) {
 	tc, g := newFakeTC(), newFakeGate()
 	tc.reportParents = true

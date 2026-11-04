@@ -444,7 +444,7 @@ const (
 func (p *phase3Shaping) regroup(ctx context.Context, bridge string, ip net.IP, minor int, epoch int64, s shapeplan.Session, now time.Time) regroupAction {
 	key := classKey(bridge, s.SessionID)
 	since, waiting := p.regroupWaiting[key]
-	if s.SpeedAllocation != speedAllocationShared || (!waiting && p.passRegroups >= maxRegroupsPerPass) {
+	if s.SpeedAllocation != speedAllocationShared {
 		return regroupNone
 	}
 	want := shape.GroupClassid(s.EntitlementID)
@@ -462,6 +462,10 @@ func (p *phase3Shaping) regroup(ctx context.Context, bridge string, ip net.IP, m
 	d, u := down[minor], up[minor]
 	if !(d.Params && d.Parent != want) && !(u.Params && u.Parent != want) {
 		delete(p.regroupWaiting, key)
+		return regroupNone
+	}
+	if !waiting && p.passRegroups >= maxRegroupsPerPass {
+		p.passRegroupsDeferred++
 		return regroupNone
 	}
 	// Fail closed: without its class the device would forward unshaped and uncounted, so it is denied first; the rebuild re-admits it once accountable.

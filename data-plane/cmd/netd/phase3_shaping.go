@@ -119,6 +119,8 @@ type phase3Shaping struct {
 	passGroups map[string]bool
 	// passRegroups counts regroups begun in this pass (regroup); capped so renewals are never starved.
 	passRegroups int
+	// passRegroupsDeferred counts regroups the cap left for a later pass; while any remain the fast path stays off.
+	passRegroupsDeferred int
 	// regroupWaiting holds, per class, when a regroup denied the device to wait for acctd to store its final counters.
 	regroupWaiting map[string]time.Time
 
@@ -696,7 +698,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 	p.passClasses = strayReads
 	p.passGroups = map[string]bool{}
 	p.passGroupClasses = map[string]map[int]shape.ClassBytes{}
-	p.passRegroups = 0
+	p.passRegroups, p.passRegroupsDeferred = 0, 0
 	for _, bridge := range sortedKeys(bridges) {
 		byMinor := desired[bridge]
 		if len(byMinor) == 0 {
