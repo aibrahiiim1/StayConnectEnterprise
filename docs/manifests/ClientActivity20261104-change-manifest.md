@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `567bddd41a0b8386c13279815bbf128a3ac7d99f`
-- **HEAD commit:** `6083c05a`
-- **Provenance (generation HEAD = inventory_head):** `6083c05ac5a4bdf38804270bde63cfb3e791b3c3`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `6911d5c2`
+- **Provenance (generation HEAD = inventory_head):** `6911d5c2fbf3a80d1616e9081b795b20cfc32eb5`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/client-activity`
 - **Remote branch:** `origin/delivery/client-activity`
 - **Changed files:** 50
@@ -13,10 +13,10 @@
 | Path | Classification | Git status | Domain | Workstream | Rollback | Purpose (last commit subject in range) |
 |---|---|---|---|---|---|---|
 | `data-plane/cmd/edged/client_activity_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Client activity: anchored paging window; staff actions on accounts name the account |
-| `data-plane/cmd/edged/client_activity_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Client activity: every event is bounded by the time it shows |
+| `data-plane/cmd/edged/client_activity_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Client activity: chips count what they open |
 | `data-plane/cmd/edged/commerce_activity_test.go` | MODIFIED | `M` | tests/tooling | RUNTIME | rollback RESTORES prior content | After check-out refusal is recorded as AFTER_CHECKOUT_NEW_DEVICE_REJECTED |
 | `data-plane/cmd/edged/guest_data_reads.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | After check-out refusal is recorded as AFTER_CHECKOUT_NEW_DEVICE_REJECTED |
-| `data-plane/cmd/edged/resources_client_activity.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Client activity: every event is bounded by the time it shows |
+| `data-plane/cmd/edged/resources_client_activity.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Client activity: chips count what they open |
 | `data-plane/cmd/edged/resources_sessions.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Client activity: one timeline of everything that happens to clients |
 | `data-plane/cmd/portald/languages_pages.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | After check-out refusal is recorded as AFTER_CHECKOUT_NEW_DEVICE_REJECTED |
 | `data-plane/cmd/portald/pms_phase3.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | After check-out refusal is recorded as AFTER_CHECKOUT_NEW_DEVICE_REJECTED |
@@ -66,15 +66,15 @@
 ## Total diff statistics (`git diff --stat`)
 ```text
  .../cmd/edged/client_activity_integration_test.go  |  49 +++
- data-plane/cmd/edged/client_activity_test.go       | 135 +++++++
+ data-plane/cmd/edged/client_activity_test.go       | 144 +++++++
  data-plane/cmd/edged/commerce_activity_test.go     |   8 +-
  data-plane/cmd/edged/guest_data_reads.go           |   1 +
- data-plane/cmd/edged/resources_client_activity.go  | 439 +++++++++++++++++++++
+ data-plane/cmd/edged/resources_client_activity.go  | 444 +++++++++++++++++++++
  data-plane/cmd/edged/resources_sessions.go         |   1 +
  data-plane/cmd/portald/languages_pages.go          |   6 +
  data-plane/cmd/portald/pms_phase3.go               |   4 +
  data-plane/cmd/portald/portal_page.go              |   1 +
- ...hase3_after_checkout_device_integration_test.go |  88 +++++
+ ...hase3_after_checkout_device_integration_test.go |  88 ++++
  data-plane/cmd/scd/phase3_auth.go                  |   4 +
  .../iamv2/testdata/iamv2_unfiltered_queries.txt    |   2 +-
  data-plane/internal/signinattempt/result.go        |  39 +-
@@ -86,7 +86,7 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   4 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   4 +-
  docs/context/StayConnect-IAM-Handoff.md            |   4 +-
- .../ClientActivity20261104-change-manifest.md      | 140 +++++++
+ .../ClientActivity20261104-change-manifest.md      | 142 +++++++
  docs/user-guide/hotel-admin-reference.md           |  16 +
  .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 354528 -> 354535 bytes
  .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 178846 -> 179250 bytes
@@ -113,9 +113,9 @@
  hotel-admin/e2e/fixtures/portal-landing.html       |   2 +-
  hotel-admin/lib/api/dashboard.ts                   |   1 +
  hotel-admin/lib/client-activity-words.ts           | 118 ++++++
- hotel-admin/test/client-activity-words.test.ts     |  22 ++
+ hotel-admin/test/client-activity-words.test.ts     |  22 +
  hotel-admin/test/signin-result-labels.test.ts      |   4 +
- 50 files changed, 1545 insertions(+), 96 deletions(-)
+ 50 files changed, 1561 insertions(+), 96 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -125,6 +125,8 @@ M  docs/manifests/ClientActivity20261104-change-manifest.md
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 6911d5c2 Client activity: chips count what they open
+HISTORICAL: 9859839b Governance: manifest regenerated for the delivery head
 HISTORICAL: 6083c05a Client activity: every event is bounded by the time it shows
 HISTORICAL: 6a504eb1 Governance: manifest regenerated for the delivery head
 HISTORICAL: 2115b1c3 Client activity: check-outs from the check-out messages; sign-in releases carry the device
