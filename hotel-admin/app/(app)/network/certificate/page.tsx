@@ -12,12 +12,11 @@ import { PageShell, PageHeader } from "@/components/ui/page";
 import { DescriptionList } from "@/components/ui/data";
 import { Skeleton } from "@/components/ui/misc";
 import { EmptyState } from "@/components/ui/empty-state";
-import { ReadOnlyNotice } from "@/components/ui/patterns";
-import { useToast } from "@/components/ui/toast";
+import { LiveStatus, ReadOnlyNotice } from "@/components/ui/patterns";
 import { errMsg, formatDate } from "@/lib/utils";
 import { useNetworkAccess } from "@/components/network/shared";
 import { HelpList, HelpSection } from "@/components/help";
-import { RefreshCw, RotateCw, CheckCircle2, ShieldCheck } from "lucide-react";
+import { AlertTriangle, RefreshCw, RotateCw, CheckCircle2, ShieldCheck } from "lucide-react";
 
 type CertStatus = {
   available?: boolean;
@@ -49,6 +48,22 @@ const THRESH: Record<string, { tone: "ok" | "info" | "warn" | "err"; label: stri
 };
 
 const when = (s?: string) => (s ? formatDate(s) : "—");
+const words = (t?: string) => {
+  if (!t) return "—";
+  const w = t.replace(/[_-]+/g, " ").trim();
+  return w.charAt(0).toUpperCase() + w.slice(1);
+};
+function daysWords(days: number): string {
+  if (days < 0) return `Expired ${-days} ${days === -1 ? "day" : "days"} ago`;
+  if (days === 0) return "Expires today";
+  return `${days} ${days === 1 ? "day" : "days"} left`;
+}
+function expiresIn(days: number | null, at?: string): string | undefined {
+  if (days === null) return at ? `Expires ${formatDate(at)}` : undefined;
+  if (days < 0) return `Expired ${-days} ${days === -1 ? "day" : "days"} ago`;
+  if (days === 0) return "Expires today";
+  return `Expires in ${days} ${days === 1 ? "day" : "days"}. Renews automatically when 45 days are left.`;
+}
 const mono = (s?: string) => (s ? <span className="break-all font-mono text-xs">{s}</span> : "—");
 
 export default function CertificatePage() {
@@ -59,16 +74,27 @@ export default function CertificatePage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [rotating, setRotating] = useState(false);
   const [rotateErr, setRotateErr] = useState<string | null>(null);
-  const toast = useToast();
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
 
-  async function load() {
+  async function load(): Promise<CertStatus | null> {
+    setRefreshing(true);
     try {
-      setSt(await api.get<CertStatus>("/hotel-admin-cert"));
-    } catch (e) { setErr(errMsg(e)); }
+      const s = await api.get<CertStatus>("/hotel-admin-cert");
+      setSt(s);
+      setLoadErr(null);
+      setUpdatedAt(Date.now());
+      return s;
+    } catch (e) { setLoadErr(errMsg(e)); return null; }
+    finally { setRefreshing(false); }
   }
   useEffect(() => { load(); }, []);
 
-  const thr = THRESH[st?.status_threshold ?? ""] ?? { tone: "default" as const, label: st?.status_threshold ?? "Unknown" };
+  const thr = THRESH[st?.status_threshold ?? ""] ?? {
+    tone: "default" as const,
+    label: st?.status_threshold ? `Other (${words(st.status_threshold)})` : "Not reported",
+  };
   const days = typeof st?.days_remaining === "number" ? st.days_remaining : null;
 
   async function check() {
@@ -78,7 +104,6 @@ export default function CertificatePage() {
       const detail = certCheckDetail(r.output_tail);
       if (r.ok) {
         setResult({ tone: "success", text: detail ? `Certificate validated. ${detail}` : "Certificate validated — no problems found." });
-        toast.success("Certificate checked", detail || "No problems found.");
       } else {
         // Show the validator's reason rather than only its exit code.
         setResult({ tone: "danger", text: detail ? `Validation found a problem: ${detail}.` : `Validation found a problem (code ${r.exit}).` });
@@ -96,13 +121,22 @@ export default function CertificatePage() {
         reason, password, confirmation: "ROTATE",
       });
       setRotating(false);
+      const after = await load();
       if (r.ok) {
-        setResult({ tone: "success", text: "Certificate rotated successfully." });
-        toast.success("Certificate rotated");
+        setResult({
+          tone: "success",
+          text:
+            "Certificate rotated. This page is still using the previous certificate until you reload it, and your browser may ask you to trust the new one." +
+            (after?.fingerprint_sha256 ? ` New SHA-256 fingerprint: ${after.fingerprint_sha256}.` : ""),
+        });
       } else {
-        setResult({ tone: "danger", text: `Rotation failed (exit ${r.exit}); the previous certificate is still serving.` });
+        setResult({
+          tone: "danger",
+          text: after?.last_error
+            ? `Rotation failed; the previous certificate is still serving. Reason recorded: ${after.last_error}`
+            : `Rotation failed (code ${r.exit}); the previous certificate is still serving. No reason was recorded.`,
+        });
       }
-      await load();
     } catch (e) {
       if (e instanceof ApiError && e.body?.error === "reauth_required") setRotateErr("Password confirmation failed.");
       else setRotateErr(errMsg(e));
@@ -141,9 +175,9 @@ export default function CertificatePage() {
             </HelpSection>
           </>
         }
+        meta={st && <LiveStatus updatedAt={updatedAt} refreshing={refreshing} onRefresh={() => void load()} error={!!loadErr} />}
         actions={writable ? (
           <>
-            <Button variant="ghost" size="icon" aria-label="Refresh" onClick={() => { setErr(null); load(); }}><RefreshCw /></Button>
             <Button variant="secondary" disabled={busy !== null} onClick={() => { setRotateErr(null); setRotating(true); }}>
               <RotateCw /> Rotate…
             </Button>
@@ -151,9 +185,7 @@ export default function CertificatePage() {
               <CheckCircle2 /> {busy === "check" ? "Checking…" : "Check certificate"}
             </Button>
           </>
-        ) : (
-          <Button variant="secondary" onClick={() => { setErr(null); load(); }}><RefreshCw /> Refresh</Button>
-        )}
+        ) : undefined}
       />
 
       {known && !writable && (
@@ -165,16 +197,24 @@ export default function CertificatePage() {
 
       <SectionCard
         title="Status"
-        description={st && st.available !== false && st.expires_at ? `Expires ${when(st.expires_at)}` : undefined}
+        description={st && st.available !== false ? expiresIn(days, st.expires_at) : undefined}
         actions={st && st.available !== false && (
           <StatusBadge tone={thr.tone}>
-            {thr.label}{days !== null ? ` · ${days} ${days === 1 ? "day" : "days"} left` : ""}
+            {thr.label}{days !== null ? ` · ${daysWords(days)}` : ""}
           </StatusBadge>
         )}
         bodyClassName="space-y-4"
       >
         {!st ? (
-          err ? null : (
+          loadErr ? (
+            <EmptyState
+              size="sm"
+              icon={<AlertTriangle />}
+              title="The certificate status could not be loaded"
+              hint={loadErr}
+              action={<Button size="sm" variant="secondary" onClick={() => void load()}><RefreshCw /> Try again</Button>}
+            />
+          ) : (
             <div className="grid gap-4 sm:grid-cols-2" aria-busy="true">
               <span className="sr-only">Loading</span>
               {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
@@ -190,7 +230,11 @@ export default function CertificatePage() {
           />
         ) : (
           <>
-            {st.last_error && <Callout tone="danger" title="Last renewal error">{st.last_error}</Callout>}
+            {st.last_error && (
+              <Callout tone="danger" title={st.last_renewal_attempt ? `Last renewal error · ${when(st.last_renewal_attempt)}` : "Last renewal error"}>
+                {st.last_error}
+              </Callout>
+            )}
             {st.san_config_match === false && (
               <Callout tone="warning" title="The certificate does not match the current configuration">
                 Its names or addresses differ from what the appliance is using now. It is renewed automatically; you can
@@ -207,7 +251,9 @@ export default function CertificatePage() {
                 { label: "Current management IP", value: mono(st.current_management_ip) },
                 {
                   label: "Matches configuration",
-                  value: st.san_config_match ? <StatusBadge tone="ok">Yes</StatusBadge> : <StatusBadge tone="err">No</StatusBadge>,
+                  value: st.san_config_match === true ? <StatusBadge tone="ok">Yes</StatusBadge>
+                    : st.san_config_match === false ? <StatusBadge tone="err">No</StatusBadge>
+                    : <StatusBadge tone="neutral">Not reported</StatusBadge>,
                 },
                 { label: "Issued", value: when(st.issued_at) },
                 { label: "Expires", value: when(st.expires_at) },
@@ -226,7 +272,7 @@ export default function CertificatePage() {
             items={[
               { label: "Last successful renewal", value: when(st.last_successful_renewal) },
               { label: "Last attempt", value: when(st.last_renewal_attempt) },
-              { label: "Last result", value: st.last_renewal_result || "—" },
+              { label: "Last result", value: words(st.last_renewal_result) },
             ]}
           />
         </SectionCard>
@@ -236,7 +282,7 @@ export default function CertificatePage() {
         open={rotating}
         onOpenChange={(v) => { if (!v) setRotating(false); }}
         title="Rotate the TLS certificate?"
-        description="A new certificate is issued for Admin Console. You cannot upload a key."
+        description="A new certificate is issued for Admin Console straight away."
         consequences={[
           "The new certificate goes through the safe lifecycle: validate, swap, reload, health check.",
           "If the health check fails, the previous certificate is put back automatically.",
