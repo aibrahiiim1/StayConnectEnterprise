@@ -119,6 +119,11 @@ func TestIntegration_Phase3_ARoomGuestAtTheLimitReplacesADevice(t *testing.T) {
 	     WHERE s.id=$1::uuid`, act["session_id"]).Scan(&stayOf); err != nil || stayOf != f.stay {
 		t.Fatalf("the new session is not on the stay's entitlement: %q %v", stayOf, err)
 	}
+	// It is a room sign-in, so the console never shows it as an email, phone or social login.
+	var method string
+	if err := f.pool.QueryRow(ctx, `SELECT credential_method FROM iam_v2.sessions WHERE id=$1::uuid`, act["session_id"]).Scan(&method); err != nil || method != "PMS" {
+		t.Fatalf("the replacing device's session records credential method %q (%v), want PMS", method, err)
+	}
 	// One entitlement for the stay: replacing a device never creates another.
 	var n int
 	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM iam_v2.entitlements WHERE stay_id=$1`, f.stay).Scan(&n)
