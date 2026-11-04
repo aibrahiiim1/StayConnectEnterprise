@@ -1,4 +1,0 @@
-commit 121fdc3c735ee9636f095705718c9c03ccdff0fb
-Date:   Wed Nov 4 05:46:39 2026 +0200
-
-    Governance: T0298 records the test-appliance deployment of master 7a36f484
