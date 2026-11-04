@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "./button";
-import { useQuietHints } from "./input";
+import { Input, InputGroup, useQuietHints } from "./input";
 import { Explain } from "./tooltip";
 import {
   Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -27,12 +27,12 @@ export function CopyButton({
   size?: React.ComponentProps<typeof Button>["size"];
   className?: string;
 }) {
-  const [copied, setCopied] = React.useState(false);
+  const [state, setState] = React.useState<"idle" | "copied" | "failed">("idle");
   React.useEffect(() => {
-    if (!copied) return;
-    const t = setTimeout(() => setCopied(false), 1600);
+    if (state === "idle") return;
+    const t = setTimeout(() => setState("idle"), state === "failed" ? 4000 : 1600);
     return () => clearTimeout(t);
-  }, [copied]);
+  }, [state]);
   return (
     <Button
       variant={variant}
@@ -41,14 +41,16 @@ export function CopyButton({
       onClick={async () => {
         try {
           await navigator.clipboard.writeText(value);
-          setCopied(true);
+          setState("copied");
         } catch {
-          /* The value remains visible if clipboard access is denied. */
+          setState("failed");
         }
       }}
     >
-      {copied ? <Check /> : <Copy />}
-      <span aria-live="polite">{copied ? copiedLabel : label}</span>
+      {state === "copied" ? <Check /> : state === "failed" ? <AlertTriangle /> : <Copy />}
+      <span aria-live="polite">
+        {state === "copied" ? copiedLabel : state === "failed" ? "Copy blocked — select the text instead" : label}
+      </span>
     </Button>
   );
 }
@@ -81,8 +83,14 @@ export function OneTimeReveal({
     if (open) setShown(true);
   }, [open]);
   return (
-    <Dialog open={open} onOpenChange={(v) => !v && onAcknowledge()}>
-      <DialogContent size="sm">
+    <Dialog open={open} onOpenChange={() => {}}>
+      <DialogContent
+        size="sm"
+        className="[&>button:last-child]:hidden"
+        onEscapeKeyDown={(e) => e.preventDefault()}
+        onPointerDownOutside={(e) => e.preventDefault()}
+        onInteractOutside={(e) => e.preventDefault()}
+      >
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           {description && <DialogDescription>{description}</DialogDescription>}
@@ -183,18 +191,31 @@ export function PendingChangeBanner({
   const ticking = useSecondsLeft(deadline ?? null);
   const left = secondsOverride ?? ticking;
   const urgent = left !== null && left <= 30;
+  const milestone = left === null ? null : left <= 0 ? 0 : left <= 10 ? 10 : left <= 30 ? 30 : left <= 60 ? 60 : null;
+  const spoken =
+    busy === "confirm"
+      ? "Keeping the change."
+      : busy === "rollback"
+        ? "Rolling back the change."
+        : milestone === null
+          ? ""
+          : milestone === 0
+            ? "Time is up. The previous configuration is being put back."
+            : `${milestone === 60 ? "1 minute" : `${milestone} seconds`} left to keep this change.`;
   return (
     <section
-      role="status"
-      aria-live="polite"
+      aria-label={typeof title === "string" ? title : "Change waiting for confirmation"}
       className={cn(
         "overflow-hidden rounded-lg border bg-card shadow-card",
         urgent ? "border-destructive/50" : "border-warning/50",
         className,
       )}
     >
+      <span role="status" aria-live="polite" className="sr-only">{spoken}</span>
       <div className={cn("flex flex-wrap items-center gap-4 px-5 py-4", urgent ? "bg-destructive-subtle" : "bg-warning-subtle")}>
         <div
+          role="timer"
+          aria-live="off"
           className={cn(
             "flex size-14 shrink-0 flex-col items-center justify-center rounded-lg bg-card font-mono tabular shadow-card",
             urgent ? "text-destructive" : "text-warning-subtle-foreground",
@@ -280,8 +301,11 @@ export function LiveStatus({
   return (
     <div className={cn("inline-flex items-center gap-2 text-caption text-muted-foreground", className)}>
       <span className="relative inline-flex size-2" aria-hidden>
-        {!error && intervalSeconds ? (
-          <span className="absolute inline-flex size-full animate-ping rounded-full bg-success/60 motion-reduce:hidden" />
+        {!error && intervalSeconds && at ? (
+          <span
+            key={at}
+            className="absolute inline-flex size-full animate-[ping_1s_cubic-bezier(0,0,0.2,1)_1_forwards] rounded-full bg-success/60 motion-reduce:hidden"
+          />
         ) : null}
         <span className={cn("relative inline-flex size-2 rounded-full", error ? "bg-warning" : intervalSeconds ? "bg-success" : "bg-muted-foreground/50")} />
       </span>
@@ -429,8 +453,8 @@ export function SettingField({
         </label>
         {quiet && <Explain>{explanation}</Explain>}
       </div>
-      <div className="flex items-stretch">
-        <input
+      <InputGroup suffix={unit} className="w-fit">
+        <Input
           id={fid}
           inputMode="numeric"
           value={value}
@@ -439,17 +463,9 @@ export function SettingField({
           aria-invalid={out || !!error || undefined}
           aria-describedby={`${fid}-hint`}
           onChange={(e) => onChange(e.target.value)}
-          className={cn(
-            "h-9 w-28 rounded-s-md border border-input/70 bg-card px-3 text-sm tabular text-foreground shadow-control",
-            "hover:border-input focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/15",
-            "disabled:border-border disabled:bg-surface disabled:text-muted-foreground",
-            (out || error) && "border-destructive",
-          )}
+          className="w-28 tabular"
         />
-        <span className="inline-flex items-center rounded-e-md border border-s-0 border-input/70 bg-surface px-3 text-sm text-muted-foreground">
-          {unit}
-        </span>
-      </div>
+      </InputGroup>
       <p id={`${fid}-hint`} className={cn("text-caption", out || error ? "text-destructive" : "text-muted-foreground")}>
         {error ??
           (out
