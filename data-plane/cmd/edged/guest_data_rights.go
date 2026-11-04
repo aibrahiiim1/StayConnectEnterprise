@@ -220,6 +220,8 @@ func (s *server) eraseGuestData(w http.ResponseWriter, r *http.Request) {
 		Counts        map[string]any `json:"counts"`
 		PackagesEnded int            `json:"packages_ended"`
 		SessionsEnded int            `json:"sessions_ended"`
+		// DevicesWithdrawn counts only the sessions scd confirmed off the network at once; the rest converge on enforcement's next pass.
+		DevicesWithdrawn int `json:"devices_withdrawn"`
 	}
 	var opID string
 	if sess := sessFrom(r.Context()); sess != nil {
@@ -253,6 +255,7 @@ func (s *server) eraseGuestData(w http.ResponseWriter, r *http.Request) {
 	// The access was ended in the erasure's own transaction; this only takes the devices off the network at once.
 	kernel := s.withdrawKernel(r, ended, addrs)
 	res.PackagesEnded, res.SessionsEnded = packages, len(ended)
+	res.DevicesWithdrawn, _ = kernel["withdrawn"].(int)
 	s.audit(r, "guest_data.erased", "guest_data_erasure", res.Ref, map[string]any{
 		"subject_kind": in.Kind, "reason": in.Reason, "counts": res.Counts,
 		"packages_ended": packages, "sessions_ended": len(ended), "kernel": kernel["summary"]})

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { LIVE_REASONS, eraseConsequences, exportDescription } from "@/lib/guest-data-words";
+import { LIVE_REASONS, eraseConsequences, erasedAccessWords, exportDescription } from "@/lib/guest-data-words";
 
 // Room credentials prove eligibility, not identity: what staff are told a request covers must match the database, never
 // shared access.
@@ -65,5 +65,17 @@ describe("what a guest-data request says it covers", () => {
     }
     expect(LIVE_REASONS.access_live).toMatch(/room/i);
     expect(LIVE_REASONS.online).toMatch(/room/i);
+  });
+
+  it("claims a disconnection only where the appliance confirmed it", () => {
+    expect(erasedAccessWords(0, 0, 0)).toBe("");
+    expect(erasedAccessWords(1, 0, 0)).toBe("Their access was ended (1 package).");
+    expect(erasedAccessWords(1, 2, 2)).toMatch(/The devices were disconnected\.$/);
+    expect(erasedAccessWords(1, 2, 1)).toMatch(/1 disconnected at once; the appliance takes the rest off the network/);
+    for (const w of [0, undefined]) {
+      const text = erasedAccessWords(2, 3, w);
+      expect(text).toMatch(/The disconnection is not confirmed yet/);
+      expect(text).not.toMatch(/were disconnected/);
+    }
   });
 });

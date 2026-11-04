@@ -90,7 +90,7 @@ describe("Guest data requests", () => {
   });
 
   it("says when the erasure ended the guest's own access", async () => {
-    post.mockResolvedValue({ erasure_ref: "ER-0A1B2C3D4E60", counts: { client_accounts: 1 }, packages_ended: 1, sessions_ended: 2 });
+    post.mockResolvedValue({ erasure_ref: "ER-0A1B2C3D4E60", counts: { client_accounts: 1 }, packages_ended: 1, sessions_ended: 2, devices_withdrawn: 0 });
     await renderPage();
     fireEvent.keyDown(screen.getByRole("button", { name: /^Actions for Client account/ }), { key: "Enter" });
     fireEvent.click(await screen.findByRole("menuitem", { name: /^Erase/ }));
@@ -98,6 +98,6 @@ describe("Guest data requests", () => {
     expect(within(dialog).getByText(/Their own internet access ends now and those devices are disconnected/)).toBeTruthy();
     fillDialog(dialog, "ERASE");
     fireEvent.click(within(dialog).getByRole("button", { name: /erase guest/i }));
-    await screen.findByText(/Their access was ended \(1 package, 2 device sessions disconnected\)/);
+    await screen.findByText(/Their access was ended \(1 package, 2 device sessions\)\. The disconnection is not confirmed yet/);
   });
 });

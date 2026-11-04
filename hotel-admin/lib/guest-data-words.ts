@@ -30,12 +30,16 @@ export function eraseConsequences(kind: string | undefined): string[] {
   ];
 }
 
-/** What an erasure did to the person's access, for the confirmation after it. */
-export function erasedAccessWords(packages: number | undefined, sessions: number | undefined): string {
+/** What an erasure did to the person's access; a disconnection is claimed only where the appliance confirmed it. */
+export function erasedAccessWords(packages: number | undefined, sessions: number | undefined, withdrawn: number | undefined): string {
   if (!packages) return "";
-  const p = `${packages} package${packages === 1 ? "" : "s"}`;
-  const s = sessions ? `, ${sessions} device session${sessions === 1 ? "" : "s"} disconnected` : "";
-  return `Their access was ended (${p}${s}).`;
+  const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
+  const ended = `Their access was ended (${plural(packages, "package")}${sessions ? `, ${plural(sessions, "device session")}` : ""}).`;
+  if (!sessions) return ended;
+  const w = withdrawn ?? 0;
+  if (w >= sessions) return `${ended} The devices were disconnected.`;
+  const rest = "the appliance takes the rest off the network on its next enforcement pass";
+  return w > 0 ? `${ended} ${w} disconnected at once; ${rest}.` : `${ended} The disconnection is not confirmed yet: ${rest.replace("the rest", "them")}.`;
 }
 
 export const LIVE_REASONS: Record<string, string> = {

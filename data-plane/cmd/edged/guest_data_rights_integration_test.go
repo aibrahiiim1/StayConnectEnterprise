@@ -166,6 +166,10 @@ func TestIntegration_GuestDataRights_FindExportErase(t *testing.T) {
 		fmt.Sprint(c.Body["addresses"]) != fmt.Sprint(map[string]any{liveSess[0].id: "10.88.0.11"}) {
 		t.Fatalf("the erased guest's device was not withdrawn by its address: %+v", c)
 	}
+	// The fake scd confirms no withdrawal, so none is claimed.
+	if body["devices_withdrawn"] != float64(0) {
+		t.Fatalf("an unconfirmed withdrawal was reported as %v devices disconnected", body["devices_withdrawn"])
+	}
 	var keptIP string
 	_ = f.pool.QueryRow(ctx, `SELECT COALESCE(host(ip),'') FROM iam_v2.sessions WHERE id=$1::uuid`, liveSess[0].id).Scan(&keptIP)
 	if keptIP != "" {

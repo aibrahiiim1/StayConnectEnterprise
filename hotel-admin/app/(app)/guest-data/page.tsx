@@ -114,10 +114,10 @@ export default function GuestDataPage() {
     if (!erasing) return;
     setBusy(true); setActionErr(null);
     try {
-      const r = await api.post<{ erasure_ref: string; counts: Record<string, number>; packages_ended?: number; sessions_ended?: number }>(
+      const r = await api.post<{ erasure_ref: string; counts: Record<string, number>; packages_ended?: number; sessions_ended?: number; devices_withdrawn?: number }>(
         "/guest-data-rights/erase", { kind: erasing.kind, id: erasing.id, reason, password });
       setErasing(null);
-      setDone({ ref: r.erasure_ref, counts: r.counts, access: erasedAccessWords(r.packages_ended, r.sessions_ended) });
+      setDone({ ref: r.erasure_ref, counts: r.counts, access: erasedAccessWords(r.packages_ended, r.sessions_ended, r.devices_withdrawn) });
       setMatches(null); setMatchesCut(false); setQ("");
       await loadErasures();
     } catch (e) {
