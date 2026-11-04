@@ -685,7 +685,7 @@ func (p *phase3Shaping) classifySession(ctx context.Context, bridge string, mino
 		// Unchanged and already under its own group: routine. New, moved or re-rated SHARED sessions keep the per-session path.
 		_, active := p.epochs[key]
 		_, held := p.classes[key]
-		if p.quarantined[key] == nil && active && held && p.installedMatchesPlan(ctx, bridge, minor, s, shape.GroupClassid(s.EntitlementID)) {
+		if p.quarantined[key] == nil && active && held && p.installedMatchesPlan(ctx, bridge, minor, s, p.groupClassFor(s.EntitlementID)) {
 			return workSteady
 		}
 		p.count("ind_shared", 1)
