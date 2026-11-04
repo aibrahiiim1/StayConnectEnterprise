@@ -1,7 +1,7 @@
 # StayConnect Enterprise — ChatGPT Project Pack MANIFEST
 
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
-<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0293 -->
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0294 -->
 **Current phase:** 7 — Cleanup, final docs, full-system re-acceptance
 **Current activity:** `FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE`
 **Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 ACCEPTED_AND_CLOSED · 4 ACCEPTED_AND_CLOSED · 5 ACCEPTED_AND_CLOSED · 6 ACCEPTED_AND_CLOSED · 7 ACCEPTED_AND_CLOSED
@@ -15,8 +15,8 @@
 <!-- END GENERATED PROJECT STATE -->
 
 ## Provenance
-- **SOURCE_COMMIT (clean source this pack was built from):** `162ebedc`
-- **State transition:** `T0293`  ·  **schema:** `1.0.0`  ·  **build timestamp:** `2026-11-04T01:10:27Z`
+- **SOURCE_COMMIT (clean source this pack was built from):** `8098a220`
+- **State transition:** `T0294`  ·  **schema:** `1.0.0`  ·  **build timestamp:** `2026-11-04T02:36:51Z`
 - **PROJECT_PACK_EXPORT_COMMIT:** *external* — the commit that commits this pack (recorded in the execution report; a pack never contains the commit that commits it). Verify with `git log -1 -- exports/chatgpt/stayconnectenterprise`.
 - **Sanitization:** guest-linked identifiers redacted in the two *(sanitized)* files; no secrets/DSNs/guest PII.
 
@@ -24,33 +24,33 @@
 
 | # | Exported filename | Original repository path | Source | Status | SHA-256 |
 |---|---|---|---|---|---|
-| 1 | `00-START-HERE.md` | *(generated)* | `162ebedc` | Entry point | `f75b93c364201ca7da2de2eea69bb235eb4869f0c9282e6ee77f9fb56caf36fb` |
-| 2 | `PROJECT-INSTRUCTIONS.md` | *(generated)* | `162ebedc` | Project config | `17843cf878feb79c033e91b954a3bed8ed89f68552a9737004b447df53694af2` |
-| 3 | `StayConnect-IAM-Phase0-Contract.md` | `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | `162ebedc` | **Authoritative** *(sanitized)* | `daf4c9c7248143b09353c248049a702758e7294622ff7a38091e07ac761ed458` |
-| 4 | `StayConnect-IAM-Handoff.md` | `docs/context/StayConnect-IAM-Handoff.md` | `162ebedc` | **Authoritative** | `a94a6319396339410ac5d493877b70fe9377e8bd4525eae3d00bde4a85773280` |
-| 5 | `StayConnect-IAM-Phase1A-Plan.md` | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | `162ebedc` | **Authoritative (closed phase)** | `c56b306f2dbdcbbff3a945022f3bb83a71d81d45f5afb11d5e266a467c700a22` |
-| 6 | `StayConnect-IAM-Phase1B-Plan.md` | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | `162ebedc` | **Authoritative — ACCEPTED_AND_CLOSED at DARK maturity (D11/T0011); PR #2 merged** | `19e17d58bda91732fd4c3e861d0cbd074eacca3947befaec8f8611aad637d85e` |
-| 7 | `Phase1B-Privilege-Matrix.md` | `docs/architecture/Phase1B-Privilege-Matrix.md` | `162ebedc` | **Authoritative — as-built grant matrix (Gate P deployed)** | `d7ffc726816e4ed6a677d35cf0b645b79278ea2a48ed4eb561008fcebb640e3d` |
-| 8 | `StayConnect-IAM-Phase2-Plan.md` | `docs/architecture/StayConnect-IAM-Phase2-Plan.md` | `162ebedc` | **Authoritative — Phase 2 ACCEPTED_AND_CLOSED at DARK maturity (D13/T0014); PR #4 authorized to merge** | `15a4b835a66f25f7b48eed5804c76b33956167bc2fbb849d629591698cdfcf70` |
-| 9 | `Phase2-Privilege-Matrix.md` | `docs/architecture/Phase2-Privilege-Matrix.md` | `162ebedc` | **Authoritative — zero new Phase-2 runtime privilege (live-verified)** | `e6a6ea057ffc83e250f9b82e18bc19e7a1238d670b2826835b0fe50f38968825` |
-| 10 | `StayConnect-IAM-Phase2-Software-Gate.md` | `docs/evidence/StayConnect-IAM-Phase2-Software-Gate.md` | `162ebedc` | **Authoritative — Phase 2 software-gate evidence (Go + 45 UI tests + build)** | `9cac79718cfedd6ef9d8351c3ffab27af998b5ef3c582919f986591184590cba` |
-| 11 | `StayConnect-IAM-Phase2-Live-Dark-Evidence.md` | `docs/evidence/StayConnect-IAM-Phase2-Live-Dark-Evidence.md` | `162ebedc` | **Authoritative — Phase 2 live-dark + two-reboot darkness evidence** | `15ef1dc49e81ede7a6c5b302b7ded6d5b667668d72e493f71a793fd95bee9cdf` |
-| 12 | `StayConnect-IAM-Phase2-Live-Dark-Acceptance.md` | `docs/acceptance/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md` | `162ebedc` | **Acceptance record — PRODUCT-OWNER ACCEPTED_AND_CLOSED at DARK maturity (D13/T0014)** | `ca7469d096ff104b14230d53814a3274eface15859be49c0cb98edbc20ef5561` |
-| 13 | `StayConnect-IAM-Phase2-Final-Report.md` | `docs/reports/StayConnect-IAM-Phase2-Final-Report.md` | `162ebedc` | **Authoritative — Phase 2 final report (accepted)** | `8eb24d822e65c75e771aeb5e846fbd395690fcadd7b23d07659db61ced4ce854` |
-| 14 | `Phase2-change-manifest.md` | `docs/manifests/Phase2-change-manifest.md` | `162ebedc` | **Generated — complete Phase 2 changed-file manifest (base..delivery_head; inventory_head provenance)** | `942fa3084e0df8f3d53315a3793be3d5b70e91326cc6cc15eb155a821c3f2008` |
-| 15 | `StayConnect-IAM-Phase3-Plan.md` | `docs/architecture/StayConnect-IAM-Phase3-Plan.md` | `162ebedc` | **Authoritative — Phase 3 plan (D14/T0015; ACCEPTED_AND_CLOSED at DARK maturity, D16/T0024; merged D17/T0025)** | `0e5facf374ef7de11568f5e674478bfc82d4c79df920f0fb84e2e09eb4cf9cc3` |
-| 16 | `Phase3-Privilege-Matrix.md` | `docs/architecture/Phase3-Privilege-Matrix.md` | `162ebedc` | **Authoritative — Phase 3 privilege matrix (PRODUCTION_IAM_V2_DML: NONE; DARK)** | `801ab8f97460ac757ef593ca1e3ecf5676749d3f7b8257440e66bf36e0a3ee25` |
-| 17 | `Phase3-change-manifest.md` | `docs/manifests/Phase3-change-manifest.md` | `162ebedc` | **Generated — complete Phase 3 changed-file manifest (base..delivery_head; inventory_head provenance)** | `eadebad5aabf83285aeb962e87371e4a80fd1fd2fc4921ac5461fdc7e8d54823` |
-| 18 | `StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md` | `docs/acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md` | `162ebedc` | **Authoritative (acceptance record)** | `864fffb0e93482fc8fa5d8fa4825687d82435eefe760a9a67975f3757c04c5c2` |
-| 19 | `Protel-FIAS-Phase0-Spike.md` | `docs/spikes/Protel-FIAS-Phase0-Spike.md` | `162ebedc` | **Authoritative** *(sanitized)* | `5765bb20eb184b2ab648fce7052c97e8531eaea852bc0a4906b0bd485295db2e` |
-| 20 | `ZERO_STALE_LEFTOVERS_RULE.md` | `docs/ZERO_STALE_LEFTOVERS_RULE.md` | `162ebedc` | **Permanent rule** | `dcb3529504c2f7dca0a36f003190641957a19d1fba15d8e08d8e143f96173530` |
-| 21 | `GITHUB_EXECUTION_AND_DELIVERY_RULE.md` | `docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md` | `162ebedc` | **Permanent rule** | `b4facd91c1454b77c8af9935114b8a69e431ccdc3ab595d3c1be9a16eb184ed8` |
-| 22 | `SYSTEM_OVERVIEW.md` | `docs/SYSTEM_OVERVIEW.md` | `162ebedc` | Historical snapshot | `59c8373c9240179ba6c32f13b6712607d6f6585a2a957de6d7deba8ac581c072` |
-| 23 | `TARGET_ARCHITECTURE.md` | `docs/TARGET_ARCHITECTURE.md` | `162ebedc` | Supporting | `07911f65b364db5cdb6eeeba1cdd273ff4211813b86d0e91175b68ebf6a278be` |
-| 24 | `STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md` | `docs/STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md` | `162ebedc` | Supporting | `934d8e389c963581faad89ddf81ac3bda352160ef2d581c6049b6937b809f55f` |
-| 25 | `DEPLOYMENT_APPLIANCE.md` | `docs/DEPLOYMENT_APPLIANCE.md` | `162ebedc` | Supporting | `f7e46b6578ebbc360fe83f25cf8a0785a0c09ac3f1528d00f64883e9a9aa7ecf` |
-| 26 | `OFFLINE_OPERATION.md` | `docs/OFFLINE_OPERATION.md` | `162ebedc` | Supporting | `069bb77cced5af6bd24d1aed9d874045bd7413c9097e3c45fafb57781bd43203` |
-| 27 | `MIGRATION_RUNBOOK.md` | `docs/MIGRATION_RUNBOOK.md` | `162ebedc` | Supporting | `de0ad2ac80b842b855968d0d9b9fee47a0cab91383124ad185702f0d19f1bca0` |
+| 1 | `00-START-HERE.md` | *(generated)* | `8098a220` | Entry point | `88b3c466f47a2afef57dffbc83608204057d6c28f90add10bc0a98603a453701` |
+| 2 | `PROJECT-INSTRUCTIONS.md` | *(generated)* | `8098a220` | Project config | `b767293a4e823f0b265421118da7ea4589dea54af76cd34ee3bde68acb071029` |
+| 3 | `StayConnect-IAM-Phase0-Contract.md` | `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | `8098a220` | **Authoritative** *(sanitized)* | `e6178e2a8289b1ea0d51ede4dfd5add0484b25c69fbae4e66d678d5cdbe517ad` |
+| 4 | `StayConnect-IAM-Handoff.md` | `docs/context/StayConnect-IAM-Handoff.md` | `8098a220` | **Authoritative** | `5985557ef9c310a025047c170dcc9c01d082293d2b6165b5dfd3d1df9c853636` |
+| 5 | `StayConnect-IAM-Phase1A-Plan.md` | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | `8098a220` | **Authoritative (closed phase)** | `711036bd89786505ee11a033f08615f8cf230d25b6ef1082f38b3d0074e9d882` |
+| 6 | `StayConnect-IAM-Phase1B-Plan.md` | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | `8098a220` | **Authoritative — ACCEPTED_AND_CLOSED at DARK maturity (D11/T0011); PR #2 merged** | `9a7a4264f43a7e18061fc03be51423039357b748a77d4f14f33119fc15318a89` |
+| 7 | `Phase1B-Privilege-Matrix.md` | `docs/architecture/Phase1B-Privilege-Matrix.md` | `8098a220` | **Authoritative — as-built grant matrix (Gate P deployed)** | `d7ffc726816e4ed6a677d35cf0b645b79278ea2a48ed4eb561008fcebb640e3d` |
+| 8 | `StayConnect-IAM-Phase2-Plan.md` | `docs/architecture/StayConnect-IAM-Phase2-Plan.md` | `8098a220` | **Authoritative — Phase 2 ACCEPTED_AND_CLOSED at DARK maturity (D13/T0014); PR #4 authorized to merge** | `15a4b835a66f25f7b48eed5804c76b33956167bc2fbb849d629591698cdfcf70` |
+| 9 | `Phase2-Privilege-Matrix.md` | `docs/architecture/Phase2-Privilege-Matrix.md` | `8098a220` | **Authoritative — zero new Phase-2 runtime privilege (live-verified)** | `e6a6ea057ffc83e250f9b82e18bc19e7a1238d670b2826835b0fe50f38968825` |
+| 10 | `StayConnect-IAM-Phase2-Software-Gate.md` | `docs/evidence/StayConnect-IAM-Phase2-Software-Gate.md` | `8098a220` | **Authoritative — Phase 2 software-gate evidence (Go + 45 UI tests + build)** | `9cac79718cfedd6ef9d8351c3ffab27af998b5ef3c582919f986591184590cba` |
+| 11 | `StayConnect-IAM-Phase2-Live-Dark-Evidence.md` | `docs/evidence/StayConnect-IAM-Phase2-Live-Dark-Evidence.md` | `8098a220` | **Authoritative — Phase 2 live-dark + two-reboot darkness evidence** | `15ef1dc49e81ede7a6c5b302b7ded6d5b667668d72e493f71a793fd95bee9cdf` |
+| 12 | `StayConnect-IAM-Phase2-Live-Dark-Acceptance.md` | `docs/acceptance/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md` | `8098a220` | **Acceptance record — PRODUCT-OWNER ACCEPTED_AND_CLOSED at DARK maturity (D13/T0014)** | `ca7469d096ff104b14230d53814a3274eface15859be49c0cb98edbc20ef5561` |
+| 13 | `StayConnect-IAM-Phase2-Final-Report.md` | `docs/reports/StayConnect-IAM-Phase2-Final-Report.md` | `8098a220` | **Authoritative — Phase 2 final report (accepted)** | `8eb24d822e65c75e771aeb5e846fbd395690fcadd7b23d07659db61ced4ce854` |
+| 14 | `Phase2-change-manifest.md` | `docs/manifests/Phase2-change-manifest.md` | `8098a220` | **Generated — complete Phase 2 changed-file manifest (base..delivery_head; inventory_head provenance)** | `942fa3084e0df8f3d53315a3793be3d5b70e91326cc6cc15eb155a821c3f2008` |
+| 15 | `StayConnect-IAM-Phase3-Plan.md` | `docs/architecture/StayConnect-IAM-Phase3-Plan.md` | `8098a220` | **Authoritative — Phase 3 plan (D14/T0015; ACCEPTED_AND_CLOSED at DARK maturity, D16/T0024; merged D17/T0025)** | `0e5facf374ef7de11568f5e674478bfc82d4c79df920f0fb84e2e09eb4cf9cc3` |
+| 16 | `Phase3-Privilege-Matrix.md` | `docs/architecture/Phase3-Privilege-Matrix.md` | `8098a220` | **Authoritative — Phase 3 privilege matrix (PRODUCTION_IAM_V2_DML: NONE; DARK)** | `801ab8f97460ac757ef593ca1e3ecf5676749d3f7b8257440e66bf36e0a3ee25` |
+| 17 | `Phase3-change-manifest.md` | `docs/manifests/Phase3-change-manifest.md` | `8098a220` | **Generated — complete Phase 3 changed-file manifest (base..delivery_head; inventory_head provenance)** | `eadebad5aabf83285aeb962e87371e4a80fd1fd2fc4921ac5461fdc7e8d54823` |
+| 18 | `StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md` | `docs/acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md` | `8098a220` | **Authoritative (acceptance record)** | `864fffb0e93482fc8fa5d8fa4825687d82435eefe760a9a67975f3757c04c5c2` |
+| 19 | `Protel-FIAS-Phase0-Spike.md` | `docs/spikes/Protel-FIAS-Phase0-Spike.md` | `8098a220` | **Authoritative** *(sanitized)* | `5765bb20eb184b2ab648fce7052c97e8531eaea852bc0a4906b0bd485295db2e` |
+| 20 | `ZERO_STALE_LEFTOVERS_RULE.md` | `docs/ZERO_STALE_LEFTOVERS_RULE.md` | `8098a220` | **Permanent rule** | `dcb3529504c2f7dca0a36f003190641957a19d1fba15d8e08d8e143f96173530` |
+| 21 | `GITHUB_EXECUTION_AND_DELIVERY_RULE.md` | `docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md` | `8098a220` | **Permanent rule** | `b4facd91c1454b77c8af9935114b8a69e431ccdc3ab595d3c1be9a16eb184ed8` |
+| 22 | `SYSTEM_OVERVIEW.md` | `docs/SYSTEM_OVERVIEW.md` | `8098a220` | Historical snapshot | `59c8373c9240179ba6c32f13b6712607d6f6585a2a957de6d7deba8ac581c072` |
+| 23 | `TARGET_ARCHITECTURE.md` | `docs/TARGET_ARCHITECTURE.md` | `8098a220` | Supporting | `07911f65b364db5cdb6eeeba1cdd273ff4211813b86d0e91175b68ebf6a278be` |
+| 24 | `STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md` | `docs/STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md` | `8098a220` | Supporting | `934d8e389c963581faad89ddf81ac3bda352160ef2d581c6049b6937b809f55f` |
+| 25 | `DEPLOYMENT_APPLIANCE.md` | `docs/DEPLOYMENT_APPLIANCE.md` | `8098a220` | Supporting | `f7e46b6578ebbc360fe83f25cf8a0785a0c09ac3f1528d00f64883e9a9aa7ecf` |
+| 26 | `OFFLINE_OPERATION.md` | `docs/OFFLINE_OPERATION.md` | `8098a220` | Supporting | `069bb77cced5af6bd24d1aed9d874045bd7413c9097e3c45fafb57781bd43203` |
+| 27 | `MIGRATION_RUNBOOK.md` | `docs/MIGRATION_RUNBOOK.md` | `8098a220` | Supporting | `de0ad2ac80b842b855968d0d9b9fee47a0cab91383124ad185702f0d19f1bca0` |
 
 *(MANIFEST is not self-referential.)*
 

@@ -1,4 +1,0 @@
-commit 162ebedcb30f03fbafb4508b4a0da78126e26485
-Date:   Wed Nov 4 03:10:25 2026 +0200
-
-    Governance: T0293 records the netd review fixes, performance, accounting and portal HTTPS recovery
