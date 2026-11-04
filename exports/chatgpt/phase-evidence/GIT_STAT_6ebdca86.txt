@@ -1,0 +1,4 @@
+commit 6ebdca8658c3abd20d995d7deaaf99567ef19ae6
+Date:   Wed Nov 4 05:27:36 2026 +0200
+
+    Governance: T0297 records the OneGate rename and the manifest clean-up
