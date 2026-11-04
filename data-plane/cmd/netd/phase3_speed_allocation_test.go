@@ -276,6 +276,96 @@ func TestSpeedAllocation_ARegroupKeepsTheMACBinding(t *testing.T) {
 }
 
 // A bulk move is spread over passes, and every session stays shaped and authorized in each of them.
+// Rebuilds are budgeted on their own: sessions that waited for their counters and are then confirmed together are rebuilt a few per pass.
+func TestSpeedAllocation_ResumedRegroupsAreRebuiltAFewPerPass(t *testing.T) {
+	tc, g := newFakeTC(), newFakeGate()
+	tc.reportParents = true
+	var ips []string
+	for i := 10; i < 30; i++ {
+		ips = append(ips, fmt.Sprintf("10.0.0.%d", i))
+	}
+	p := allocWriter(t, tc, g, ips...)
+	sessions := make([]shapeplan.Session, len(ips))
+	for i, ip := range ips {
+		sessions[i] = allocSession(fmt.Sprintf("s%d", i), ip, fmt.Sprintf("old-%d", i), "SHARED")
+	}
+	t0 := time.Now()
+	if _, err := p.submit(context.Background(), envelope(1, sessions...), t0); err != nil {
+		t.Fatal(err)
+	}
+	for i := range sessions {
+		sessions[i].EntitlementID = fmt.Sprintf("new-%d", i)
+	}
+	// Not yet stored: every pass starts at most eight waits and rebuilds none.
+	for n := 1; n <= 3; n++ {
+		if _, err := p.submit(context.Background(), envelope(int64(1+n), sessions...), t0.Add(time.Duration(n)*time.Second)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(p.regroupWaiting) != len(ips) {
+		t.Fatalf("%d sessions waiting, want all %d", len(p.regroupWaiting), len(ips))
+	}
+	moved := func() int {
+		n := 0
+		for i, ip := range ips {
+			if tc.parentOf("br-guest", ip) == shape.GroupClassid(fmt.Sprintf("new-%d", i)) {
+				n++
+			}
+		}
+		return n
+	}
+	for i := range sessions {
+		stampStored(p, &sessions[i])
+	}
+	for n := 0; n < 4; n++ {
+		before := moved()
+		if _, err := p.submit(context.Background(), envelope(int64(5+n), sessions...), t0.Add(time.Duration(5+n)*time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		if step := moved() - before; step > maxRegroupsPerPass {
+			t.Fatalf("one pass rebuilt %d resumed regroups, want at most %d", step, maxRegroupsPerPass)
+		}
+	}
+	if moved() != len(ips) {
+		t.Fatalf("%d of %d sessions moved after the counters were stored", moved(), len(ips))
+	}
+}
+
+// A denial that cannot be proven leaves the class in place and makes the walk unclean, so the regroup is retried, never skipped.
+func TestSpeedAllocation_AFailedRegroupDenialIsReportedAndRetried(t *testing.T) {
+	tc, g := newFakeTC(), newFakeGate()
+	tc.reportParents = true
+	p := allocWriter(t, tc, g, "10.0.0.11")
+	p.fastPath = true
+	s := allocSession("a", "10.0.0.11", "ent-free", "SHARED")
+	t0 := time.Now()
+	if _, err := p.submit(context.Background(), envelope(1, s), t0); err != nil {
+		t.Fatal(err)
+	}
+	old := tc.parentOf("br-guest", "10.0.0.11")
+	s.EntitlementID = "ent-fullstay"
+	stampStored(p, &s)
+	g.mu.Lock()
+	g.failRevoke["10.0.0.11"] = true
+	g.mu.Unlock()
+	res, err := p.submit(context.Background(), envelope(2, s), t0.Add(time.Second))
+	if err != nil || res.Failed == 0 {
+		t.Fatalf("a regroup whose denial failed was reported clean: %+v %v", res, err)
+	}
+	if tc.parentOf("br-guest", "10.0.0.11") != old {
+		t.Fatal("the class was moved although the device could not be denied")
+	}
+	g.mu.Lock()
+	delete(g.failRevoke, "10.0.0.11")
+	g.mu.Unlock()
+	if _, err := p.submit(context.Background(), envelope(2, s), t0.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if tc.parentOf("br-guest", "10.0.0.11") != shape.GroupClassid("ent-fullstay") || !g.isAuthorized("br-guest", "10.0.0.11") {
+		t.Fatal("the regroup was not retried once the gate recovered")
+	}
+}
+
 // Regroups the per-pass cap left behind keep the fast path off, so an unchanged plan resubmitted still finishes a bulk move.
 func TestSpeedAllocation_ACappedBulkMoveIsNotStalledByTheFastPath(t *testing.T) {
 	tc, g := newFakeTC(), newFakeGate()
