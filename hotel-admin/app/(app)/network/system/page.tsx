@@ -123,7 +123,7 @@ export default function NetworkSettingsPage() {
   }
 
   // reseed: after a confirm or rollback the form must show what is now in force, whatever the last render thought of it.
-  async function load({ reseed = false }: { reseed?: boolean } = {}) {
+  async function load({ reseed = false }: { reseed?: boolean } = {}): Promise<SysNetState | null> {
     setRefreshing(true);
     try {
       const s = await api.get<SysNetState>("/network/system");
@@ -132,8 +132,25 @@ export default function NetworkSettingsPage() {
       if (s.pending) startCountdown(s.pending.deadline_unix);
       setLoadErr(null);
       setUpdatedAt(Date.now());
-    } catch (e) { setLoadErr(errMsg(e)); }
+      return s;
+    } catch (e) { setLoadErr(errMsg(e)); return null; }
     finally { setRefreshing(false); }
+  }
+
+  // The deadline passing is not the change ending: the appliance's watchdog rolls it back a few seconds later. The lock stays until a
+  // refresh reports no pending change (checked for up to a minute, then left to the page's own reads).
+  // One settle at a time: a refresh that still reports the change pending restarts the countdown, whose passed deadline asks again.
+  const settling = useRef(false);
+  async function settleAfterDeadline() {
+    if (settling.current) return;
+    settling.current = true;
+    try {
+      for (let i = 0; i < 20; i++) {
+        const s = await load({ reseed: true });
+        if (s && !s.pending) { setApplyResp(null); await loadHistory(); return; }
+        await new Promise((r) => setTimeout(r, 3000));
+      }
+    } finally { settling.current = false; }
   }
   async function loadHistory() {
     try { setHistory((await api.get<{ history: SysNetAudit[] }>("/network/system/history")).history ?? []); }
@@ -189,8 +206,7 @@ export default function NetworkSettingsPage() {
       setCountdown(left);
       if (left <= 0) {
         if (timer.current) clearInterval(timer.current);
-        setApplyResp(null);
-        void inBackground(async () => { await load(); await loadHistory(); });
+        void inBackground(settleAfterDeadline);
       }
     };
     tick(); timer.current = setInterval(tick, 1000);
