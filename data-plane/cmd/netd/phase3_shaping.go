@@ -712,6 +712,17 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 		if len(byMinor) == 0 {
 			continue
 		}
+		// A removed client network (replaced or switched off): its sessions are ended here, before anything is installed on a bridge
+		// that no longer exists. After a restart the bridge setup below fails on it, so checking later would retry them forever.
+		if p.passRetired != nil && p.passRetired(bridge) {
+			for _, minor := range sortedIntKeys(byMinor) {
+				s := byMinor[minor]
+				res.Problems = append(res.Problems, "shape "+s.SessionID+": its client network was removed; the session is ended")
+				p.markEnded(ctx, s.SessionID, endReasonNetworkRemoved)
+				p.endSeries(bridge, s.SessionID)
+			}
+			continue
+		}
 		if err := p.shp.EnsureBridgeInfra(ctx, bridge); err != nil {
 			res.Failed++
 			res.Problems = append(res.Problems, "bridge "+bridge+": "+err.Error())

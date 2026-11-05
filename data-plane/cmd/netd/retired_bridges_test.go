@@ -84,6 +84,30 @@ func TestApplier_ASessionOnARemovedNetworkIsEnded(t *testing.T) {
 	}
 }
 
+// absentBridgeTC fails bridge setup as the real shaper does when the bridge does not exist (the state after a netd restart).
+type absentBridgeTC struct{ *fakeTC }
+
+func (absentBridgeTC) EnsureBridgeInfra(context.Context, string) error {
+	return errors.New(`Cannot find device "br-guest"`)
+}
+
+// After a restart the bridge setup fails on a removed network's bridge; its sessions are still ended, not retried forever.
+func TestApplier_ASessionOnARemovedNetworkIsEndedEvenWhenItsBridgeCannotBeSetUp(t *testing.T) {
+	tc, g := newFakeTC(), newFakeGate()
+	p := ownershipWriter(t, tc, g, fakeLeases{rows: []KeaLease{lease("10.0.0.5", "96:48:f9:7a:9b:09")}})
+	p.shp = absentBridgeTC{tc}
+	fe := newFakeEnforcement()
+	p.enforcement = fe
+	p.retired = func(context.Context) func(string) bool { return func(b string) bool { return b == "br-guest" } }
+
+	if _, err := p.submit(context.Background(), envelope(1, sessionOn("10.0.0.5", "96:48:f9:7a:9b:09")), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if len(fe.ended) != 1 || fe.ended[0] != "s-1" {
+		t.Fatalf("a session on a removed network whose bridge cannot be set up was not ended: %v", fe.ended)
+	}
+}
+
 // With no retired bridges the same session is enforced as before.
 func TestApplier_ALiveNetworkIsUnaffectedByTheRetiredCheck(t *testing.T) {
 	tc, g := newFakeTC(), newFakeGate()
