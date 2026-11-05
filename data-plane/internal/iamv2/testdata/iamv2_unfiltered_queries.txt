@@ -64,11 +64,11 @@ cmd/scd/client_devices.go	a27daaa0e02b	SELECT count(*)::int FROM iam_v2.device_s
 cmd/scd/client_resume.go	08ddd96f27bb	UPDATE iam_v2.principal_device_credentials SET last_used_at = now() WHERE id=$1::uuid
 cmd/scd/client_resume.go	42d2e171b6d1	UPDATE iam_v2.principal_device_credentials SET revoked_at = now() WHERE id=$1::uuid AND re
 cmd/scd/iamv2_session_activate.go	0a2fb1cc3458	SELECT count(DISTINCT device_id) FROM iam_v2.sessions WHERE entitlement_id=$1 AND ended IS
+cmd/scd/iamv2_session_activate.go	42f28e884923	SELECT COALESCE( (SELECT NULLIF(ac.credential,'') FROM iam_v2.auth_contexts ac WHERE ac.id
 cmd/scd/iamv2_session_activate.go	4a3fcd7b2aca	SELECT EXISTS(SELECT 1 FROM iam_v2.device_network_appearances WHERE device_id = $1 AND gue
 cmd/scd/iamv2_session_activate.go	58808cbded52	SELECT state, ended FROM iam_v2.sessions WHERE id=$1
 cmd/scd/iamv2_session_activate.go	76ef48845525	SELECT ac.device_id::text FROM iam_v2.entitlements e JOIN iam_v2.purchases p ON p.id = e.p
 cmd/scd/iamv2_session_activate.go	a801b1a989ed	SELECT id::text, COALESCE(host(ip), ''), COALESCE(ingress_interface, '') FROM iam_v2.sessi
-cmd/scd/iamv2_session_activate.go	c8f63f9e9f36	SELECT COALESCE( (SELECT NULLIF(ac.credential,'') FROM iam_v2.auth_contexts ac WHERE ac.id
 cmd/scd/iamv2_session_ops.go	76d78fe0eaef	SELECT count(*) FROM iam_v2.sessions se JOIN iam_v2.devices d ON d.id = se.device_id WHERE
 cmd/scd/otp_handlers.go	c947680c22bc	SELECT EXISTS (SELECT 1 FROM iam_v2.otp_code_reveals WHERE challenge_id=$1::uuid)
 cmd/scd/phase3_offers.go	aa8587ceaef0	SELECT rule_type, rule_value FROM iam_v2.package_eligibility_rules WHERE package_revision_

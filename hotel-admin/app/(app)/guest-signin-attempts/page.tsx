@@ -83,6 +83,11 @@ const RESULT_WORDS: Record<string, { tone: "ok" | "warn" | "err" | "info" | "neu
     meaning:
       "The guest's details were right, but the stay's package already had its maximum number of devices online. The guest was asked to disconnect or replace one.",
   },
+  AFTER_CHECKOUT_NEW_DEVICE_REJECTED: {
+    tone: "warn",
+    meaning:
+      "The departed guest's details were right, but After Check-out Access continues only on devices the stay used before check-out, and this was another device. The guest was told to use one of those devices.",
+  },
 };
 
 const RESULT_FILTER_LABELS: Record<string, string> = {
@@ -101,6 +106,7 @@ const RESULT_FILTER_LABELS: Record<string, string> = {
   LICENSE_REFUSED: "Licence refused new clients",
   LICENSE_CAPACITY_REACHED: "Licensed capacity full",
   DEVICE_LIMIT_REACHED: "Device limit reached",
+  AFTER_CHECKOUT_NEW_DEVICE_REJECTED: "New device after check-out",
 };
 
 const RESULT_FILTERS = [
