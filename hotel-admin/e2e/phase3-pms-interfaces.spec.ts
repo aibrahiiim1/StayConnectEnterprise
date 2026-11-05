@@ -107,7 +107,7 @@ async function installBackend(
     }
     if (path.endsWith("/revisions")) return route.fulfill(json(200, { revisions: opts.revisions ?? REVISIONS }));
     if (path.endsWith("/health")) return route.fulfill(json(200, { health: opts.health ?? HEALTH }));
-    if (path === "/pms-interfaces") return route.fulfill(json(200, { interfaces: opts.interfaces ?? [IFACE] }));
+    if (path === "/pms-interfaces") return route.fulfill(json(200, { interfaces: opts.interfaces ?? [IFACE], appliance_timezone: "Africa/Cairo" }));
     if (path.startsWith("/pms-interfaces/")) {
       return route.fulfill(json(200, { interface: IFACE, guest_networks: opts.routes ?? [] }));
     }

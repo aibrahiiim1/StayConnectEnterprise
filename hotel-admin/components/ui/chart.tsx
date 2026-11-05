@@ -34,6 +34,24 @@ export function ColumnChart({
   emptyLabel?: string;
 }) {
   const [hover, setHover] = React.useState<number | null>(null);
+  const [cursor, setCursor] = React.useState(0);
+  const columns = React.useRef<(HTMLButtonElement | null)[]>([]);
+  const stop = Math.min(cursor, Math.max(0, data.length - 1));
+
+  const moveTo = (i: number) => {
+    const next = Math.max(0, Math.min(data.length - 1, i));
+    setCursor(next);
+    columns.current[next]?.focus();
+  };
+  const onColumnKey = (e: React.KeyboardEvent<HTMLButtonElement>, i: number) => {
+    const rtl = getComputedStyle(e.currentTarget).direction === "rtl";
+    const forward = rtl ? "ArrowLeft" : "ArrowRight";
+    const back = rtl ? "ArrowRight" : "ArrowLeft";
+    if (e.key === forward) { e.preventDefault(); moveTo(i + 1); }
+    else if (e.key === back) { e.preventDefault(); moveTo(i - 1); }
+    else if (e.key === "Home") { e.preventDefault(); moveTo(0); }
+    else if (e.key === "End") { e.preventDefault(); moveTo(data.length - 1); }
+  };
 
   const totals = data.map((d) => d.values.reduce((a, b) => a + (b || 0), 0));
   const peak = Math.max(0, ...totals);
@@ -59,7 +77,6 @@ export function ColumnChart({
           ))}
         </div>
 
-        {/* role="img" hides the focusable columns' values from screen readers. */}
         <div className="flex items-end gap-[2px] pl-14" style={{ height }} role="group"
           aria-label={`${series.map((s) => s.name).join(" and ")} by ${data.length === 24 ? "hour" : "period"}`}>
           {data.map((d, i) => {
@@ -68,10 +85,13 @@ export function ColumnChart({
             return (
               <button
                 key={i}
+                ref={(el) => { columns.current[i] = el; }}
                 type="button"
+                tabIndex={i === stop ? 0 : -1}
+                onKeyDown={(e) => onColumnKey(e, i)}
                 onMouseEnter={() => setHover(i)}
                 onMouseLeave={() => setHover((h) => (h === i ? null : h))}
-                onFocus={() => setHover(i)}
+                onFocus={() => { setHover(i); setCursor(i); }}
                 onBlur={() => setHover((h) => (h === i ? null : h))}
                 // Use full-height hit targets so tiny bars remain reachable.
                 className={cn(
@@ -98,7 +118,7 @@ export function ColumnChart({
                       }}
                       className={cn(
                         "block w-full transition-opacity",
-                        isTop ? "rounded-t-[4px]" : "",
+                        isTop ? "rounded-t-sm" : "",
                         hover !== null && !active && "opacity-55",
                       )}
                     />
@@ -257,7 +277,7 @@ function ChartTooltip({ label, children }: { label: string; children: React.Reac
     <div
       className={cn(
         "pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 w-max -translate-x-1/2",
-        "rounded-md border border-border bg-popover px-2.5 py-1.5 text-popover-foreground shadow-md",
+        "rounded-md border border-border bg-popover px-2.5 py-1.5 text-popover-foreground shadow-overlay",
       )}
     >
       <div className="mb-1 text-2xs font-semibold uppercase tracking-wide text-muted-foreground">{label}</div>
@@ -351,6 +371,20 @@ export function AreaChart({
   const onLeave = (e: React.PointerEvent<SVGSVGElement>) => {
     if (e.pointerType !== "touch") setHover(null);
   };
+  const onKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (n === 0) return;
+    const rtl = getComputedStyle(e.currentTarget).direction === "rtl";
+    const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+    const at = hover ?? n - 1;
+    let next: number | null = null;
+    if (step) next = at + (rtl ? -step : step);
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = n - 1;
+    else if (e.key === "Escape") { setHover(null); return; }
+    if (next === null) return;
+    e.preventDefault();
+    setHover(Math.max(0, Math.min(n - 1, next)));
+  };
 
   return (
     <div className={cn("min-w-0", className)}>
@@ -363,7 +397,16 @@ export function AreaChart({
             </span>
           ))}
         </div>
-        <div ref={ref} className="relative min-w-0 flex-1">
+        <div
+          ref={ref}
+          tabIndex={allZero ? undefined : 0}
+          role={allZero ? undefined : "group"}
+          aria-label={allZero ? undefined : `${series.map((s) => s.name).join(" and ")} over time. Use the arrow keys to read each period.`}
+          onKeyDown={allZero ? undefined : onKey}
+          onFocus={() => setHover((h) => h ?? (n > 0 ? n - 1 : null))}
+          onBlur={() => setHover(null)}
+          className="relative min-w-0 flex-1 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        >
           <svg
             width="100%"
             height={height}
@@ -423,7 +466,7 @@ export function AreaChart({
           </svg>
           {hover !== null && !allZero && data[hover] && (
             <div
-              className="pointer-events-none absolute top-0 z-20 -translate-x-1/2 rounded-md border border-border bg-popover px-2.5 py-1.5 text-popover-foreground shadow-md"
+              className="pointer-events-none absolute top-0 z-20 -translate-x-1/2 rounded-md border border-border bg-popover px-2.5 py-1.5 text-popover-foreground shadow-overlay"
               style={{ left: `${(x(hover) / w) * 100}%` }}
             >
               <div className="mb-1 text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -544,7 +587,6 @@ export function BarList({
   );
 }
 
-/** Each cell states its count so color is never the only way to read the grid. */
 export function Heatmap({
   rows,
   columns,
@@ -559,8 +601,17 @@ export function Heatmap({
   className?: string;
 }) {
   const peak = Math.max(0, ...values.flat());
+  let top: { r: number; c: number } | null = null;
+  let best = 0;
+  for (let ri = 0; ri < values.length; ri++) {
+    for (let ci = 0; ci < (values[ri]?.length ?? 0); ci++) {
+      const v = values[ri][ci] ?? 0;
+      if (v > best) { best = v; top = { r: ri, c: ci }; }
+    }
+  }
   return (
-    <div className={cn("min-w-0 overflow-x-auto", className)}>
+    <div className={cn("min-w-0 space-y-2", className)}>
+    <div className="min-w-0 overflow-x-auto">
       <table className="border-separate border-spacing-[3px]">
         <tbody>
           {rows.map((r, ri) => (
@@ -576,7 +627,7 @@ export function Heatmap({
                     key={c}
                     title={`${r} ${c}: ${formatValue(v)}`}
                     aria-label={`${r} ${c}: ${formatValue(v)}`}
-                    className="size-4 min-w-4 rounded-[3px] bg-surface"
+                    className="size-4 min-w-4 rounded-sm bg-surface"
                     style={v > 0 ? { background: `hsl(var(--chart-1) / ${(0.12 + a * 0.88).toFixed(2)})` } : undefined}
                   />
                 );
@@ -593,6 +644,24 @@ export function Heatmap({
           </tr>
         </tbody>
       </table>
+    </div>
+      {peak > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          {top && (
+            <span>
+              Busiest: <span className="font-medium text-foreground">{rows[top.r]} {columns[top.c]}</span>
+              {" · "}<span className="font-medium tabular text-foreground">{formatValue(peak)}</span>
+            </span>
+          )}
+          <span className="inline-flex items-center gap-1.5" aria-hidden>
+            <span className="tabular">{formatValue(0)}</span>
+            {[0.12, 0.34, 0.56, 0.78, 1].map((a) => (
+              <span key={a} className="size-3 rounded-sm" style={{ background: `hsl(var(--chart-1) / ${a})` }} />
+            ))}
+            <span className="tabular">{formatValue(peak)}</span>
+          </span>
+        </div>
+      )}
     </div>
   );
 }

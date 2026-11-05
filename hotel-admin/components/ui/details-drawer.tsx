@@ -46,10 +46,10 @@ export function DetailsDrawer({
       <SheetContent width={width}>
         <SheetHeader eyebrow={eyebrow} title={title} description={description} badges={badges} icon={icon} />
         <SheetBody aria-busy={loading || undefined}>
+          <span role="status" aria-live="polite" className="sr-only">{loading ? "Loading" : ""}</span>
           <ErrorBanner err={error} className="mb-0" />
           {loading ? (
-            <div className="space-y-3" aria-live="polite">
-              <span className="sr-only">Loading</span>
+            <div className="space-y-3">
               <Skeleton className="h-4 w-2/3" />
               <Skeleton className="h-4 w-1/2" />
               <Skeleton className="h-24 w-full" />

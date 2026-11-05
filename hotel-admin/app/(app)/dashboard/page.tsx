@@ -41,6 +41,8 @@ export default function DashboardPage() {
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [loadedAt, setLoadedAt] = useState<string | null>(null);
+  const [announce, setAnnounce] = useState("");
+  const failed = useRef(false);
   const rangeRef = useRef<OverviewRange>(range);
   const seq = useRef(0);
 
@@ -62,8 +64,12 @@ export default function DashboardPage() {
       if (o.status === "fulfilled") {
         setSnap(normalizeOverview(o.value));
         setErr(null);
+        if (manual || failed.current) setAnnounce(`Overview updated at ${new Date().toLocaleTimeString()}.`);
+        failed.current = false;
       } else {
         setErr(o.reason);
+        if (manual || !failed.current) setAnnounce("The overview could not be updated.");
+        failed.current = true;
       }
       if (h.status === "fulfilled") setHealth(h.value);
       setLoadedAt(new Date().toISOString());
@@ -170,10 +176,11 @@ export default function DashboardPage() {
               options={OVERVIEW_RANGES.map((r) => ({ value: r.value, label: r.label }))}
             />
             {loadedAt && (
-              <span className="text-xs text-muted-foreground" title={new Date(loadedAt).toLocaleString()} aria-live="polite">
+              <span className="text-xs text-muted-foreground" title={new Date(loadedAt).toLocaleString()}>
                 {busy ? "Updating…" : `Updated ${formatRelative(loadedAt)}`}
               </span>
             )}
+            <span role="status" aria-live="polite" className="sr-only">{announce}</span>
             <Button variant="secondary" size="sm" onClick={() => void load(range, true)} disabled={busy}>
               <RefreshCw className={busy ? "animate-spin motion-reduce:animate-none" : undefined} />
               Refresh

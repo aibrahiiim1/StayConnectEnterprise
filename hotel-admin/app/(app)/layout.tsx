@@ -174,9 +174,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
       <DialogPrimitive.Root open={drawer} onOpenChange={setDrawer}>
         <DialogPrimitive.Portal>
-          <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-scrim/45 backdrop-blur-[2px] lg:hidden data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 motion-reduce:animate-none" />
+          <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-scrim/50 lg:hidden data-[state=open]:animate-in data-[state=closed]:animate-out duration-base ease-onegate data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 motion-reduce:animate-none" />
           <DialogPrimitive.Content
-            className="fixed inset-y-0 start-0 z-50 h-full w-64 outline-none lg:hidden data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:slide-in-from-left data-[state=closed]:slide-out-to-left motion-reduce:animate-none"
+            className="fixed inset-y-0 start-0 z-50 h-full w-64 outline-none lg:hidden data-[state=open]:animate-in data-[state=closed]:animate-out ease-onegate data-[state=open]:duration-200 data-[state=closed]:duration-150 data-[state=open]:slide-in-from-left data-[state=closed]:slide-out-to-left rtl:data-[state=open]:slide-in-from-right rtl:data-[state=closed]:slide-out-to-right motion-reduce:animate-none"
             aria-label="Navigation"
             // Radix would focus the nav filter and raise the phone keyboard over the menu; focus the panel instead.
             onOpenAutoFocus={(e) => {

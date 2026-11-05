@@ -239,7 +239,11 @@ func (s *server) listPMSInterfaces(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"interfaces": out})
+	var applianceTZ string
+	if err := s.db.QueryRow(ctx, `SELECT current_setting('TimeZone')`).Scan(&applianceTZ); err != nil {
+		applianceTZ = ""
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"interfaces": out, "appliance_timezone": applianceTZ})
 }
 
 func (s *server) getPMSInterface(w http.ResponseWriter, r *http.Request) {
