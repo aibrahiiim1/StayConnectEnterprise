@@ -1,28 +1,28 @@
 "use client";
 
-// Refunds come from the provider; operator actions follow the API's available_actions list.
-
 import { usePmsConnections } from "@/lib/pms-scope";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import Link from "next/link";
-import { ArrowUpRight, BedDouble, Receipt } from "lucide-react";
-import { api, FinancialPayment, FinancialSettlement, surfaceUnavailableMessage } from "@/lib/api";
-import { formatDate } from "@/lib/utils";
+import { AlertTriangle, ArrowUpRight, BedDouble, Receipt, RefreshCw } from "lucide-react";
+import { api, ApiError, FinancialPayment, FinancialSettlement } from "@/lib/api";
+import { cn, formatDate } from "@/lib/utils";
 import { Card, CardFooter } from "@/components/ui/card";
 import { FilterBar } from "@/components/ui/toolbar";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
-import { ErrorBanner } from "@/components/ui/error-banner";
+import { Callout } from "@/components/ui/error-banner";
 import { PageHeader, PageShell, StatCard, StatGrid } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { FilterChips, KeyValueGrid, Pagination } from "@/components/ui/data";
 import { useServerPage, type PagedFields } from "@/lib/use-server-page";
 import { Skeleton, SkeletonRows } from "@/components/ui/misc";
 import { Sheet, SheetBody, SheetContent, SheetFooter, SheetHeader, SheetSection } from "@/components/ui/sheet";
-import { humanize, money } from "./format";
+import { money } from "./format";
 import { currencyExponent } from "@/lib/commerce-form";
+
+const FADE = "animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none";
 
 type Tone = "ok" | "warn" | "err" | "info" | "default";
 
@@ -34,19 +34,23 @@ export const PAID_BY: Record<string, string> = {
   MANUAL_APPROVAL: "Manual approval",
 };
 
+function paidBy(method: string): string {
+  return PAID_BY[method] ?? "Not recognised";
+}
+
 function sourceWords(r: FinancialSettlement, multi = false): string {
   switch (r.source) {
     case "ROOM": return r.room ? `Room ${r.room}${multi && r.pms_interface_label ? ` · ${r.pms_interface_label}` : ""}` : "Room sign-in";
     case "VOUCHER": return "Voucher";
     case "ACCOUNT": return "Client account";
     case "OPEN": return "Chose a package without signing in";
-    default: return "—";
+    default: return "Not known";
   }
 }
 
 export function paymentState(method: string, status: string): { label: string; tone: Tone; explain: string } {
   if (method === "NOT_REQUIRED" || status === "NOT_REQUIRED") {
-    return { label: "Free — nothing to pay", tone: "default", explain: "The package is free, so there was nothing to collect." };
+    return { label: "Nothing to pay", tone: "default", explain: "The package is free, so there was nothing to collect." };
   }
   switch (status) {
     case "SETTLED":
@@ -70,23 +74,63 @@ export function paymentState(method: string, status: string): { label: string; t
     case "REVERSED":
       return { label: "Refunded", tone: "warn", explain: "The payment was given back by the provider." };
     default:
-      return { label: humanize(status), tone: "default", explain: "" };
+      return { label: "State not recognised", tone: "default", explain: "This console does not recognise the state of this payment." };
   }
 }
 
 const ACCESS_WORDS: Record<string, string> = {
   GRANTED: "Access given",
   AWAITING_SETTLEMENT: "Waiting for payment",
-  PENDING: "Waiting",
+  MANUAL_REVIEW: "Waiting for a decision",
+  PENDING: "Started",
   FAILED: "No access given",
   CANCELLED: "Cancelled",
 };
-// Server-side views keep counts consistent across every payment, not only the loaded page.
+
+const STEP_WORDS: Record<string, string> = {
+  CHARGE: "Payment",
+  REFUND: "Refund",
+  CHARGEBACK: "Chargeback",
+};
+
+function resultWords(p: FinancialPayment): { label: string; tone: "ok" | "err" | "info" | "neutral" } {
+  switch (p.status) {
+    case "CAPTURED":
+      return {
+        label: p.transaction_type === "REFUND" ? "Refunded" : p.transaction_type === "CHARGEBACK" ? "Returned to the cardholder" : "Paid",
+        tone: "ok",
+      };
+    case "CREATED": return { label: "Started", tone: "info" };
+    case "PENDING": return { label: "Waiting for the provider", tone: "info" };
+    case "FAILED": return { label: "Failed", tone: "neutral" };
+    case "EXPIRED": return { label: "Expired", tone: "neutral" };
+    case "CANCELLED": return { label: "Cancelled", tone: "neutral" };
+    case "UNKNOWN": return { label: "Not known whether it went through", tone: "err" };
+    default: return { label: "Not recognised", tone: "neutral" };
+  }
+}
+
+function settledAs(p: FinancialPayment): string | null {
+  const r = p.settlement_report;
+  if (!r) return null;
+  const exp = currencyExponent(r.settlement_currency) ?? 2;
+  const parts = [`Settled as ${money(r.settlement_amount_minor, r.settlement_currency, exp)}`];
+  if (r.converted) parts[0] += r.exchange_rate ? `, converted at the provider's rate ${r.exchange_rate}` : ", converted by the provider";
+  if (typeof r.fee_minor === "number") parts.push(`fee ${money(r.fee_minor, r.settlement_currency, exp)}`);
+  if (typeof r.net_minor === "number") parts.push(`net ${money(r.net_minor, r.settlement_currency, exp)}`);
+  return parts.join(" · ");
+}
+
+function amountWords(r: FinancialSettlement): string {
+  if (r.method === "NOT_REQUIRED") return "Free";
+  if (r.amount_minor === 0) return "Nothing charged";
+  return money(r.amount_minor, r.currency, r.currency_exponent);
+}
+
 type View = "" | "attention" | "paid" | "voucher" | "free";
 
 type SettlementsResp = PagedFields & {
   settlements?: FinancialSettlement[];
-  /** Counts and collected totals cover all payments, independent of page and view. */
   summary?: {
     all?: number; attention?: number; paid?: number; voucher?: number; free?: number;
     collected?: { currency: string; currency_exponent: number; amount_minor: number }[];
@@ -105,29 +149,46 @@ export function SettlementsView() {
   const [view, setView] = useState<View>("");
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
-  const [detailErr, setDetailErr] = useState<string | null>(null);
+  const [detailFailed, setDetailFailed] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
 
-  // Reset to page one when the view changes.
   const list = useServerPage<SettlementsResp>({
     path: view ? `/financial-ops/settlements?view=${view}` : "/financial-ops/settlements",
     rowsOf: (r) => r.settlements,
   });
   const { resp, current } = list;
-  const err = list.err ? surfaceUnavailableMessage(list.err as any, "Package payments") : null;
   const rows = current && resp ? resp.settlements ?? [] : null;
+  const notEnabled = list.err instanceof ApiError && list.err.status === 404;
+  const loadFailed = !!list.err && !resp;
+  const stale = !!list.err && !!resp;
 
-  async function open(id: string) {
+  const fetchDetail = useCallback(async (id: string) => {
+    setDetailLoading(true);
+    try {
+      setDetail(await api.get<Detail>(`/financial-ops/settlements/${id}`));
+      setDetailFailed(false);
+    } catch {
+      setDetailFailed(true);
+    } finally {
+      setDetailLoading(false);
+    }
+  }, []);
+
+  function open(id: string) {
     setSelected(id);
     setDetail(null);
-    setDetailErr(null);
-    try {
-      setDetail(await api.get(`/financial-ops/settlements/${id}`));
-    } catch (e: any) {
-      setDetailErr(e?.message ?? "Could not load that payment");
-    }
+    setDetailFailed(false);
+    void fetchDetail(id);
+  }
+
+  function close() {
+    setSelected(null);
+    setDetail(null);
+    setDetailFailed(false);
   }
 
   const sum = resp?.summary;
+  const haveSummary = !!sum;
   const counts = {
     attention: sum?.attention ?? 0,
     paid: sum?.paid ?? 0,
@@ -135,12 +196,21 @@ export function SettlementsView() {
     free: sum?.free ?? 0,
     all: sum?.all ?? 0,
   };
-  const collected = (sum?.collected ?? [])
-    .map((c) => money(c.amount_minor, c.currency, c.currency_exponent)).join(" · ") || "0.00";
-  const haveSummary = !!sum;
+  const collectedList = sum?.collected ?? [];
+  const collected = collectedList.length
+    ? collectedList.map((c) => money(c.amount_minor, c.currency, c.currency_exponent)).join(" · ")
+    : "Nothing yet";
+
+  function tile(value: string) {
+    if (haveSummary) return <span className={FADE}>{value}</span>;
+    if (list.err) return "Not known";
+    return <Skeleton className="h-7 w-16" />;
+  }
+
   const visible = rows ?? [];
   const s = detail?.settlement;
   const state = s ? paymentState(s.method, s.status) : null;
+  const spin = (on: boolean) => cn(on && "animate-spin motion-reduce:animate-none");
 
   return (
     <PageShell>
@@ -172,22 +242,32 @@ export function SettlementsView() {
         }
       />
 
-      <ErrorBanner err={err} className="mb-0" />
+      {stale && (
+        <div className={FADE}>
+          <Callout tone="warning">The payments could not be refreshed. What is shown may be out of date.</Callout>
+        </div>
+      )}
 
       <StatGrid cols={4}>
         <StatCard
           label="Needs your attention"
-          value={haveSummary ? counts.attention.toLocaleString() : "—"}
-          tone={counts.attention > 0 ? "err" : "ok"}
-          hint={counts.attention > 0 ? "Waiting, in progress, failed or to review" : "Nothing to do"}
+          value={tile(counts.attention.toLocaleString())}
+          tone={!haveSummary ? "default" : counts.attention > 0 ? "warn" : "ok"}
+          hint={
+            !haveSummary
+              ? list.err ? "Could not be loaded" : undefined
+              : counts.attention > 0
+                ? "Waiting for payment, in progress, not paid or to review"
+                : "Nothing to do"
+          }
         />
         <StatCard
           label="Collected (card and room charge)"
-          value={haveSummary ? collected : "—"}
-          hint={`${counts.paid.toLocaleString()} paid package${counts.paid === 1 ? "" : "s"}`}
+          value={tile(collected)}
+          hint={haveSummary ? `From ${counts.paid.toLocaleString()} card and room-charge package${counts.paid === 1 ? "" : "s"}` : undefined}
         />
-        <StatCard label="Vouchers used" value={haveSummary ? counts.voucher.toLocaleString() : "—"}  />
-        <StatCard label="Free packages" value={haveSummary ? counts.free.toLocaleString() : "—"}  />
+        <StatCard label="Vouchers used" value={tile(counts.voucher.toLocaleString())} />
+        <StatCard label="Free packages" value={tile(counts.free.toLocaleString())} />
       </StatGrid>
 
       <Card className="overflow-hidden">
@@ -204,10 +284,33 @@ export function SettlementsView() {
               { value: "free", label: "Free", count: counts.free },
             ]}
           />
-        } actions={rows ? <span className="text-xs text-muted-foreground">Newest first</span> : undefined} />
+        } actions={resp ? (
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-muted-foreground">Newest first</span>
+            <Button size="xs" variant="ghost" onClick={() => void list.reload()} disabled={list.loading}>
+              <RefreshCw className={spin(list.loading)} /> Refresh
+            </Button>
+          </div>
+        ) : undefined} />
         <div>
-          {!rows ? (
-            err ? null : <SkeletonRows rows={4} cols={6} />
+          {loadFailed ? (
+            <div role="alert" className={FADE}>
+              <EmptyState
+                size="sm"
+                icon={<AlertTriangle />}
+                title={notEnabled ? "Package payments is not enabled on this appliance" : "Package payments could not be loaded"}
+                hint={notEnabled
+                  ? "There is nothing to show here. Enabling it is a deployment decision. Nothing has been changed."
+                  : "Check the appliance is reachable, then try again. Nothing has been changed."}
+                action={
+                  <Button size="sm" variant="secondary" onClick={() => void list.reload()} disabled={list.loading}>
+                    <RefreshCw className={spin(list.loading)} /> Try again
+                  </Button>
+                }
+              />
+            </div>
+          ) : !rows ? (
+            <SkeletonRows rows={4} cols={6} />
           ) : visible.length === 0 ? (
             <EmptyState
               size="sm"
@@ -219,7 +322,7 @@ export function SettlementsView() {
               action={view ? <Button variant="secondary" size="sm" onClick={() => setView("")}>Show all</Button> : undefined}
             />
           ) : (
-            <Table>
+            <Table label="Package payments">
               <THead>
                 <TR>
                   <TH>When</TH>
@@ -235,23 +338,21 @@ export function SettlementsView() {
                 {visible.map((r) => {
                   const st = paymentState(r.method, r.status);
                   return (
-                    <TR key={r.settlement_id} onClick={() => void open(r.settlement_id)}>
-                      <TD nowrap muted className="text-xs">{r.at ? formatDate(r.at) : "—"}</TD>
-                      <TD className="font-medium">{r.package_name || "—"}</TD>
+                    <TR key={r.settlement_id} onClick={() => open(r.settlement_id)}>
+                      <TD nowrap muted className="text-xs">{r.at ? formatDate(r.at) : "Not known"}</TD>
+                      <TD className="font-medium">{r.package_name || "Package not named"}</TD>
                       <TD className="hidden md:table-cell">
                         <span className="inline-flex items-center gap-1.5">
                           {r.source === "ROOM" && <BedDouble className="size-3.5 text-muted-foreground" aria-hidden />}
                           {sourceWords(r, multi)}
                         </span>
                       </TD>
-                      <TD className="hidden sm:table-cell">{PAID_BY[r.method] ?? humanize(r.method)}</TD>
-                      <TD numeric>
-                        {r.amount_minor === 0 ? "—" : money(r.amount_minor, r.currency, r.currency_exponent)}
-                      </TD>
+                      <TD className="hidden sm:table-cell">{paidBy(r.method)}</TD>
+                      <TD numeric>{amountWords(r)}</TD>
                       <TD nowrap><StatusBadge tone={st.tone}>{st.label}</StatusBadge></TD>
                       <TD pinEnd className="w-0 text-end">
                         <Button size="xs" variant="ghost"
-                          onClick={(e) => { e.stopPropagation(); void open(r.settlement_id); }}
+                          onClick={(e) => { e.stopPropagation(); open(r.settlement_id); }}
                           onKeyDown={(e) => e.stopPropagation()}
                           aria-label={`Details of ${r.package_name || "this payment"}`}>
                           Details
@@ -278,18 +379,32 @@ export function SettlementsView() {
         )}
       </Card>
 
-      <Sheet open={selected !== null} onOpenChange={(v) => { if (!v) { setSelected(null); setDetail(null); } }}>
+      <Sheet open={selected !== null} onOpenChange={(v) => { if (!v) close(); }}>
         <SheetContent width="md">
           <SheetHeader
             eyebrow="Package payment"
-            title={s ? (s.package_name || "Package") : "Package payment"}
-            description={s ? `${PAID_BY[s.method] ?? humanize(s.method)}${s.at ? ` · ${formatDate(s.at)}` : ""}` : undefined}
+            title={s ? (s.package_name || "Package not named") : "Package payment"}
+            description={s ? `${paidBy(s.method)}${s.at ? ` · ${formatDate(s.at)}` : ""}` : undefined}
             badges={state ? <StatusBadge tone={state.tone}>{state.label}</StatusBadge> : undefined}
           />
           <SheetBody>
-            <ErrorBanner err={detailErr} className="mb-0" />
             {!detail || !s || !state ? (
-              detailErr ? null : (
+              detailFailed ? (
+                <div role="alert" className={FADE}>
+                  <EmptyState
+                    size="sm"
+                    icon={<AlertTriangle />}
+                    title="This payment could not be loaded"
+                    hint="Check the appliance is reachable, then try again. Nothing has been changed."
+                    action={
+                      <Button size="sm" variant="secondary" disabled={detailLoading}
+                        onClick={() => selected && void fetchDetail(selected)}>
+                        <RefreshCw className={spin(detailLoading)} /> Try again
+                      </Button>
+                    }
+                  />
+                </div>
+              ) : (
                 <div className="space-y-3" aria-busy="true">
                   <span className="sr-only">Loading the payment</span>
                   <Skeleton className="h-20 w-full" />
@@ -297,7 +412,7 @@ export function SettlementsView() {
                 </div>
               )
             ) : (
-              <>
+              <div className={cn("space-y-6", FADE)}>
                 <SheetSection title="What happened">
                   <p className="text-sm">{state.explain}</p>
                   {s.status === "MANUAL_REVIEW" && (
@@ -305,16 +420,21 @@ export function SettlementsView() {
                       Decide it on Manual review <ArrowUpRight className="size-3.5" aria-hidden />
                     </Link>
                   )}
+                  {s.status === "FAILED" && s.method === "PMS_POSTING" && (
+                    <Link href="/financial-health" className="mt-2 inline-flex items-center gap-1 text-sm text-primary underline-offset-4 hover:underline">
+                      See room charge problems on Charge health <ArrowUpRight className="size-3.5" aria-hidden />
+                    </Link>
+                  )}
                 </SheetSection>
                 <SheetSection title="Details">
                   <KeyValueGrid
                     items={[
-                      { label: "Package", value: s.package_name || "—" },
+                      { label: "Package", value: s.package_name || "Package not named" },
                       { label: "Client", value: sourceWords(s, multi) },
-                      { label: "Paid by", value: PAID_BY[s.method] ?? humanize(s.method) },
-                      { label: "Amount", value: s.method === "NOT_REQUIRED" ? "Free" : money(s.amount_minor, s.currency, s.currency_exponent) },
-                      { label: "Access", value: ACCESS_WORDS[s.purchase_state] ?? humanize(s.purchase_state) },
-                      { label: "When", value: s.at ? formatDate(s.at) : "—" },
+                      { label: "Paid by", value: paidBy(s.method) },
+                      { label: "Amount", value: amountWords(s) },
+                      { label: "Access", value: ACCESS_WORDS[s.purchase_state] ?? "Not recognised" },
+                      { label: "When", value: s.at ? formatDate(s.at) : "Not known" },
                     ]}
                   />
                 </SheetSection>
@@ -324,32 +444,27 @@ export function SettlementsView() {
                       <p className="text-sm text-muted-foreground">No card payment has been started for this package.</p>
                     ) : (
                       <div className="overflow-hidden rounded-md border border-border">
-                        <Table>
+                        <Table label="Card payment history">
                           <THead>
                             <TR><TH>Step</TH><TH>Amount</TH><TH>Result</TH></TR>
                           </THead>
                           <TBody>
-                            {detail.payments.map((p) => (
-                              <TR key={p.payment_id}>
-                                <TD>{humanize(p.transaction_type)}</TD>
-                                <TD className="tabular">
-                                  {money(p.amount_minor, p.currency, p.currency_exponent)}
-                                  {p.settlement_report && (
-                                    <div className="text-2xs text-muted-foreground" data-testid="settlement-report">
-                                      Settled as {money(p.settlement_report.settlement_amount_minor, p.settlement_report.settlement_currency, currencyExponent(p.settlement_report.settlement_currency) ?? 2)}
-                                      {p.settlement_report.exchange_rate ? ` at the provider's rate ${p.settlement_report.exchange_rate}` : ""}
-                                      {typeof p.settlement_report.fee_minor === "number" ? ` · fee ${money(p.settlement_report.fee_minor, p.settlement_report.settlement_currency, currencyExponent(p.settlement_report.settlement_currency) ?? 2)}` : ""}
-                                      {typeof p.settlement_report.net_minor === "number" ? ` · net ${money(p.settlement_report.net_minor, p.settlement_report.settlement_currency, currencyExponent(p.settlement_report.settlement_currency) ?? 2)}` : ""}
-                                    </div>
-                                  )}
-                                </TD>
-                                <TD>
-                                  <Badge tone={p.status === "CAPTURED" ? "ok" : p.status === "UNKNOWN" ? "err" : "info"}>
-                                    {humanize(p.status)}
-                                  </Badge>
-                                </TD>
-                              </TR>
-                            ))}
+                            {detail.payments.map((p) => {
+                              const res = resultWords(p);
+                              const report = settledAs(p);
+                              return (
+                                <TR key={p.payment_id}>
+                                  <TD>{STEP_WORDS[p.transaction_type] ?? "Not recognised"}</TD>
+                                  <TD className="tabular">
+                                    {money(p.amount_minor, p.currency, p.currency_exponent)}
+                                    {report && (
+                                      <div className="text-2xs text-muted-foreground" data-testid="settlement-report">{report}</div>
+                                    )}
+                                  </TD>
+                                  <TD><Badge tone={res.tone}>{res.label}</Badge></TD>
+                                </TR>
+                              );
+                            })}
                           </TBody>
                         </Table>
                       </div>
@@ -362,11 +477,11 @@ export function SettlementsView() {
                     provider appears here automatically.
                   </p>
                 )}
-              </>
+              </div>
             )}
           </SheetBody>
           <SheetFooter>
-            <Button variant="ghost" onClick={() => { setSelected(null); setDetail(null); }}>Close</Button>
+            <Button variant="ghost" onClick={close}>Close</Button>
           </SheetFooter>
         </SheetContent>
       </Sheet>

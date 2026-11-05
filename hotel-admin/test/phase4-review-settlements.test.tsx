@@ -202,7 +202,8 @@ describe("package payments", () => {
     expect(await screen.findByText("Room 14340")).toBeInTheDocument();
     expect(screen.getByText("Paid")).toBeInTheDocument();
     expect(screen.getByText("Needs review")).toBeInTheDocument();
-    expect(screen.getByText("Free — nothing to pay")).toBeInTheDocument();
+    expect(screen.getByText("Nothing to pay")).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("—");
     expect(screen.getByText("Paid by voucher")).toBeInTheDocument();
     expect(screen.getByText("Client account")).toBeInTheDocument();
     for (const code of ["NOT_REQUIRED", "PMS_POSTING", "MANUAL_REVIEW", "ONLINE_PAYMENT", "PREPAID"]) {
@@ -225,7 +226,10 @@ describe("package payments", () => {
     render(<SettlementsView />);
     const buttons = await screen.findAllByRole("button", { name: /details of/i });
     await userEvent.click(buttons[0]);
-    expect(await screen.findByText("Captured")).toBeInTheDocument();
+    const history = await screen.findByRole("table", { name: "Card payment history" });
+    expect(within(history).getByText("Payment")).toBeInTheDocument();
+    expect(within(history).getByText("Paid")).toBeInTheDocument();
+    expect(screen.queryByText("Captured")).not.toBeInTheDocument();
     for (const forbidden of [/refund/i, /chargeback/i, /reverse/i, /charge again/i]) {
       expect(screen.queryByRole("button", { name: forbidden })).not.toBeInTheDocument();
     }
@@ -245,7 +249,7 @@ describe("package payments", () => {
     render(<SettlementsView />);
     const buttons = await screen.findAllByRole("button", { name: /details of/i });
     await userEvent.click(buttons[0]);
-    await screen.findByText("Captured");
+    await screen.findByRole("table", { name: "Card payment history" });
     const body = document.body.textContent ?? "";
     for (const name of ["Stripe", "Adyen", "Checkout.com", "PayPal", "Braintree"]) {
       expect(body).not.toContain(name);
