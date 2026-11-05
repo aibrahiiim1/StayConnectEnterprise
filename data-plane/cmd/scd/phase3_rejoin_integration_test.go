@@ -186,6 +186,21 @@ func TestIntegration_Rejoin_TheNetworkDisconnectedDeviceReturnsToItsOwnEntitleme
 	if r := f.rejoin(t, f.net.guestIP, f.net.mac); r.Outcome != rejoinOutcomeNotEligible {
 		t.Fatalf("a released device was reconnected: %+v", r)
 	}
+	// A reconnection never opens an authorization, so a release racing it cannot be undone: the database refuses a session
+	// for a device whose authorization is closed, which is the guard a racing reconnection meets.
+	var device string
+	_ = f.pool.QueryRow(ctx, `SELECT id::text FROM iam_v2.devices WHERE mac=$1::macaddr AND tenant_id=$2`, f.net.mac, f.tenant).Scan(&device)
+	if _, err := f.pool.Exec(ctx, `INSERT INTO iam_v2.sessions(tenant_id,site_id,entitlement_id,device_id,credential_method,state,started,ip,mac)
+		VALUES ($1,$2,$3,$4,'REJOIN','PENDING_ENFORCEMENT',now(),$5::inet,$6::macaddr)`,
+		f.tenant, f.site, g.EntitlementID, device, f.net.guestIP, f.net.mac); err == nil {
+		t.Fatal("a session was opened for a device whose authorization had been released")
+	}
+	var open int
+	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM iam_v2.entitlement_device_authorizations WHERE entitlement_id=$1 AND device_id=$2 AND deauthorized_at IS NULL`,
+		g.EntitlementID, device).Scan(&open)
+	if open != 0 {
+		t.Fatalf("the released device's authorization was reopened (%d open)", open)
+	}
 }
 
 // When the package itself has ended, a network-ended session is not reconnected: there is nothing to return to.

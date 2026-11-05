@@ -2,9 +2,9 @@ package main
 
 // Automatic reconnection for room sign-in (Product Owner, 2026-11-05). A device that room sign-in let in, and whose session the
 // network then ended (its lease lapsed or was reissued, its address changed), is put back on the SAME entitlement without the
-// room details when the portal sees it again. Nothing is granted: no quote, purchase or entitlement is written, and the device's
-// existing authorization is only re-affirmed through authorize_entitlement_device, which keeps the device limit and the
-// after-check-out rule. The usage, allowance and window are the entitlement's and are not touched.
+// room details when the portal sees it again. Nothing is granted: no quote, purchase, entitlement or device authorization is written;
+// the session runs on the authorization the device already holds, so the device limit and the after-check-out rule are unchanged.
+// The usage, allowance and window are the entitlement's and are not touched.
 //
 // Every condition below must hold, and each fails closed:
 //   - DHCP says the address is leased to this MAC right now ("owned"; "unknown" is a refusal, never a reconnect on doubt);
@@ -157,10 +157,16 @@ func (p *phase3Auth) rejoinOnce(w http.ResponseWriter, r *http.Request, body []b
 		p.rejoinRefused(w, "live_session_under_lock")
 		return
 	}
-	// Re-affirms the existing authorization (idempotent); a refusal here is the database's own device rule.
-	if _, err := tx.Exec(ctx, `SELECT iam_v2.authorize_entitlement_device($1,$2,now())`, ent, dev.DeviceID); err != nil {
+	// The authorization must still be open now, under the lock: a staff release racing this probe closes it without touching the
+	// entitlement row. Nothing here may open one: authorize_entitlement_device would start a new interval and silently undo the
+	// release, so a reconnection only ever uses the authorization the device already holds, and the session insert's own guard
+	// refuses a device without one.
+	var authorized bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM iam_v2.entitlement_device_authorizations
+		WHERE tenant_id=$1 AND entitlement_id=$2::uuid AND device_id=$3::uuid AND deauthorized_at IS NULL)`,
+		p.srv.tenID, ent, dev.DeviceID).Scan(&authorized); err != nil || !authorized {
 		noteRetry(ctx, err)
-		p.rejoinRefused(w, "authorization: "+err.Error())
+		p.rejoinRefused(w, "authorization_closed")
 		return
 	}
 	if err := reserveLicensedSlot(ctx, tx, p.srv.applID, p.srv.lic.MaxConcurrentOnlineGuests()); err != nil {
