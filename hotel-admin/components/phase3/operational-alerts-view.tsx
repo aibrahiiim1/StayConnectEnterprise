@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, BellRing, CheckCheck, RefreshCw } from "lucide-react";
-import { api, ApiError, ListResp, OperationalAlert, StayDetail } from "@/lib/api";
+import { api, ListResp, OperationalAlert, StayDetail } from "@/lib/api";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
@@ -45,8 +45,13 @@ const stateWord = (s: string) => (s === "ACKNOWLEDGED" ? "Acknowledged" : s === 
 
 type StayInfo = { room?: string | null; reservation?: string | null } | null;
 
+function failure(e: unknown): { status?: number; code: string } {
+  const x = e as { status?: number; code?: string } | null;
+  return { status: x?.status, code: typeof x?.code === "string" ? x.code : "" };
+}
+
 function actionError(e: unknown): string {
-  const code = e instanceof ApiError ? e.code : "";
+  const { code } = failure(e);
   if (code === "not_found") return "This alert was already resolved. The queue has been refreshed.";
   if (code === "actor_invalid") return "Your account could not be recorded against this action. Sign in again, then retry. Nothing was changed.";
   return "The action could not be completed. Check the appliance is reachable, then try again. Nothing was changed.";
@@ -138,7 +143,8 @@ export function OperationalAlertsView({
       await load();
       return "ok";
     } catch (e: unknown) {
-      if (e instanceof ApiError && e.status === 409 && e.code === "state_conflict") {
+      const f = failure(e);
+      if (f.status === 409 && f.code === "state_conflict") {
         setNote("This alert changed while you were looking at it. The queue has been refreshed.");
         await load();
         return "conflict";
@@ -146,7 +152,7 @@ export function OperationalAlertsView({
         const words = actionError(e);
         if (action === "resolve" && resolving) setResolveErr(words);
         else setErr(words);
-        if (e instanceof ApiError && e.code === "not_found") await load();
+        if (f.code === "not_found") await load();
       }
       return "error";
     } finally {
