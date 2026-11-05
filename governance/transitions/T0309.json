@@ -1,0 +1,35 @@
+{
+  "transition_id": "T0309",
+  "seq": 309,
+  "timestamp": "2026-11-05T18:38:39+02:00",
+  "timestamp_derivation": "Read from the workstation clock (UTC+02:00) by the script that wrote this receipt, immediately before the commit that introduces it.",
+  "record_type": "USAGE_EXPLORER_PACKAGES_AND_AFTER_CHECKOUT_ROOM_SIGN_IN",
+  "authorisation": "The Product Owner's missions of 2026-11-05 (D95): the Usage explorer improvements (PR #330), and the end-to-end fix of the D93 After Check-out Access defect including migration 0209, protected merge and deployment to the test appliance 172.21.96.97 under D79.",
+  "delivery": "PR #330 (merged 0e3b2dba): the Usage explorer lists a source's total over every package apart from its latest package (name, status, own allowance and meter), lists every package with its own meter, dates and ending, and splits a session carried across packages from session_entitlement_bindings and the raw samples only when they add up to the session total; svc_edged gained SELECT on session_entitlement_bindings (Gate-P and baseline). PR #347 (merged 6935b49b): migration 0209 lets issue_or_return_pms_context issue a room sign-in context to a CHECKED_OUT stay holding an ACTIVE, in-window GRACE_AFTER_CHECKOUT entitlement; scd's room probe and the context consume in internal/authctx share the predicate (authctx.AfterCheckoutLive); the IN_HOUSE arm is unchanged; baseline regenerated; the tenant-isolation check on the #330 queries restored.",
+  "findings": "On the test appliance a checked-out room's own devices were refused room sign-in as STAY_NOT_ELIGIBLE while its After Check-out Access was active (40 refusals in 11 checked-out rooms on 2026-11-05, 6 of them from the rooms' own authorised devices): the context function issued contexts to IN_HOUSE stays only and the post-stay route is not enabled; the existing after-check-out device test kept the stay IN_HOUSE and so never saw it. The Usage explorer had set every package's total against one package's allowance (MAX over entitlements), so stays read as over their allowance when no package had been overrun. Separately, Kea is not authoritative on the client networks (no DHCPNAK to a client re-requesting an address now leased to another device): reported to the Product Owner, not changed.",
+  "verification": "Real-checkout integration test (internal/checkout, the converter itself): the stay's own devices rejoin the same After Check-out entitlement repeatedly with no purchase, entitlement, window, quota or device-count change; a new device is refused by the database; a context issued before the access ended cannot be used and none is issued after; with the 0209 down migration applied the test fails with the production error. scd handler test on a CHECKED_OUT stay: rejoin by surname and by reservation number recorded VERIFIED, a new device AFTER_CHECKOUT_NEW_DEVICE_REJECTED, a wrong surname CREDENTIAL_MISMATCH, ended access STAY_NOT_ELIGIBLE. Regression on Linux: authctx, checkout, staygrant and poststay integration; scd Phase3/PostStay/AfterCheckout/SignInAttempts/Role integration including svc_scd; iamv2 unit tests in both builds; edged unit and Usage integration tests as svc_edged; factory-clean baseline IDENTICAL (14,936 catalog facts). Codex review clean on both PRs.",
+  "deployment": {
+    "test_appliance": "Recorded in T0310.",
+    "central": "Not changed."
+  },
+  "not_touched": "After Check-out Access settings (version 3: 10 devices, 5 GB, 12 h, kept as the operator set them), the post-stay route, DHCP and networking, enforcement and quota rules, PMS configuration and postings, payments, licences, PKI and trust, the production Central.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "6935b49bc5f10e790ec5b82a72a1ad212c6451b1",
+  "previous_delivery": "T0308",
+  "decision": "D95",
+  "go_live": "NOT authorised."
+}

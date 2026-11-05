@@ -13,7 +13,7 @@ func TestEveryResultHasALabelAndAGuestClass(t *testing.T) {
 		}
 		switch r.GuestClass() {
 		case GuestSuccess, GuestCredential, GuestTechnical, GuestRateLimited, GuestLicense, GuestCapacity, GuestDeviceLimit,
-			GuestAfterCheckoutDevice:
+			GuestAfterCheckoutDevice, GuestAddressConflict:
 		default:
 			t.Errorf("%s maps to an unknown guest class %q", r, r.GuestClass())
 		}
