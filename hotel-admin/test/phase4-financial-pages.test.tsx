@@ -137,8 +137,15 @@ describe("financial recovery", () => {
     });
     render(<FinancialRecoveryView />);
     const btn = await screen.findByRole("button", { name: /record/i });
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveAccessibleDescription(/choose what you established/i);
     await userEvent.click(btn);
-    expect(await screen.findByRole("alert")).toHaveTextContent(/choose what you established/i);
+    expect(post).not.toHaveBeenCalled();
+    await userEvent.selectOptions(screen.getByLabelText(/conclusion for this payment/i), "CONFIRMED_NOT_COMPLETED");
+    await userEvent.type(screen.getByLabelText(/evidence for this decision/i), "too short");
+    expect(btn).toHaveAccessibleDescription(/at least 10 characters/i);
+    await userEvent.type(screen.getByLabelText(/evidence for this decision/i), "!");
+    expect(btn).toHaveAccessibleDescription(/enter your password/i);
     expect(post).not.toHaveBeenCalled();
   });
 
@@ -275,7 +282,8 @@ describe("zero-attempt recovery", () => {
     zeroRoute(ZERO_ELIGIBLE);
     render(<FinancialRecoveryView />);
     expect(await screen.findByText(/Never transmitted \(1\)/)).toBeInTheDocument();
-    expect(screen.getByText(/do not appear on the Manual Review screen/i)).toBeInTheDocument();
+    expect(screen.getByText(/do not appear on Manual review/i)).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("CONFIRMED_NOT_COMPLETED");
     expect(screen.getByText("25.00 USD")).toBeInTheDocument();
   });
 
@@ -322,7 +330,13 @@ describe("zero-attempt recovery", () => {
     post.mockResolvedValue({ transmitted: false });
     render(<FinancialRecoveryView />);
     await screen.findByText(/Never transmitted/);
-    await userEvent.click(screen.getByRole("button", { name: /authorize one attempt/i }));
+    const authorize = screen.getByRole("button", { name: /authorize one attempt/i });
+    expect(authorize).toBeDisabled();
+    await userEvent.type(screen.getByLabelText(/why this charge must still go out/i), "checked the folio; nothing was posted");
+    await userEvent.selectOptions(screen.getByLabelText(/evidence source for this posting/i), "PMS_FOLIO_INSPECTION");
+    await userEvent.type(screen.getByLabelText(/reference to that evidence/i), "folio 4471");
+    await userEvent.type(screen.getByLabelText(/your password/i), "hunter2");
+    await userEvent.click(authorize);
     await waitFor(() => expect(screen.getAllByRole("status").some((s) => /nothing has been sent/i.test(s.textContent ?? ""))).toBe(true));
   });
 
@@ -335,7 +349,7 @@ describe("zero-attempt recovery", () => {
     render(<FinancialRecoveryView />);
     await screen.findByText(/Never transmitted/);
     expect(screen.getByText("Not yet reconciled")).toBeInTheDocument();
-    expect(screen.getByText(/Reconcile this item above/i)).toBeInTheDocument();
+    expect(screen.getByText(/Reconcile this charge under Held work/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /authorize one attempt/i })).not.toBeInTheDocument();
   });
 
