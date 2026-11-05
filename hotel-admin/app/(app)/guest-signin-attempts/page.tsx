@@ -88,6 +88,11 @@ const RESULT_WORDS: Record<string, { tone: "ok" | "warn" | "err" | "info" | "neu
     meaning:
       "The departed guest's details were right, but After Check-out Access continues only on devices the stay used before check-out, and this was another device. The guest was told to use one of those devices.",
   },
+  ADDRESS_CONFLICT: {
+    tone: "warn",
+    meaning:
+      "The device was still using a network address the DHCP server had since given to another device, so it could not be connected. Nothing about the room was checked; the guest was asked to turn Wi-Fi off and on again, which gives the device a valid address.",
+  },
 };
 
 const RESULT_FILTER_LABELS: Record<string, string> = {
@@ -107,6 +112,7 @@ const RESULT_FILTER_LABELS: Record<string, string> = {
   LICENSE_CAPACITY_REACHED: "Licensed capacity full",
   DEVICE_LIMIT_REACHED: "Device limit reached",
   AFTER_CHECKOUT_NEW_DEVICE_REJECTED: "New device after check-out",
+  ADDRESS_CONFLICT: "Old network address",
 };
 
 const RESULT_FILTERS = [
@@ -324,7 +330,7 @@ export default function GuestSignInAttemptsPage() {
                     <TD nowrap className="font-medium">{a.room || "—"}</TD>
                     <TD truncate muted title={a.guest_network || undefined} className="hidden max-w-[12rem] md:table-cell">{a.guest_network || "—"}</TD>
                     <TD nowrap>
-                      <StatusBadge tone={tone(a.result)}>{a.succeeded ? "Connected" : "Refused"}</StatusBadge>
+                      <StatusBadge tone={a.no_package_taken ? "neutral" : tone(a.result)}>{a.no_package_taken ? "No package taken" : a.succeeded ? "Connected" : "Refused"}</StatusBadge>
                     </TD>
                     <TD className="hidden lg:table-cell">{a.result_label}</TD>
                     <TD nowrap muted className="hidden xl:table-cell">

@@ -37,7 +37,13 @@ type signInAttemptRow struct {
 	DeviceMAC        string `json:"device_mac,omitempty"`
 	RequestID        string `json:"request_id,omitempty"`
 	LatencyMS        *int64 `json:"latency_ms,omitempty"`
+	// NoPackageTaken: verified, but no session followed within signInNoPackageTaken's wait; the guest left at the package choice.
+	NoPackageTaken bool `json:"no_package_taken,omitempty"`
 }
+
+// signInNoPackageTaken is true for a verified room sign-in that never produced a session, once its sign-in context (10 minutes)
+// and a paid purchase's settlement have had time to finish. Derived when read; the stored result is unchanged. The attempts list repeats it\n// inline (alias a), because the tenant-isolation check reads each statement as one literal.
+const signInNoPackageTaken = `(sia.result = 'VERIFIED' AND sia.session_id IS NULL AND sia.occurred_at < now() - interval '15 minutes')`
 
 type signInAttemptDetail struct {
 	signInAttemptRow
@@ -169,7 +175,8 @@ func (s *server) listSignInAttempts(w http.ResponseWriter, r *http.Request) {
 		SELECT a.id::text, a.occurred_at, COALESCE(a.submitted_room,''), COALESCE(a.guest_network_name,''),
 		       a.result, COALESCE(a.verifier_kind,''), a.mirror_age_seconds,
 		       COALESCE(a.pms_transport_status,''), COALESCE(host(a.device_ip),''),
-		       COALESCE(a.device_mac::text,''), COALESCE(a.request_id::text,''), a.latency_ms
+		       COALESCE(a.device_mac::text,''), COALESCE(a.request_id::text,''), a.latency_ms,
+		       (a.result = 'VERIFIED' AND a.session_id IS NULL AND a.occurred_at < now() - interval '15 minutes')
 		  FROM iam_v2.sign_in_attempts a
 		 `+signInAttemptFilter+`
 		   AND `+signInSearchMatch+`
@@ -187,13 +194,16 @@ func (s *server) listSignInAttempts(w http.ResponseWriter, r *http.Request) {
 		var e signInAttemptRow
 		if err := rows.Scan(&e.ID, &e.OccurredAt, &e.Room, &e.GuestNetwork, &e.Result, &e.VerifierKind,
 			&e.MirrorAgeSeconds, &e.TransportStatus, &e.DeviceIP, &e.DeviceMAC, &e.RequestID,
-			&e.LatencyMS); err != nil {
+			&e.LatencyMS, &e.NoPackageTaken); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "internal", "scan failed")
 			return
 		}
 		// The reason comes from the same Go map the codes are declared in, so the screen and recorder cannot drift.
 		e.ResultLabel = signinattempt.Result(e.Result).Label()
-		e.Succeeded = signinattempt.Result(e.Result).Succeeded()
+		e.Succeeded = signinattempt.Result(e.Result).Succeeded() && !e.NoPackageTaken
+		if e.NoPackageTaken {
+			e.ResultLabel = "Verified, but no package was taken"
+		}
 		out = append(out, e)
 	}
 	if err := rows.Err(); err != nil {

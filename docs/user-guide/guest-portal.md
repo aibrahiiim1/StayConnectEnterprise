@@ -40,7 +40,7 @@ license.
 
 | Method | What the client enters | Notes |
 |---|---|---|
-| **Room** | Room Number, plus exactly one detail from the reservation: surname, first name, reservation number, or any one of the three in a single box that is compared against all three (the site chooses under **Admin Console → Hotel → Room sign-in**; a hint under the field says which) | Checked against the site's PMS through the appliance's guest list. If the guest qualifies for more than one internet package, the page offers **Choose your internet package**; with one package it is granted directly. After check-out, a device that was on the stay signs in the same way and is let back onto the stay's **After Check-out Access** while it lasts; a new device is refused. |
+| **Room** | Room Number, plus exactly one detail from the reservation: surname, first name, reservation number, or any one of the three in a single box that is compared against all three (the site chooses under **Admin Console → Hotel → Room sign-in**; a hint under the field says which) | Checked against the site's PMS through the appliance's guest list. If the guest qualifies for more than one internet package, the page offers **Choose your internet package**; with one package it is granted directly. After check-out, a device that was on the stay signs in the same way and is let back onto the stay's **After Check-out Access** while it lasts; a new device is refused. A device the network disconnected (its address lease ended, or it returned with a new address) is reconnected to the same package automatically, without the form, while that package is active; after the guest logs out it signs in again. |
 | **Voucher** | Voucher Code | A **Use Personal Account** switch changes to the account form when both are enabled. |
 | **Personal account** | Username, Password | Accounts created by staff under the **Admin Console → Client accounts**. |
 | **Email** | Email address → **Send code**, then the 6-digit code → **Verify** | Needs a sender under **Email & SMS**. *Try a different email* starts again. |
@@ -55,6 +55,7 @@ in it, and a wrong room and a wrong name give the same message. Examples (Englis
 
 | Situation | Message |
 |---|---|
+| Device kept an old network address | "Your device is using an old network address. Turn Wi-Fi off and on again, then sign in." |
 | Wrong room or guest detail | "The room number or guest detail you entered is incorrect. Check the room number and enter the full first name, family name, or reservation number." |
 | Stay cannot be checked right now | "We are unable to verify your stay right now. Please try again or contact the site team for assistance." |
 | Too many attempts | "Too many attempts. Please wait N seconds and try again." with a live countdown, then "You can try again now." |

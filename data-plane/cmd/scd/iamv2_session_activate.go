@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/onegate/onegate/data-plane/internal/signinattempt"
 	"github.com/onegate/onegate/data-plane/internal/writerguard"
 )
 
@@ -310,6 +311,9 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 		// SessionsStarted counts only sessions that actually started.
 		s.met.SessionsStarted.WithLabelValues("iamv2").Inc()
 	}
+	if state == "active" {
+		s.linkPaidSignIn(ctx, req.EntitlementID, req.DeviceID, sessionID)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"session_id": sessionID,
 		"state":      state,
@@ -318,6 +322,27 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 		"authority":  "iam_v2",
 		"bridge":     nc.Bridge,
 	})
+}
+
+// linkPaidSignIn completes the room sign-in that bought this entitlement with the session its payment opened: a paid grant answers
+// PENDING and the session opens here later, so the attempt otherwise stayed "verified, no session". Only the device that signed in,
+// and only while the attempt has no session (complete_sign_in_attempt), so a repeat changes nothing.
+func (s *server) linkPaidSignIn(ctx context.Context, entitlementID, deviceID, sessionID string) {
+	if s.p3auth == nil || sessionID == "" {
+		return
+	}
+	var requestID string
+	if err := s.db.QueryRow(ctx, `
+	    SELECT ac.resolution_request_id::text
+	      FROM iam_v2.entitlements e
+	      JOIN iam_v2.purchases pu ON pu.id = e.purchase_id AND pu.tenant_id = e.tenant_id
+	      JOIN iam_v2.auth_contexts ac ON ac.id = pu.auth_context_id AND ac.tenant_id = pu.tenant_id
+	     WHERE e.id = $1 AND e.tenant_id = $2 AND e.site_id = $3
+	       AND ac.device_id = $4 AND ac.method = 'PMS' AND ac.resolution_request_id IS NOT NULL`,
+		entitlementID, s.tenID, s.siteID, deviceID).Scan(&requestID); err != nil {
+		return
+	}
+	s.p3auth.completeAttempt(requestID, signinattempt.Verified, entitlementID, sessionID)
 }
 
 // endReasonAddressChanged ends a session when the device returns at a different address or bridge (audit B-19).
