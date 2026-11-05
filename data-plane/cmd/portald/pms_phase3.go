@@ -31,6 +31,9 @@ const (
 
 const guestRoomDeviceLimitMessage = "Every device place for this room is in use. On a device that is online with it, remove one under “Your devices”, or contact the site team."
 
+// ADDRESS_CONFLICT: the device kept an address DHCP has since leased to another device; a fact about the device, not a room.
+const guestAddressConflictMessage = "Your device is using an old network address. Turn Wi-Fi off and on again, then sign in."
+
 const guestAfterCheckoutDeviceMessage = "After check-out, Internet access continues only on the devices that were connected during your stay. Please use one of those devices, or contact the site team."
 
 // The same sentences the voucher and account sign-in show (main.go, iamv2_commerce_session.go).
@@ -56,6 +59,7 @@ var guestAuthMessages = map[string]string{
 	"DEVICE_LIMIT": guestRoomDeviceLimitMessage,
 	// AFTER_CHECKOUT_DEVICE: the departed guest is verified, but this device was not one of the stay's.
 	"AFTER_CHECKOUT_DEVICE": guestAfterCheckoutDeviceMessage,
+	"ADDRESS_CONFLICT":      guestAddressConflictMessage,
 	// LICENSE and CAPACITY are property-wide facts, never about a room.
 	"LICENSE":  guestLicenseRefusedMessage,
 	"CAPACITY": guestCapacityMessage,

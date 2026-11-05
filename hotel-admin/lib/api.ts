@@ -469,6 +469,8 @@ export type SignInAttempt = {
   device_mac?: string | null;
   request_id?: string | null;
   latency_ms?: number | null;
+  // Verified, but no session followed: the guest left at the package choice (derived by edged).
+  no_package_taken?: boolean;
 };
 
 export type SignInAttemptDetail = SignInAttempt & {
