@@ -128,9 +128,7 @@ func (s *server) listUsageStays(w http.ResponseWriter, r *http.Request) {
 		         COALESCE(SUM(se.bytes_up), 0)   AS up,
 		         COUNT(se.id)                    AS sessions,
 		         COUNT(DISTINCT se.device_id)    AS devices,
-		         MAX(COALESCE(e.data_quota_bytes, spr.data_quota_bytes)) AS quota,
-		         MAX(e.consumed_data_bytes)      AS consumed,
-		         MAX(e.terminal_reason)          AS end_reason
+		         `+currentEntitlementCols+`
 		    FROM iam_v2.entitlements e
 		    -- THE ENFORCED ALLOWANCE (internal/enforce): the entitlement's own frozen quota, else its plan's.
 		    LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id
@@ -209,6 +207,12 @@ type staySessionRow struct {
 	BytesUp   int64      `json:"bytes_up"`
 	BytesAll  int64      `json:"bytes_total"`
 }
+
+// currentEntitlementCols takes allowance, use and end reason from the source's most recent entitlement (as the headers do):
+// MAX skipped an unlimited current package and set an old package's allowance against every package's totals.
+const currentEntitlementCols = `(array_agg(COALESCE(e.data_quota_bytes, spr.data_quota_bytes) ORDER BY e.activated_at DESC NULLS LAST, e.id DESC))[1] AS quota,
+		         (array_agg(e.consumed_data_bytes ORDER BY e.activated_at DESC NULLS LAST, e.id DESC))[1] AS consumed,
+		         (array_agg(e.terminal_reason ORDER BY e.activated_at DESC NULLS LAST, e.id DESC))[1] AS end_reason`
 
 // stayHeaderSQL reads one stay, the room always carrying its interface, with the allowance of its most recent entitlement.
 const stayHeaderSQL = `
@@ -593,9 +597,7 @@ func usageSourceListSQL(limit, offset int) string {
 		         COALESCE(SUM(se.bytes_up), 0)   AS up,
 		         COUNT(se.id)                    AS sessions,
 		         COUNT(DISTINCT se.device_id)    AS devices,
-		         MAX(COALESCE(e.data_quota_bytes, spr.data_quota_bytes)) AS quota,
-		         MAX(e.consumed_data_bytes)      AS consumed,
-		         MAX(e.terminal_reason)          AS end_reason,
+		         ` + currentEntitlementCols + `,
 		         MAX(se.started)                 AS last_started
 		    FROM iam_v2.entitlements e
 		    -- THE ENFORCED ALLOWANCE (internal/enforce): the entitlement's own frozen quota, else its plan's.

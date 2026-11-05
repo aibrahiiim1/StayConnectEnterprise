@@ -120,6 +120,26 @@ func TestSubjectColumnsMatchTheEntitlementSubject(t *testing.T) {
 	}
 }
 
+// THE ALLOWANCE SHOWN IS THE CURRENT PACKAGE'S: a MAX across packages hid an unlimited one behind an old free package's quota.
+func TestUsageListsShowTheMostRecentEntitlementsAllowance(t *testing.T) {
+	b, err := os.ReadFile("resources_usage.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(b)
+	for _, bad := range []string{"MAX(COALESCE(e.data_quota_bytes", "MAX(e.consumed_data_bytes)", "MAX(e.terminal_reason)"} {
+		if strings.Contains(src, bad) {
+			t.Errorf("a usage list aggregates %q across entitlements", bad)
+		}
+	}
+	if n := strings.Count(src, "currentEntitlementCols+") + strings.Count(src, "currentEntitlementCols +"); n != 2 {
+		t.Errorf("the stay list and the source list should both read currentEntitlementCols; found %d uses", n)
+	}
+	if !strings.Contains(usageSourceListSQL(51, 50), "ORDER BY e.activated_at DESC NULLS LAST, e.id DESC))[1] AS quota") {
+		t.Error("the source list does not take the most recent entitlement's allowance")
+	}
+}
+
 func TestParseSourceType(t *testing.T) {
 	for in, want := range map[string]string{"": "", "all": "", "stay": "stay", "STAY": "stay", " account ": "account", "voucher": "voucher"} {
 		got, ok := parseSourceType(in)
