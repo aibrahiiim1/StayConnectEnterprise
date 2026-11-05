@@ -576,12 +576,12 @@ export default function GuestSignInAttemptsPage() {
                     { label: "Verification value entered", value: <span className="font-medium">{creds.submitted_verifier || "Nothing entered"}</span> },
                     {
                       label: "PMS connection",
-                      value: `${transportWords(detail.pms_transport_status)} · last full refresh ${detail.mirror_last_complete_sync_at ? formatDate(detail.mirror_last_complete_sync_at) : "never"}`,
+                      value: `${transportWords(detail.pms_transport_status)} · last full sync ${detail.mirror_last_complete_sync_at ? formatDate(detail.mirror_last_complete_sync_at) : "never"}`,
                     },
                   ]}
                 />
                 <p className="mt-2 text-xs">
-                  Changes made in the PMS after the displayed last-refresh time are not available on this appliance.
+                  Changes made in the PMS after the displayed last-sync time are not available on this appliance.
                 </p>
               </Callout>
             ) : (
