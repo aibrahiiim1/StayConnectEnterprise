@@ -151,6 +151,14 @@ seven steps:
 > network are moved onto it automatically, and the original is kept, disabled, as
 > history. If the apply fails or you do not confirm in time, everything goes back
 > as it was and the change waits for another attempt.
+>
+> The same dialog widens a network's subnet (for example from a /22 to the /19
+> default): a switched-on network is never widened in place, because its clients,
+> leases and speed classes belong to the old range. Once the replacement is
+> confirmed, clients take a lease on it and sign in once more; their package and the
+> data they used carry on. Their sessions on the old network are ended by the
+> appliance as *network removed* rather than left waiting on a network that no
+> longer exists. MAC reservations are not carried to a new subnet.
 
 **DHCP reservations:** pin a device's MAC to a fixed address on **DHCP & leases**
 (`/network/dhcp` → Reservations → **New reservation**) or on the client network's

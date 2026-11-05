@@ -120,7 +120,7 @@ export function ReplaceTopologyDialog({
           This only records the change. The client network keeps serving its clients, keeps its PMS routing and keeps
           its place in your Internet packages until you apply the configuration on Client networks and confirm it.
           The replacement then carries over this network&rsquo;s addressing, DHCP pools, reservations, DNS, portal design,
-          sign-in method choices and PMS route; clients reconnect on it, and their internet package and data used carry on.
+          sign-in method choices and PMS route. Clients reconnect on it and sign in once more; their internet package and data used carry on.
         </Callout>
         <ImpactPanel affected={impact?.affected} external={impact?.external_requirements} />
         <Field label="Port" required>
@@ -152,10 +152,10 @@ export function ReplaceTopologyDialog({
         </label>
         {readdress && (
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Subnet" required><Input aria-label="New subnet" value={subnet} onChange={(e) => setSubnet(e.target.value)} placeholder="10.30.0.0/24" /></Field>
+            <Field label="Subnet" required><Input aria-label="New subnet" value={subnet} onChange={(e) => setSubnet(e.target.value)} placeholder="10.30.0.0/19" /></Field>
             <Field label="Gateway" required><Input aria-label="New gateway" value={gateway} onChange={(e) => setGateway(e.target.value)} placeholder="10.30.0.1" /></Field>
-            <Field label="DHCP pool start" required><Input aria-label="Pool start" value={poolStart} onChange={(e) => setPoolStart(e.target.value)} placeholder="10.30.0.100" /></Field>
-            <Field label="DHCP pool end" required><Input aria-label="Pool end" value={poolEnd} onChange={(e) => setPoolEnd(e.target.value)} placeholder="10.30.0.250" /></Field>
+            <Field label="DHCP pool start" required><Input aria-label="Pool start" value={poolStart} onChange={(e) => setPoolStart(e.target.value)} placeholder="10.30.0.10" /></Field>
+            <Field label="DHCP pool end" required><Input aria-label="Pool end" value={poolEnd} onChange={(e) => setPoolEnd(e.target.value)} placeholder="10.30.31.250" /></Field>
             <p className="text-xs text-muted-foreground sm:col-span-2">MAC reservations are not carried to a new subnet.</p>
           </div>
         )}
