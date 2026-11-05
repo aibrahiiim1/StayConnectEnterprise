@@ -144,12 +144,17 @@ export default function NetworkSettingsPage() {
   // refresh reports no pending change (checked for up to a minute, then left to the page's own reads).
   // One settle at a time: a refresh that still reports the change pending restarts the countdown, whose passed deadline asks again.
   const settling = useRef(false);
+  // Bumped by Keep and Roll back: a settle loop from before them stops instead of re-seeding a form the operator is editing again.
+  const settleGen = useRef(0);
   async function settleAfterDeadline() {
     if (settling.current) return;
     settling.current = true;
+    const gen = settleGen.current;
     try {
       for (let i = 0; i < 20; i++) {
+        if (gen !== settleGen.current) return;
         const s = await load({ reseed: true });
+        if (gen !== settleGen.current) return;
         if (s && !s.pending) { setApplyResp(null); await loadHistory(); return; }
         await new Promise((r) => setTimeout(r, 3000));
       }
@@ -237,6 +242,7 @@ export default function NetworkSettingsPage() {
     try {
       const revision = applyResp?.revision_id ?? state?.pending?.revision_id;
       await api.post("/network/system/confirm", revision ? { revision_id: revision } : {});
+      settleGen.current++;
       if (timer.current) clearInterval(timer.current);
       setApplyResp(null); setCountdown(0); setValidation(null); setValidatedFor(null);
       toast.success("Configuration kept", "The new WAN / LAN settings are now permanent.");
@@ -251,6 +257,7 @@ export default function NetworkSettingsPage() {
     setBusy("rollback"); setRollbackErr(null);
     try {
       await api.post("/network/system/rollback", { password });
+      settleGen.current++;
       setRollingBack(false);
       if (timer.current) clearInterval(timer.current);
       setApplyResp(null); setCountdown(0); setValidation(null); setValidatedFor(null);

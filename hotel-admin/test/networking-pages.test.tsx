@@ -401,6 +401,37 @@ describe("WAN / LAN settings", () => {
     expect((screen.getByLabelText("IP address") as HTMLInputElement).value).toBe("192.168.60.25");
   }, 15000);
 
+  it("a settle loop running when Keep succeeds never overwrites the next edit", async () => {
+    let applied = false, kept = false;
+    const pending = { ...STATE, pending: { revision_id: "r9", deadline_unix: Math.floor(Date.now() / 1000), management_url: "https://192.168.60.30" } };
+    get.mockImplementation((path: string) => {
+      if (path === "/auth/whoami") return Promise.resolve(IT);
+      if (path.startsWith("/network/system/history")) return Promise.resolve({ history: [] });
+      if (path === "/network/system") return Promise.resolve(applied && !kept ? pending : STATE);
+      return Promise.reject(new Error(`unexpected GET ${path}`));
+    });
+    post.mockImplementation((path: string) => {
+      if (path === "/network/system/validate") return Promise.resolve({ validation: { ok: true }, management_url: "https://192.168.60.30", effective: {} });
+      if (path === "/network/system/apply") { applied = true; return Promise.resolve({ ok: true, state: "pending_confirmation", validation: { ok: true }, management_url: "https://192.168.60.30", deadline_unix: Math.floor(Date.now() / 1000) + 1 }); }
+      if (path === "/network/system/confirm") { kept = true; return Promise.resolve({}); }
+      return Promise.resolve({});
+    });
+    render(<WanLanPage />);
+    await screen.findByRole("heading", { name: "WAN / LAN settings" });
+    fireEvent.change(screen.getByLabelText("IP address"), { target: { value: "192.168.60.30" } });
+    fireEvent.click(screen.getByRole("button", { name: /Validate & preview/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Apply change/ }));
+    const apply = await screen.findByRole("dialog");
+    fireEvent.change(within(apply).getByLabelText(/Confirm your password/), { target: { value: "s3cret" } });
+    fireEvent.click(within(apply).getByRole("button", { name: "Apply change" }));
+    await new Promise((r) => setTimeout(r, 1600)); // past the deadline: the settle loop is reading
+    fireEvent.click(await screen.findByRole("button", { name: "Keep this configuration" }));
+    await waitFor(() => expect(screen.getByLabelText("IP address")).not.toBeDisabled());
+    fireEvent.change(screen.getByLabelText("IP address"), { target: { value: "192.168.60.44" } });
+    await new Promise((r) => setTimeout(r, 3500)); // the settle loop's next read would have re-seeded the form
+    expect((screen.getByLabelText("IP address") as HTMLInputElement).value).toBe("192.168.60.44");
+  }, 15000);
+
   // Audit P8 L14: keeping the change names the pending change the operator is looking at.
   it("Keep sends the pending change's revision when the appliance reports it", async () => {
     const rev = "11111111-2222-4333-8444-555555555555";
