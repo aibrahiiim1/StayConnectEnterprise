@@ -718,7 +718,8 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 			for _, minor := range sortedIntKeys(byMinor) {
 				s := byMinor[minor]
 				res.Problems = append(res.Problems, "shape "+s.SessionID+": its client network was removed; the session is ended")
-				p.markEnded(ctx, s.SessionID, endReasonNetworkRemoved)
+				// Bookkeeping, queued after the pass's admissions and renewals so a large removed network cannot stall live ones.
+				p.queueEnd(ctx, classKey(bridge, s.SessionID), s.SessionID, endReasonNetworkRemoved)
 				p.endSeries(bridge, s.SessionID)
 			}
 			continue
