@@ -466,6 +466,15 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 			res.Problems = append(res.Problems, "session "+s.SessionID+": no bridge")
 			continue
 		}
+		// A removed client network (replaced or switched off): its sessions are ended straight from the plan, before class numbers are
+		// allocated (an absent /19 bridge's addresses fall back to colliding minors) and before anything is installed on the bridge.
+		if s.Entitled && p.passRetired != nil && p.passRetired(s.Bridge) {
+			res.Problems = append(res.Problems, "shape "+s.SessionID+": its client network was removed; the session is ended")
+			// Bookkeeping, queued after the pass's admissions and renewals so a large removed network cannot stall live ones.
+			p.queueEnd(ctx, classKey(s.Bridge, s.SessionID), s.SessionID, endReasonNetworkRemoved)
+			p.endSeries(s.Bridge, s.SessionID)
+			continue
+		}
 		if !bridges[s.Bridge] {
 			// A session on an undeclared bridge is a producer defect: its class would never be removed.
 			res.Failed++
@@ -710,18 +719,6 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 	for _, bridge := range sortedKeys(bridges) {
 		byMinor := desired[bridge]
 		if len(byMinor) == 0 {
-			continue
-		}
-		// A removed client network (replaced or switched off): its sessions are ended here, before anything is installed on a bridge
-		// that no longer exists. After a restart the bridge setup below fails on it, so checking later would retry them forever.
-		if p.passRetired != nil && p.passRetired(bridge) {
-			for _, minor := range sortedIntKeys(byMinor) {
-				s := byMinor[minor]
-				res.Problems = append(res.Problems, "shape "+s.SessionID+": its client network was removed; the session is ended")
-				// Bookkeeping, queued after the pass's admissions and renewals so a large removed network cannot stall live ones.
-				p.queueEnd(ctx, classKey(bridge, s.SessionID), s.SessionID, endReasonNetworkRemoved)
-				p.endSeries(bridge, s.SessionID)
-			}
 			continue
 		}
 		if err := p.shp.EnsureBridgeInfra(ctx, bridge); err != nil {

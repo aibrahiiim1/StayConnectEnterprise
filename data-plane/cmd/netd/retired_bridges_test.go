@@ -108,6 +108,24 @@ func TestApplier_ASessionOnARemovedNetworkIsEndedEvenWhenItsBridgeCannotBeSetUp(
 	}
 }
 
+// On an absent /19 bridge two addresses fall back to the same class number; both sessions are still ended, not dropped as a clash.
+func TestApplier_CollidingSessionsOnARemovedSlash19AreBothEnded(t *testing.T) {
+	tc, g := newFakeTC(), newFakeGate()
+	p := ownershipWriter(t, tc, g, fakeLeases{rows: []KeaLease{lease("10.30.0.5", "96:48:f9:7a:9b:05"), lease("10.30.16.5", "96:48:f9:7a:9b:16")}})
+	fe := newFakeEnforcement()
+	p.enforcement = fe
+	p.retired = func(context.Context) func(string) bool { return func(b string) bool { return b == "br-guest" } }
+	a, b := sessionOn("10.30.0.5", "96:48:f9:7a:9b:05"), sessionOn("10.30.16.5", "96:48:f9:7a:9b:16")
+	b.SessionID, b.DeviceID = "s-2", "dev-2"
+
+	if _, err := p.submit(context.Background(), envelope(1, a, b), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if len(fe.ended) != 2 {
+		t.Fatalf("both sessions of the removed /19 must be ended, got %v", fe.ended)
+	}
+}
+
 // With no retired bridges the same session is enforced as before.
 func TestApplier_ALiveNetworkIsUnaffectedByTheRetiredCheck(t *testing.T) {
 	tc, g := newFakeTC(), newFakeGate()
