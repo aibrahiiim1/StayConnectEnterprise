@@ -700,7 +700,9 @@ function ConnectionRecovery({ id, writable }: { id: string; writable: boolean })
   const load = useCallback(async () => {
     setReading(true);
     try {
-      setSettings(await api.get<PmsConnectionSettings>(`/pms-interfaces/${id}/connection-settings`));
+      const got = await api.get<PmsConnectionSettings>(`/pms-interfaces/${id}/connection-settings`);
+      if (!CONN_FIELDS.every((f) => typeof got?.[f.key] === "number")) throw new Error("incomplete");
+      setSettings(got);
       setFailed(false);
     } catch {
       setFailed(true);
@@ -796,7 +798,7 @@ function ConnectionRecovery({ id, writable }: { id: string; writable: boolean })
               <Field
                 key={f.key}
                 label={f.label}
-                hint={`Currently ${current[f.key].toLocaleString()} ${f.unit}${current.is_default ? " (the default)" : ""}. Allowed ${f.min.toLocaleString()} to ${f.max.toLocaleString()}.`}
+                hint={`Currently ${current[f.key].toLocaleString()} ${f.unit}${current.is_default ? " (nobody has changed this one)" : ""}. Allowed ${f.min.toLocaleString()} to ${f.max.toLocaleString()}.`}
                 error={e ? <span key={e} className={FADE}>{e}</span> : undefined}
               >
                 <InputGroup suffix={f.unit}>
