@@ -116,7 +116,7 @@ export function ConnectionCard({
   }
   if ((h?.review_events ?? 0) > 0) {
     warnings.push(
-      <Link key="review" href="/stay-events" className="underline underline-offset-2">
+      <Link key="review" href="/stay-events?show=undecided" className="underline underline-offset-2">
         {h!.review_events.toLocaleString()} PMS message{h!.review_events === 1 ? " needs" : "s need"} a decision
       </Link>,
     );

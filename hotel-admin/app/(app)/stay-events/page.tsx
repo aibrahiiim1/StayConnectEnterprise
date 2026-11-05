@@ -1,7 +1,5 @@
 "use client";
 
-// A row with no room is meaningful, not a gap: the message could not be matched to a stay.
-
 import { useEffect, useMemo, useState } from "react";
 import type { StayEvent } from "@/lib/api";
 import { useServerPage, type PagedFields } from "@/lib/use-server-page";
@@ -15,17 +13,24 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { Explain } from "@/components/ui/tooltip";
 import { HelpList, HelpSection } from "@/components/help";
-import { MonoId, SkeletonRows } from "@/components/ui/misc";
+import { MonoId, Skeleton, SkeletonRows } from "@/components/ui/misc";
 import { DetailsDrawer, DetailsSection } from "@/components/ui/details-drawer";
 import { DescriptionList, Pagination, SearchInput } from "@/components/ui/data";
 import { FilterBar } from "@/components/ui/toolbar";
 import { RowActions } from "@/components/ui/row-actions";
 import { LiveStatus, refreshingClass } from "@/components/ui/patterns";
 import { cn, formatRelative, formatDate } from "@/lib/utils";
-import { Send } from "lucide-react";
+import { AlertTriangle, RefreshCw, Send } from "lucide-react";
 import { useOperatorRoles } from "@/lib/whoami-context";
 import { canWrite } from "@/lib/roles";
-import { DECISION_WORDS, ReviewDecisionActions, ReviewExpirySettingCard } from "@/components/phase3/review-decisions";
+import {
+  DECISION_WORDS,
+  ReviewDecisionActions,
+  ReviewExpirySettingCard,
+  stayStatusWords,
+} from "@/components/phase3/review-decisions";
+
+const FADE = "animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none";
 
 const STATUS_WORDS: Record<string, { label: string; tone: Tone; meaning: string }> = {
   APPLIED: {
@@ -59,7 +64,6 @@ const REVIEW_CODE_WORDS: Record<string, string> = {
 };
 const reviewCodeWords = (c: string) => REVIEW_CODE_WORDS[c] ?? c.replace(/_/g, " ").toLowerCase();
 
-// Unknown types fall through to their raw value so nothing a connector sends is hidden.
 const TYPE_WORDS: Record<string, string> = {
   GUEST_IN: "Check-in",
   GI: "Check-in",
@@ -87,6 +91,7 @@ const FILTERS: { value: string; label: string }[] = [
   { value: "MANUAL_REVIEW", label: "Placed in review (decided or not)" },
   { value: "SKIPPED_DUPLICATE", label: "Duplicates" },
   { value: "REJECTED", label: "Rejected" },
+  { value: "FAILED", label: "Not applied" },
 ];
 
 type StayEventsResp = PagedFields & {
@@ -104,7 +109,7 @@ type StayEventsResp = PagedFields & {
 
 function statusOf(e: StayEvent) {
   const base = STATUS_WORDS[e.processing_status] ?? {
-    label: e.processing_status.replace(/_/g, " ").toLowerCase(),
+    label: "Status not recognised",
     tone: "default" as const,
     meaning: "",
   };
@@ -113,15 +118,24 @@ function statusOf(e: StayEvent) {
     : base;
 }
 
+function calloutTone(e: StayEvent): "success" | "danger" | "neutral" | "warning" {
+  if (e.processing_status === "APPLIED") return "success";
+  if (e.processing_status === "REJECTED" || e.processing_status === "FAILED") return "danger";
+  if (e.processing_status === "SKIPPED_DUPLICATE") return "neutral";
+  if (e.processing_status === "MANUAL_REVIEW" && e.decided) return "neutral";
+  return "warning";
+}
+
 export default function StayEventsPage() {
-  // Defaults to everything, not the review queue: an empty "Nothing to review" table reads as a dead feed.
   const [status, setStatus] = useState("");
   const [query, setQuery] = useState("");
   const [detail, setDetail] = useState<StayEvent | null>(null);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
 
-  // The search term goes in a header, never the URL, because it can be a guest's name and edged logs request lines.
-  // "Needs a decision" means in review with no decision yet, not every message ever placed in review.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("show") === "undecided") setStatus("UNDECIDED");
+  }, []);
+
   const path = status === "UNDECIDED"
     ? "/pms-events?undecided=true"
     : status ? "/pms-events?processing_status=" + encodeURIComponent(status) : "/pms-events";
@@ -134,20 +148,19 @@ export default function StayEventsPage() {
   );
   const list = useServerPage<StayEventsResp>({ path, headers });
   const { resp, current, err, loading: refreshing } = list;
-  const rows = current && resp ? resp.data ?? [] : err && !resp ? [] : null;
+  const loadFailed = err !== null && !resp;
+  const rows = current && resp ? resp.data ?? [] : null;
   useEffect(() => { if (current && resp) setUpdatedAt(Date.now()); }, [current, resp]);
 
-  // Tiles are server counts over every message, regardless of the filter.
   const sum = resp?.summary;
   const counts = {
     applied: sum?.applied ?? 0,
-    waiting: sum?.pending ?? 0,
     review: sum?.undecided ?? sum?.manual_review ?? 0,
-    rejected: sum?.rejected ?? 0,
     unmatched: sum?.unmatched ?? 0,
   };
   const newest = sum?.newest_received_at;
-  const detailStatus = detail ? STATUS_WORDS[detail.processing_status] : undefined;
+  const tile = (n: number) =>
+    sum ? n.toLocaleString() : loadFailed ? <span className="text-muted-foreground">Not known</span> : <Skeleton className="h-6 w-16" />;
 
   return (
     <PageShell width="wide">
@@ -180,27 +193,27 @@ export default function StayEventsPage() {
           </>
         }
         actions={
-          <LiveStatus updatedAt={updatedAt} refreshing={refreshing} error={!!err && !!rows?.length} onRefresh={() => void list.reload()} />
+          <LiveStatus updatedAt={updatedAt} refreshing={refreshing} error={!!err && !!resp} onRefresh={() => void list.reload()} />
         }
       />
 
       <StatGrid cols={4}>
         <StatCard
           label="Last message"
-          value={newest ? formatRelative(newest) : "—"}
-          tone={!sum ? "default" : newest ? "ok" : "warn"}
-          hint={!sum ? undefined : newest ? "The connection is carrying traffic" : "Nothing has arrived yet"}
+          value={newest ? formatRelative(newest) : sum ? "None yet" : loadFailed ? <span className="text-muted-foreground">Not known</span> : <Skeleton className="h-6 w-16" />}
+          tone={sum && !newest ? "warn" : "default"}
+          hint={!sum ? undefined : newest ? `Received ${formatDate(newest)}` : "Nothing has arrived yet"}
         />
-        <StatCard label="Applied" value={sum ? counts.applied.toLocaleString() : "—"} hint="Guest list updated" />
+        <StatCard label="Applied" value={tile(counts.applied)} hint="Guest list updated" />
         <StatCard
           label="Needs a decision"
-          value={sum ? counts.review.toLocaleString() : "—"}
+          value={tile(counts.review)}
           tone={counts.review > 0 ? "warn" : "default"}
           hint="Stopped rather than guessed"
         />
         <StatCard
           label="Not matched to a stay"
-          value={sum ? counts.unmatched.toLocaleString() : "—"}
+          value={tile(counts.unmatched)}
           tone={counts.unmatched > 0 ? "warn" : "default"}
           explain={
             <Explain>
@@ -212,9 +225,15 @@ export default function StayEventsPage() {
       </StatGrid>
 
       {counts.review > 0 && status !== "UNDECIDED" && (
-        <Callout tone="warning" title={`${counts.review} message${counts.review === 1 ? "" : "s"} need a decision`}>
+        <Callout
+          tone="warning"
+          className={FADE}
+          title={`${counts.review.toLocaleString()} message${counts.review === 1 ? " needs" : "s need"} a decision`}
+        >
           Until they are resolved the guest list may not reflect what the front desk has done.
-          {canDecide ? " Open one to acknowledge it or link it to a stay." : " The site admin or IT manager decides them."}{" "}
+          {canDecide
+            ? " Open one to acknowledge it or link it to a stay."
+            : " Your role can see these messages but not decide them."}{" "}
           <Button variant="link" size="xs" className="h-auto p-0 font-medium" onClick={() => setStatus("UNDECIDED")}>
             Show only those
           </Button>
@@ -246,23 +265,41 @@ export default function StayEventsPage() {
             </Select>
           }
         />
-        {err !== null && <div className="px-4 pt-3"><ErrorBanner err={err} /></div>}
-        <div className={cn(refreshing && refreshingClass)}>
+        {err !== null && resp && <div className="px-4 pt-3"><ErrorBanner err={err} /></div>}
+        <div className={cn(refreshing && rows !== null && refreshingClass)}>
           {rows === null ? (
-            <SkeletonRows rows={6} cols={5} />
+            loadFailed ? (
+              <div role="alert" className={FADE}>
+                <EmptyState
+                  size="sm"
+                  icon={<AlertTriangle />}
+                  title="PMS activity could not be loaded"
+                  hint="The appliance did not return the PMS messages, so the list and the counts above are not known. Nothing has been changed."
+                  action={
+                    <Button variant="secondary" disabled={refreshing} onClick={() => void list.reload()}>
+                      <RefreshCw className={cn(refreshing && "animate-spin motion-reduce:animate-none")} /> Try again
+                    </Button>
+                  }
+                />
+              </div>
+            ) : (
+              <SkeletonRows rows={6} cols={5} />
+            )
           ) : rows.length === 0 ? (
-            <EmptyState
-              size="sm"
-              icon={<Send />}
-              title={
-                needle
-                  ? "Nothing matches this search"
-                  : status
-                    ? "No messages in this state"
-                    : "The PMS has not sent anything"
-              }
-              hint={!needle && !status ? "If guests have checked in since the connection came up, check the PMS connection." : undefined}
-            />
+            <div className={FADE}>
+              <EmptyState
+                size="sm"
+                icon={<Send />}
+                title={
+                  needle
+                    ? "Nothing matches this search"
+                    : status
+                      ? "No messages in this state"
+                      : "The PMS has not sent anything"
+                }
+                hint={!needle && !status ? "If guests have checked in since the connection came up, check the PMS connection." : undefined}
+              />
+            </div>
           ) : (
             <Table label="PMS messages">
               <THead>
@@ -315,7 +352,7 @@ export default function StayEventsPage() {
                         )}
                       </TD>
                       <TD nowrap muted className="hidden lg:table-cell" title={e.pms_timestamp_utc ? formatDate(e.pms_timestamp_utc) : undefined}>
-                        {e.pms_timestamp_utc ? formatRelative(e.pms_timestamp_utc) : "—"}
+                        {e.pms_timestamp_utc ? formatRelative(e.pms_timestamp_utc) : "Not given"}
                       </TD>
                       <TD nowrap muted className="hidden md:table-cell" title={formatDate(e.received_at)}>{formatRelative(e.received_at)}</TD>
                       <TD className="w-0">
@@ -355,17 +392,10 @@ export default function StayEventsPage() {
       >
         {detail && (
           <>
-            <Callout
-              tone={
-                detail.processing_status === "APPLIED" ? "success"
-                  : detail.processing_status === "REJECTED" ? "danger"
-                    : detail.processing_status === "SKIPPED_DUPLICATE" ? "neutral" : "warning"
-              }
-              title={(detailStatus ?? { label: detail.processing_status }).label}
-            >
-              {detailStatus?.meaning}
+            <Callout tone={calloutTone(detail)} title={statusOf(detail).label}>
+              {STATUS_WORDS[detail.processing_status]?.meaning ?? "This message is in a state this console does not recognise."}
               {detail.processing_status === "MANUAL_REVIEW" && detail.decided && (
-                <> Decided: {DECISION_WORDS[detail.decision ?? ""] ?? detail.decision}.</>
+                <> It has since been decided: {(DECISION_WORDS[detail.decision ?? ""] ?? "decided").toLowerCase()}.</>
               )}
             </Callout>
             {detail.processing_status === "MANUAL_REVIEW" && !detail.decided && canDecide && (
@@ -379,14 +409,14 @@ export default function StayEventsPage() {
             <DetailsSection title="Message">
               <DescriptionList
                 items={[
-                  { label: "Room", value: detail.room ?? "Not matched" },
-                  { label: "Guest", value: detail.identity_hidden ? "Not shown to your role" : detail.primary_guest ?? "—" },
-                  { label: "Reservation", value: detail.identity_hidden ? "Not shown to your role" : detail.external_reservation_id ?? detail.message_reservation ?? "—" },
-                  { label: "Stay status", value: detail.stay_status?.replace(/_/g, " ").toLowerCase() ?? "—" },
-                  { label: "PMS connection", value: detail.pms_interface_label || "—" },
-                  { label: "Message type", value: `${typeWords(detail.event_type)} (${detail.event_type})` },
-                  { label: "Reason code", value: detail.review_code ? `${reviewCodeWords(detail.review_code)} (${detail.review_code})` : "—" },
-                  { label: "Time at the PMS", value: detail.pms_timestamp_utc ? formatDate(detail.pms_timestamp_utc) : "—" },
+                  { label: "Room", value: detail.room ?? "Not matched to a stay" },
+                  { label: "Guest", value: detail.identity_hidden ? "Not shown to your role" : detail.primary_guest ?? "Not given" },
+                  { label: "Reservation", value: detail.identity_hidden ? "Not shown to your role" : detail.external_reservation_id ?? detail.message_reservation ?? "Not given" },
+                  { label: "Stay status", value: detail.stay_status ? stayStatusWords(detail.stay_status) : "No stay" },
+                  { label: "PMS connection", value: detail.pms_interface_label || "Not known" },
+                  { label: "Message type", value: typeWords(detail.event_type) },
+                  { label: "Reason", value: detail.review_code ? reviewCodeWords(detail.review_code) : "None given" },
+                  { label: "Time at the PMS", value: detail.pms_timestamp_utc ? formatDate(detail.pms_timestamp_utc) : "Not given by the PMS" },
                   { label: "Received here", value: formatDate(detail.received_at) },
                   {
                     label: "PMS message id",
@@ -397,6 +427,11 @@ export default function StayEventsPage() {
                   { label: "Event id", value: <MonoId value={detail.id} title="Event" /> },
                 ]}
               />
+              <p className="mt-2 text-xs text-muted-foreground">
+                For support: message type <span className="font-mono">{detail.event_type}</span>
+                {detail.review_code && <>, reason <span className="font-mono">{detail.review_code}</span></>}
+                {detail.stay_status && <>, stay <span className="font-mono">{detail.stay_status}</span></>}
+              </p>
             </DetailsSection>
           </>
         )}
