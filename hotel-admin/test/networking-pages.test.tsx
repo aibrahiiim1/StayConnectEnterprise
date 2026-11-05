@@ -344,6 +344,29 @@ describe("WAN / LAN settings", () => {
     expect(screen.getByRole("button", { name: "Keep this configuration" })).toBeTruthy();
   });
 
+  it("after Roll back now the form shows the settings back in force, not the rejected ones", async () => {
+    route({ "/auth/whoami": IT, "/network/system": STATE, "/network/system/history": { history: [] } });
+    post.mockImplementation((path: string) => {
+      if (path === "/network/system/validate") return Promise.resolve({ validation: { ok: true }, management_url: "https://192.168.60.30", effective: {} });
+      if (path === "/network/system/apply") return Promise.resolve({ ok: true, state: "pending_confirmation", validation: { ok: true }, management_url: "https://192.168.60.30", deadline_unix: Math.floor(Date.now() / 1000) + 120 });
+      return Promise.resolve({});
+    });
+    render(<WanLanPage />);
+    await screen.findByRole("heading", { name: "WAN / LAN settings" });
+    fireEvent.change(screen.getByLabelText("IP address"), { target: { value: "192.168.60.30" } });
+    fireEvent.click(screen.getByRole("button", { name: /Validate & preview/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Apply change/ }));
+    const apply = await screen.findByRole("dialog");
+    fireEvent.change(within(apply).getByLabelText(/Confirm your password/), { target: { value: "s3cret" } });
+    fireEvent.click(within(apply).getByRole("button", { name: "Apply change" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Roll back now" }));
+    const back = await screen.findByRole("dialog");
+    fireEvent.change(within(back).getByLabelText(/Confirm your password/), { target: { value: "s3cret" } });
+    fireEvent.click(within(back).getByRole("button", { name: /Roll back/ }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith("/network/system/rollback", { password: "s3cret" }));
+    await waitFor(() => expect((screen.getByLabelText("IP address") as HTMLInputElement).value).toBe("192.168.60.25"));
+  });
+
   // Audit P8 L14: keeping the change names the pending change the operator is looking at.
   it("Keep sends the pending change's revision when the appliance reports it", async () => {
     const rev = "11111111-2222-4333-8444-555555555555";

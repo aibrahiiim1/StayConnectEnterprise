@@ -122,12 +122,13 @@ export default function NetworkSettingsPage() {
     setLanIp(s.lan.ip); setLanPrefix(String(s.lan.prefix_len));
   }
 
-  async function load() {
+  // reseed: after a confirm or rollback the form must show what is now in force, whatever the last render thought of it.
+  async function load({ reseed = false }: { reseed?: boolean } = {}) {
     setRefreshing(true);
     try {
       const s = await api.get<SysNetState>("/network/system");
       setState(s);
-      if (!dirtyRef.current) seed(s);
+      if (reseed || !dirtyRef.current) seed(s);
       if (s.pending) startCountdown(s.pending.deadline_unix);
       setLoadErr(null);
       setUpdatedAt(Date.now());
@@ -220,8 +221,7 @@ export default function NetworkSettingsPage() {
       if (timer.current) clearInterval(timer.current);
       setApplyResp(null); setCountdown(0); setValidation(null); setValidatedFor(null);
       toast.success("Configuration kept", "The new WAN / LAN settings are now permanent.");
-      dirtyRef.current = false;
-      await load(); loadHistory();
+      await load({ reseed: true }); loadHistory();
     } catch (e) { setErr(errMsg(e)); } finally { setBusy(null); }
   }
 
@@ -236,8 +236,7 @@ export default function NetworkSettingsPage() {
       if (timer.current) clearInterval(timer.current);
       setApplyResp(null); setCountdown(0); setValidation(null); setValidatedFor(null);
       toast.success("Rolled back", "The previous WAN / LAN settings are back in place.");
-      dirtyRef.current = false;
-      await load(); loadHistory();
+      await load({ reseed: true }); loadHistory();
     } catch (e) { setRollbackErr(errMsg(e)); } finally { setBusy(null); }
   }
 
