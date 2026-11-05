@@ -140,7 +140,8 @@ describe("After Check-out Access: pure rules", () => {
     expect(describePublishFailure({ status: 409, code: "version_conflict" }).conflict).toBe(true);
     expect(describePublishFailure({ status: 401, code: "reauth" }).field).toBe("password");
     expect(describePublishFailure({ status: 400, code: "reason_invalid" }).field).toBe("reason");
-    expect(describePublishFailure({ status: 400, code: "validation", message: "bounds" }).message).toMatch(/bounds/);
+    expect(describePublishFailure({ status: 400, code: "validation", message: "bounds" }).message).toMatch(/did not accept these terms/);
+    expect(describePublishFailure({ status: 400, code: "validation", message: "bounds" }).message).not.toMatch(/bounds/);
   });
 });
 
