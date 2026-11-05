@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { api, ListResp } from "@/lib/api";
 import type { PortalHTTPSDoc } from "@/lib/portal-https";
@@ -18,7 +18,9 @@ import { Button } from "@/components/ui/button";
 import { Field, QuietHints, Select } from "@/components/ui/input";
 import { InfoHint } from "@/components/ui/quiet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { Callout } from "@/components/ui/error-banner";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ConfirmDialog } from "@/components/ui/dialog";
 import { PageHeader, PageShell } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { Skeleton, Switch } from "@/components/ui/misc";
@@ -29,7 +31,7 @@ import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
 import { NetworkSignInOverview } from "@/components/network/effective-signin";
 import type { SiteFacts } from "@/lib/sign-in-effective";
 import { senderReady, type NotifyProvider } from "@/lib/sign-in-readiness";
-import { Ticket, Hotel, KeyRound, Mail, MessageSquare, Users, ArrowUpRight, PackageOpen, Smartphone } from "lucide-react";
+import { Ticket, Hotel, KeyRound, Mail, MessageSquare, Users, ArrowUpRight, PackageOpen, Smartphone, AlertTriangle, RefreshCw } from "lucide-react";
 import { useOperatorRoles } from "@/lib/whoami-context";
 
 type Method = { enabled?: boolean };
@@ -61,6 +63,13 @@ type SocialProvider = { provider: string; enabled: boolean };
 
 const SOCIAL_LABELS: Record<string, string> = { google: "Google", apple: "Apple", facebook: "Facebook", microsoft: "Microsoft" };
 
+type ReadState = "unknown" | "known" | "failed";
+
+function readable(e: unknown, fallback: string): string {
+  const m = e instanceof Error ? e.message : typeof e === "string" ? e : "";
+  return m && /\s/.test(m) && !/[_{}]/.test(m) ? m : fallback;
+}
+
 type SignInTab = "methods" | "networks" | "email" | "codes" | "protection";
 const SIGN_IN_TABS: readonly SignInTab[] = ["methods", "networks", "email", "codes", "protection"];
 
@@ -72,7 +81,6 @@ function tabFromHash(): SignInTab {
 
 export default function SignInMethodsPage() {
   const toast = useToast();
-  // Read-only until the role loads; edged enforces the real gate.
   const roles = useOperatorRoles();
   const writable = roles === null ? false : canWrite("auth-methods", roles);
   const mayChangeProtection = roles === null ? false : canWrite("guest-signin-protection", roles);
@@ -86,11 +94,20 @@ export default function SignInMethodsPage() {
   const cardMod = moduleLicensed(caps, "card_payment");
 
   const [cfg, setCfg] = useState<AuthMethods | null>(null);
+  const [loadErr, setLoadErr] = useState<unknown>(null);
+  const [loading, setLoading] = useState(false);
   const [notify, setNotify] = useState<NotifyProvider[]>([]);
+  const [notifyState, setNotifyState] = useState<ReadState>("unknown");
   const [social, setSocial] = useState<SocialProvider[]>([]);
+  const [socialState, setSocialState] = useState<ReadState>("unknown");
   const [httpsActive, setHttpsActive] = useState<boolean | null>(null);
-  const [err, setErr] = useState<unknown>(null);
+  const [saveErr, setSaveErr] = useState<{ label: string; message: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [pendingOff, setPendingOff] = useState<{ label: string; title: string; patch: Partial<AuthMethods>; last: boolean } | null>(null);
+  const [journeyDirty, setJourneyDirty] = useState(false);
+  const [journeyKey, setJourneyKey] = useState(0);
+  const [askTab, setAskTab] = useState<SignInTab | null>(null);
+  const keepRef = useRef<HTMLButtonElement>(null);
   const [tab, setTab] = useState<SignInTab>("methods");
   useEffect(() => {
     setTab(tabFromHash());
@@ -98,59 +115,78 @@ export default function SignInMethodsPage() {
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
-  const selectTab = useCallback((t: SignInTab) => {
+  const goTab = useCallback((t: SignInTab) => {
     setTab(t);
     window.history.replaceState(null, "", t === "methods" ? window.location.pathname + window.location.search : `#${t}`);
   }, []);
+  const selectTab = useCallback((t: SignInTab) => {
+    if (journeyDirty && t !== "methods") { setAskTab(t); return; }
+    goTab(t);
+  }, [journeyDirty, goTab]);
+  useEffect(() => { if (askTab) keepRef.current?.focus(); }, [askTab]);
   const { readiness: pmsReadiness } = useRoomSignInReadiness(hospitality);
 
+  const notifyReadable = (emailMod || smsMod || whatsappMod) && roles !== null && canRead("notification-providers", roles);
+  const socialReadable = socialMod && roles !== null && canRead("social-providers", roles);
+
   const load = useCallback(async () => {
-    setErr(null);
+    setLoading(true);
     try {
       const m = await api.get<AuthMethods>("/auth-methods");
       setCfg(m ?? {});
+      setLoadErr(null);
     } catch (e) {
-      setErr(e);
-      setCfg({});
+      setLoadErr(e);
+    } finally {
+      setLoading(false);
     }
-    if ((emailMod || smsMod || whatsappMod) && roles !== null && canRead("notification-providers", roles)) {
+    if (notifyReadable) {
       try {
         const n = await api.get<ListResp<NotifyProvider>>("/notification-providers");
         setNotify(n.data ?? []);
-      } catch { /* readiness unknown; rendered as such */ }
+        setNotifyState("known");
+      } catch {
+        setNotifyState("failed");
+      }
     }
     if (roles !== null && canRead("portal-https", roles)) {
       try {
         const d = await api.get<PortalHTTPSDoc>("/portal-https");
         setHttpsActive(typeof d?.state?.https_active === "boolean" ? d.state.https_active : null);
-      } catch { /* unknown; no warning rather than a wrong one */ }
+      } catch {
+        setHttpsActive(null);
+      }
     }
-    if (socialMod && roles !== null && canRead("social-providers", roles)) {
+    if (socialReadable) {
       try {
         const s = await api.get<ListResp<SocialProvider>>("/social-providers");
         setSocial(s.data ?? []);
-      } catch { /* readiness unknown; rendered as such */ }
+        setSocialState("known");
+      } catch {
+        setSocialState("failed");
+      }
     }
-  }, [emailMod, smsMod, whatsappMod, socialMod, roles]);
-  useEffect(() => { load(); }, [load]);
+  }, [notifyReadable, socialReadable, roles]);
+  useEffect(() => { void load(); }, [load]);
 
-  // Sends only the changed key, so unrendered config is never deleted.
   const save = useCallback(async (patch: Partial<AuthMethods>, label: string) => {
-    setBusy(label); setErr(null);
+    setBusy(label); setSaveErr(null);
     try {
       const updated = await api.put<AuthMethods>("/auth-methods", patch);
       setCfg(updated ?? {});
       toast.success(`${label} saved`, "Clients see the change the next time the sign-in page loads.");
     } catch (e) {
-      setErr(e);
+      setSaveErr({ label, message: `Not saved. ${readable(e, "The appliance did not accept the change; try again.")}` });
       await load();
     } finally { setBusy(null); }
   }, [load, toast]);
 
+  const senderKnown = notifyReadable && notifyState === "known";
+  const socialKnown = socialReadable && socialState === "known";
   const emailReady = useMemo(() => senderReady(notify, "email"), [notify]);
   const smsReady = useMemo(() => senderReady(notify, "sms"), [notify]);
   const whatsappReady = useMemo(() => senderReady(notify, "whatsapp"), [notify]);
-  const socialReady = useMemo(() => social.filter((p) => p.enabled).map((p) => p.provider), [social]);
+  const socialReady = useMemo(() => (socialKnown ? social.filter((p) => p.enabled).map((p) => p.provider) : []), [social, socialKnown]);
   const socialListed = useMemo(() => {
     const on = Object.entries(cfg?.social ?? {}).filter(([, m]) => m?.enabled).map(([p]) => p);
     return Array.from(new Set([...socialReady, ...on]));
@@ -208,6 +244,23 @@ export default function SignInMethodsPage() {
   );
 
   if (cfg === null) {
+    if (loadErr) {
+      return (
+        <PageShell>
+          {header}
+          <EmptyState
+            icon={<AlertTriangle />}
+            title="Sign-in methods could not be loaded"
+            hint="The appliance did not return its sign-in settings, so none are shown rather than showing every method as off. Nothing has been changed."
+            action={
+              <Button variant="secondary" disabled={loading} onClick={() => void load()}>
+                <RefreshCw className={cn(loading && "animate-spin motion-reduce:animate-none")} /> Try again
+              </Button>
+            }
+          />
+        </PageShell>
+      );
+    }
     return (
       <PageShell>
         {header}
@@ -224,12 +277,37 @@ export default function SignInMethodsPage() {
     cfg,
     modules: { hospitality, email_otp: emailMod, sms_otp: smsMod, whatsapp_otp: whatsappMod, social_login: socialMod },
     senders: {
-      email: emailMod && roles !== null && canRead("notification-providers", roles) ? emailReady : null,
-      sms: smsMod && roles !== null && canRead("notification-providers", roles) ? smsReady : null,
-      whatsapp: whatsappMod && roles !== null && canRead("notification-providers", roles) ? whatsappReady : null,
+      email: emailMod && senderKnown ? emailReady : null,
+      sms: smsMod && senderKnown ? smsReady : null,
+      whatsapp: whatsappMod && senderKnown ? whatsappReady : null,
     },
-    socialProviders: socialMod && roles !== null && canRead("social-providers", roles) ? socialReady : null,
+    socialProviders: socialKnown ? socialReady : null,
   };
+
+  const locked = busy !== null;
+  const socialOn = socialMod ? Object.values(cfg.social ?? {}).filter((m) => m?.enabled).length : 0;
+  const onCount = [
+    cfg.voucher?.enabled,
+    cfg.guest_account?.enabled,
+    cfg.open?.enabled,
+    hospitality && pms.enabled,
+    emailMod && cfg.email_account?.enabled,
+    smsMod && cfg.sms?.enabled,
+    whatsappMod && cfg.whatsapp?.enabled,
+  ].filter(Boolean).length + socialOn;
+  const primaryNow = cfg.portal?.primary_method ?? "";
+  const rowError = (label: string) => (saveErr?.label === label ? saveErr.message : undefined);
+  const toggle = (label: string, title: string, on: boolean, patch: Partial<AuthMethods>, primaryKey?: PrimaryMethod) => {
+    if (on) { void save(patch, label); return; }
+    const last = onCount <= 1;
+    const primary = !!primaryKey && primaryNow === primaryKey;
+    if (last || primary) setPendingOff({ label, title, patch, last });
+    else void save(patch, label);
+  };
+  const senderWarning = (ready: boolean, what: string, missing: string) =>
+    notifyState === "failed" && notifyReadable
+      ? `The ${what} sender under Delivery could not be checked, so whether it works is unknown.`
+      : senderKnown && !ready ? missing : undefined;
 
   const showCodes = roles !== null && (canRead("auth-methods", roles) || ((smsMod || whatsappMod) && canRead("code-requests", roles)));
   const showProtection = hospitality || (roles !== null && canRead("auth-methods", roles));
@@ -249,7 +327,18 @@ export default function SignInMethodsPage() {
       {roles !== null && !writable && (
         <ReadOnlyNotice>Your role can see which sign-in methods are offered but not change them.</ReadOnlyNotice>
       )}
-      <ErrorBanner err={err} className="mb-0" />
+      {loadErr !== null && (
+        <Callout tone="warning" title="The sign-in settings could not be re-read">
+          What is shown is the last answer from the appliance and may be out of date.{" "}
+          <button type="button" className="underline underline-offset-2" disabled={loading} onClick={() => void load()}>Try again</button>
+        </Callout>
+      )}
+
+      {onCount === 0 && (
+        <Callout tone="warning" title="No sign-in method is on">
+          New clients cannot connect until a method is switched on below. Clients already online stay connected.
+        </Callout>
+      )}
 
       {hospitality && roles !== null && canRead("guest-signin-restrictions", roles) && (
         <NetworkPausesNotice canAct={canWrite("guest-signin-restrictions", roles)} />
@@ -261,6 +350,26 @@ export default function SignInMethodsPage() {
           isolation on, and finish <Link href="/portal-https" className="underline">Portal HTTPS</Link> before clients rely on
           these methods.
         </Callout>
+      )}
+
+      {askTab && (
+        <div className={cn("flex flex-wrap items-center gap-3 rounded-md border border-border bg-surface px-4 py-3", "animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none")}>
+          <p role="status" className="me-auto text-sm">Discard the changes you made to the client journey?</p>
+          <Button ref={keepRef} type="button" variant="secondary" onClick={() => setAskTab(null)}>Keep editing</Button>
+          <Button
+            type="button"
+            variant="danger"
+            onClick={() => {
+              const t = askTab;
+              setAskTab(null);
+              setJourneyDirty(false);
+              setJourneyKey((k) => k + 1);
+              goTab(t);
+            }}
+          >
+            Discard changes
+          </Button>
+        </div>
       )}
 
       <Tabs value={activeTab} onValueChange={(v) => selectTab(v as SignInTab)}>
@@ -277,8 +386,10 @@ export default function SignInMethodsPage() {
                 description="The client types a code from a printed or emailed voucher."
                 enabled={!!cfg.voucher?.enabled}
                 busy={busy === "Voucher"}
+                locked={locked}
+                error={rowError("Voucher")}
                 writable={writable}
-                onToggle={(v) => save({ voucher: { ...(cfg.voucher ?? {}), enabled: v } }, "Voucher")}
+                onToggle={(v) => toggle("Voucher", "Voucher code", v, { voucher: { ...(cfg.voucher ?? {}), enabled: v } }, "voucher")}
                 manageHref="/vouchers"
                 manageLabel="Vouchers"
               />
@@ -288,8 +399,10 @@ export default function SignInMethodsPage() {
                 description="A username and password issued to the client."
                 enabled={!!cfg.guest_account?.enabled}
                 busy={busy === "Client account"}
+                locked={locked}
+                error={rowError("Client account")}
                 writable={writable}
-                onToggle={(v) => save({ guest_account: { ...(cfg.guest_account ?? {}), enabled: v } }, "Client account")}
+                onToggle={(v) => toggle("Client account", "Client account", v, { guest_account: { ...(cfg.guest_account ?? {}), enabled: v } }, "guest_account")}
                 manageHref="/guest-accounts"
                 manageLabel="Client accounts"
               />
@@ -301,8 +414,10 @@ export default function SignInMethodsPage() {
                   : "The client picks a Free package with no credential. A recovery code resumes it later."}
                 enabled={!!cfg.open?.enabled}
                 busy={busy === "Open package selection"}
+                locked={locked}
+                error={rowError("Open package selection")}
                 writable={writable}
-                onToggle={(v) => save({ open: { ...(cfg.open ?? {}), enabled: v } }, "Open package selection")}
+                onToggle={(v) => toggle("Open package selection", "Choose a package without signing in", v, { open: { ...(cfg.open ?? {}), enabled: v } })}
                 manageHref="/payment-methods"
                 manageLabel="Payment methods"
               />
@@ -313,8 +428,10 @@ export default function SignInMethodsPage() {
                   description="Room number and one detail from the reservation, checked against the PMS."
                   enabled={!!pms.enabled}
                   busy={busy === "Room sign-in"}
+                  locked={locked}
+                  error={rowError("Room sign-in")}
                   writable={writable}
-                  onToggle={(v) => save({ pms: { ...pms, enabled: v, mode: pms.mode || "room_lastname" } }, "Room sign-in")}
+                  onToggle={(v) => toggle("Room sign-in", "Room sign-in", v, { pms: { ...pms, enabled: v, mode: pms.mode || "room_lastname" } }, "pms")}
                   warning={pms.enabled && roomSignInImpaired(pmsReadiness)
                     ? pmsReadiness.state === "down"
                       ? "Not working on any network that offers it — see PMS routing."
@@ -331,10 +448,12 @@ export default function SignInMethodsPage() {
                   description="The client registers with their email address and a password, then signs in with them."
                   enabled={!!cfg.email_account?.enabled}
                   busy={busy === "Email accounts"}
+                  locked={locked}
+                  error={rowError("Email accounts")}
                   writable={writable}
-                  onToggle={(v) => save({ email_account: { ...(cfg.email_account ?? {}), enabled: v } }, "Email accounts")}
-                  warning={emailReady ? undefined
-                    : "No email sender is switched on under Delivery, so verification and password-reset emails cannot be sent."}
+                  onToggle={(v) => toggle("Email accounts", "Email accounts", v, { email_account: { ...(cfg.email_account ?? {}), enabled: v } }, "email_account")}
+                  warning={senderWarning(emailReady, "email",
+                    "No email sender is switched on under Delivery, so verification and password-reset emails cannot be sent.")}
                   manageHref="/notifications"
                   manageLabel="Delivery"
                 />
@@ -346,9 +465,12 @@ export default function SignInMethodsPage() {
                   description="The client receives a one-time code by text message."
                   enabled={!!cfg.sms?.enabled}
                   busy={busy === "SMS code"}
+                  locked={locked}
+                  error={rowError("SMS code")}
                   writable={writable}
-                  onToggle={(v) => save({ sms: { ...(cfg.sms ?? {}), enabled: v } }, "SMS code")}
-                  ready={smsReady}
+                  onToggle={(v) => toggle("SMS code", "SMS code", v, { sms: { ...(cfg.sms ?? {}), enabled: v } }, "sms")}
+                  ready={senderKnown ? smsReady : true}
+                  warning={senderWarning(true, "text-message", "")}
                   notReadyReason="Not available until a text-message sender is switched on under Delivery."
                   manageHref="/notifications"
                   manageLabel="Delivery"
@@ -361,9 +483,12 @@ export default function SignInMethodsPage() {
                   description="The client receives a one-time code on WhatsApp for their phone number."
                   enabled={!!cfg.whatsapp?.enabled}
                   busy={busy === "WhatsApp code"}
+                  locked={locked}
+                  error={rowError("WhatsApp code")}
                   writable={writable}
-                  onToggle={(v) => save({ whatsapp: { ...(cfg.whatsapp ?? {}), enabled: v } }, "WhatsApp code")}
-                  ready={whatsappReady}
+                  onToggle={(v) => toggle("WhatsApp code", "WhatsApp code", v, { whatsapp: { ...(cfg.whatsapp ?? {}), enabled: v } }, "whatsapp")}
+                  ready={senderKnown ? whatsappReady : true}
+                  warning={senderWarning(true, "WhatsApp", "")}
                   notReadyReason="Not available until a WhatsApp sender is switched on under Delivery."
                   manageHref="/notifications"
                   manageLabel="Delivery"
@@ -382,7 +507,13 @@ export default function SignInMethodsPage() {
                         </Link>
                       )}
                     </div>
+                    {socialReadable && socialState === "failed" && (
+                      <p className={cn("text-xs text-warning-subtle-foreground", "animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none")} role="status">
+                        Identity providers could not be checked, so whether each one works is unknown.
+                      </p>
+                    )}
                     {socialListed.length === 0 ? (
+                      socialState === "failed" ? null :
                       <div className="flex flex-wrap items-center gap-2 text-sm">
                         <Badge tone="default">Not available</Badge>
                         <span className="text-muted-foreground">No identity provider is configured.</span>
@@ -394,29 +525,36 @@ export default function SignInMethodsPage() {
                       <ul className="grid gap-2 sm:grid-cols-2">
                         {socialListed.map((p) => {
                           const on = !!cfg.social?.[p]?.enabled;
-                          const ready = socialReady.includes(p);
+                          const ready = socialKnown ? socialReady.includes(p) : true;
                           const name = SOCIAL_LABELS[p] ?? p;
+                          const label = `Social (${p})`;
+                          const error = rowError(label);
                           return (
-                            <li key={p} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3.5 py-2.5">
-                              {writable ? (
-                                <label className="flex cursor-pointer items-center gap-2.5 text-sm">
-                                  <input
-                                    type="checkbox"
-                                    className="size-4 accent-primary"
-                                    checked={on}
-                                    disabled={busy === `Social (${p})` || (!ready && !on)}
-                                    onChange={(e) =>
-                                      save({ social: { ...(cfg.social ?? {}), [p]: { ...(cfg.social?.[p] ?? {}), enabled: e.target.checked } } },
-                                        `Social (${p})`)}
-                                  />
-                                  <span className="capitalize">{name}</span>
-                                </label>
-                              ) : (
-                                <span className="text-sm capitalize">{name}</span>
+                            <li key={p} className="space-y-1.5 rounded-md border border-border px-3.5 py-2.5">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm capitalize">{name}</span>
+                                  {ready
+                                    ? <StatusBadge tone={on ? "ok" : "default"}>{on ? "Offered" : "Not offered"}</StatusBadge>
+                                    : <Badge tone="warn">Not set up</Badge>}
+                                </div>
+                                {writable && (
+                                  <div className="flex items-center gap-2">
+                                    {busy === label && <span className="text-xs text-muted-foreground" aria-live="polite">Saving…</span>}
+                                    <Switch
+                                      checked={on}
+                                      disabled={locked || (!ready && !on)}
+                                      label={name}
+                                      onCheckedChange={(v) =>
+                                        toggle(label, name, v, { social: { ...(cfg.social ?? {}), [p]: { ...(cfg.social?.[p] ?? {}), enabled: v } } })}
+                                    />
+                                  </div>
+                                )}
+                              </div>
+                              {!ready && (
+                                <p className="text-xs text-warning-subtle-foreground">Switch it off, or set it up under Identity providers.</p>
                               )}
-                              {ready
-                                ? <StatusBadge tone={on ? "ok" : "default"}>{on ? "Offered" : "Not offered"}</StatusBadge>
-                                : <Badge tone="warn">Not set up — switch it off or set it up under Identity providers</Badge>}
+                              {error && <p className={cn("text-xs text-destructive", "animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none")} role="alert">{error}</p>}
                             </li>
                           );
                         })}
@@ -429,10 +567,15 @@ export default function SignInMethodsPage() {
           </SectionCard>
 
           <ClientJourneyCard
+            key={journeyKey}
             cfg={cfg}
             writable={writable}
             busy={busy === "Client journey"}
+            locked={locked}
+            error={rowError("Client journey")}
+            httpsActive={httpsActive}
             hospitality={hospitality}
+            onDirtyChange={setJourneyDirty}
             onSave={(portal) => save({ portal }, "Client journey")}
           />
         </TabsContent>
@@ -470,11 +613,29 @@ export default function SignInMethodsPage() {
           </TabsContent>
         )}
       </Tabs>
+
+      <ConfirmDialog
+        open={pendingOff !== null}
+        onOpenChange={(o) => { if (!o) setPendingOff(null); }}
+        title={`Switch off ${pendingOff?.title ?? ""}?`}
+        description={pendingOff?.last
+          ? "It is the only sign-in method that is on. New clients will have no way to sign in until another method is switched on. Clients already online stay connected."
+          : "It is the primary method on the portal. The portal will use the automatic order until it is switched on again or another primary method is chosen."}
+        confirmLabel="Switch off"
+        confirmVariant="danger"
+        onConfirm={() => {
+          const p = pendingOff;
+          setPendingOff(null);
+          if (p) void save(p.patch, p.label);
+        }}
+      />
     </PageShell>
   );
 }
-function ClientJourneyCard({ cfg, writable, busy, hospitality, onSave }: {
-  cfg: AuthMethods; writable: boolean; busy: boolean; hospitality: boolean;
+
+function ClientJourneyCard({ cfg, writable, busy, locked, error, httpsActive, hospitality, onDirtyChange, onSave }: {
+  cfg: AuthMethods; writable: boolean; busy: boolean; locked: boolean; error?: string; httpsActive: boolean | null;
+  hospitality: boolean; onDirtyChange: (dirty: boolean) => void;
   onSave: (portal: PortalJourney) => void;
 }) {
   const stored = cfg.portal ?? {};
@@ -498,7 +659,13 @@ function ClientJourneyCard({ cfg, writable, busy, hospitality, onSave }: {
 
   const n = Number(days);
   const daysValid = days.trim() !== "" && Number.isInteger(n) && n >= REMEMBER_DAYS_MIN && n <= REMEMBER_DAYS_MAX;
-  const dirty = primary !== storedPrimary || (daysValid && n !== storedDays);
+  const dirty = primary !== storedPrimary || days.trim() !== String(storedDays);
+  const canSave = primary !== storedPrimary || (daysValid && n !== storedDays);
+  const daysError = writable && days.trim() !== "" && Number.isFinite(n) && !Number.isInteger(n)
+    ? "Enter a whole number of days from 0 to 365."
+    : writable && days.trim() === "" ? "Enter a whole number of days from 0 to 365." : undefined;
+  useEffect(() => { onDirtyChange(dirty); }, [dirty, onDirtyChange]);
+  useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
 
   return (
     <Card>
@@ -514,8 +681,7 @@ function ClientJourneyCard({ cfg, writable, busy, hospitality, onSave }: {
           className="grid gap-4 md:grid-cols-2"
           onSubmit={(e) => {
             e.preventDefault();
-            if (!daysValid || !writable) return;
-            // The whole `portal` key is replaced, so spread the stored value to keep other fields.
+            if (!daysValid || !writable || locked) return;
             onSave({ ...stored, primary_method: primary, remember_device_days: n });
           }}
         >
@@ -523,7 +689,7 @@ function ClientJourneyCard({ cfg, writable, busy, hospitality, onSave }: {
             label="Primary method"
             hint="Shown first on the portal. Identity providers appear above it; other methods under 'Or sign in with'."
           >
-            <Select value={primary} disabled={!writable || busy} onChange={(e) => setPrimary(e.target.value as PrimaryMethod)}>
+            <Select value={primary} disabled={!writable || locked} onChange={(e) => setPrimary(e.target.value as PrimaryMethod)}>
               <option value="">Automatic</option>
               {enabledMethods.map((m) => <option key={m} value={m}>{PRIMARY_LABELS[m]}</option>)}
               {storedOff && <option value={storedPrimary}>{PRIMARY_LABELS[storedPrimary]} (switched off)</option>}
@@ -537,18 +703,26 @@ function ClientJourneyCard({ cfg, writable, busy, hospitality, onSave }: {
             min={REMEMBER_DAYS_MIN}
             max={REMEMBER_DAYS_MAX}
             defaultValue={REMEMBER_DAYS_DEFAULT}
-            readOnly={!writable || busy}
+            readOnly={!writable || locked}
+            error={daysError}
             explanation="How long a device that verified a code or identity provider reconnects without another code. Only over the portal's HTTPS address. 0 = always ask."
           />
+          {httpsActive === false && (
+            <p className="text-xs text-warning-subtle-foreground md:col-span-2" role="status">
+              The portal has no HTTPS address yet, so no device is remembered until{" "}
+              <Link href="/portal-https" className="underline underline-offset-2">Portal HTTPS</Link> is finished.
+            </p>
+          )}
           {storedOff && (
             <p className="text-xs text-warning-subtle-foreground md:col-span-2" role="status">
               {PRIMARY_LABELS[storedPrimary]} is the stored primary method but is switched off, so the portal uses the automatic order until it is switched on or another method is chosen.
             </p>
           )}
           {writable && (
-            <div className="flex items-center justify-end gap-3 border-t border-border pt-4 md:col-span-2">
-              {dirty && !busy && <span className="text-xs text-muted-foreground">Not saved yet.</span>}
-              <Button type="submit" disabled={!dirty || !daysValid || busy}>{busy ? "Saving…" : "Save journey"}</Button>
+            <div className="flex flex-wrap items-center justify-end gap-3 border-t border-border pt-4 md:col-span-2">
+              {error && <p className={cn("me-auto text-xs text-destructive", "animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none")} role="alert">{error}</p>}
+              {dirty && !busy && !error && <span className="text-xs text-muted-foreground">Not saved yet.</span>}
+              <Button type="submit" disabled={!canSave || !daysValid || locked}>{busy ? "Saving…" : "Save journey"}</Button>
             </div>
           )}
         </form>
@@ -567,10 +741,10 @@ function MethodIcon({ icon }: { icon: React.ReactNode }) {
 }
 
 function MethodRow({
-  icon, title, description, enabled, busy, writable, onToggle, ready = true, notReadyReason, warning, manageHref, manageLabel,
+  icon, title, description, enabled, busy, locked, error, writable, onToggle, ready = true, notReadyReason, warning, manageHref, manageLabel,
 }: {
   icon: React.ReactNode; title: string; description: string;
-  enabled: boolean; busy: boolean; writable: boolean; onToggle: (v: boolean) => void;
+  enabled: boolean; busy: boolean; locked: boolean; error?: string; writable: boolean; onToggle: (v: boolean) => void;
   ready?: boolean; notReadyReason?: string;
   warning?: string;
   manageHref?: string; manageLabel?: string;
@@ -593,13 +767,14 @@ function MethodRow({
             </Link>
           )}
         </div>
-        {!ready && notReadyReason && <p className="text-xs text-warning-subtle-foreground">{notReadyReason}</p>}
-        {ready && warning && <p className="text-xs text-warning-subtle-foreground" role="status">{warning}</p>}
+        {!ready && notReadyReason && <p className={cn("text-xs text-warning-subtle-foreground", "animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none")}>{notReadyReason}</p>}
+        {ready && warning && <p className={cn("text-xs text-warning-subtle-foreground", "animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none")} role="status">{warning}</p>}
+        {error && <p className={cn("text-xs text-destructive", "animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none")} role="alert">{error}</p>}
       </div>
       {writable && (
         <div className="flex shrink-0 items-center gap-2 pt-1">
           {busy && <span className="text-xs text-muted-foreground" aria-live="polite">Saving…</span>}
-          <Switch checked={enabled} disabled={busy || (!ready && !enabled)} onCheckedChange={onToggle} label={title} />
+          <Switch checked={enabled} disabled={locked || (!ready && !enabled)} onCheckedChange={onToggle} label={title} />
         </div>
       )}
     </li>
