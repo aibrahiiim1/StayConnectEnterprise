@@ -13,8 +13,11 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/onegate/onegate/data-plane/internal/signinattempt"
 )
@@ -378,5 +381,50 @@ func TestIntegration_SignInAttempt_APaidSessionIsLinkedToItsSignIn(t *testing.T)
 	if err := f.pool.QueryRow(ctx, `SELECT result, COALESCE(session_id::text,'') FROM iam_v2.sign_in_attempts WHERE request_id=$1::uuid`, reqID).
 		Scan(&result, &sess); err != nil || result != "VERIFIED" || sess == "" {
 		t.Fatalf("the paid sign-in was not linked to its session: %s %q %v", result, sess, err)
+	}
+}
+
+// The reconnection runs as svc_scd on the appliance: every statement it issues must be readable by that role. Run as the production
+// role with the real queries (found on the test appliance: the first version read a table svc_scd may not).
+func TestIntegration_Rejoin_RunsAsTheProductionRole(t *testing.T) {
+	dsn := os.Getenv("SCD_ROLE_TEST_DSN")
+	if dsn == "" {
+		t.Skip("SCD_ROLE_TEST_DSN not set")
+	}
+	f := newAuthFixture(t)
+	soleOccupant(t, f)
+	defer f.startEnforcementOwner(t)()
+	g := f.signInByRoom(t, 1)
+	f.endLive(t, f.net.mac, "ADDRESS_NO_LONGER_OWNED")
+	ctx := context.Background()
+	role, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer role.Close()
+	var device string
+	_ = f.pool.QueryRow(ctx, `SELECT id::text FROM iam_v2.devices WHERE mac=$1::macaddr AND tenant_id=$2`, f.net.mac, f.tenant).Scan(&device)
+	tx, err := role.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var ent string
+	if err := tx.QueryRow(ctx, rejoinCandidateSQL, f.tenant, f.site, device, f.p3.bridgeFor(ctx, net.ParseIP(f.net.guestIP)), rejoinableEndReasons).Scan(&ent); err != nil {
+		t.Fatalf("svc_scd cannot run the reconnection's candidate query: %v", err)
+	}
+	if ent != g.EntitlementID {
+		t.Fatalf("candidate %s, want %s", ent, g.EntitlementID)
+	}
+	var live, authorized bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM iam_v2.sessions
+		WHERE tenant_id=$1 AND site_id=$2 AND device_id=$3 AND ended IS NULL AND state IN ('active','PENDING_ENFORCEMENT'))`,
+		f.tenant, f.site, device).Scan(&live); err != nil {
+		t.Fatalf("svc_scd cannot read live sessions: %v", err)
+	}
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM iam_v2.entitlement_devices
+		WHERE tenant_id=$1 AND entitlement_id=$2::uuid AND device_id=$3::uuid AND status = 'AUTHORIZED')`,
+		f.tenant, ent, device).Scan(&authorized); err != nil || !authorized {
+		t.Fatalf("svc_scd cannot read the device's place (%v, authorized=%v)", err, authorized)
 	}
 }
