@@ -36,7 +36,7 @@ export function ImpactPanel({ affected, external }: { affected?: NetworkConseque
       )}
       {ext.length > 0 && (
         <Callout tone="info" title="Outside OneGate: switch, access points and hypervisor">
-          <ul className="list-disc pl-5">{ext.map((t) => <li key={t}>{t}</li>)}</ul>
+          <ul className="list-disc ps-5">{ext.map((t) => <li key={t}>{t}</li>)}</ul>
         </Callout>
       )}
     </div>
