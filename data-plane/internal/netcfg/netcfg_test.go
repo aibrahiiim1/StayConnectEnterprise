@@ -200,6 +200,21 @@ func TestKeaExcludesExternal(t *testing.T) {
 	}
 }
 
+// A served client network is authoritative, so a stale address is refused, never ignored; Kea's global default stays
+// non-authoritative and nothing outside the served list (external, relay, management) is touched.
+func TestKeaClientSubnetsAreAuthoritativeAndNothingElse(t *testing.T) {
+	ext := vlan20()
+	ext.ID, ext.DHCPMode = "ext", DHCPExternal
+	dhcp4 := RenderKeaDhcp4([]GuestNetwork{vlan20(), ext}, topoT(), "/x", "/y")
+	subnets := dhcp4["subnet4"].([]map[string]any)
+	if len(subnets) != 1 || subnets[0]["authoritative"] != true {
+		t.Fatalf("served client subnets: %+v", subnets)
+	}
+	if _, set := dhcp4["authoritative"]; set {
+		t.Fatal("authoritative must be set per served client subnet, not globally")
+	}
+}
+
 func TestNftRenderConcatSet(t *testing.T) {
 	out := string(RenderNftables([]GuestNetwork{vlan20()}, topoT()))
 	if !strings.Contains(out, "type ifname . ipv4_addr") {

@@ -7,13 +7,14 @@
 // LIVE is shown disabled where the provider's `live_allowed` is false; the server refuses it anyway
 // (409 live_not_authorised).
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import {
   AccountSaveBody, PaymentAccount, PaymentProvider, saveErrorMessage,
 } from "@/lib/payment-admin";
 import { DialogForm } from "@/components/ui/dialog";
 import { Field, Input, Select } from "@/components/ui/input";
+import { ErrorBanner } from "@/components/ui/error-banner";
 
 type Draft = {
   provider: string;
@@ -60,11 +61,17 @@ export function AccountDialog({
   const [d, setD] = useState<Draft>(() => initialDraft(account, providers));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [touched, setTouched] = useState(false);
+  const errorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (error) errorRef.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+  }, [error]);
 
   // Reset on open and close so a typed secret or password does not outlive the dialog.
   useEffect(() => {
     setD(initialDraft(open ? account : null, providers));
     setError(null);
+    setTouched(false);
   }, [open, account, providers]);
 
   const provider = useMemo(() => providers.find((p) => p.id === d.provider), [providers, d.provider]);
@@ -89,7 +96,7 @@ export function AccountDialog({
   for (const k of credentialKeys) {
     if (k.required && !keysSet.has(k.key) && !(d.credentials[k.key] ?? "").trim()) missing.push(k.label);
   }
-  if (d.reason.trim().length < 4) missing.push("a reason");
+  if (d.reason.trim().length < 4) missing.push("a reason of at least 4 characters");
   if (!d.password) missing.push("your password");
 
   async function submit() {
@@ -139,10 +146,11 @@ export function AccountDialog({
       submitLabel={account ? "Save account" : "Add account"}
       busyLabel="Saving…"
       busy={busy}
-      error={error}
       disabled={missing.length > 0}
+      disabledReason={touched ? `Still needed: ${missing.join(", ")}.` : "Fill in the required fields."}
       onSubmit={submit}
     >
+      <div className="space-y-4" onInput={() => setTouched(true)} onChange={() => setTouched(true)}>
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Provider" required>
           <Select
@@ -243,9 +251,14 @@ export function AccountDialog({
       <Field label="Confirm your password" required>
         <Input type="password" autoComplete="current-password" value={d.password} onChange={(e) => set("password", e.target.value)} />
       </Field>
-      {missing.length > 0 && (
-        <p className="text-xs text-muted-foreground" aria-live="polite">Still needed: {missing.join(", ")}.</p>
-      )}
+      </div>
+      <div ref={errorRef}>
+        {error && (
+          <div className="animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none">
+            <ErrorBanner err={error} />
+          </div>
+        )}
+      </div>
     </DialogForm>
   );
 }
