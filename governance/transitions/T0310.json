@@ -1,0 +1,34 @@
+{
+  "transition_id": "T0310",
+  "seq": 310,
+  "timestamp": "2026-11-05T18:38:59+02:00",
+  "timestamp_derivation": "Read from the workstation clock (UTC+02:00) by the script that wrote this receipt, immediately before the commit that introduces it.",
+  "record_type": "TEST_APPLIANCE_UPGRADE",
+  "authorisation": "The Product Owner's mission of 2026-11-05 (D95): deployment of the fix to the test appliance 172.21.96.97 under D79, including migration 0209.",
+  "delivery": "The test appliance was upgraded with appliance-install.sh --upgrade to master 6935b49bc5f1 (the merge of PR #347, which also carries the merged PRs #330-#332): migration 0209 applied behind the installer's verified pre-change backup db-20261105T161933Z.sql.gz.age, the Gate-P reconcile (GATEP_RECONCILE = OK), every service binary and the Admin Console replaced.",
+  "verification": "Every binary (scd, edged, pmsd, portald, netd, acctd, keybootstrap, svc-run) matched DEPLOYED_BINARIES.sha256 and read back vcs.revision 6935b49bc5f1, -tags=stayconnect_production, vcs.modified=false; APPLIANCE_UNITS = PASS; schema ledger head 0209; edged health ok; all services active. Live: a checked-out room's own online device signed in by room through scd and joined the same After Check-out entitlement, keeping its session, with window and entitlements unchanged (attempt VERIFIED); a rolled-back call of issue_or_return_pms_context issued a context to that departed stay; checked-out rooms' sign-ins after the upgrade were VERIFIED for their devices. After Check-out Access settings read back unchanged: version 3, 10 devices, 5 GB, 12 hours, enabled.",
+  "deployment": {
+    "test_appliance": "onegate-appliance-6935b49bc5f1; console release 20261105-163614; rollback tree /opt/stayconnect/.previous/20261105T163602Z and bin/*.bak-20261105T163602Z (scripts/binary-rollback.sh); database rollback: the 0209 down migration or the pre-change backup db-20261105T161933Z.sql.gz.age.",
+    "central": "Not changed."
+  },
+  "not_touched": "DHCP and networking (Kea authoritative mode reported, not changed), After Check-out Access settings, PMS configuration and postings, payments, licences, the production Central.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "6935b49bc5f10e790ec5b82a72a1ad212c6451b1",
+  "previous_delivery": "T0309",
+  "decision": "D95",
+  "go_live": "NOT authorised."
+}
