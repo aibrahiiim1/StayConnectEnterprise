@@ -145,6 +145,10 @@ func (e *Enforcer) PlanForSite(ctx context.Context, tenant, site string) (Plan, 
 			COALESCE(spr.speed_allocation,'PER_DEVICE'),
 			(s.state IN ('active','PENDING_ENFORCEMENT') AND s.ended IS NULL AND e.status='ACTIVE'
 			 AND (e.window_ends_at IS NULL OR e.window_ends_at > now())) AS entitled
+			-- A live session whose entitlement has ended is torn down AS the end of its package, whichever writer gets there first;
+			-- without a reason here netd wrote its generic ENFORCEMENT_TORN_DOWN when it won the race against the expiry writer.
+			, CASE WHEN s.ended IS NULL AND (e.status <> 'ACTIVE' OR (e.window_ends_at IS NOT NULL AND e.window_ends_at <= now()))
+			       THEN 'ENTITLEMENT_ENDED' ELSE '' END AS tear_reason
 		FROM iam_v2.sessions s
 		JOIN iam_v2.entitlements e ON e.id = s.entitlement_id
 		LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id
@@ -161,7 +165,7 @@ func (e *Enforcer) PlanForSite(ctx context.Context, tenant, site string) (Plan, 
 		var sh SessionShape
 		var entitled bool
 		if err := rows.Scan(&sh.SessionID, &sh.EntitlementID, &sh.DeviceID, &sh.IP, &sh.MAC, &sh.Bridge,
-			&sh.DownKbps, &sh.UpKbps, &sh.WindowEndsAt, &sh.SpeedAllocation, &entitled); err != nil {
+			&sh.DownKbps, &sh.UpKbps, &sh.WindowEndsAt, &sh.SpeedAllocation, &entitled, &sh.EndReason); err != nil {
 			return p, err
 		}
 		if entitled {

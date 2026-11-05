@@ -7,9 +7,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import {
   AccountsResp, CardSettings, PaymentAccount, PaymentChange, PaymentProvider, ProvidersResp, TestResult,
-  saveErrorMessage,
+  codeWords, saveErrorMessage,
 } from "@/lib/payment-admin";
-import { formatDate } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 import { Card, CardBody, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { DescriptionList } from "@/components/ui/data";
@@ -30,7 +30,7 @@ import { useToast } from "@/components/ui/toast";
 import { AccountDialog } from "./account-dialog";
 import { cardAccepts, defaultCardAccount } from "@/lib/card-currency";
 import { CodeList, CodeText } from "./codes";
-import { CreditCard, Plus, PlugZap, Trash2 } from "lucide-react";
+import { AlertTriangle, CreditCard, Plus, PlugZap, RefreshCw, Trash2 } from "lucide-react";
 
 const MAX_EXTRA_DOMAINS = 20;
 
@@ -58,6 +58,24 @@ export function domainProblem(raw: string): string | null {
 }
 
 const KIND_LABEL: Record<string, string> = { account: "Provider account", domains: "Payment domains", settings: "Timings" };
+
+function LoadFailed({ title, err, loading, onRetry }: { title: string; err: unknown; loading: boolean; onRetry: () => void }) {
+  return (
+    <EmptyState
+      size="sm"
+      icon={<AlertTriangle />}
+      title={title}
+      hint={err instanceof Error ? err.message : undefined}
+      action={<Button size="sm" variant="secondary" disabled={loading} onClick={onRetry}><RefreshCw /> Try again</Button>}
+    />
+  );
+}
+
+type Failed = { providers?: unknown; accounts?: unknown; settings?: unknown; changes?: unknown };
+
+const changeKey = (c: PaymentChange) => `${c.changed_at}|${c.kind}`;
+
+const nowTime = () => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
 type PackageCurrencyRow = {
   package_id: string; code: string; name?: string | null; active?: boolean; current_revision_id?: string | null;
@@ -96,7 +114,7 @@ export function CurrencyMismatchNotice({ accounts }: { accounts: AccountsResp | 
   const withheld = acct === "none" ? pkgs : pkgs.filter((p) => !cardAccepts(acct, p.currency));
   if (withheld.length === 0) return null;
   return (
-    <p className="mt-3 rounded-md border border-warning/40 bg-warning-subtle px-3.5 py-2.5 text-xs text-warning-subtle-foreground" role="status" data-testid="card-currency-mismatch">
+    <p className="mt-3 rounded-md border border-warning/40 bg-warning-subtle px-3.5 py-2.5 text-xs text-warning-subtle-foreground animate-in fade-in-0 slide-in-from-top-1 duration-base ease-onegate motion-reduce:animate-none" role="status" data-testid="card-currency-mismatch">
       <strong>Not offered by card:</strong>{" "}
       {withheld.map((p) => `${p.name} (${p.currency})`).join(", ")}.{" "}
       {acct === "none"
@@ -112,10 +130,14 @@ export function CurrencyMismatchNotice({ accounts }: { accounts: AccountsResp | 
 function summariseDetail(detail: unknown): string {
   if (detail === null || detail === undefined || detail === "") return "—";
   if (typeof detail === "string") return detail;
-  if (Array.isArray(detail)) return detail.map((v) => summariseDetail(v)).join(", ");
+  if (typeof detail === "boolean") return detail ? "Yes" : "No";
+  if (Array.isArray(detail)) return detail.length === 0 ? "None" : detail.map((v) => summariseDetail(v)).join(", ");
   if (typeof detail === "object") {
     return Object.entries(detail as Record<string, unknown>)
-      .map(([k, v]) => `${k.replace(/_/g, " ")}: ${typeof v === "object" && v !== null ? summariseDetail(v) : String(v)}`)
+      .map(([k, v]) => {
+        const words = k.replace(/_/g, " ");
+        return `${words.charAt(0).toUpperCase()}${words.slice(1)}: ${summariseDetail(v)}`;
+      })
       .join(" · ");
   }
   return String(detail);
@@ -135,20 +157,25 @@ export function CardPaymentConfig({ writable, methods }: { writable: boolean; me
   const [settings, setSettings] = useState<CardSettings | null>(null);
   const [changes, setChanges] = useState<PaymentChange[] | null>(null);
   const [err, setErr] = useState<unknown>(null);
+  const [failed, setFailed] = useState<Failed>({});
+  const [loading, setLoading] = useState(false);
 
   const load = useCallback(async () => {
     setErr(null);
+    setLoading(true);
     const [p, a, s, c] = await Promise.allSettled([
       api.get<ProvidersResp>("/payment-providers/providers"),
       api.get<AccountsResp>("/payment-providers/accounts"),
       api.get<CardSettings>("/payment-providers/settings"),
       api.get<{ changes: PaymentChange[] }>("/payment-providers/changes"),
     ]);
-    if (p.status === "fulfilled") setProviders(p.value); else setErr(p.reason);
-    if (a.status === "fulfilled") setAccounts(a.value); else setErr(a.reason);
-    if (s.status === "fulfilled") setSettings(s.value); else setErr(s.reason);
-    // A failure to read the history must not stop the rest being managed.
-    setChanges(c.status === "fulfilled" ? c.value.changes ?? [] : []);
+    const f: Failed = {};
+    if (p.status === "fulfilled") setProviders(p.value); else f.providers = p.reason;
+    if (a.status === "fulfilled") setAccounts(a.value); else f.accounts = a.reason;
+    if (s.status === "fulfilled") setSettings(s.value); else f.settings = s.reason;
+    if (c.status === "fulfilled") setChanges(c.value.changes ?? []); else f.changes = c.reason;
+    setFailed(f);
+    setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -156,8 +183,10 @@ export function CardPaymentConfig({ writable, methods }: { writable: boolean; me
     try {
       const c = await api.get<{ changes: PaymentChange[] }>("/payment-providers/changes");
       setChanges(c.changes ?? []);
-    } catch { /* the save succeeded; the history refreshes on the next load */ }
+      setFailed((prev) => ({ ...prev, changes: undefined }));
+    } catch { return; }
   }, []);
+  const retry = () => void load();
 
   return (
     <QuietHints>
@@ -180,6 +209,9 @@ export function CardPaymentConfig({ writable, methods }: { writable: boolean; me
         providers={providers?.providers ?? null}
         accounts={accounts}
         writable={writable}
+        failed={failed.accounts ?? failed.providers}
+        loading={loading}
+        onRetry={retry}
         onChanged={async () => {
           try { setAccounts(await api.get<AccountsResp>("/payment-providers/accounts")); } catch (e) { setErr(e); }
           await reloadHistory();
@@ -187,11 +219,14 @@ export function CardPaymentConfig({ writable, methods }: { writable: boolean; me
         toastSuccess={toast.success}
       />
       </TabsContent>
-      <TabsContent value="settings" className="mt-4 space-y-4">
+      <TabsContent value="settings" forceMount hidden={tab !== "settings"} className="mt-4 space-y-4">
       <DomainsCard
         providers={providers?.providers ?? null}
         extra={accounts?.extra_domains ?? null}
         writable={writable}
+        failed={failed.providers ?? failed.accounts}
+        loading={loading}
+        onRetry={retry}
         onSaved={async (domains) => {
           setAccounts((prev) => (prev ? { ...prev, extra_domains: domains } : prev));
           toast.success("Payment domains saved");
@@ -201,6 +236,9 @@ export function CardPaymentConfig({ writable, methods }: { writable: boolean; me
       <SettingsCard
         settings={settings}
         writable={writable}
+        failed={failed.settings}
+        loading={loading}
+        onRetry={retry}
         onSaved={async (next) => {
           setSettings(next);
           toast.success("Card payment timings saved");
@@ -209,7 +247,7 @@ export function CardPaymentConfig({ writable, methods }: { writable: boolean; me
       />
       </TabsContent>
       <TabsContent value="history" className="mt-4">
-        <HistoryCard changes={changes} />
+        <HistoryCard changes={changes} failed={failed.changes} loading={loading} onRetry={retry} />
       </TabsContent>
     </Tabs>
     </QuietHints>
@@ -217,18 +255,21 @@ export function CardPaymentConfig({ writable, methods }: { writable: boolean; me
 }
 
 function AccountsCard({
-  providers, accounts, writable, onChanged, toastSuccess,
+  providers, accounts, writable, failed, loading, onRetry, onChanged, toastSuccess,
 }: {
   providers: PaymentProvider[] | null;
   accounts: AccountsResp | null;
   writable: boolean;
+  failed: unknown;
+  loading: boolean;
+  onRetry: () => void;
   onChanged: () => Promise<void>;
   toastSuccess: (t: string, d?: string) => void;
 }) {
   const [editing, setEditing] = useState<PaymentAccount | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [testing, setTesting] = useState<string | null>(null);
-  const [results, setResults] = useState<Record<string, TestResult>>({});
+  const [results, setResults] = useState<Record<string, TestResult & { at: string }>>({});
   const [converting, setConverting] = useState<PaymentAccount | null>(null);
 
   const providerLabel = (id: string) => providers?.find((p) => p.id === id)?.label ?? id;
@@ -237,12 +278,12 @@ function AccountsCard({
     setTesting(a.id);
     try {
       const r = await api.post<TestResult>(`/payment-providers/accounts/${encodeURIComponent(a.id)}/test`, {});
-      setResults((prev) => ({ ...prev, [a.id]: r }));
+      setResults((prev) => ({ ...prev, [a.id]: { ...r, at: nowTime() } }));
     } catch (e) {
       const body = e instanceof ApiError ? e.body : null;
       setResults((prev) => ({
         ...prev,
-        [a.id]: { ok: false, error: body?.error ?? "request_failed", message: saveErrorMessage(e) },
+        [a.id]: { ok: false, error: body?.error ?? "request_failed", message: saveErrorMessage(e), at: nowTime() },
       }));
     } finally {
       setTesting(null);
@@ -273,7 +314,9 @@ function AccountsCard({
           </Callout>
         </CardBody>
       )}
-      {accounts === null ? (
+      {(accounts === null || providers === null) && failed ? (
+          <LoadFailed title="The provider accounts could not be loaded" err={failed} loading={loading} onRetry={onRetry} />
+        ) : accounts === null ? (
           <SkeletonRows rows={2} cols={5} />
         ) : accounts.accounts.length === 0 ? (
           <EmptyState size="sm" icon={<CreditCard />} title="No provider account yet"
@@ -286,9 +329,9 @@ function AccountsCard({
                 <TH className="hidden md:table-cell">Provider</TH>
                 <TH>Currency</TH>
                 <TH>Other currencies</TH>
-                <TH>Mode</TH>
+                <TH className="hidden md:table-cell">Mode</TH>
                 <TH>Status</TH>
-                <TH>Credentials</TH>
+                <TH className="hidden md:table-cell">Credentials</TH>
                 <TH><span className="sr-only">Actions</span></TH>
               </TR>
             </THead>
@@ -303,6 +346,20 @@ function AccountsCard({
                         {a.is_default && <Badge tone="accent">Default</Badge>}
                       </div>
                       <div className="truncate font-mono text-xs text-muted-foreground" title={a.merchant_account_ref}>{a.merchant_account_ref}</div>
+                      {r && (
+                        <div key={r.at} className="mt-1 whitespace-normal text-xs animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none" role="status">
+                          {r.ok ? (
+                            <span className="text-success-subtle-foreground">Connection accepted</span>
+                          ) : r.error === "provider_calls_not_authorised" ? (
+                            <span className="text-muted-foreground">Not tested: {r.message}</span>
+                          ) : (
+                            <span className="text-destructive">
+                              Connection failed{r.message ? `: ${r.message}` : r.error && codeWords(r.error) ? `: ${codeWords(r.error)}` : "."}
+                            </span>
+                          )}
+                          <span className="text-muted-foreground"> · tested at {r.at}</span>
+                        </div>
+                      )}
                     </TD>
                     <TD nowrap className="hidden md:table-cell">{providerLabel(a.provider)}</TD>
                     <TD nowrap className="font-mono">{a.currency}</TD>
@@ -327,27 +384,14 @@ function AccountsCard({
                         <span className="text-xs text-muted-foreground">Settles {a.currency} only</span>
                       )}
                     </TD>
-                    <TD nowrap><Badge tone={a.mode === "LIVE" ? "warn" : "info"}>{a.mode}</Badge></TD>
+                    <TD nowrap className="hidden md:table-cell"><Badge tone={a.mode === "LIVE" ? "warn" : "info"}>{a.mode}</Badge></TD>
                     <TD nowrap>
                       <StatusBadge tone={a.status === "ACTIVE" ? "ok" : "default"}>
                         {a.status === "ACTIVE" ? "Active" : a.status === "DISABLED" ? "Disabled" : a.status}
                       </StatusBadge>
                     </TD>
-                    <TD>
+                    <TD className="hidden md:table-cell">
                       <Badge tone={a.has_credentials ? "ok" : "warn"}>{a.has_credentials ? "Stored" : "Not set"}</Badge>
-                      {r && (
-                        <div className="mt-1 text-xs" role="status">
-                          {r.ok ? (
-                            <span className="text-success-subtle-foreground">Connection accepted</span>
-                          ) : r.error === "provider_calls_not_authorised" ? (
-                            <span className="text-muted-foreground">Not tested: {r.message}</span>
-                          ) : (
-                            <span className="text-destructive">
-                              Connection failed{r.message ? `: ${r.message}` : r.error ? ` (${r.error})` : ""}
-                            </span>
-                          )}
-                        </div>
-                      )}
                     </TD>
                     <TD className="w-0">
                       <RowActions
@@ -393,11 +437,14 @@ function AccountsCard({
 }
 
 function DomainsCard({
-  providers, extra, writable, onSaved,
+  providers, extra, writable, failed, loading, onRetry, onSaved,
 }: {
   providers: PaymentProvider[] | null;
   extra: string[] | null;
   writable: boolean;
+  failed: unknown;
+  loading: boolean;
+  onRetry: () => void;
   onSaved: (domains: string[]) => Promise<void>;
 }) {
   const [draft, setDraft] = useState<string[]>([]);
@@ -406,6 +453,7 @@ function DomainsCard({
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [saveErr, setSaveErr] = useState<string | null>(null);
+  const [added, setAdded] = useState<string | null>(null);
 
   useEffect(() => { if (extra) setDraft(extra); }, [extra]);
   const dirty = useMemo(() => JSON.stringify(draft) !== JSON.stringify(extra ?? []), [draft, extra]);
@@ -416,7 +464,7 @@ function DomainsCard({
     if (problem) { setAddErr(problem); return; }
     if (draft.includes(d)) { setAddErr("That domain is already on the list."); return; }
     if (draft.length >= MAX_EXTRA_DOMAINS) { setAddErr(`At most ${MAX_EXTRA_DOMAINS} domains.`); return; }
-    setDraft([...draft, d]); setAdding(""); setAddErr(null);
+    setDraft([...draft, d]); setAdding(""); setAddErr(null); setAdded(d);
   }
 
   async function save({ reason, password }: { reason: string; password: string }) {
@@ -443,6 +491,10 @@ function DomainsCard({
         </div>
       </CardHeader>
       <CardBody className="space-y-5">
+        {(providers === null || extra === null) && failed ? (
+          <LoadFailed title="The payment domains could not be loaded" err={failed} loading={loading} onRetry={onRetry} />
+        ) : (
+        <>
         <div className="space-y-2">
           <div className="text-label">Provided by each provider</div>
           {providers === null ? (
@@ -482,7 +534,7 @@ function DomainsCard({
           ) : (
             <ul className="space-y-1.5">
               {draft.map((d) => (
-                <li key={d} className="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-1.5">
+                <li key={d} className={cn("flex items-center justify-between gap-2 rounded-md border border-border px-3 py-1.5", d === added && "animate-in fade-in-0 zoom-in-95 duration-base ease-onegate motion-reduce:animate-none")}>
                   <span className="min-w-0 break-all font-mono text-sm">{d}</span>
                   {writable && (
                     <Button
@@ -514,10 +566,16 @@ function DomainsCard({
                     className="font-mono"
                   />
                 </Field>
-                <Button type="submit" variant="secondary" className="sm:mt-7" disabled={draft.length >= MAX_EXTRA_DOMAINS}>
+                <Button type="submit" variant="secondary" className="sm:mt-7" disabled={draft.length >= MAX_EXTRA_DOMAINS}
+                  aria-describedby={draft.length >= MAX_EXTRA_DOMAINS ? "domains-full" : undefined}>
                   <Plus /> Add
                 </Button>
               </form>
+              {draft.length >= MAX_EXTRA_DOMAINS && (
+                <p id="domains-full" className="text-xs text-muted-foreground">
+                  The list holds at most {MAX_EXTRA_DOMAINS} domains. Remove one to add another.
+                </p>
+              )}
               <div className="flex flex-wrap gap-2">
                 <Button disabled={!dirty} onClick={() => { setSaveErr(null); setConfirming(true); }}>Save domains</Button>
                 {dirty && <Button variant="ghost" onClick={() => setDraft(extra)}>Discard changes</Button>}
@@ -525,6 +583,8 @@ function DomainsCard({
             </div>
           )}
         </div>
+        </>
+        )}
       </CardBody>
       <ConfirmDialog
         open={confirming}
@@ -543,10 +603,13 @@ function DomainsCard({
 }
 
 function SettingsCard({
-  settings, writable, onSaved,
+  settings, writable, failed, loading, onRetry, onSaved,
 }: {
   settings: CardSettings | null;
   writable: boolean;
+  failed: unknown;
+  loading: boolean;
+  onRetry: () => void;
   onSaved: (s: CardSettings) => Promise<void>;
 }) {
   const [expiry, setExpiry] = useState("");
@@ -565,7 +628,11 @@ function SettingsCard({
     return (
       <Card>
         <CardHeader><CardTitle>Card payment timings</CardTitle></CardHeader>
-        <SkeletonRows rows={2} cols={2} />
+        {failed ? (
+          <LoadFailed title="The card payment timings could not be loaded" err={failed} loading={loading} onRetry={onRetry} />
+        ) : (
+          <SkeletonRows rows={2} cols={2} />
+        )}
       </Card>
     );
   }
@@ -663,11 +730,11 @@ function SettingsCard({
 
 const HISTORY_SHOWN = 8;
 
-function HistoryCard({ changes }: { changes: PaymentChange[] | null }) {
-  const [open, setOpen] = useState<number | null>(null);
+function HistoryCard({ changes, failed, loading, onRetry }: { changes: PaymentChange[] | null; failed: unknown; loading: boolean; onRetry: () => void }) {
+  const [open, setOpen] = useState<string | null>(null);
   const [all, setAll] = useState(false);
   const shown = changes ? (all ? changes : changes.slice(0, HISTORY_SHOWN)) : [];
-  const sel = open !== null && changes ? changes[open] : null;
+  const sel = open !== null && changes ? changes.find((c) => changeKey(c) === open) ?? null : null;
   return (
     <Card className="overflow-hidden">
       <CardHeader>
@@ -681,16 +748,18 @@ function HistoryCard({ changes }: { changes: PaymentChange[] | null }) {
           </Button>
         )}
       </CardHeader>
-      {changes === null ? (
+      {changes === null && failed ? (
+        <LoadFailed title="The change history could not be loaded" err={failed} loading={loading} onRetry={onRetry} />
+      ) : changes === null ? (
         <SkeletonRows rows={3} cols={4} />
       ) : (
         <HistoryList
           label="Change history"
           emptyLabel="No changes recorded yet."
-          onSelect={(it) => setOpen(Number(it.id))}
-          selectedId={open !== null ? String(open) : null}
-          items={shown.map((c, i) => ({
-            id: String(i),
+          onSelect={(it) => setOpen(it.id)}
+          selectedId={open}
+          items={shown.map((c) => ({
+            id: changeKey(c),
             title: KIND_LABEL[c.kind] ?? c.kind,
             actor: c.changed_by || undefined,
             at: c.changed_at,
@@ -727,16 +796,14 @@ function HistoryCard({ changes }: { changes: PaymentChange[] | null }) {
  * settles at its own rate, and OneGate only records the provider's report (it never sets or computes a rate).
  */
 function ConversionDialog({ account, providerName, onClose, onSaved }: { account: PaymentAccount | null; providerName: string; onClose: () => void; onSaved: () => void | Promise<void> }) {
-  const [reason, setReason] = useState("");
-  const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<unknown>(null);
-  useEffect(() => { setReason(""); setPassword(""); setError(null); }, [account]);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => { setError(null); }, [account]);
   const turningOn = !!account && !account.provider_converts;
   return (
     <ConfirmDialog
       open={account !== null}
-      onOpenChange={(v) => !v && onClose()}
+      onOpenChange={(v) => !v && !busy && onClose()}
       title={turningOn ? "Let the provider convert other currencies?" : "Stop converting other currencies?"}
       description={turningOn
         ? `Packages priced in another currency will be offered by card. The client pays the package price in that currency; ${providerName} settles it into ${account?.currency ?? ""} at its own exchange rate and fee, and the settlement it reports is recorded with each payment.`
@@ -744,21 +811,19 @@ function ConversionDialog({ account, providerName, onClose, onSaved }: { account
       confirmLabel={turningOn ? "Let the provider convert" : "Stop converting"}
       busy={busy}
       error={error}
-      onConfirm={async () => {
+      requireReason
+      reasonStrict
+      reasonMinLength={4}
+      requirePassword
+      strictPassword
+      onConfirm={async ({ reason, password }) => {
         if (!account) return;
         setBusy(true); setError(null);
         try {
-          await api.post(`/payment-providers/accounts/${account.id}/conversion`, { provider_converts: turningOn, reason: reason.trim(), password });
+          await api.post(`/payment-providers/accounts/${account.id}/conversion`, { provider_converts: turningOn, reason, password });
           await onSaved();
-        } catch (e) { setError(e); } finally { setBusy(false); }
+        } catch (e) { setError(saveErrorMessage(e)); } finally { setBusy(false); }
       }}
-    >
-      <Field label="Reason" required hint="Recorded in the change history.">
-        <Input value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} aria-label="Reason" />
-      </Field>
-      <Field label="Confirm your password" required>
-        <Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} aria-label="Confirm your password" />
-      </Field>
-    </ConfirmDialog>
+    />
   );
 }
