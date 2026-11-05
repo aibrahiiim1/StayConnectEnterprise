@@ -20,7 +20,7 @@ vi.mock("@/lib/api", () => {
       this.body = body;
     }
   }
-  return { ApiError, api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), del: vi.fn() } };
+  return { ApiError, inBackground: (fn: () => unknown) => fn(), api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), del: vi.fn() } };
 });
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
@@ -400,6 +400,94 @@ describe("WAN / LAN settings", () => {
     expect(await screen.findByText("Change applied — confirmation required")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Keep this configuration" })).toBeTruthy();
   });
+
+  it("after Roll back now the form shows the settings back in force, not the rejected ones", async () => {
+    route({ "/auth/whoami": IT, "/network/system": STATE, "/network/system/history": { history: [] } });
+    post.mockImplementation((path: string) => {
+      if (path === "/network/system/validate") return Promise.resolve({ validation: { ok: true }, management_url: "https://192.168.60.30", effective: {} });
+      if (path === "/network/system/apply") return Promise.resolve({ ok: true, state: "pending_confirmation", validation: { ok: true }, management_url: "https://192.168.60.30", deadline_unix: Math.floor(Date.now() / 1000) + 120 });
+      return Promise.resolve({});
+    });
+    render(<WanLanPage />);
+    await screen.findByRole("heading", { name: "WAN / LAN settings" });
+    fireEvent.change(screen.getByLabelText("IP address"), { target: { value: "192.168.60.30" } });
+    fireEvent.click(screen.getByRole("button", { name: /Validate & preview/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Apply change/ }));
+    const apply = await screen.findByRole("dialog");
+    fireEvent.change(within(apply).getByLabelText(/Confirm your password/), { target: { value: "s3cret" } });
+    fireEvent.click(within(apply).getByRole("button", { name: "Apply change" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Roll back now" }));
+    const back = await screen.findByRole("dialog");
+    fireEvent.change(within(back).getByLabelText(/Confirm your password/), { target: { value: "s3cret" } });
+    fireEvent.click(within(back).getByRole("button", { name: /Roll back/ }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith("/network/system/rollback", { password: "s3cret" }));
+    await waitFor(() => expect((screen.getByLabelText("IP address") as HTMLInputElement).value).toBe("192.168.60.25"));
+  });
+
+  it("keeps the form locked after the deadline until the appliance reports the change ended", async () => {
+    let reads = 0;
+    let applied = false, ended = false;
+    const pending = { ...STATE, pending: { revision_id: "r9", deadline_unix: Math.floor(Date.now() / 1000), management_url: "https://192.168.60.30" } };
+    get.mockImplementation((path: string) => {
+      if (path === "/auth/whoami") return Promise.resolve(IT);
+      if (path.startsWith("/network/system/history")) return Promise.resolve({ history: [] });
+      if (path === "/network/system") { reads++; return Promise.resolve(applied && !ended ? pending : STATE); }
+      return Promise.reject(new Error(`unexpected GET ${path}`));
+    });
+    post.mockImplementation((path: string) => {
+      if (path === "/network/system/validate") return Promise.resolve({ validation: { ok: true }, management_url: "https://192.168.60.30", effective: {} });
+      if (path === "/network/system/apply") { applied = true; return Promise.resolve({ ok: true, state: "pending_confirmation", validation: { ok: true }, management_url: "https://192.168.60.30", deadline_unix: Math.floor(Date.now() / 1000) + 1 }); }
+      return Promise.resolve({});
+    });
+    render(<WanLanPage />);
+    await screen.findByRole("heading", { name: "WAN / LAN settings" });
+    fireEvent.change(screen.getByLabelText("IP address"), { target: { value: "192.168.60.30" } });
+    fireEvent.click(screen.getByRole("button", { name: /Validate & preview/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Apply change/ }));
+    const apply = await screen.findByRole("dialog");
+    fireEvent.change(within(apply).getByLabelText(/Confirm your password/), { target: { value: "s3cret" } });
+    fireEvent.click(within(apply).getByRole("button", { name: "Apply change" }));
+    // The deadline passes and the appliance still reports the change pending: the form stays locked.
+    const before = reads;
+    await waitFor(() => expect(reads).toBeGreaterThan(before), { timeout: 4000 });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(screen.getByLabelText("IP address")).toBeDisabled();
+    ended = true;
+    // The next read says it ended: the form unlocks, showing what is in force.
+    await waitFor(() => expect(screen.getByLabelText("IP address")).not.toBeDisabled(), { timeout: 8000 });
+    expect((screen.getByLabelText("IP address") as HTMLInputElement).value).toBe("192.168.60.25");
+  }, 15000);
+
+  it("a settle loop running when Keep succeeds never overwrites the next edit", async () => {
+    let applied = false, kept = false;
+    const pending = { ...STATE, pending: { revision_id: "r9", deadline_unix: Math.floor(Date.now() / 1000), management_url: "https://192.168.60.30" } };
+    get.mockImplementation((path: string) => {
+      if (path === "/auth/whoami") return Promise.resolve(IT);
+      if (path.startsWith("/network/system/history")) return Promise.resolve({ history: [] });
+      if (path === "/network/system") return Promise.resolve(applied && !kept ? pending : STATE);
+      return Promise.reject(new Error(`unexpected GET ${path}`));
+    });
+    post.mockImplementation((path: string) => {
+      if (path === "/network/system/validate") return Promise.resolve({ validation: { ok: true }, management_url: "https://192.168.60.30", effective: {} });
+      if (path === "/network/system/apply") { applied = true; return Promise.resolve({ ok: true, state: "pending_confirmation", validation: { ok: true }, management_url: "https://192.168.60.30", deadline_unix: Math.floor(Date.now() / 1000) + 1 }); }
+      if (path === "/network/system/confirm") { kept = true; return Promise.resolve({}); }
+      return Promise.resolve({});
+    });
+    render(<WanLanPage />);
+    await screen.findByRole("heading", { name: "WAN / LAN settings" });
+    fireEvent.change(screen.getByLabelText("IP address"), { target: { value: "192.168.60.30" } });
+    fireEvent.click(screen.getByRole("button", { name: /Validate & preview/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Apply change/ }));
+    const apply = await screen.findByRole("dialog");
+    fireEvent.change(within(apply).getByLabelText(/Confirm your password/), { target: { value: "s3cret" } });
+    fireEvent.click(within(apply).getByRole("button", { name: "Apply change" }));
+    await new Promise((r) => setTimeout(r, 1600)); // past the deadline: the settle loop is reading
+    fireEvent.click(await screen.findByRole("button", { name: "Keep this configuration" }));
+    await waitFor(() => expect(screen.getByLabelText("IP address")).not.toBeDisabled());
+    fireEvent.change(screen.getByLabelText("IP address"), { target: { value: "192.168.60.44" } });
+    await new Promise((r) => setTimeout(r, 3500)); // the settle loop's next read would have re-seeded the form
+    expect((screen.getByLabelText("IP address") as HTMLInputElement).value).toBe("192.168.60.44");
+  }, 15000);
 
   // Audit P8 L14: keeping the change names the pending change the operator is looking at.
   it("Keep sends the pending change's revision when the appliance reports it", async () => {

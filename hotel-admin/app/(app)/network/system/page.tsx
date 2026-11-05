@@ -12,17 +12,20 @@ import { Field, FieldGrid, Input } from "@/components/ui/input";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { ErrorBanner, Callout } from "@/components/ui/error-banner";
+import { EmptyState } from "@/components/ui/empty-state";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { DescriptionList } from "@/components/ui/data";
 import { Skeleton } from "@/components/ui/misc";
 import { ChangeDiff, HistoryList } from "@/components/ui/history";
 import { DetailsDrawer, DetailsSection } from "@/components/ui/details-drawer";
-import { PendingChangeBanner, ReadOnlyNotice } from "@/components/ui/patterns";
+import { LiveStatus, PendingChangeBanner, ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { errMsg } from "@/lib/utils";
+import { usePoll } from "@/lib/use-poll";
+import { clearExpiredLock } from "@/lib/sysnet-lock";
 import { ValidationIssueList, useNetworkAccess } from "@/components/network/shared";
 import { HelpList, HelpSection } from "@/components/help";
-import { Download, RefreshCw, ChevronDown, CheckCircle2 } from "lucide-react";
+import { AlertTriangle, Download, RefreshCw, ChevronDown, CheckCircle2 } from "lucide-react";
 
 function Conn({ ok, label }: { ok: boolean; label: string }) {
   return <StatusBadge tone={ok ? "ok" : "err"}>{label}: {ok ? "OK" : "Failing"}</StatusBadge>;
@@ -34,29 +37,69 @@ function when(s: string): string {
   const t = Date.parse(/[+-]\d{2}$/.test(s) ? `${s}:00` : s);
   return Number.isFinite(t) ? new Date(t).toLocaleString() : s;
 }
+function clock(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+function duration(seconds: number): string {
+  if (seconds % 86400 === 0) return `${seconds / 86400} day${seconds === 86400 ? "" : "s"}`;
+  if (seconds % 3600 === 0) return `${seconds / 3600} hour${seconds === 3600 ? "" : "s"}`;
+  if (seconds % 60 === 0) return `${seconds / 60} minutes`;
+  return `${seconds} seconds`;
+}
+function prefixProblem(v: string, min: number, max: number): string | undefined {
+  const n = Number(v);
+  if (!v.trim() || !Number.isInteger(n)) return "Enter a whole number.";
+  if (n < min || n > max) return `Use a value from ${min} to ${max}.`;
+  return undefined;
+}
+
+const ACTION_WORDS: Record<string, string> = {
+  "network.apply.requested": "Apply requested",
+  "network.apply.rejected": "Apply refused",
+  "network.apply.started": "Apply started",
+  "network.apply.failed": "Apply failed",
+  "network.apply.verify_failed": "Checks after applying failed",
+  "network.apply.pending_confirmation": "Applied, waiting to be kept",
+  "network.apply.confirmed": "Kept",
+  "network.apply.confirmation_timeout": "Not kept in time",
+  "network.rollback.automatic.started": "Automatic roll back started",
+  "network.rollback.automatic.succeeded": "Rolled back automatically",
+  "network.rollback.automatic.failed": "Automatic roll back failed",
+  "network.rollback.manual.started": "Roll back started",
+  "network.rollback.manual.succeeded": "Rolled back",
+  "network.rollback.manual.failed": "Roll back failed",
+  "network.reconcile.pending_within_window": "Pending change found after a restart",
+  "network.reconcile.stale_pending": "Expired pending change cleared after a restart",
+};
+const actionWords = (a: string) => ACTION_WORDS[a] ?? a;
+
 const mono = (v: React.ReactNode) => <span className="font-mono text-xs">{v}</span>;
+const same = <span className="text-xs text-muted-foreground">No change</span>;
 const auditResult = (h: SysNetAudit) => h.apply_result || h.confirm_result || h.rollback_result || h.failure_reason || "";
 const HISTORY_PREVIEW = 8;
+
+type Busy = null | "validate" | "apply" | "confirm" | "rollback";
 
 export default function NetworkSettingsPage() {
   const { known, writable } = useNetworkAccess();
   const [state, setState] = useState<SysNetState | null>(null);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<Busy>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const toast = useToast();
 
   const [wanIp, setWanIp] = useState("");
-  const [wanPrefix, setWanPrefix] = useState(24);
+  const [wanPrefix, setWanPrefix] = useState("24");
   const [wanGw, setWanGw] = useState("");
   const [wanDns, setWanDns] = useState("");
   const [lanIp, setLanIp] = useState("");
-  const [lanPrefix, setLanPrefix] = useState(24);
-  const [dhcpEnabled, setDhcpEnabled] = useState(true);
-  const [dhcpStart, setDhcpStart] = useState("");
-  const [dhcpEnd, setDhcpEnd] = useState("");
-  const [dhcpLease, setDhcpLease] = useState(3600);
+  const [lanPrefix, setLanPrefix] = useState("24");
 
   const [validation, setValidation] = useState<SysNetValidateResp | null>(null);
+  const [validatedFor, setValidatedFor] = useState<string | null>(null);
   const [applyResp, setApplyResp] = useState<SysNetApplyResp | null>(null);
   const [countdown, setCountdown] = useState<number>(0);
   const [history, setHistory] = useState<SysNetAudit[] | null>(null);
@@ -64,22 +107,58 @@ export default function NetworkSettingsPage() {
   const [entry, setEntry] = useState<SysNetAudit | null>(null);
   const [diag, setDiag] = useState<Record<string, string> | null>(null);
   const [diagBusy, setDiagBusy] = useState(false);
+  const [diagErr, setDiagErr] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  const formKey = JSON.stringify([wanIp.trim(), wanPrefix.trim(), wanGw.trim(), wanDns.trim(), lanIp.trim(), lanPrefix.trim()]);
+  const stateKey = (s: SysNetState) =>
+    JSON.stringify([s.wan.ip, String(s.wan.prefix_len), s.wan.gateway, (s.wan.dns || []).join(", "), s.lan.ip, String(s.lan.prefix_len)]);
+  const dirty = state !== null && formKey !== stateKey(state);
+  const dirtyRef = useRef(false);
+  dirtyRef.current = dirty;
+
   function seed(s: SysNetState) {
-    setWanIp(s.wan.ip); setWanPrefix(s.wan.prefix_len); setWanGw(s.wan.gateway);
+    setWanIp(s.wan.ip); setWanPrefix(String(s.wan.prefix_len)); setWanGw(s.wan.gateway);
     setWanDns((s.wan.dns || []).join(", "));
-    setLanIp(s.lan.ip); setLanPrefix(s.lan.prefix_len);
-    setDhcpEnabled(s.lan.dhcp_enabled); setDhcpStart(s.lan.dhcp_start);
-    setDhcpEnd(s.lan.dhcp_end); setDhcpLease(s.lan.dhcp_lease_seconds);
+    setLanIp(s.lan.ip); setLanPrefix(String(s.lan.prefix_len));
   }
 
-  async function load() {
+  // reseed: after a confirm or rollback the form must show what is now in force, whatever the last render thought of it.
+  async function load({ reseed = false }: { reseed?: boolean } = {}): Promise<SysNetState | null> {
+    setRefreshing(true);
     try {
       const s = await api.get<SysNetState>("/network/system");
-      setState(s); seed(s);
+      setState(s);
+      if (reseed || !dirtyRef.current) seed(s);
+      // Any read that finds no pending change after the deadline ends the local lock too, not only the settle loop's.
+      if (!s.pending) setApplyResp((r) => clearExpiredLock(r, Date.now()));
       if (s.pending) startCountdown(s.pending.deadline_unix);
-    } catch (e) { setErr(errMsg(e)); }
+      setLoadErr(null);
+      setUpdatedAt(Date.now());
+      return s;
+    } catch (e) { setLoadErr(errMsg(e)); return null; }
+    finally { setRefreshing(false); }
+  }
+
+  // The deadline passing is not the change ending: the appliance's watchdog rolls it back a few seconds later. The lock stays until a
+  // refresh reports no pending change (checked for up to a minute, then left to the page's own reads).
+  // One settle at a time: a refresh that still reports the change pending restarts the countdown, whose passed deadline asks again.
+  const settling = useRef(false);
+  // Bumped by Keep and Roll back: a settle loop from before them stops instead of re-seeding a form the operator is editing again.
+  const settleGen = useRef(0);
+  async function settleAfterDeadline() {
+    if (settling.current) return;
+    settling.current = true;
+    const gen = settleGen.current;
+    try {
+      for (let i = 0; i < 20; i++) {
+        if (gen !== settleGen.current) return;
+        const s = await load({ reseed: true });
+        if (gen !== settleGen.current) return;
+        if (s && !s.pending) { setApplyResp(null); await loadHistory(); return; }
+        await new Promise((r) => setTimeout(r, 3000));
+      }
+    } finally { settling.current = false; }
   }
   async function loadHistory() {
     try { setHistory((await api.get<{ history: SysNetAudit[] }>("/network/system/history")).history ?? []); }
@@ -92,25 +171,40 @@ export default function NetworkSettingsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const pendingNow = !!state?.pending || applyResp?.state === "pending_confirmation";
+  // The promise lets usePoll wait for a refresh in flight: /network/system runs connectivity checks, and stacked reads could overwrite newer state.
+  usePoll(() => load(), 30000, { enabled: !!state && !pendingNow && busy === null });
+
   function proposal(): SysNetProposal {
     return {
       wan: {
-        mode: "static", ip: wanIp, prefix_len: Number(wanPrefix), gateway: wanGw,
+        mode: "static", ip: wanIp.trim(), prefix_len: Number(wanPrefix), gateway: wanGw.trim(),
         dns: wanDns.split(",").map((s) => s.trim()).filter(Boolean),
       },
       lan: {
-        ip: lanIp, prefix_len: Number(lanPrefix), dhcp_enabled: dhcpEnabled,
-        dhcp_start: dhcpStart, dhcp_end: dhcpEnd, dhcp_lease_seconds: Number(dhcpLease),
+        ip: lanIp.trim(), prefix_len: Number(lanPrefix), dhcp_enabled: state?.lan.dhcp_enabled ?? false,
+        dhcp_start: state?.lan.dhcp_start ?? "", dhcp_end: state?.lan.dhcp_end ?? "",
+        dhcp_lease_seconds: state?.lan.dhcp_lease_seconds ?? 0,
       },
     };
   }
 
+  const wanPrefixErr = prefixProblem(wanPrefix, 1, 32);
+  const lanPrefixErr = prefixProblem(lanPrefix, 19, 30);
+  const wanIpErr = wanIp.trim() ? undefined : "Enter the WAN IP address.";
+  const wanGwErr = wanGw.trim() ? undefined : "Enter the default gateway.";
+  const formBlocked = !!(wanPrefixErr || lanPrefixErr || wanIpErr || wanGwErr);
+  const valid = validation && validatedFor === formKey ? validation : null;
+
   async function doValidate() {
-    setErr(null); setBusy(true); setApplyResp(null);
+    if (formBlocked) return;
+    setErr(null); setBusy("validate"); setApplyResp(null);
+    const key = formKey;
     try {
       const r = await api.post<SysNetValidateResp>("/network/system/validate", proposal());
       setValidation(r);
-    } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); }
+      setValidatedFor(key);
+    } catch (e) { setErr(errMsg(e)); } finally { setBusy(null); }
   }
 
   function startCountdown(deadlineUnix: number) {
@@ -118,7 +212,10 @@ export default function NetworkSettingsPage() {
     const tick = () => {
       const left = Math.max(0, deadlineUnix - Math.floor(Date.now() / 1000));
       setCountdown(left);
-      if (left <= 0) { if (timer.current) clearInterval(timer.current); void inBackground(load); }
+      if (left <= 0) {
+        if (timer.current) clearInterval(timer.current);
+        void inBackground(settleAfterDeadline);
+      }
     };
     tick(); timer.current = setInterval(tick, 1000);
   }
@@ -128,7 +225,8 @@ export default function NetworkSettingsPage() {
 
   async function doApply({ password }: { reason: string; password: string }) {
     if (!password) { setApplyErr("Confirm your password to apply a network change."); return; }
-    setApplyErr(null); setErr(null); setBusy(true);
+    if (!valid?.validation.ok) { setApplyErr("Validate the change again before applying it."); return; }
+    setApplyErr(null); setErr(null); setBusy("apply");
     try {
       const r = await api.post<SysNetApplyResp>("/network/system/apply", { proposal: proposal(), password });
       setApplyResp(r);
@@ -136,52 +234,55 @@ export default function NetworkSettingsPage() {
       if (r.state === "pending_confirmation" && r.deadline_unix) startCountdown(r.deadline_unix);
       else if (r.state === "failed" || r.state === "rolled_back") setErr(r.message || `Apply ${r.state === "failed" ? "failed" : "rolled back"}.`);
       loadHistory();
-    } catch (e) { setApplyErr(errMsg(e)); } finally { setBusy(false); }
+    } catch (e) { setApplyErr(errMsg(e)); } finally { setBusy(null); }
   }
 
   async function doConfirm() {
-    setBusy(true); setErr(null);
+    setBusy("confirm"); setErr(null);
     try {
-      // The change the operator is looking at; netd refuses to keep a different one (audit P8 L14).
       const revision = applyResp?.revision_id ?? state?.pending?.revision_id;
       await api.post("/network/system/confirm", revision ? { revision_id: revision } : {});
+      settleGen.current++;
       if (timer.current) clearInterval(timer.current);
-      setApplyResp(null); setCountdown(0); setValidation(null);
+      setApplyResp(null); setCountdown(0); setValidation(null); setValidatedFor(null);
       toast.success("Configuration kept", "The new WAN / LAN settings are now permanent.");
-      await load(); loadHistory();
-    } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); }
+      await load({ reseed: true }); loadHistory();
+    } catch (e) { setErr(errMsg(e)); } finally { setBusy(null); }
   }
 
-  // The password goes in a masked field, never a browser prompt, which shows what is typed.
   const [rollingBack, setRollingBack] = useState(false);
   const [rollbackErr, setRollbackErr] = useState<string | null>(null);
 
   async function doRollback({ password }: { reason: string; password: string }) {
-    setBusy(true); setRollbackErr(null);
+    setBusy("rollback"); setRollbackErr(null);
     try {
       await api.post("/network/system/rollback", { password });
+      settleGen.current++;
       setRollingBack(false);
       if (timer.current) clearInterval(timer.current);
-      setApplyResp(null); setCountdown(0);
+      setApplyResp(null); setCountdown(0); setValidation(null); setValidatedFor(null);
       toast.success("Rolled back", "The previous WAN / LAN settings are back in place.");
-      await load(); loadHistory();
-    } catch (e) { setRollbackErr(errMsg(e)); } finally { setBusy(false); }
+      await load({ reseed: true }); loadHistory();
+    } catch (e) { setRollbackErr(errMsg(e)); } finally { setBusy(null); }
   }
 
   async function loadDiag() {
-    setDiagBusy(true);
+    setDiagBusy(true); setDiagErr(null);
     try { setDiag((await api.get<{ diagnostics: Record<string, string> }>("/network/system/diagnostics")).diagnostics); }
-    catch (e) { setErr(errMsg(e)); }
+    catch (e) { setDiagErr(errMsg(e)); }
     finally { setDiagBusy(false); }
   }
   function downloadDiag() {
     if (!diag) return;
     const report = Object.entries(diag).map(([k, v]) => `===== ${k} =====\n${v}\n`).join("\n");
-    const blob = new Blob([report], { type: "text/plain" });
+    const url = URL.createObjectURL(new Blob([report], { type: "text/plain" }));
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `network-diagnostics-${new Date().toISOString().slice(0, 19)}.txt`;
+    a.href = url;
+    a.download = `network-diagnostics-${new Date().toISOString().slice(0, 19).replace(/:/g, "-")}.txt`;
+    document.body.appendChild(a);
     a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 
   const header = (
@@ -193,6 +294,15 @@ export default function NetworkSettingsPage() {
           <Link href="/network" className="font-medium text-foreground underline underline-offset-2">Client networks</Link>.
         </>
       }
+      meta={state && (
+        <LiveStatus
+          updatedAt={updatedAt}
+          refreshing={refreshing}
+          onRefresh={() => { setErr(null); void load(); void loadHistory(); }}
+          intervalSeconds={pendingNow ? undefined : 30}
+          error={!!loadErr}
+        />
+      )}
       help={
         <>
           <HelpSection title="What this page covers">
@@ -225,11 +335,6 @@ export default function NetworkSettingsPage() {
           </HelpSection>
         </>
       }
-      actions={
-        <Button variant="secondary" onClick={() => { setErr(null); load(); loadHistory(); }}>
-          <RefreshCw /> Refresh
-        </Button>
-      }
     />
   );
 
@@ -237,20 +342,33 @@ export default function NetworkSettingsPage() {
     return (
       <PageShell>
         {header}
-        <ErrorBanner err={err} className="mb-0" />
-        <div className="grid gap-5 md:grid-cols-2" aria-busy={!err}>
-          <span className="sr-only">{err ? "" : "Loading network settings"}</span>
-          <Skeleton className="h-72 w-full" />
-          <Skeleton className="h-72 w-full" />
-        </div>
+        {loadErr ? (
+          <EmptyState
+            icon={<AlertTriangle />}
+            title="The network settings could not be loaded"
+            hint={loadErr}
+            action={<Button variant="secondary" onClick={() => { void load(); void loadHistory(); }}><RefreshCw /> Try again</Button>}
+          />
+        ) : (
+          <div className="grid gap-5 md:grid-cols-2" aria-busy="true">
+            <span className="sr-only">Loading network settings</span>
+            <Skeleton className="h-72 w-full" />
+            <Skeleton className="h-72 w-full" />
+          </div>
+        )}
       </PageShell>
     );
   }
 
-  const mgmtWillChange = wanIp !== state.wan.ip;
-  const pendingNow = !!state.pending || applyResp?.state === "pending_confirmation";
+  const newUrl = valid?.management_url || `https://${wanIp.trim()}`;
+  const mgmtWillChange = wanIp.trim() !== state.wan.ip;
   const reconnectUrl = applyResp?.management_url || state.pending?.management_url;
   const shownHistory = history ? (allHistory ? history : history.slice(0, HISTORY_PREVIEW)) : [];
+  const wanBefore = `${state.wan.ip}/${state.wan.prefix_len} gw ${state.wan.gateway} dns ${state.wan.dns.join(", ")}`;
+  const wanAfter = `${wanIp.trim()}/${wanPrefix.trim()} gw ${wanGw.trim()} dns ${wanDns.split(",").map((s) => s.trim()).filter(Boolean).join(", ")}`;
+  const lanBefore = `${state.lan.ip}/${state.lan.prefix_len}`;
+  const lanAfter = `${lanIp.trim()}/${lanPrefix.trim()}`;
+  const urlAfter = valid?.management_url ?? state.wan.management_url;
 
   return (
     <PageShell>
@@ -265,7 +383,7 @@ export default function NetworkSettingsPage() {
           title="Change applied — confirmation required"
           description={
             <>
-              The new configuration is live but will <strong>roll back automatically in {countdown}s</strong> unless
+              The new configuration is live but will <strong>roll back automatically in {clock(countdown)}</strong> unless
               you keep it.
               {reconnectUrl && (
                 <> If you changed the WAN IP, reconnect at <strong className="font-mono">{reconnectUrl}</strong> and keep it from there.</>
@@ -274,7 +392,7 @@ export default function NetworkSettingsPage() {
           }
           secondsLeft={countdown}
           canAct={writable}
-          busy={busy ? (rollingBack ? "rollback" : "confirm") : null}
+          busy={busy === "confirm" ? "confirm" : busy === "rollback" ? "rollback" : null}
           confirmLabel="Keep this configuration"
           rollbackLabel="Roll back now"
           onConfirm={doConfirm}
@@ -313,7 +431,7 @@ export default function NetworkSettingsPage() {
           columns={2}
           items={[
             { label: "IP address", value: mono(`${state.wan.ip}/${state.wan.prefix_len}`) },
-            { label: "IP mode", value: state.wan.mode === "static" ? "Static" : state.wan.mode === "dhcp" ? "DHCP" : state.wan.mode },
+            { label: "IP mode", value: state.wan.mode === "static" ? "Static" : state.wan.mode === "dhcp" ? "DHCP" : `Other (${state.wan.mode})` },
             { label: "Default gateway", value: mono(state.wan.gateway) },
             { label: "DNS", value: mono(state.wan.dns.join(", ") || "—") },
             { label: "Subnet mask", value: mono(state.wan.netmask) },
@@ -329,9 +447,9 @@ export default function NetworkSettingsPage() {
         />
       </SectionCard>
 
-      <details className="group rounded-lg border border-border bg-card shadow-card">
+      <details className="disclosure-motion group rounded-lg border border-border bg-card shadow-card">
         <summary className="flex cursor-pointer select-none flex-wrap items-center gap-2 rounded-lg px-5 py-3.5 text-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
-          <ChevronDown className="size-4 text-muted-foreground transition-transform group-open:rotate-180" aria-hidden />
+          <ChevronDown className="size-4 text-muted-foreground transition-transform duration-base ease-onegate group-open:rotate-180 motion-reduce:transition-none" aria-hidden />
           Base LAN / legacy bridge
           <span className="font-mono text-xs font-normal text-muted-foreground">{state.lan.bridge}</span>
           <Badge tone="default">Legacy{state.lan.dhcp_enabled ? "" : " · unused"}</Badge>
@@ -349,7 +467,11 @@ export default function NetworkSettingsPage() {
               { label: "MAC address", value: mono(state.lan.mac) },
               { label: "DHCP (this bridge)", value: state.lan.dhcp_enabled ? "Enabled" : "Off — clients use client networks" },
               { label: "DHCP range", value: mono(`${state.lan.dhcp_start} – ${state.lan.dhcp_end}`), hidden: !state.lan.dhcp_enabled },
-              { label: "Lease time", value: `${state.lan.dhcp_lease_seconds}s`, hidden: !state.lan.dhcp_enabled },
+              {
+                label: "Lease time",
+                value: <span className="tabular">{state.lan.dhcp_lease_seconds} s · {duration(state.lan.dhcp_lease_seconds)}</span>,
+                hidden: !state.lan.dhcp_enabled,
+              },
               { label: "DNS to clients", value: mono(state.lan.dns.join(", ") || "—") },
               { label: "Bridge members", value: mono((state.lan.members ?? []).join(", ") || "—") },
             ]}
@@ -364,37 +486,58 @@ export default function NetworkSettingsPage() {
           bodyClassName="space-y-5"
           footer={
             <>
-              <Button variant="secondary" onClick={doValidate} disabled={busy}>
-                <CheckCircle2 /> {busy && !applying ? "Validating…" : "Validate & preview"}
+              <Button variant="secondary" onClick={doValidate} disabled={busy !== null || pendingNow || formBlocked}>
+                <CheckCircle2 /> {busy === "validate" ? "Validating…" : "Validate & preview"}
               </Button>
-              {validation?.validation.ok && (
-                <Button onClick={() => { setApplyErr(null); setApplying(true); }} disabled={busy}>
+              {valid?.validation.ok && !pendingNow ? (
+                <Button onClick={() => { setApplyErr(null); setApplying(true); }} disabled={busy !== null}>
                   Apply change…
                 </Button>
+              ) : !pendingNow && (
+                <span className="text-caption text-muted-foreground">
+                  {validation && validatedFor !== formKey
+                    ? "The settings changed since the last check. Validate again to apply."
+                    : "Apply appears once the change passes validation."}
+                </span>
               )}
             </>
           }
         >
-          <div className="grid gap-5 md:grid-cols-2">
+          {pendingNow && (
+            <Callout tone="info" title="A change is waiting to be kept">
+              Keep it or roll it back above before making another change.
+            </Callout>
+          )}
+          <fieldset disabled={pendingNow} className="grid min-w-0 gap-5 md:grid-cols-2">
             <fieldset className="min-w-0 space-y-3">
               <legend className="mb-3 text-label">
                 WAN / management <span className="ms-1 font-mono text-xs font-normal text-muted-foreground">{state.wan.interface}</span>
               </legend>
               <FieldGrid cols={2}>
-                <Field label="IP address"><Input value={wanIp} onChange={(e) => setWanIp(e.target.value)} className="font-mono" /></Field>
-                <Field label="Prefix length"><Input type="number" value={wanPrefix} onChange={(e) => setWanPrefix(Number(e.target.value))} /></Field>
+                <Field label="IP address" error={wanIpErr}>
+                  <Input aria-required="true" value={wanIp} onChange={(e) => setWanIp(e.target.value)} className="font-mono" />
+                </Field>
+                <Field label="Prefix length" hint="1 to 32." error={wanPrefixErr}>
+                  <Input type="number" inputMode="numeric" min={1} max={32} value={wanPrefix} onChange={(e) => setWanPrefix(e.target.value)} />
+                </Field>
               </FieldGrid>
-              <Field label="Default gateway"><Input value={wanGw} onChange={(e) => setWanGw(e.target.value)} className="font-mono" /></Field>
-              <Field label="DNS servers" hint="Separate several with commas."><Input value={wanDns} onChange={(e) => setWanDns(e.target.value)} className="font-mono" /></Field>
+              <Field label="Default gateway" error={wanGwErr}>
+                <Input aria-required="true" value={wanGw} onChange={(e) => setWanGw(e.target.value)} className="font-mono" />
+              </Field>
+              <Field label="DNS servers" optional hint="Separate several with commas.">
+                <Input value={wanDns} onChange={(e) => setWanDns(e.target.value)} className="font-mono" />
+              </Field>
             </fieldset>
             <fieldset className="min-w-0 space-y-3">
               <legend className="mb-3 text-label">
                 Base LAN / legacy bridge <span className="ms-1 font-mono text-xs font-normal text-muted-foreground">{state.lan.bridge}</span>
               </legend>
               <FieldGrid cols={2}>
-                <Field label="Base gateway IP"><Input value={lanIp} onChange={(e) => setLanIp(e.target.value)} className="font-mono" /></Field>
-                <Field label="Prefix length" hint="19 to 30. /19 (8,190 addresses) is the widest a client network can be.">
-                  <Input type="number" min={19} max={30} value={lanPrefix} onChange={(e) => setLanPrefix(Number(e.target.value))} />
+                <Field label="Base gateway IP">
+                  <Input aria-required="true" value={lanIp} onChange={(e) => setLanIp(e.target.value)} className="font-mono" />
+                </Field>
+                <Field label="Prefix length" hint="19 to 30. /19 (8,190 addresses) is the widest a client network can be." error={lanPrefixErr}>
+                  <Input type="number" inputMode="numeric" min={19} max={30} value={lanPrefix} onChange={(e) => setLanPrefix(e.target.value)} />
                 </Field>
               </FieldGrid>
               <p className="text-caption text-muted-foreground">
@@ -402,40 +545,33 @@ export default function NetworkSettingsPage() {
                 <Link href="/network/dhcp" className="text-primary underline">DHCP &amp; leases</Link>.
               </p>
             </fieldset>
-          </div>
+          </fieldset>
 
-          {mgmtWillChange && (
+          {mgmtWillChange && !pendingNow && (
             <Callout tone="warning" title="Changing the WAN IP changes the admin address">
-              After applying you must reconnect at <strong className="font-mono">https://{wanIp}</strong> and keep the
+              After applying you must reconnect at <strong className="font-mono">{newUrl}</strong> and keep the
               change there, or it rolls back automatically.
+              {!valid && " Validate to see the exact address."}
             </Callout>
           )}
 
-          {validation && (
+          {valid && (
             <div className="space-y-3">
-              {validation.validation.ok ? (
+              {valid.validation.ok ? (
                 <Callout tone="success" title="Configuration is valid">Review the change below, then apply it.</Callout>
               ) : (
                 <Callout tone="danger" title="Validation failed">
-                  <ValidationIssueList issues={validation.validation.issues ?? []} className="mt-1" />
+                  <ValidationIssueList issues={valid.validation.issues ?? []} className="mt-1" />
                 </Callout>
               )}
               <ChangeDiff
                 changes={[
-                  {
-                    field: "WAN",
-                    before: mono(`${state.wan.ip}/${state.wan.prefix_len} gw ${state.wan.gateway} dns ${state.wan.dns.join(",")}`),
-                    after: mono(`${wanIp}/${wanPrefix} gw ${wanGw} dns ${wanDns}`),
-                  },
-                  {
-                    field: "LAN",
-                    before: mono(`${state.lan.ip}/${state.lan.prefix_len} dhcp ${state.lan.dhcp_start}-${state.lan.dhcp_end}`),
-                    after: mono(`${lanIp}/${lanPrefix} dhcp ${dhcpEnabled ? `${dhcpStart}-${dhcpEnd}` : "off"}`),
-                  },
+                  { field: "WAN", before: mono(wanBefore), after: wanAfter === wanBefore ? same : mono(wanAfter) },
+                  { field: "Base LAN", before: mono(lanBefore), after: lanAfter === lanBefore ? same : mono(lanAfter) },
                   {
                     field: "Management URL",
                     before: mono(state.wan.management_url),
-                    after: <span className="font-mono text-xs font-semibold">{validation.management_url}</span>,
+                    after: urlAfter === state.wan.management_url ? same : <span className="font-mono text-xs font-semibold">{urlAfter}</span>,
                   },
                 ]}
               />
@@ -456,8 +592,9 @@ export default function NetworkSettingsPage() {
               {diag && <Button variant="secondary" size="sm" onClick={downloadDiag}><Download /> Download report</Button>}
             </>
           }
-          bodyClassName={diag ? "space-y-3" : "hidden"}
+          bodyClassName={diag || diagErr ? "space-y-3" : "hidden"}
         >
+          <ErrorBanner err={diagErr} className="mb-0" />
           {diag && Object.entries(diag).map(([k, v]) => (
             <div key={k} className="space-y-1">
               <div className="text-label text-muted-foreground">{k}</div>
@@ -475,14 +612,14 @@ export default function NetworkSettingsPage() {
                 label="WAN / LAN change history"
                 emptyLabel="No changes recorded yet."
                 items={shownHistory.map((h, n) => ({
-                  id: String(n),
-                  title: h.action,
+                  id: `${h.at}|${h.action}|${n}`,
+                  title: actionWords(h.action),
                   actor: h.actor,
                   at: when(h.at),
                   summary: [h.target, auditResult(h)].filter(Boolean).join(" · ") || undefined,
                   tone: h.failure_reason || h.rollback_result ? "warn" : "neutral",
                 }))}
-                onSelect={(it) => setEntry(shownHistory[Number(it.id)] ?? null)}
+                onSelect={(it) => setEntry(shownHistory.find((h, n) => `${h.at}|${h.action}|${n}` === it.id) ?? null)}
               />
               {history.length > HISTORY_PREVIEW && (
                 <div className="border-t border-border px-4 py-2.5">
@@ -500,7 +637,7 @@ export default function NetworkSettingsPage() {
         open={entry !== null}
         onOpenChange={(v) => !v && setEntry(null)}
         eyebrow="WAN / LAN change"
-        title={entry?.action ?? ""}
+        title={entry ? actionWords(entry.action) : ""}
         description={entry ? when(entry.at) : undefined}
       >
         {entry && (
@@ -515,6 +652,7 @@ export default function NetworkSettingsPage() {
                 { label: "Roll back result", value: entry.rollback_result, hidden: !entry.rollback_result },
                 { label: "Failure", value: <span className="text-destructive">{entry.failure_reason}</span>, hidden: !entry.failure_reason },
                 { label: "Backup", value: mono(entry.backup_path), hidden: !entry.backup_path },
+                { label: "Recorded as", value: mono(entry.action) },
               ]}
             />
           </DetailsSection>
@@ -529,10 +667,10 @@ export default function NetworkSettingsPage() {
         consequences={[
           "The change takes effect immediately.",
           "If nobody keeps it before the timer runs out, the appliance puts the previous settings back on its own.",
-          ...(mgmtWillChange ? [<>The admin address changes to <strong className="font-mono">https://{wanIp}</strong>. Reconnect there to keep the change.</>] : []),
+          ...(mgmtWillChange ? [<>The admin address changes to <strong className="font-mono">{newUrl}</strong>. Reconnect there to keep the change.</>] : []),
         ]}
         confirmLabel="Apply change"
-        busy={busy}
+        busy={busy === "apply"}
         error={applyErr}
         requirePassword strictPassword
         passwordLabel="Confirm your password to apply"
@@ -549,7 +687,7 @@ export default function NetworkSettingsPage() {
         ]}
         confirmLabel="Roll back now"
         confirmVariant="danger"
-        busy={busy}
+        busy={busy === "rollback"}
         error={rollbackErr}
         requirePassword strictPassword
         onConfirm={doRollback}
