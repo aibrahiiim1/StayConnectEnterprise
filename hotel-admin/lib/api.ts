@@ -1537,7 +1537,7 @@ export type ReviewPostingDetail = {
   };
   attempts: ReviewAttempt[];
   review: {
-    history: { action: string; actor: string; reason: string; created_at: string }[];
+    history: { action: string; actor: string; reason: string; evidence?: unknown; created_at: string }[];
     version: number | null;
     terminal_action: string | null;
     escalation_count: number;

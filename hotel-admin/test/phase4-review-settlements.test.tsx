@@ -40,10 +40,15 @@ const ACTIONS = {
     { action: "ESCALATE", terminal: false, needs_evidence: false, accepts_amount: false,
       summary: "someone else must look" },
   ],
+  evidence_contract: { source_types: {
+    PMS_FOLIO_INSPECTION: "the operator opened the guest folio in the PMS and looked",
+    PROVIDER_DASHBOARD: "the payment provider's own dashboard was consulted",
+    OTHER_DOCUMENTED: "another documented source, described in the note",
+  } },
 };
 
 const QUEUE = {
-  queue: [{
+  items: [{
     posting_id: "p1", pms_interface_id: "i1", execution_state: "UNKNOWN", amount_minor: 1500,
     currency: "USD", currency_exponent: 2, latest_attempt_no: 1, latest_p_number: "42",
     latest_pa_as_status: null, outbox_state: "HELD_RECOVERY", review_version: 0,
@@ -52,7 +57,7 @@ const QUEUE = {
 };
 
 const DETAIL = {
-  posting: QUEUE.queue[0],
+  posting: QUEUE.items[0],
   pinned_evidence: {
     settlement_id: "s1", purchase_id: "pu1", stay_id: "st1", g_number: "G5000",
     connector_kind: "protel-fias", posting_target_model: "RESERVATION",
@@ -65,7 +70,6 @@ const DETAIL = {
   diagnostics: { attempt_count: 1, unknown_attempt_count: 1, has_unknown_history: true,
     interface_freshness_block: null },
   available_actions: ["CONFIRM_POSTED", "ESCALATE"],
-  evidence_contract: { source_types: ["PMS_SCREEN", "PROVIDER_DASHBOARD"] },
   limitations: ["Programmatic PMS reversal is capability=false in v1."],
 };
 
@@ -90,9 +94,10 @@ describe("manual review", () => {
       "/financial-review/postings/p1": DETAIL });
     render(<ManualReviewView />);
     await userEvent.click(await screen.findByRole("button", { name: /^review$/i }));
-    expect(await screen.findByText(/nobody knows whether the folio was charged/i)).toBeInTheDocument();
-    expect(screen.getByText("protel-fias (ACTIVE)")).toBeInTheDocument();
-    expect(screen.getByText(/programmatic pms reversal is capability=false/i)).toBeInTheDocument();
+    expect(await screen.findByText(/nobody knows whether the guest's bill was charged/i)).toBeInTheDocument();
+    expect(screen.getByText("Protel FIAS · Active")).toBeInTheDocument();
+    expect(screen.queryByText(/capability=false/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/CONFIRM_POSTED/)).not.toBeInTheDocument();
   });
 
   it("shows the pinned reservation (G#) and posting target, and a NOT_SENT attempt as not sent", async () => {
@@ -111,10 +116,10 @@ describe("manual review", () => {
       "/financial-review/postings/p1": detail });
     render(<ManualReviewView />);
     await userEvent.click(await screen.findByRole("button", { name: /^review$/i }));
-    expect(await screen.findByText("Reservation (G#)")).toBeInTheDocument();
+    expect(await screen.findByText("Reservation number")).toBeInTheDocument();
     expect(screen.getByText("G5000")).toBeInTheDocument();
-    expect(screen.getByText("Posting target")).toBeInTheDocument();
-    expect(screen.getByText("Reservation (room + reservation number)")).toBeInTheDocument();
+    expect(screen.getByText("Sent to")).toBeInTheDocument();
+    expect(screen.getByText("Room and reservation number")).toBeInTheDocument();
     expect(screen.queryByText(/folio identity/i)).not.toBeInTheDocument();
     expect(screen.getByText("Not sent (nothing reached the PMS)")).toBeInTheDocument();
     expect(screen.queryByText("FAILED")).not.toBeInTheDocument();
@@ -133,7 +138,8 @@ describe("manual review", () => {
     await userEvent.click(await screen.findByRole("button", { name: /^review$/i }));
     await userEvent.selectOptions(await screen.findByLabelText(/what did you establish/i), "CONFIRM_POSTED");
     await userEvent.type(screen.getByLabelText(/^why$/i), "the folio shows the charge");
-    await userEvent.selectOptions(screen.getByLabelText(/evidence source/i), "PMS_SCREEN");
+    expect(screen.getByRole("button", { name: /record decision/i })).toBeDisabled();
+    await userEvent.selectOptions(screen.getByLabelText(/evidence source/i), "PMS_FOLIO_INSPECTION");
     await userEvent.type(screen.getByLabelText(/reference to it/i), "folio screen 14:22");
     await userEvent.type(screen.getByLabelText(/your password/i), "hunter2");
     await userEvent.click(screen.getByRole("button", { name: /record decision/i }));
@@ -142,7 +148,7 @@ describe("manual review", () => {
     expect(sent.action).toBe("CONFIRM_POSTED");
     expect(sent.expected_version).toBe(0);
     expect(sent.password).toBe("hunter2");
-    expect(sent.evidence).toEqual({ source_type: "PMS_SCREEN", reference: "folio screen 14:22" });
+    expect(sent.evidence).toEqual({ source_type: "PMS_FOLIO_INSPECTION", reference: "folio screen 14:22" });
     expect(Object.keys(sent)).not.toContain("actor");
   });
 
@@ -151,7 +157,7 @@ describe("manual review", () => {
       "/financial-review/postings/p1": DETAIL });
     render(<ManualReviewView canAct={false} />);
     await userEvent.click(await screen.findByRole("button", { name: /^review$/i }));
-    expect(await screen.findByText("protel-fias (ACTIVE)")).toBeInTheDocument();
+    expect(await screen.findByText("Protel FIAS · Active")).toBeInTheDocument();
     expect(screen.queryByLabelText(/what did you establish/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/your password/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /record decision/i })).not.toBeInTheDocument();
