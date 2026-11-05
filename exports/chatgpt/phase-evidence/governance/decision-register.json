@@ -1376,6 +1376,19 @@
       "authorization_evidence": "The Product Owner's mission of 2026-11-05: expand VLAN 95 to /19 keeping gateway 10.3.0.1 with a safe validated transition (temporary client disconnections accepted), then an 8-hour lease; verify the /19 default for new appliances and client networks; take ownership of and complete PRs #314-#320 and #322-#326 with protected merges; deploy the final integrated version to the test appliance.",
       "does_not_authorize": "Changing the in-place widening rule (widenRefusal) or the network replacement contract; Automatic Reconnection; PMS configuration or financial changes; PKI or trust changes; the production Central; Go-Live.",
       "delivery_status": "Delivered on master 901a4101 (T0307); test appliance (T0308)."
+    },
+    {
+      "id": "D95",
+      "decided_on": "2026-11-05",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-11-05",
+      "status": "ACTIVE",
+      "title": "A DEPARTED GUEST'S OWN DEVICES SIGN IN AGAIN BY ROOM WHILE THEIR AFTER CHECK-OUT ACCESS IS VALID (D93 DEFECT, MIGRATION 0209): room sign-in refused every checked-out stay (issue_or_return_pms_context issued contexts to IN_HOUSE stays only, and the post-stay route is not enabled), so no device could reconnect after check-out. A CHECKED_OUT stay holding an ACTIVE, in-window GRACE_AFTER_CHECKOUT entitlement is now eligible for room sign-in; such a sign-in only joins that entitlement (nothing offered or bought; window, allowance, usage and devices unchanged), authorize_entitlement_device still decides which devices may join, and a new device is refused and recorded as AFTER_CHECKOUT_NEW_DEVICE_REJECTED. The Usage explorer now separates a stay's total over every package from its latest package, lists each package with its own meter, and splits sessions carried across packages from their accounting samples (PR #330).",
+      "authorization_evidence": "The Product Owner's missions of 2026-11-05: the Usage explorer improvements in PR #330 (\"GO -- Approved\"), and \"Approved. You have full end-to-end authorization to fix the D93 After Check-out Access defect, including the required database migration\" with deployment to the test appliance 172.21.96.97; preserve D93 (previously authorised devices reconnect while their After Check-out Access is valid, without resetting quotas or creating entitlements; new devices stay prohibited); keep the operator's After Check-out Access settings (10 devices, 5 GB).",
+      "does_not_authorize": "Admitting new devices after check-out; enabling the post-stay route; changing the After Check-out Access settings; DHCP or other networking changes (Kea authoritative mode was reported, not changed); PMS configuration or financial changes; PKI or trust changes; the production Central; Go-Live.",
+      "delivery_status": "Delivered on master 6935b49b (T0309); test appliance (T0310)."
     }
   ]
 }
