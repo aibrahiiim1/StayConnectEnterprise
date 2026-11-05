@@ -86,7 +86,7 @@ describe("port mode", () => {
     await screen.findByText("ens192");
     expect(screen.queryByText("ens160")).toBeNull();
     fireEvent.click(screen.getByText(/Convert to Trunk…/));
-    fireEvent.change(screen.getByLabelText("VLAN id 1"), { target: { value: "60" } });
+    fireEvent.change(screen.getByLabelText("VLAN ID 1"), { target: { value: "60" } });
     fireEvent.click(screen.getByRole("button", { name: "Preview" }));
     await screen.findByText(/Check outside the appliance/);
     expect(post).toHaveBeenLastCalledWith("/network/ports/ens192/mode", { mode: "trunk", preview: true, vlans: [{ vlan_id: 60, name: "" }] });
@@ -99,7 +99,7 @@ describe("port mode", () => {
     post.mockResolvedValueOnce({ ...plan, conflicts: ["10.60.0.0/24 overlaps Access"] });
     render(<PortModeCard writable reloadKey={0} onStaged={vi.fn()} />);
     fireEvent.click(await screen.findByText(/Convert to Trunk…/));
-    fireEvent.change(screen.getByLabelText("VLAN id 1"), { target: { value: "60" } });
+    fireEvent.change(screen.getByLabelText("VLAN ID 1"), { target: { value: "60" } });
     fireEvent.click(screen.getByRole("button", { name: "Preview" }));
     const stage = await screen.findByRole("button", { name: /Stage this change/ });
     expect((stage as HTMLButtonElement).disabled).toBe(true);

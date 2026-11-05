@@ -121,7 +121,7 @@ describe("Client networks", () => {
     post.mockResolvedValue({});
     render(<GuestNetworksPage />);
 
-    const banner = await screen.findByText(/Revision #9 — confirm or it rolls back automatically/);
+    const banner = await screen.findByText(/Revision #9: keep it, or it rolls back automatically/);
     const box = banner.closest("section")!;
     expect(within(box).getByLabelText(/seconds left/)).toBeTruthy();
     fireEvent.click(within(box).getByRole("button", { name: "Keep this change" }));
@@ -157,7 +157,7 @@ describe("Client networks", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
-  it("taking a network offline is a staged change, confirmed in a dialog that says so", async () => {
+  it("switching a network off is a staged change, confirmed in a dialog that says so", async () => {
     route({
       "/auth/whoami": IT,
       "/network/guest-networks": list([NET]),
@@ -167,15 +167,15 @@ describe("Client networks", () => {
     post.mockResolvedValue({});
     render(<GuestNetworksPage />);
 
-    await rowAction("Guest WiFi", "Disable");
+    await rowAction("Guest WiFi", "Switch off");
     const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText("Take Guest WiFi offline?")).toBeTruthy();
+    expect(within(dialog).getByText("Switch off Guest WiFi?")).toBeTruthy();
     expect(within(dialog).getByText(/Nothing happens to clients until you apply/)).toBeTruthy();
-    fireEvent.click(within(dialog).getByRole("button", { name: "Take offline" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Switch off" }));
     await waitFor(() => expect(post).toHaveBeenCalledWith("/network/guest-networks/net-1/disable"));
   });
 
-  it("a disabled network can be enabled again, as a staged change", async () => {
+  it("a switched-off network can be switched on again, as a staged change", async () => {
     route({
       "/auth/whoami": IT,
       "/network/guest-networks": list([{ ...NET, enabled: false }]),
@@ -184,9 +184,22 @@ describe("Client networks", () => {
     });
     post.mockResolvedValue({});
     render(<GuestNetworksPage />);
-    await rowAction("Guest WiFi", "Enable");
+    await rowAction("Guest WiFi", "Switch on");
     await waitFor(() => expect(post).toHaveBeenCalledWith("/network/guest-networks/net-1/enable"));
-    expect(screen.queryByRole("menuitem", { name: "Disable" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Switch off" })).toBeNull();
+  });
+
+  it("says when a change waiting to be kept could not be checked, and which parts did not load", async () => {
+    route({
+      "/auth/whoami": IT,
+      "/network/guest-networks": list([NET]),
+      "/network/guest-networks/net-1/status": { id: "net-1", bridge_name: "br-g20", enabled: true, active_clients: 0 },
+    });
+    render(<GuestNetworksPage />);
+    expect(await screen.findByText("Whether a change is waiting to be kept could not be checked")).toBeTruthy();
+    expect(await screen.findByText(/Staged changes/, { selector: "p" })).toBeTruthy();
+    expect(screen.getByText("Live status could not be read")).toBeTruthy();
+    expect(document.body.textContent ?? "").not.toContain("unexpected GET");
   });
 
   it("a read-only role sees the list but no write action", async () => {
