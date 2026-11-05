@@ -89,7 +89,7 @@ const SOURCE_LABEL: Record<SourceType, string> = {
 const SEARCH_HINT: Record<TypeFilter, { label: string; placeholder: string }> = {
   all: {
     label: "Username, card reference, room number or reservation",
-    placeholder: "Username, card reference, room or reservation — or leave empty for the heaviest users",
+    placeholder: "Username, card reference, room or reservation",
   },
   account: { label: "Client account username", placeholder: "Username, e.g. alex.morgan" },
   voucher: { label: "Voucher card reference", placeholder: "Card reference — the first characters are enough" },
@@ -99,7 +99,7 @@ const SEARCH_HINT: Record<TypeFilter, { label: string; placeholder: string }> = 
 
 const SEARCH_HINT_NO_ROOMS = {
   label: "Username or card reference",
-  placeholder: "Username or card reference — or leave empty for the heaviest users",
+  placeholder: "Username or card reference",
 };
 
 const STAY_WORDS: Record<string, string> = {
@@ -121,6 +121,21 @@ const ACCESS_WORDS: Record<string, string> = {
 const accessWords = (s: string) => ACCESS_WORDS[s] ?? s.replace(/_/g, " ").toLowerCase();
 
 const shortRef = (id: string) => (id.length > 12 ? `${id.slice(0, 8)}…` : id);
+
+const plural = (n: number, one: string, many: string) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
+
+function normalMac(raw: string): string | null {
+  const hex = raw.trim().toLowerCase().replace(/[^0-9a-f]/g, "");
+  if (hex.length !== 12) return null;
+  return hex.match(/.{2}/g)!.join(":");
+}
+
+const browserTimeZone = (): string => {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "this computer's time zone"; }
+  catch { return "this computer's time zone"; }
+};
+
+type SampleState = { bytes_total: number; sample_count: number; truncated?: boolean } | "loading" | "error";
 
 function sourceTitle(s: SourceRow): string {
   switch (s.source_type) {
@@ -166,13 +181,19 @@ function LatestPackageCell({ row }: { row: SourceRow }) {
 export default function UsageExplorerPage() {
   const [tab, setTab] = useState<Tab>("sources");
   const [q, setQ] = useState("");
+  const [deviceQ, setDeviceQ] = useState("");
+  const [deviceErr, setDeviceErr] = useState<string | null>(null);
+  const [reloadWanted, setReloadWanted] = useState(false);
+  const sourceHeadingRef = useRef<HTMLDivElement>(null);
+  const deviceHeadingRef = useRef<HTMLDivElement>(null);
+  const returnTo = useRef<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
   const [rows, setRows] = useState<SourceRow[] | null>(null);
   const [source, setSource] = useState<SourceDetail | null>(null);
   const [device, setDevice] = useState<DeviceDetail | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [samples, setSamples] = useState<Record<string, { bytes_total: number; sample_count: number; truncated?: boolean } | "loading">>({});
+  const [samples, setSamples] = useState<Record<string, SampleState>>({});
   const [period, setPeriod] = useState<Period>("30");
   const [fromDay, setFromDay] = useState("");
   const [toDay, setToDay] = useState("");
@@ -202,18 +223,32 @@ export default function UsageExplorerPage() {
       setHasMore(!!r.meta?.has_more);
     } catch (e) {
       if (mine !== latest.current) return;
-      setErr(e instanceof ApiError ? e.message : "the usage records could not be read");
+      setErr(e instanceof ApiError ? e.message : "The usage records could not be read.");
     } finally { if (mine === latest.current) setBusy(false); }
   }, [q, typeFilter, period, fromDay, toDay]);
 
   useEffect(() => { if (tab === "sources" && rows === null && err === null) search(); }, [tab, rows, err, search]);
 
-  async function openSource(type: SourceType, id: string) {
+  const openSource = useCallback(async (type: SourceType, id: string) => {
     setBusy(true); setErr(null);
-    try { setSource(await api.get<SourceDetail>(`/usage/sources/${type}/${encodeURIComponent(id)}?${periodQuery(period, fromDay, toDay).qs}`)); }
-    catch (e) { setErr(e instanceof ApiError ? e.message : "that access source could not be read"); }
+    try {
+      setSource(await api.get<SourceDetail>(`/usage/sources/${type}/${encodeURIComponent(id)}?${periodQuery(period, fromDay, toDay).qs}`));
+      setDevice(null);
+    }
+    catch (e) { setErr(e instanceof ApiError ? e.message : "That access source could not be read."); }
     finally { setBusy(false); }
-  }
+  }, [period, fromDay, toDay]);
+
+  const sourceKey = source ? `${source.source.source_type}:${source.source.source_id}` : null;
+  useEffect(() => {
+    if (sourceKey) { returnTo.current = sourceKey; sourceHeadingRef.current?.focus(); }
+    else if (returnTo.current && rows) {
+      document.getElementById(`usage-src-${returnTo.current}`)?.focus();
+      returnTo.current = null;
+    }
+  }, [sourceKey, rows]);
+  const deviceKey = device?.mac ?? null;
+  useEffect(() => { if (deviceKey) deviceHeadingRef.current?.focus(); }, [deviceKey]);
 
   // Deep link /usage?stay=<id>; read from location, not useSearchParams, which needs a Suspense boundary for the static build.
   useEffect(() => {
@@ -222,12 +257,28 @@ export default function UsageExplorerPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function lookUpDevice(mac: string) {
-    setBusy(true); setErr(null); setSource(null);
-    try { setDevice(await api.get<DeviceDetail>(`/usage/devices/${encodeURIComponent(mac)}?${periodQuery(period, fromDay, toDay).qs}`)); setTab("devices"); }
-    catch (e) { setErr(e instanceof ApiError ? e.message : "that device could not be read"); setDevice(null); }
+  const lookUpDevice = useCallback(async (raw: string) => {
+    const mac = normalMac(raw);
+    if (!mac) { setDeviceErr("Enter a MAC address such as aa:bb:cc:dd:ee:ff."); return; }
+    setDeviceErr(null);
+    setBusy(true); setErr(null);
+    try {
+      const d = await api.get<DeviceDetail>(`/usage/devices/${encodeURIComponent(mac)}?${periodQuery(period, fromDay, toDay).qs}`);
+      setDevice(d); setDeviceQ(mac); setSource(null); setTab("devices");
+    }
+    catch (e) { setErr(e instanceof ApiError ? e.message : "That device could not be read."); }
     finally { setBusy(false); }
-  }
+  }, [period, fromDay, toDay]);
+
+  const openType = source?.source.source_type;
+  const openId = source?.source.source_id;
+  const openMac = device?.mac;
+  useEffect(() => {
+    if (!reloadWanted) return;
+    setReloadWanted(false);
+    if (openType && openId) void openSource(openType, openId);
+    if (openMac) void lookUpDevice(openMac);
+  }, [reloadWanted, openType, openId, openMac, openSource, lookUpDevice]);
 
   async function openSamples(sessionID: string) {
     setSamples((p) => ({ ...p, [sessionID]: "loading" }));
@@ -235,7 +286,7 @@ export default function UsageExplorerPage() {
       const r = await api.get<{ bytes_total: number; sample_count: number; truncated?: boolean }>(`/usage/sessions/${sessionID}/samples`);
       setSamples((p) => ({ ...p, [sessionID]: r }));
     } catch {
-      setSamples((p) => { const n = { ...p }; delete n[sessionID]; return n; });
+      setSamples((p) => ({ ...p, [sessionID]: "error" }));
     }
   }
 
@@ -297,19 +348,24 @@ export default function UsageExplorerPage() {
         }
       />
 
-      <ErrorBanner err={err} />
+      {!(tab === "sources" && !source && rows === null) && <ErrorBanner err={err} />}
 
       <FilterBar>
-        <span className="text-label text-muted-foreground" aria-hidden>Period</span>
-        <Select aria-label="Period" className="w-full sm:w-48" value={period}
-          onChange={(e) => { setPeriod(e.target.value as Period); setErr(null); setRows(null); setSource(null); setDevice(null); }}>
+        <label htmlFor="usage-period" className="text-label text-muted-foreground">Period</label>
+        <Select id="usage-period" className="w-full sm:w-48" value={period}
+          onChange={(e) => {
+            const next = e.target.value as Period;
+            setPeriod(next); setErr(null);
+            if (next !== "custom") { setRows(null); setReloadWanted(true); }
+          }}>
           {PERIODS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
         </Select>
         {period === "custom" && (
           <>
             <Input type="date" aria-label="From" className="w-full sm:w-44" value={fromDay} onChange={(e) => setFromDay(e.target.value)} />
             <Input type="date" aria-label="To" className="w-full sm:w-44" value={toDay} onChange={(e) => setToDay(e.target.value)} />
-            <Button variant="secondary" disabled={!!range.error} onClick={() => { setErr(null); setRows(null); setSource(null); setDevice(null); }}>Apply</Button>
+            <Button variant="secondary" disabled={!!range.error} onClick={() => { setErr(null); setRows(null); setReloadWanted(true); }}>Apply</Button>
+            <span className="text-caption text-muted-foreground">Days in {browserTimeZone()}.</span>
           </>
         )}
         <span className="text-xs text-muted-foreground">Every total on this page covers this period.</span>
@@ -317,7 +373,7 @@ export default function UsageExplorerPage() {
 
       <Tabs
         value={tab}
-        onValueChange={(v) => { setTab(v as Tab); setSource(null); setDevice(null); setErr(null); }}
+        onValueChange={(v) => { setTab(v as Tab); setErr(null); }}
       >
         <TabsList aria-label="What to investigate">
           <TabsTrigger value="sources"><KeyRound className="size-4" aria-hidden /> By access source</TabsTrigger>
@@ -345,17 +401,22 @@ export default function UsageExplorerPage() {
                 <div role="search" className="flex flex-wrap gap-2">
                   <SearchInput value={q} onChange={setQ} onSearch={() => void search()} name="usage-source-filter"
                     id="usage-source-filter" className="min-w-0 flex-1 sm:w-auto"
-                    label={hint.label} placeholder={hint.placeholder} />
+                    label={hint.label} placeholder={hint.placeholder} aria-describedby="usage-source-hint" />
                   <Button variant="secondary" disabled={busy} onClick={() => void search()}>{busy ? "Searching…" : "Search"}</Button>
                 </div>
+                <p id="usage-source-hint" className="text-caption text-muted-foreground">
+                  Leave the search empty to list the heaviest users.
+                </p>
               </div>
 
               {rows === null && err !== null ? (
                 <EmptyState size="sm" icon={<AlertTriangle />} title="The usage records could not be loaded"
+                  hint={err}
                   action={<Button size="sm" variant="secondary" disabled={busy} onClick={() => void search()}><RefreshCw /> Try again</Button>} />
               ) : rows === null ? <SkeletonRows rows={4} cols={5} /> : rows.length === 0 ? (
                 <EmptyState size="sm" icon={<Activity />} title={q.trim() ? "No access source matched" : "No usage recorded yet"}
-                  hint="Only access sources that were given internet access appear here." />
+                  hint="Only access sources that were given internet access appear here."
+                  action={q.trim() ? <Button size="sm" variant="secondary" onClick={() => { setQ(""); setRows(null); }}>Clear search</Button> : undefined} />
               ) : (
                 <div className={cn(busy && refreshingClass)}>
                   <Table label="Access sources">
@@ -411,6 +472,7 @@ export default function UsageExplorerPage() {
                           </TD>
                           <TD pinEnd className="w-0 text-end">
                             <Button size="xs" variant="ghost" className="text-foreground"
+                              id={`usage-src-${r.source_type}:${r.source_id}`}
                               onClick={(e) => { e.stopPropagation(); void openSource(r.source_type, r.source_id); }}
                               aria-label={`Details for ${title}`}>
                               Details <ChevronRight className="rtl:rotate-180" />
@@ -438,14 +500,14 @@ export default function UsageExplorerPage() {
           )}
 
           {source && src && (
-            <div className="space-y-5">
+            <div key={sourceKey ?? undefined} className="space-y-5 animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none">
               <Button variant="ghost" size="sm" onClick={() => setSource(null)}>
                 <ArrowLeft className="rtl:rotate-180" /> Back to access sources
               </Button>
 
               <Card>
                 <CardHeader>
-                  <div className="min-w-0 space-y-1">
+                  <div ref={sourceHeadingRef} tabIndex={-1} className="min-w-0 space-y-1 outline-none">
                     <CardTitle className={cn(src.source_type === "voucher" && "font-mono")}>{sourceTitle(src)}</CardTitle>
                     {isStay ? (
                       <CardDescription>
@@ -502,8 +564,8 @@ export default function UsageExplorerPage() {
                   )}
                   <div className="flex flex-wrap gap-2">
                     {source.service_plan && <Badge tone="neutral">Service plan: {source.service_plan}</Badge>}
-                    <Badge tone="default">{src.totals.sessions} sessions</Badge>
-                    <Badge tone="default">{src.totals.devices} devices</Badge>
+                    <Badge tone="default">{plural(src.totals.sessions, "session", "sessions")}</Badge>
+                    <Badge tone="default">{plural(src.totals.devices, "device", "devices")}</Badge>
                   </div>
                 </CardBody>
               </Card>
@@ -563,11 +625,13 @@ export default function UsageExplorerPage() {
             <CardHeader><CardTitle>Look up a device</CardTitle></CardHeader>
             <CardBody className="space-y-3">
               <div role="search" className="flex flex-wrap gap-2">
-                <SearchInput value={q} onChange={setQ} onSearch={(v) => { if (v.trim()) void lookUpDevice(v); }}
+                <SearchInput value={deviceQ} onChange={(v) => { setDeviceQ(v); setDeviceErr(null); }} onSearch={(v) => { if (v.trim()) void lookUpDevice(v); }}
                   name="usage-device-lookup" id="usage-device-lookup" className="min-w-0 flex-1 font-mono sm:w-auto"
-                  label="Device MAC address" placeholder="aa:bb:cc:dd:ee:ff" />
-                <Button variant="secondary" disabled={busy || !q.trim()} onClick={() => void lookUpDevice(q)}>{busy ? "Looking…" : "Look up"}</Button>
+                  label="Device MAC address" placeholder="aa:bb:cc:dd:ee:ff"
+                  aria-describedby={deviceErr ? "usage-device-error" : undefined} />
+                <Button variant="secondary" disabled={busy || !deviceQ.trim()} onClick={() => void lookUpDevice(deviceQ)}>{busy ? "Looking…" : "Look up"}</Button>
               </div>
+              {deviceErr && <p id="usage-device-error" role="alert" className="text-caption text-destructive">{deviceErr}</p>}
             </CardBody>
           </Card>
 
@@ -577,10 +641,10 @@ export default function UsageExplorerPage() {
           )}
 
           {device && (
-            <>
+            <div key={deviceKey ?? undefined} className="space-y-5 animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none">
               <Card>
                 <CardHeader>
-                  <div className="min-w-0 space-y-1">
+                  <div ref={deviceHeadingRef} tabIndex={-1} className="min-w-0 space-y-1 outline-none">
                     <CardTitle className="font-mono">{device.mac}</CardTitle>
                     <CardDescription>
                       {formatDate(device.from)} → {formatDate(device.to)}
@@ -615,7 +679,7 @@ export default function UsageExplorerPage() {
               )}
 
               <SessionsCard sessions={device.sessions} samples={samples} onOpenSamples={openSamples} />
-            </>
+            </div>
           )}
         </TabsContent>
       </Tabs>
@@ -698,7 +762,7 @@ function SessionPackages({ s }: { s: SessionRow }) {
 /** Sample totals print next to the session total so the two can be seen to agree. */
 function SessionsCard({ sessions, samples, onOpenSamples }: {
   sessions: SessionRow[];
-  samples: Record<string, { bytes_total: number; sample_count: number; truncated?: boolean } | "loading">;
+  samples: Record<string, SampleState>;
   onOpenSamples: (id: string) => void;
 }) {
   return (
@@ -739,8 +803,8 @@ function SessionsCard({ sessions, samples, onOpenSamples }: {
                   <TD nowrap className="hidden font-mono text-xs md:table-cell">{s.mac || "—"}</TD>
                   <TD className="whitespace-nowrap text-end tabular">
                     {formatBytes(s.bytes_total)}
-                    {sm && sm !== "loading" && (
-                      <div className="text-caption text-muted-foreground">
+                    {sm && sm !== "loading" && sm !== "error" && (
+                      <div className="text-caption text-muted-foreground animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none">
                         {sm.truncated ? "The first " : ""}{sm.sample_count.toLocaleString()} samples · {formatBytes(sm.bytes_total)}
                         {sm.truncated ? " — the session has more; this is not its whole total" : ""}
                       </div>
@@ -755,6 +819,12 @@ function SessionsCard({ sessions, samples, onOpenSamples }: {
                       </Button>
                     )}
                     {sm === "loading" && <span className="text-caption text-muted-foreground" aria-live="polite">Reading…</span>}
+                    {sm === "error" && (
+                      <span className="inline-flex items-center gap-1.5" role="alert">
+                        <span className="text-caption text-destructive">The samples could not be read.</span>
+                        <Button size="xs" variant="ghost" className="text-foreground" onClick={() => onOpenSamples(s.session_id)}>Try again</Button>
+                      </span>
+                    )}
                   </TD>
                 </TR>
               );
