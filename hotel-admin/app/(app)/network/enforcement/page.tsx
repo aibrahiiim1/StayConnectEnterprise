@@ -74,32 +74,28 @@ function useLeaveGuard(dirty: boolean) {
   const router = useRouter();
   const [target, setTarget] = useState<string | null>(null);
   const leaving = useRef(false);
-  // One guard entry, pushed the first time there are changes and reused by later edits; a Back that arrives once the draft is
-  // clean consumes it and carries on to where it was going.
-  const guarded = useRef(false);
-  const dirtyNow = useRef(dirty);
-  dirtyNow.current = dirty;
+  // The guard entry exists only while there are unsaved changes: pushed when they appear, stepped off when the draft is clean again
+  // (saved or reverted), so no stale entry outlives the draft for Back or Forward to land on.
+  const onGuard = useRef(false);
+  const stepping = useRef(false);
   const pushGuard = () => window.history.pushState({ ...window.history.state, leaveGuard: true }, "", window.location.href);
   useEffect(() => {
-    if (dirty && !guarded.current) {
+    if (dirty && !onGuard.current) {
       pushGuard();
-      guarded.current = true;
+      onGuard.current = true;
+    } else if (!dirty && onGuard.current) {
+      onGuard.current = false;
+      stepping.current = true;
+      window.history.back();
     }
   }, [dirty]);
   useEffect(() => {
-    // Back from another screen can land on the guard entry left by an earlier visit: recognised, so a clean Back consumes it.
-    if ((window.history.state as { leaveGuard?: boolean } | null)?.leaveGuard) guarded.current = true;
     const here = window.location.pathname + window.location.search;
-    const onPop = (e: PopStateEvent) => {
-      if (leaving.current || !guarded.current) return;
-      // Only a Back off the guard onto this page's own entry: Forward to another screen, or landing on the guard itself, is not leaving.
-      const landed = window.location.pathname + window.location.search;
-      if (landed !== here || (e.state as { leaveGuard?: boolean } | null)?.leaveGuard) return;
-      if (!dirtyNow.current) {
-        guarded.current = false;
-        window.history.back();
-        return;
-      }
+    const onPop = () => {
+      if (stepping.current) { stepping.current = false; return; }
+      if (leaving.current || !onGuard.current) return;
+      // Back off the guard onto this page's own entry: the guard is restored and the operator is asked.
+      if (window.location.pathname + window.location.search !== here) return;
       pushGuard();
       setTarget(HISTORY_BACK);
     };
@@ -140,7 +136,11 @@ function useLeaveGuard(dirty: boolean) {
           // Past the guard entry and the page itself, to where Back was going.
           leaving.current = true;
           window.history.go(-2);
-        } else if (t) router.push(t);
+        } else if (t) {
+          // From the guard entry, the destination takes its place, so Back from there returns to this page once, not twice.
+          leaving.current = true;
+          if (onGuard.current) { onGuard.current = false; router.replace(t); } else router.push(t);
+        }
       }}
     />
   );

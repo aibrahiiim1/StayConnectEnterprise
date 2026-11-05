@@ -139,18 +139,6 @@ describe("enforcement policy page", () => {
     expect((screen.getByLabelText(/Cut-off delay/) as HTMLInputElement).value).toBe("9");
   });
 
-  it("a clean page that lands on an earlier visit's guard entry lets Back carry on", async () => {
-    serve(doc(), ["site_admin"]);
-    window.history.replaceState({ leaveGuard: true }, "", window.location.href);
-    const back = vi.spyOn(window.history, "back").mockImplementation(() => {});
-    await renderPage();
-    window.dispatchEvent(new PopStateEvent("popstate"));
-    expect(back).toHaveBeenCalledTimes(1);
-    expect(screen.queryByText("Leave without saving?")).toBeNull();
-    back.mockRestore();
-    window.history.replaceState(null, "", window.location.href);
-  });
-
   it("Forward to another screen is not taken for a Back across the guard", async () => {
     serve(doc(), ["site_admin"]);
     const here = window.location.pathname + window.location.search;
@@ -164,21 +152,26 @@ describe("enforcement policy page", () => {
     window.history.replaceState(null, "", here);
   });
 
-  it("keeps one history guard across edit, revert and edit again", async () => {
+  it("holds a history guard only while there are unsaved changes", async () => {
     serve(doc(), ["site_admin"]);
     const push = vi.spyOn(window.history, "pushState");
+    // As a browser does, stepping back fires popstate.
+    const back = vi.spyOn(window.history, "back").mockImplementation(() => { window.dispatchEvent(new PopStateEvent("popstate")); });
     const user = userEvent.setup();
     await renderPage();
     const cutoff = screen.getByLabelText(/Cut-off delay/);
+    const guards = () => push.mock.calls.filter((c) => (c[0] as { leaveGuard?: boolean } | null)?.leaveGuard).length;
     await user.clear(cutoff); await user.type(cutoff, "9");
+    expect(guards()).toBe(1);
+    // Reverting to what is saved gives the guard entry back, so no stale entry outlives the draft.
     await user.clear(cutoff); await user.type(cutoff, "5");
+    expect(back).toHaveBeenCalledTimes(1);
     await user.clear(cutoff); await user.type(cutoff, "7");
-    expect(push.mock.calls.filter((c) => (c[0] as { leaveGuard?: boolean } | null)?.leaveGuard).length).toBe(1);
+    expect(guards()).toBe(2);
     window.dispatchEvent(new PopStateEvent("popstate"));
     expect(await screen.findByText("Leave without saving?")).toBeTruthy();
-    push.mockRestore();
+    push.mockRestore(); back.mockRestore();
   });
-
   it("turning private denial off needs the confirmation text", async () => {
     serve(doc(), ["hotel_it_manager"]);
     patch.mockResolvedValue(doc({ policy: { private_deny_enabled: false, config_version: 2 } }));
