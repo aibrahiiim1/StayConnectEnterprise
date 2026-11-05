@@ -144,6 +144,57 @@ describe("Activity", () => {
     const disclosure = within(drawer).getByText("Raw payload");
     expect(disclosure.closest("details")).toBeTruthy();
   });
+
+  it("names who signed in, words every recorded action and filters by person", async () => {
+    const MONA = "11111111-2222-3333-4444-555555555555";
+    routes({
+      "/audit": fakeAudit([
+        { ts: "2026-09-20T10:00:00Z", actor_type: "operator", action: "operator.login", target_type: "operator", target_id: MONA },
+        { ts: "2026-09-20T09:00:00Z", actor_type: "operator", actor_id: MONA, action: "voucher.code_revealed", target_type: "voucher", target_id: "v-1" },
+      ]),
+      "/operators": { data: [{ id: MONA, display_name: "Mona" }] },
+    }, ["site_admin"]);
+    const Page = (await import("@/app/(app)/audit/page")).default;
+    render(<Page />);
+    await screen.findByText("Signed in to Admin Console");
+    const table = screen.getByRole("table", { name: "Activity" });
+    await waitFor(() => expect(within(table).getAllByText("Mona")).toHaveLength(2));
+    expect(within(table).getByText("Showed a voucher code")).toBeTruthy();
+    expect(screen.queryByText("voucher.code_revealed")).toBeNull();
+    expect(screen.queryByText(/A removed operator/)).toBeNull();
+    expect(within(table).getByText("· Voucher", { exact: false })).toBeTruthy();
+
+    const chips = screen.getByRole("radiogroup", { name: "Show" });
+    expect(within(chips).getByRole("radio", { name: /Vouchers & codes/ })).toBeTruthy();
+    expect(within(chips).queryByRole("radio", { name: /^Other/ })).toBeNull();
+
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Who" }), "Mona");
+    await waitFor(() => expect(get.mock.calls.some(([path]) => String(path).includes(`actor=${MONA}`))).toBe(true));
+  });
+
+  it("says An operator rather than a removed operator when the staff list cannot be read", async () => {
+    routes({
+      "/audit": fakeAudit([
+        { ts: "2026-09-20T10:00:00Z", actor_type: "operator", actor_id: "11111111-2222-3333-4444-555555555555", action: "role.updated" },
+      ]),
+    }, ["front_desk"]);
+    const Page = (await import("@/app/(app)/audit/page")).default;
+    render(<Page />);
+    await screen.findByText("Changed a role");
+    expect(screen.getAllByText("An operator").length).toBeGreaterThan(0);
+    expect(screen.queryByText("A removed operator")).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Who" })).toBeNull();
+  });
+
+  it("offers Try again when the trail cannot be loaded", async () => {
+    routes({ "/audit": () => Promise.reject(new Error("offline")) }, ["site_admin"]);
+    const Page = (await import("@/app/(app)/audit/page")).default;
+    render(<Page />);
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).getByText("The activity trail could not be loaded")).toBeTruthy();
+    expect(within(alert).getByRole("button", { name: /Try again/ })).toBeTruthy();
+    expect(screen.queryByText("offline")).toBeNull();
+  });
 });
 
 describe("Backups", () => {
