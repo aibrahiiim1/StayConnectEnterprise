@@ -1,7 +1,7 @@
 "use client";
 
 import { usePmsConnections } from "@/lib/pms-scope";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, ArrowUpRight, BedDouble, Receipt, RefreshCw } from "lucide-react";
 import { api, ApiError, FinancialPayment, FinancialSettlement } from "@/lib/api";
@@ -15,7 +15,8 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Callout } from "@/components/ui/error-banner";
 import { PageHeader, PageShell, StatCard, StatGrid } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
-import { FilterChips, KeyValueGrid, Pagination } from "@/components/ui/data";
+import { FilterChips, KeyValueGrid, Pagination, SearchInput } from "@/components/ui/data";
+import { DateRangeFilter, PERIOD_PRESETS, periodBounds, periodWords, type Period } from "@/components/ui/date-range";
 import { useServerPage, type PagedFields } from "@/lib/use-server-page";
 import { Skeleton, SkeletonRows } from "@/components/ui/misc";
 import { Sheet, SheetBody, SheetContent, SheetFooter, SheetHeader, SheetSection } from "@/components/ui/sheet";
@@ -147,15 +148,37 @@ type Detail = {
 export function SettlementsView() {
   const { multi } = usePmsConnections();
   const [view, setView] = useState<View>("");
+  const [period, setPeriod] = useState<Period>({ preset: "all" });
+  const [text, setText] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [detailFailed, setDetailFailed] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
 
-  const list = useServerPage<SettlementsResp>({
-    path: view ? `/financial-ops/settlements?view=${view}` : "/financial-ops/settlements",
-    rowsOf: (r) => r.settlements,
-  });
+  const path = useMemo(() => {
+    const p = new URLSearchParams();
+    if (view) p.set("view", view);
+    const b = periodBounds(period);
+    if (b) {
+      p.set("from", b.from.toISOString());
+      p.set("to", b.to.toISOString());
+    }
+    const qs = p.toString();
+    return "/financial-ops/settlements" + (qs ? "?" + qs : "");
+  }, [view, period]);
+  const needle = text.trim();
+  const headers = useMemo(() => (needle ? { "X-Payment-Search": encodeURIComponent(needle) } : undefined), [needle]);
+  const narrowed = period.preset !== "all" || !!needle;
+  const periodName = period.preset === "custom"
+    ? periodWords(period)
+    : PERIOD_PRESETS.find((o) => o.value === period.preset)?.label ?? "";
+  function clearFilters() {
+    setPeriod({ preset: "all" });
+    setText("");
+    setView("");
+  }
+
+  const list = useServerPage<SettlementsResp>({ path, headers, rowsOf: (r) => r.settlements });
   const { resp, current } = list;
   const rows = current && resp ? resp.settlements ?? [] : null;
   const notEnabled = list.err instanceof ApiError && list.err.status === 404;
@@ -201,6 +224,9 @@ export function SettlementsView() {
     ? collectedList.map((c) => money(c.amount_minor, c.currency, c.currency_exponent)).join(" · ")
     : "Nothing yet";
 
+  const selection = [period.preset !== "all" ? periodName : "", needle ? `Matching “${needle}”` : ""]
+    .filter(Boolean).join(" · ");
+
   function tile(value: string) {
     if (haveSummary) return <span className={FADE}>{value}</span>;
     if (list.err) return "Not known";
@@ -235,6 +261,13 @@ export function SettlementsView() {
                 ]}
               />
             </HelpSection>
+            <HelpSection title="Period and search">
+              <p>
+                The period and the search apply to the list, the counts and the totals alike. A period is in this
+                browser&apos;s time zone and counts a payment by its time under When; weeks start on Monday. Search
+                looks in the package, the room, the PMS connection and how it was paid.
+              </p>
+            </HelpSection>
             <HelpSection title="Refunds">
               <p>There is no refund button. A refund made by the card provider is recorded here automatically.</p>
             </HelpSection>
@@ -258,20 +291,27 @@ export function SettlementsView() {
               ? list.err ? "Could not be loaded" : undefined
               : counts.attention > 0
                 ? "Waiting for payment, in progress, not paid or to review"
-                : "Nothing to do"
+                : narrowed ? "Nothing in this selection" : "Nothing to do"
           }
         />
         <StatCard
           label="Collected (card and room charge)"
           value={tile(collected)}
-          hint={haveSummary ? `From ${counts.paid.toLocaleString()} card and room-charge package${counts.paid === 1 ? "" : "s"}` : undefined}
+          hint={haveSummary
+            ? `From ${counts.paid.toLocaleString()} card and room-charge package${counts.paid === 1 ? "" : "s"}${selection ? ` · ${selection}` : ""}`
+            : undefined}
         />
-        <StatCard label="Vouchers used" value={tile(counts.voucher.toLocaleString())} />
-        <StatCard label="Free packages" value={tile(counts.free.toLocaleString())} />
+        <StatCard label="Vouchers used" value={tile(counts.voucher.toLocaleString())} hint={haveSummary && selection ? selection : undefined} />
+        <StatCard label="Free packages" value={tile(counts.free.toLocaleString())} hint={haveSummary && selection ? selection : undefined} />
       </StatGrid>
 
       <Card className="overflow-hidden">
-        <FilterBar inset filters={
+        <FilterBar inset
+          search={
+            <SearchInput value={text} onChange={setText} label="Search package payments"
+              placeholder="Package, room, paid by…" delay={300} />
+          }
+          filters={
           <FilterChips<View>
             label="Show"
             value={view}
@@ -291,7 +331,9 @@ export function SettlementsView() {
               <RefreshCw className={spin(list.loading)} /> Refresh
             </Button>
           </div>
-        ) : undefined} />
+        ) : undefined}>
+          <DateRangeFilter value={period} onChange={setPeriod} />
+        </FilterBar>
         <div>
           {loadFailed ? (
             <div role="alert" className={FADE}>
@@ -311,6 +353,14 @@ export function SettlementsView() {
             </div>
           ) : !rows ? (
             <SkeletonRows rows={4} cols={6} />
+          ) : visible.length === 0 && narrowed ? (
+            <EmptyState
+              size="sm"
+              icon={<Receipt />}
+              title="No payment matches"
+              hint={view ? "Nothing in this view for the chosen period and search." : "Try another period or search."}
+              action={<Button variant="secondary" size="sm" onClick={clearFilters}>Clear filters</Button>}
+            />
           ) : visible.length === 0 ? (
             <EmptyState
               size="sm"

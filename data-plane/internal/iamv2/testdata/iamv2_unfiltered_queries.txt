@@ -45,7 +45,9 @@ cmd/edged/resources_phase3.go	ec8a93cf20e2	($2::text IS NULL OR ev.processing_st
 cmd/edged/resources_phase3.go	f857679a57a9	SELECT display_name, is_primary FROM iam_v2.stay_guests WHERE stay_id=$1 ORDER BY is_prima
 cmd/edged/resources_phase3_interface_authoring.go	c6a0ee6e6862	SELECT connector_kind FROM iam_v2.pms_interfaces WHERE id=$1
 cmd/edged/resources_phase3_interfaces.go	6c02cda67fab	i.id::text, i.connector_kind, i.display_label, i.lifecycle_state, COALESCE(i.current_revis
-cmd/edged/resources_phase4_finops.go	2d97b385dfa9	SELECT v.settlement_id::text, v.purchase_id::text, v.method, v.status, v.purchase_state, c
+cmd/edged/resources_phase4_finops.go	aaf625933926	WITH v AS ( SELECT v.settlement_id::text AS settlement_id, v.purchase_id::text AS purchase
+cmd/edged/resources_phase4_finops.go	c3813a39899c	FROM iam_v2.v_financial_settlements v JOIN iam_v2.purchases p ON p.id = v.purchase_id LEFT
+cmd/edged/resources_phase4_finops.go	e44d61e61b6f	SELECT v.settlement_id::text, v.purchase_id::text, v.method, v.status, v.purchase_state, c
 cmd/edged/resources_pms_policy.go	964a05c93d70	SELECT disabled_methods FROM iam_v2.network_signin_overrides WHERE network_id=$1::uuid
 cmd/edged/resources_pms_reconciliation.go	e4f36ac3beb0	pms_interface_id::text, COALESCE((SELECT i.display_label FROM iam_v2.pms_interfaces i WHER
 cmd/edged/resources_portal_profiles.go	204c0a487d5f	SELECT count(*) FROM iam_v2.portal_profile_assignments WHERE profile_id=$1::uuid
