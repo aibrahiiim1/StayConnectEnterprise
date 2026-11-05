@@ -3,28 +3,32 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { SectionCard } from "@/components/ui/card";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { useToast } from "@/components/ui/toast";
 import { RoutingEditor, usePmsRouting } from "@/components/pms/routing-editor";
-import { errMsg } from "@/lib/utils";
+import { netErrorWords } from "@/components/network/shared";
+import type { LoadReport } from "@/components/network/lifecycle";
 import type { ArchivedNetwork, DefaultReadiness } from "@/lib/api/network-archive";
 
 const STATE_TONE = { ok: "ok", attention: "warn", unresolved: "err" } as const;
 const STATE_LABEL = { ok: "Ready", attention: "Check", unresolved: "Needs your decision" } as const;
 
-/** What stands between the Default Network and being the guest-service entry point. It describes; it changes nothing by itself. */
-export function DefaultNetworkCard({ reloadKey }: { reloadKey: number }) {
+const absent = (e: unknown) => e instanceof ApiError && e.status === 404;
+
+export function DefaultNetworkCard({ reloadKey, onLoaded }: { reloadKey: number; onLoaded?: LoadReport }) {
   const [info, setInfo] = useState<DefaultReadiness | null>(null);
   const { canRoute, interfaces } = usePmsRouting();
   const [editing, setEditing] = useState(false);
 
   const load = useCallback(() => {
-    api.get<DefaultReadiness>("/network/default").then(setInfo).catch(() => setInfo(null));
-  }, []);
+    api.get<DefaultReadiness>("/network/default")
+      .then((r) => { setInfo(r); onLoaded?.(true); })
+      .catch((e) => { setInfo(null); onLoaded?.(absent(e)); });
+  }, [onLoaded]);
   useEffect(load, [load, reloadKey]);
 
   if (!info || !info.present) return null;
@@ -77,8 +81,7 @@ export function DefaultNetworkCard({ reloadKey }: { reloadKey: number }) {
   );
 }
 
-/** Networks a confirmed reset retired. Collapsed by default; the count is always visible. */
-export function ArchivedNetworks({ writable, reloadKey, onRestored }: { writable: boolean; reloadKey: number; onRestored: () => void }) {
+export function ArchivedNetworks({ writable, reloadKey, onRestored, onLoaded }: { writable: boolean; reloadKey: number; onRestored: () => void; onLoaded?: LoadReport }) {
   const toast = useToast();
   const [items, setItems] = useState<ArchivedNetwork[]>([]);
   const [open, setOpen] = useState(false);
@@ -86,8 +89,10 @@ export function ArchivedNetworks({ writable, reloadKey, onRestored }: { writable
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    api.get<{ data: ArchivedNetwork[] }>("/network/archive").then((r) => setItems(r.data ?? [])).catch(() => setItems([]));
-  }, [reloadKey]);
+    api.get<{ data: ArchivedNetwork[] }>("/network/archive")
+      .then((r) => { setItems(r.data ?? []); onLoaded?.(true); })
+      .catch((e) => { setItems([]); onLoaded?.(absent(e)); });
+  }, [reloadKey, onLoaded]);
 
   if (items.length === 0) return null;
 
@@ -99,7 +104,7 @@ export function ArchivedNetworks({ writable, reloadKey, onRestored }: { writable
       toast.success(`${n.name} is back in the main list`, "It is still switched off.");
       onRestored();
     } catch (e) {
-      setErr(errMsg(e));
+      setErr(netErrorWords(e));
     } finally {
       setBusy(null);
     }
@@ -131,11 +136,11 @@ export function ArchivedNetworks({ writable, reloadKey, onRestored }: { writable
                 <span>
                   <Link className="font-medium hover:underline" href={`/network/${n.id}`}>{n.name}</Link>{" "}
                   <span className="text-muted-foreground">
-                    — {n.retired_by}, {new Date(n.archived_at).toLocaleDateString()}
+                    {n.retired_by || "Archived"}, {new Date(n.archived_at).toLocaleDateString()}
                     {n.has_history ? "; has client history" : ""}{n.has_pms_routing ? "; keeps its PMS routing" : ""}
                   </span>
                 </span>
-                {writable && <Button size="sm" variant="secondary" disabled={busy === n.id} onClick={() => void restore(n)}>Restore from archive</Button>}
+                {writable && <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => void restore(n)}>{busy === n.id ? "Restoring…" : "Restore from archive"}</Button>}
               </li>
             ))}
           </ul>
