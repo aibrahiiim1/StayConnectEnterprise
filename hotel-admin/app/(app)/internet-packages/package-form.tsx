@@ -7,14 +7,15 @@
 
 import { PmsConnectionPicker } from "@/components/pms/pms-connection-picker";
 import { NetworkPicker } from "@/components/network/network-picker";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Field, Input, QuietHints, Select } from "@/components/ui/input";
 import { InfoHint } from "@/components/ui/quiet";
 import { generateShortCode } from "@/lib/short-code";
 import { Switch } from "@/components/ui/misc";
-import { Callout } from "@/components/ui/error-banner";
-import { Trash2, Plus, ChevronDown, ChevronRight } from "lucide-react";
+import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { Trash2, Plus, ChevronRight } from "lucide-react";
 import { durationToSeconds } from "@/lib/units";
 import {
   ALLOCATION_MODE_LABELS, validateAllocation, serializeAllocation, previewAllocation,
@@ -128,6 +129,29 @@ export type PackageFormInitial = {
   display?: Record<string, unknown> | null;
 };
 
+const browserTimeZone = (): string => {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "this computer's time zone"; }
+  catch { return "this computer's time zone"; }
+};
+
+function readableWords(t: string): string {
+  const w = t.replace(/_/g, " ").trim().toLowerCase();
+  return w.charAt(0).toUpperCase() + w.slice(1);
+}
+
+function readableValue(v: unknown): string {
+  if (v === null || v === undefined) return "—";
+  if (Array.isArray(v)) return v.map((x) => (typeof x === "string" ? readableWords(x) : readableValue(x))).join(", ");
+  if (typeof v === "object") {
+    return Object.entries(v as Record<string, unknown>).map(([k, x]) => `${readableWords(k)}: ${readableValue(x)}`).join(" · ");
+  }
+  if (typeof v === "boolean") return v ? "Yes" : "No";
+  return typeof v === "string" ? readableWords(v) : String(v);
+}
+
+let rowSeq = 0;
+const nextRowKey = () => `row-${++rowSeq}`;
+
 function emptyRule(type: RuleType): EligibilityRuleForm {
   switch (type) {
     case "AUTH_METHOD": return { type, methods: "" };
@@ -148,9 +172,10 @@ function emptyRule(type: RuleType): EligibilityRuleForm {
 
 export function PackageForm({
   mode, initial, plans, busy, onSave, onCancel, modules = null, roomChargeInterfaces = null, clientGroups = null,
-  cardAccount = null,
+  cardAccount = null, submitError = null,
 }: {
   mode: "add" | "edit";
+  submitError?: unknown;
   initial?: PackageFormInitial;
   plans: PlanOption[];
   busy?: boolean;
@@ -193,8 +218,15 @@ export function PackageForm({
       : "");
 
   const [planID, setPlanID] = useState(initial?.planID ?? "");
-  const [advanced, setAdvanced] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const errorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (error || submitError) errorRef.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+  }, [error, submitError]);
+  const [rowKeys, setRowKeys] = useState<string[]>(() =>
+    (initial ? (initial.rules ?? []) : []).filter((r) => !isDedicatedRule(r)).map(() => nextRowKey()));
+  const [addedKey, setAddedKey] = useState<string | null>(null);
+  const tz = browserTimeZone();
   const ids = useId();
   const planHeadingID = `${ids}-plan`;
   const endHeadingID = `${ids}-end`;
@@ -212,6 +244,10 @@ export function PackageForm({
       return;
     }
     if (!name.trim()) { setError("Enter a name. It is what the client sees on the portal."); return; }
+    if (duration.end_mode === "VALIDITY_WINDOW" && !(Number(durationHours) > 0)) {
+      setError("Enter how many hours access lasts. It must be more than 0.");
+      return;
+    }
     const res = buildPublishPayload({
       code: code || generateShortCode(name), name,
       // The caller replaces this with the revision resolved from the selected plan.
@@ -290,7 +326,6 @@ export function PackageForm({
   return (
     <QuietHints>
     <form onSubmit={submit} className="space-y-6 [&>div+div]:border-t [&>div+div]:border-border [&>div+div]:pt-5" data-testid="package-form">
-      {error && <div role="alert" className="text-sm text-destructive">{error}</div>}
 
       <div className="grid gap-4 sm:grid-cols-2">
         {/* Accessible names are the visible labels; test hooks live in data-testid, not aria-label. */}
@@ -305,7 +340,7 @@ export function PackageForm({
           <div className="text-sm rounded-md border border-border bg-surface px-3 py-2" role="status">
             There are no service plans yet. A service plan defines the speed, allowances and device limit a
             package hands out, so one has to exist first.{" "}
-            <a href="/service-plans" className="underline">Create a service plan</a>, then come back.
+            <Link href="/service-plans" className="underline">Create a service plan</Link>, then come back.
           </div>
         ) : (
           <>
@@ -344,7 +379,7 @@ export function PackageForm({
           )}
           {duration.end_mode === "VALIDITY_WINDOW" && (
             <Field label="Hours">
-              <Input data-testid="duration-hours" type="number" min={0} step="0.5" value={durationHours}
+              <Input data-testid="duration-hours" type="number" min={0.5} step="0.5" value={durationHours}
                 onChange={(e) => {
                   setDurationHours(e.target.value);
                   const secs = durationToSeconds(e.target.value, "hours");
@@ -353,7 +388,7 @@ export function PackageForm({
             </Field>
           )}
           {duration.end_mode === "FIXED_AT" && (
-            <Field label="Ends at">
+            <Field label="Ends at" hint={`In ${tz}.`}>
               <Input data-testid="ends-at" type="datetime-local" value={duration.ends_at ?? ""}
                 onChange={(e) => setDuration((d) => ({ ...d, ends_at: e.target.value }))} />
             </Field>
@@ -377,7 +412,7 @@ export function PackageForm({
             ))}
         </Select>
         {alloc.mode === "PER_STAY_NIGHT" && (
-          <div className="mt-2 space-y-2">
+          <div className="mt-2 space-y-2 animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none">
             <div className="grid gap-2 sm:grid-cols-3">
               <Field label="GB per night">
                 <Input data-testid="gb-per-night" type="number" min={0} step="0.1" value={alloc.gb_per_night}
@@ -472,7 +507,7 @@ export function PackageForm({
           <option value="groups_public">Groups and public</option>
         </Select>
         {(audience === "groups" || audience === "groups_public") && (
-          <div className="mt-2 space-y-1.5" role="group" aria-label="Client groups in the audience">
+          <div className="mt-2 space-y-1.5 animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none" role="group" aria-label="Client groups in the audience">
             {clientGroups === null && <p className="text-xs text-muted-foreground">Loading client groups…</p>}
             {clientGroups === "error" && (
               <p className="text-xs text-warning-subtle-foreground" role="status">
@@ -482,7 +517,7 @@ export function PackageForm({
             {Array.isArray(clientGroups) && clientGroups.length === 0 && unknownGroupIDs.length === 0 && (
               <p className="text-xs text-muted-foreground" role="status">
                 This site has no client groups yet.{" "}
-                <a href="/client-groups" className="underline">Create one under Client access → Client groups</a>, then come back.
+                <Link href="/client-groups" className="underline">Create one under Client access → Client groups</Link>, then come back.
               </p>
             )}
             {groupOptions.map((g) => {
@@ -511,7 +546,7 @@ export function PackageForm({
       {/* The free allowance is keyed on the package, not the revision, so a wording change does not reset it.
           It also applies to priced packages, but the device switch defaults ON only for Free ones. */}
       <div>
-        <SectionHeading id={`${ids}-free`} title="Free access" hint={
+        <SectionHeading id={`${ids}-free`} title={paid ? "How often a client can buy it" : "How often a client can get it"} hint={
           paid
             ? (freeRule
               ? "This package has a price. The limit still applies — a client may buy it the stated number of times."
@@ -557,7 +592,12 @@ export function PackageForm({
             <h3 className="text-label">More conditions</h3>
             <InfoHint>Narrow who is offered this package by sign-in method, date, network or stay.</InfoHint>
           </div>
-          <Button type="button" variant="ghost" onClick={() => setRules((rs) => [...rs, emptyRule("AUTH_METHOD")])}>
+          <Button type="button" variant="ghost" onClick={() => {
+            const key = nextRowKey();
+            setRowKeys((ks) => [...ks, key]);
+            setAddedKey(key);
+            setRules((rs) => [...rs, emptyRule("AUTH_METHOD")]);
+          }}>
             <Plus size={14} /> Add condition
           </Button>
         </div>
@@ -578,8 +618,9 @@ export function PackageForm({
           const vi = rules.slice(0, i).filter((x) => !isDedicatedRule(x)).length;
           // Numbered by visible row; the dedicated rules are not rows.
           const n = `Condition ${vi + 1}`;
+          const rowKey = rowKeys[vi] ?? `row-at-${vi}`;
           return (
-          <div key={i} className="flex gap-2 items-center mb-2" data-testid={`rule-${vi}`}>
+          <div key={rowKey} className={`mb-2 flex flex-wrap items-center gap-2 sm:flex-nowrap ${rowKey === addedKey ? "animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none" : ""}`} data-testid={`rule-${vi}`}>
             <Select data-testid={`rule-type-${vi}`} aria-label={`${n}: type`} className="h-9 w-auto shrink-0 ps-2.5"
               value={r.type} onChange={(e) => setRules((rs) => rs.map((x, j) => (j === i ? emptyRule(e.target.value as RuleType) : x)))}>
               <optgroup label="General">
@@ -595,8 +636,8 @@ export function PackageForm({
             {r.type === "AUTH_METHOD" && <Input data-testid={`rule-methods-${vi}`} aria-label={`${n}: sign-in methods`} placeholder="account, voucher" value={r.methods} onChange={(e) => setRule(i, { methods: e.target.value })} />}
             {r.type === "SUBJECT_KIND" && <Input data-testid={`rule-kinds-${vi}`} aria-label={`${n}: client kinds`} placeholder="ACCOUNT, VOUCHER" value={r.kinds} onChange={(e) => setRule(i, { kinds: e.target.value })} />}
             {r.type === "DATE_WINDOW" && <>
-              <Input data-testid={`rule-from-${vi}`} aria-label={`${n}: from`} type="datetime-local" value={r.from} onChange={(e) => setRule(i, { from: e.target.value })} />
-              <Input data-testid={`rule-until-${vi}`} aria-label={`${n}: until`} type="datetime-local" value={r.until} onChange={(e) => setRule(i, { until: e.target.value })} />
+              <Input data-testid={`rule-from-${vi}`} aria-label={`${n}: from`} title={`In ${tz}`} type="datetime-local" value={r.from} onChange={(e) => setRule(i, { from: e.target.value })} />
+              <Input data-testid={`rule-until-${vi}`} aria-label={`${n}: until`} title={`In ${tz}`} type="datetime-local" value={r.until} onChange={(e) => setRule(i, { until: e.target.value })} />
             </>}
             {r.type === "PRIOR_PURCHASE" && (
               // The other mode is the Free access control above.
@@ -624,7 +665,10 @@ export function PackageForm({
             )}
             {r.type === "TRAVEL_AGENT" && <TravelAgentPicker testId={`rule-travel-agents-${vi}`} label={`${n}: travel agents`} value={r.travel_agents} onChange={(v) => setRule(i, { travel_agents: v })} />}
             {r.type === "PMS_INTERFACE" && <PmsConnectionPicker testId={`rule-pms-interfaces-${vi}`} label={`${n}: PMS connections`} value={r.pms_interface_ids} onChange={(v) => setRule(i, { pms_interface_ids: v })} />}
-            <Button type="button" variant="ghost" data-testid={`remove-rule-${vi}`} aria-label={`Remove condition ${vi + 1}`} onClick={() => setRules((rs) => rs.filter((_, j) => j !== i))}><Trash2 size={14} /></Button>
+            <Button type="button" variant="ghost" data-testid={`remove-rule-${vi}`} aria-label={`Remove condition ${vi + 1}`} onClick={() => {
+              setRowKeys((ks) => ks.filter((_, j) => j !== vi));
+              setRules((rs) => rs.filter((_, j) => j !== i));
+            }}><Trash2 size={14} /></Button>
           </div>
           );
         })}
@@ -632,9 +676,10 @@ export function PackageForm({
           <div className="mt-2 space-y-1" data-testid="preserved-rules">
             {(initial?.preservedRules ?? []).map((r, i) => (
               <div key={i} className="rounded-md border border-border bg-surface/50 px-3 py-1.5 text-xs">
-                <span className="font-mono">{r.type}</span>{" "}
-                <span className="font-mono text-muted-foreground">{JSON.stringify(r.value)}</span>{" "}
+                <span className="font-medium">{readableWords(r.type)}</span>{" "}
+                <span className="text-muted-foreground">{readableValue(r.value)}</span>{" "}
                 <span className="text-muted-foreground">— kept as is</span>
+                <span className="ms-1.5 font-mono text-2xs text-muted-foreground">({r.type})</span>
               </div>
             ))}
             <p className="text-xs text-muted-foreground">
@@ -656,22 +701,25 @@ export function PackageForm({
       )}
 
       <div>
-        <button type="button" className="flex items-center gap-1 rounded-md text-label text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          onClick={() => setAdvanced((v) => !v)} aria-expanded={advanced}>
-          {advanced ? <ChevronDown size={14} /> : <ChevronRight size={14} />} Advanced
-        </button>
-        {advanced && (
+        <details className="group disclosure-motion">
+          <summary className="flex w-fit cursor-pointer list-none items-center gap-1 rounded-md text-label text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+            <ChevronRight size={14} className="transition-transform duration-base ease-onegate group-open:rotate-90 motion-reduce:transition-none rtl:rotate-180 rtl:group-open:rotate-90" aria-hidden /> Advanced
+          </summary>
           <div className="mt-3 space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Offer from"><Input data-testid="visible-from" type="datetime-local" value={visFrom} onChange={(e) => setVisFrom(e.target.value)} /></Field>
-              <Field label="Offer until"><Input data-testid="visible-until" type="datetime-local" value={visUntil} onChange={(e) => setVisUntil(e.target.value)} /></Field>
+              <Field label="Offer from" hint={`In ${tz}.`}><Input data-testid="visible-from" type="datetime-local" value={visFrom} onChange={(e) => setVisFrom(e.target.value)} /></Field>
+              <Field label="Offer until" hint={`In ${tz}.`}><Input data-testid="visible-until" type="datetime-local" value={visUntil} onChange={(e) => setVisUntil(e.target.value)} /></Field>
             </div>
           </div>
-        )}
+        </details>
+      </div>
+
+      <div ref={errorRef} className="space-y-2 empty:hidden">
+        {error ? <div role="alert" className="text-sm text-destructive">{error}</div> : <ErrorBanner err={submitError} />}
       </div>
 
       <div className="flex flex-wrap justify-end gap-2">
-        {onCancel && <Button type="button" variant="secondary" onClick={onCancel}>Cancel</Button>}
+        {onCancel && <Button type="button" variant="secondary" disabled={busy} onClick={onCancel}>Cancel</Button>}
         <Button type="submit" disabled={busy}>{busy ? "Saving…" : mode === "edit" ? "Save changes" : "Add package"}</Button>
       </div>
     </form>

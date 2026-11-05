@@ -3,9 +3,9 @@
 // Every grant, whatever produced it, from the purchase record forward. "Offered" appears only when a portal
 // offer really existed, and no time is shown that was not recorded.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import Link from "next/link";
-import { Activity, BarChart3, Clock, Database, ExternalLink, PackageCheck, Users } from "lucide-react";
+import { Activity, AlertTriangle, BarChart3, Clock, Database, ExternalLink, PackageCheck, RefreshCw, Users } from "lucide-react";
 import { api, ListResp } from "@/lib/api";
 import {
   getActivity, priceText, statusWords, whoWords, endReasonText, SOURCE_LABELS,
@@ -26,9 +26,13 @@ import { FilterChips, KeyValueGrid, MetricStrip, Pagination, SearchInput, Timeli
 import { BarList } from "@/components/ui/chart";
 import { focusSheetItself } from "@/components/commerce/sheet-focus";
 import { MonoId, SkeletonRows } from "@/components/ui/misc";
+import { Button } from "@/components/ui/button";
+import { LiveStatus, refreshingClass } from "@/components/ui/patterns";
+import { usePoll } from "@/lib/use-poll";
+import { methodLabel } from "@/lib/session-words";
 import { formatBytes } from "@/lib/bytes";
 import { formatDuration } from "@/lib/units";
-import { formatDate, formatRelative } from "@/lib/utils";
+import { cn, formatDate, formatRelative } from "@/lib/utils";
 import type { TabProps } from "./packages-tab";
 import { moduleHasHistory, moduleLicensed, useCapabilities } from "@/lib/capabilities";
 
@@ -45,6 +49,16 @@ function localToISO(v: string): string | undefined {
   const t = new Date(v);
   return Number.isFinite(t.getTime()) ? t.toISOString() : undefined;
 }
+
+function readableWords(t: string): string {
+  const w = t.replace(/_/g, " ").trim().toLowerCase();
+  return w.charAt(0).toUpperCase() + w.slice(1);
+}
+
+const browserTimeZone = (): string => {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "this computer's time zone"; }
+  catch { return "this computer's time zone"; }
+};
 
 const HOSPITALITY_SOURCES = ["CHECKOUT_GRACE", "EMERGENCY_GRACE", "POST_STAY_CONVERSION", "CROSS_PMS_TRANSFER"];
 const IDENTITY_MODULES = ["email_otp", "sms_otp", "whatsapp_otp", "social_login"];
@@ -72,12 +86,15 @@ export function ActivityTab({ guard, setErr }: TabProps) {
   const [loading, setLoading] = useState(true);
   const [loadErr, setLoadErr] = useState<unknown>(null);
   const [packages, setPackages] = useState<PackageSummary[]>([]);
+  const [packagesFailed, setPackagesFailed] = useState(false);
   const [open, setOpen] = useState<ActivityRow | null>(null);
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
+  const fieldID = useId();
 
   useEffect(() => {
     api.get<ListResp<PackageSummary>>("/commercial-packages")
-      .then((r) => setPackages(r.data ?? []))
-      .catch(() => setPackages([]));
+      .then((r) => { setPackages(r.data ?? []); setPackagesFailed(false); })
+      .catch(() => { setPackages([]); setPackagesFailed(true); });
   }, []);
 
   const customReady = range !== "custom" || (!!localToISO(customFrom) && !!localToISO(customTo));
@@ -91,11 +108,13 @@ export function ActivityTab({ guard, setErr }: TabProps) {
     setLoading(true); setLoadErr(null);
     try {
       setResp(await getActivity(query));
+      setUpdatedAt(Date.now());
     } catch (e) {
       if (!guard(e)) { setLoadErr(e); setErr(null); }
     } finally { setLoading(false); }
   }, [range, customFrom, customTo, packageID, source, status, q, offset, customReady, guard, setErr]);
   useEffect(() => { load(); }, [load]);
+  usePoll(() => load(), 60000, { enabled: customReady });
 
   const reset = <T,>(set: (v: T) => void) => (v: T) => { setOffset(0); set(v); };
 
@@ -125,15 +144,22 @@ export function ActivityTab({ guard, setErr }: TabProps) {
       >
         {range === "custom" && (
           <>
-            <Input type="datetime-local" aria-label="From" className="w-full sm:w-52" value={customFrom}
-              onChange={(e) => { setOffset(0); setCustomFrom(e.target.value); }} />
-            <Input type="datetime-local" aria-label="To" className="w-full sm:w-52" value={customTo}
-              onChange={(e) => { setOffset(0); setCustomTo(e.target.value); }} />
+            <div className="flex w-full items-center gap-2 sm:w-auto">
+              <label htmlFor={`${fieldID}-from`} className="text-sm text-muted-foreground">From</label>
+              <Input id={`${fieldID}-from`} type="datetime-local" className="w-full sm:w-52" value={customFrom}
+                onChange={(e) => { setOffset(0); setCustomFrom(e.target.value); }} />
+            </div>
+            <div className="flex w-full items-center gap-2 sm:w-auto">
+              <label htmlFor={`${fieldID}-to`} className="text-sm text-muted-foreground">To</label>
+              <Input id={`${fieldID}-to`} type="datetime-local" className="w-full sm:w-52" value={customTo}
+                onChange={(e) => { setOffset(0); setCustomTo(e.target.value); }} />
+            </div>
           </>
         )}
         <Select aria-label="Package" className="w-full sm:w-48" value={packageID}
           onChange={(e) => { setOffset(0); setPackageID(e.target.value); }}>
           <option value="">All packages</option>
+          {packagesFailed && <option value="" disabled>The package list could not be loaded</option>}
           {packages.map((p) => <option key={p.package_id} value={p.package_id}>{p.name || p.code}</option>)}
         </Select>
         <Select aria-label="How it was given" className="w-full sm:w-52" value={source}
@@ -142,11 +168,17 @@ export function ActivityTab({ guard, setErr }: TabProps) {
           {Object.entries(SOURCE_LABELS).filter(([v]) => offerSource(v)).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
         </Select>
       </FilterBar>
-      {range === "custom" && !customReady && (
-        <p className="-mt-3 text-xs text-muted-foreground">Choose both a start and an end to see a custom period.</p>
+      {range === "custom" && (
+        <p className="-mt-3 text-xs text-muted-foreground">
+          {customReady ? "" : "Choose both a start and an end to see a custom period. "}Times are in {browserTimeZone()}.
+        </p>
       )}
 
-      <ErrorBanner err={loadErr} />
+      {resp && <ErrorBanner err={loadErr} />}
+
+      <div className="flex justify-end">
+        <LiveStatus updatedAt={updatedAt} refreshing={loading} onRefresh={() => void load()} intervalSeconds={60} error={!!loadErr} />
+      </div>
 
       <StatGrid cols={4}>
         <StatCard label="Still valid" value={s ? s.active_now.toLocaleString() : "—"} icon={<Users />}
@@ -156,7 +188,7 @@ export function ActivityTab({ guard, setErr }: TabProps) {
         <StatCard label="Data used" value={s ? formatBytes(s.data_bytes) : "—"} icon={<Database />}
           hint="On these grants' connections" />
         <StatCard label="Most given package" value={top ? top.name : "—"} icon={<BarChart3 />}
-          hint={top ? `${top.grants.toLocaleString()} grant${top.grants === 1 ? "" : "s"}` : "Nothing in this period"} />
+          hint={top ? `${top.grants.toLocaleString()} grant${top.grants === 1 ? "" : "s"}` : s ? "Nothing in this period" : undefined} />
       </StatGrid>
 
       {s && s.undated > 0 && (
@@ -195,12 +227,17 @@ export function ActivityTab({ guard, setErr }: TabProps) {
             />
           }
         />
-        {loading && !resp ? (
+        {!resp && loadErr ? (
+          <EmptyState size="sm" icon={<AlertTriangle />} title="The client activity could not be loaded"
+            hint={loadErr instanceof Error ? loadErr.message : undefined}
+            action={<Button size="sm" variant="secondary" disabled={loading} onClick={() => void load()}><RefreshCw /> Try again</Button>} />
+        ) : !resp ? (
           <SkeletonRows rows={6} cols={6} />
         ) : rows.length === 0 ? (
           <EmptyState size="sm" icon={<Activity />} title="Nothing in this period"
             hint="Widen the period or clear a filter." />
         ) : (
+          <div className={cn(loading && refreshingClass)}>
           <Table label="Client activity">
             <THead><TR>
               <TH>When</TH><TH>Package</TH><TH>Client</TH><TH className="hidden md:table-cell">How it was given</TH>
@@ -232,6 +269,7 @@ export function ActivityTab({ guard, setErr }: TabProps) {
               })}
             </TBody>
           </Table>
+          </div>
         )}
         {resp && rows.length > 0 && (
           <CardFooter>
@@ -287,7 +325,7 @@ function ActivityRecord({ r }: { r: ActivityRow }) {
 
         {r.status === "NOT_GRANTED" && (
           <Callout tone="warning" title="No access was given">
-            This purchase is recorded as {r.purchase_state.replace(/_/g, " ").toLowerCase()} and produced no internet
+            This purchase is recorded as &ldquo;{readableWords(r.purchase_state)}&rdquo; and produced no internet
             access.
           </Callout>
         )}
@@ -313,7 +351,7 @@ function ActivityRecord({ r }: { r: ActivityRow }) {
             { label: "Service plan", value: r.service_plan || "—" },
             { label: "Data allowance", value: r.quota_bytes ? formatBytes(r.quota_bytes) : "No data limit",
               hint: r.consumed_data_bytes != null && r.quota_bytes ? `${formatBytes(r.consumed_data_bytes)} counted against it` : undefined },
-            { label: "Signed in with", value: r.sign_in_method ? r.sign_in_method.replace(/_/g, " ").toLowerCase() : "—" },
+            { label: "Signed in with", value: r.sign_in_method ? methodLabel(r.sign_in_method.toUpperCase()) : "—" },
             { label: "Why it ended", value: ended ?? (r.status === "TERMINATED" ? "Not recorded" : "Still running") },
           ]} />
         </SheetSection>
