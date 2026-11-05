@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0208, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0210, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -2739,7 +2739,11 @@ BEGIN
          entitlement_id = COALESCE(p_entitlement, entitlement_id),
          session_id     = COALESCE(p_session, session_id)
    WHERE tenant_id = p_tenant AND site_id = p_site AND request_id = p_request
-     AND result = 'VERIFIED' AND session_id IS NULL;
+     AND ((result = 'VERIFIED' AND session_id IS NULL)
+          -- A retry of the same sign-in that produced its session replaces a retryable refusal (0210).
+          OR (p_result = 'VERIFIED' AND p_session IS NOT NULL
+              AND result IN ('DEVICE_LIMIT_REACHED','SERVICE_UNAVAILABLE','LICENSE_CAPACITY_REACHED')
+              AND (session_id IS NULL OR session_id = p_session)));
   GET DIAGNOSTICS v_rows = ROW_COUNT;
   RETURN v_rows;
 END $$;
@@ -5330,7 +5334,7 @@ CREATE FUNCTION iam_v2.issue_or_return_pms_context(p_tenant uuid, p_site uuid, p
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
-DECLARE v_existing uuid; v_lifecycle int; v_ev bigint;
+DECLARE v_existing uuid; v_lifecycle int; v_ev bigint; v_departed boolean;
 BEGIN
   PERFORM iam_v2.begin_controlled_operation('auth_context');
   IF p_request IS NULL THEN
@@ -5347,16 +5351,23 @@ BEGIN
 
   -- The row lock and the version snapshot still come from the Stay itself; whether the Stay may be authorised
   -- at all is the shared predicate's decision.
-  SELECT st.lifecycle_version, st.occupancy_evidence_version INTO v_lifecycle, v_ev
+  SELECT st.lifecycle_version, st.occupancy_evidence_version, st.status = 'CHECKED_OUT'
+    INTO v_lifecycle, v_ev, v_departed
     FROM iam_v2.stays st
    WHERE st.tenant_id=p_tenant AND st.site_id=p_site
      AND st.pms_interface_id=p_interface AND st.id=p_stay
      -- Stay-row conditions INLINE, so the FOR UPDATE recheck evaluates them against the locked tuple.
-     AND st.status='IN_HOUSE'
-     AND st.occupancy_evidence_at IS NOT NULL
-     AND st.occupancy_clock_suspect IS NOT TRUE
-     AND st.occupancy_evidence_version > 0
-     AND st.occupancy_revision_id = p_revision
+     AND ((st.status='IN_HOUSE'
+           AND st.occupancy_evidence_at IS NOT NULL
+           AND st.occupancy_clock_suspect IS NOT TRUE
+           AND st.occupancy_evidence_version > 0
+           AND st.occupancy_revision_id = p_revision)
+          -- A departed stay only while its After Check-out Access is valid (0209).
+          OR (st.status='CHECKED_OUT'
+              AND EXISTS (SELECT 1 FROM iam_v2.entitlements e
+                           WHERE e.tenant_id = st.tenant_id AND e.site_id = st.site_id AND e.stay_id = st.id
+                             AND e.status = 'ACTIVE' AND e.end_mode = 'GRACE_AFTER_CHECKOUT'
+                             AND (e.window_ends_at IS NULL OR e.window_ends_at > now()))))
    FOR UPDATE OF st;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'CONTEXT_INVALID: stay % is not eligible for a PMS context', p_stay;
@@ -5374,12 +5385,15 @@ BEGIN
     WHERE rt.tenant_id=p_tenant AND rt.site_id=p_site AND rt.pms_interface_id=p_interface
     FOR UPDATE;
 
-  -- Feed health, materialization readiness and the freshness ceiling, now judged under both locks.
-  PERFORM 1 FROM iam_v2.stays st
-   WHERE st.id = p_stay
-     AND iam_v2.p3_feed_authorizes(p_tenant, p_site, p_interface, p_revision, st.occupancy_evidence_at);
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'CONTEXT_INVALID: stay % is not eligible for a PMS context', p_stay;
+  -- Feed health, materialization readiness and the freshness ceiling, now judged under both locks. A departed stay's
+  -- check-out is already applied and a later reinstatement changes its lifecycle_version, which the context pins.
+  IF NOT v_departed THEN
+    PERFORM 1 FROM iam_v2.stays st
+     WHERE st.id = p_stay
+       AND iam_v2.p3_feed_authorizes(p_tenant, p_site, p_interface, p_revision, st.occupancy_evidence_at);
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'CONTEXT_INVALID: stay % is not eligible for a PMS context', p_stay;
+    END IF;
   END IF;
 
   RETURN QUERY
@@ -22798,7 +22812,7 @@ CREATE TABLE iam_v2.sign_in_attempts (
     encryption_key_id uuid,
     cipher_version integer,
     CONSTRAINT sign_in_attempts_matched_field_check CHECK (((matched_field IS NULL) OR (matched_field = ANY (ARRAY['FIRST_NAME'::text, 'FAMILY_NAME'::text, 'RESERVATION_NUMBER'::text])))),
-    CONSTRAINT sign_in_attempts_result_check CHECK ((result = ANY (ARRAY['VERIFIED'::text, 'CREDENTIAL_MISMATCH'::text, 'ROOM_NOT_IN_MIRROR'::text, 'STAY_NOT_ELIGIBLE'::text, 'AMBIGUOUS_ROOM_CANDIDATES'::text, 'MIRROR_STALE_OR_MISSING_CHANGE'::text, 'RATE_LIMITED'::text, 'ROUTING_OR_INTERFACE_FAILURE'::text, 'SERVICE_UNAVAILABLE'::text, 'SPENT_REQUEST_ID'::text, 'MALFORMED_SUBMISSION'::text, 'VERIFIED_NO_ELIGIBLE_PACKAGE'::text, 'LICENSE_REFUSED'::text, 'LICENSE_CAPACITY_REACHED'::text, 'DEVICE_LIMIT_REACHED'::text, 'AFTER_CHECKOUT_NEW_DEVICE_REJECTED'::text]))),
+    CONSTRAINT sign_in_attempts_result_check CHECK ((result = ANY (ARRAY['VERIFIED'::text, 'CREDENTIAL_MISMATCH'::text, 'ROOM_NOT_IN_MIRROR'::text, 'STAY_NOT_ELIGIBLE'::text, 'AMBIGUOUS_ROOM_CANDIDATES'::text, 'MIRROR_STALE_OR_MISSING_CHANGE'::text, 'RATE_LIMITED'::text, 'ROUTING_OR_INTERFACE_FAILURE'::text, 'SERVICE_UNAVAILABLE'::text, 'SPENT_REQUEST_ID'::text, 'MALFORMED_SUBMISSION'::text, 'VERIFIED_NO_ELIGIBLE_PACKAGE'::text, 'LICENSE_REFUSED'::text, 'LICENSE_CAPACITY_REACHED'::text, 'DEVICE_LIMIT_REACHED'::text, 'AFTER_CHECKOUT_NEW_DEVICE_REJECTED'::text, 'ADDRESS_CONFLICT'::text]))),
     CONSTRAINT sign_in_attempts_sealed_all_or_none CHECK ((((sensitive_ciphertext IS NULL) AND (sensitive_nonce IS NULL) AND (encryption_key_id IS NULL) AND (cipher_version IS NULL)) OR ((sensitive_ciphertext IS NOT NULL) AND (sensitive_nonce IS NOT NULL) AND (encryption_key_id IS NOT NULL) AND (cipher_version IS NOT NULL)))),
     CONSTRAINT sign_in_attempts_verifier_kind_check CHECK ((verifier_kind = ANY (ARRAY['FULL_NAME'::text, 'RESERVATION_NUMBER_LIKE'::text, 'UNKNOWN'::text])))
 );
