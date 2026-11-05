@@ -25,6 +25,7 @@ import { AlertTriangle, Pin, Plus, RefreshCw, Wifi } from "lucide-react";
 import { errMsg } from "@/lib/utils";
 import { usePoll } from "@/lib/use-poll";
 import { cidrsOverlap } from "@/lib/network-trunk";
+import { serviceStateOf } from "@/lib/network-state";
 import { HelpList, HelpSection } from "@/components/help";
 import {
   AddReservationDialog, EditReservationDialog, RemoveReservationDialog, ReservationTable, useNetworkAccess,
@@ -85,7 +86,9 @@ export default function DhcpPage() {
 
   const netName = (gid: string) =>
     networks?.find((n) => n.id === gid)?.name ?? (networks === null && !netErr ? "…" : "Unknown network");
-  const netOf = (ip: string) => networks?.find((n) => n.subnet_cidr && cidrsOverlap(`${ip}/32`, n.subnet_cidr)) ?? null;
+  // A switched-off or archived network may overlap a live one: a lease belongs to the network serving it, never to an inactive match.
+  const netOf = (ip: string) =>
+    networks?.find((n) => n.subnet_cidr && serviceStateOf(n) === "serving" && cidrsOverlap(`${ip}/32`, n.subnet_cidr)) ?? null;
 
   const needle = q.trim();
   const headers = useMemo(
@@ -305,6 +308,16 @@ export default function DhcpPage() {
             ) : reservations.length === 0 ? (
               noMatch("reservations")
             ) : (
+              <>
+              {resList.err && (
+                // The rows on screen are the last ones read: a reload that failed is said, not hidden behind them.
+                <Callout tone="warning" title="The reservations could not be refreshed" className="m-3">
+                  <span className="flex flex-wrap items-center gap-2">
+                    {errMsg(resList.err)} The list shows the last reservations read.
+                    <Button variant="secondary" size="sm" onClick={loadReservations}><RefreshCw /> Try again</Button>
+                  </span>
+                </Callout>
+              )}
               <ReservationTable
                 reservations={reservations}
                 writable={writable}
@@ -312,6 +325,7 @@ export default function DhcpPage() {
                 onEdit={setEditRes}
                 onRemove={setRemoving}
               />
+              </>
             )}
             {reservations && reservations.length > 0 && (resList.offset > 0 || resList.hasMore) && (
               <CardFooter>
