@@ -26,7 +26,10 @@ export function AccessLogTab({ reveals, error }: { reveals: VoucherReveal[] | nu
       <CardHeader>
         <div className="min-w-0">
           <CardTitle>Who has read a code</CardTitle>
-          <CardDescription>Every reveal and batch export, with the operator and reason. Latest 200 records.</CardDescription>
+          <CardDescription>
+            Every reveal and batch export, with the operator and reason.
+            {reveals && reveals.length >= 200 ? " Only the latest 200 records are shown here." : ""}
+          </CardDescription>
         </div>
       </CardHeader>
       <FilterBar
@@ -69,7 +72,7 @@ export function AccessLogTab({ reveals, error }: { reveals: VoucherReveal[] | nu
               {rows.map((r, i) => (
                 <TR key={`${r.revealed_at}-${i}`}>
                   <TD nowrap>
-                    <When iso={r.revealed_at} />
+                    <When iso={r.revealed_at} focusable={false} />
                   </TD>
                   <TD>
                     {r.action === "REVEAL" ? (

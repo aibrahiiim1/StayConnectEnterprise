@@ -4,7 +4,7 @@
 // Expiry is computed from the validity window at sign-in; filters and actions use the same effective state.
 
 import * as React from "react";
-import { Ban, CalendarClock, CheckCircle2, Plus, Settings2, Ticket, TicketCheck } from "lucide-react";
+import { AlertTriangle, Ban, CalendarClock, CheckCircle2, Plus, RefreshCw, Settings2, Ticket, TicketCheck } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardFooter } from "@/components/ui/card";
@@ -15,14 +15,15 @@ import { FilterChips, Pagination, SearchInput } from "@/components/ui/data";
 import { Explain } from "@/components/ui/tooltip";
 import { QuietHints, Select } from "@/components/ui/input";
 import { SkeletonRows } from "@/components/ui/misc";
-import { ReadOnlyNotice } from "@/components/ui/patterns";
+import { LiveStatus, ReadOnlyNotice, refreshingClass } from "@/components/ui/patterns";
+import { usePoll } from "@/lib/use-poll";
+import { cn } from "@/lib/utils";
 import { PageHeader, PageShell, StatCard, StatGrid } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   batchLabel,
-  batchName,
   effectiveStatus,
   maskedCode,
   validityWords,
@@ -77,12 +78,14 @@ export function VouchersView(props: {
 
   const [summary, setSummary] = React.useState<VoucherSummaryFull | null>(null);
   const [summaryErr, setSummaryErr] = React.useState<unknown>(null);
+  const [updatedAt, setUpdatedAt] = React.useState<number | null>(null);
   React.useEffect(() => {
     api
       .get<VoucherSummaryFull>("/vouchers/summary")
       .then((s) => {
         setSummary(s);
         setSummaryErr(null);
+        setUpdatedAt(Date.now());
       })
       .catch(setSummaryErr);
   }, [reloadKey]);
@@ -123,22 +126,30 @@ export function VouchersView(props: {
 
   const [list, setList] = React.useState<VoucherListResp | null>(null);
   const [listErr, setListErr] = React.useState<unknown>(null);
+  const [listLoading, setListLoading] = React.useState(false);
+  const listSeq = React.useRef(0);
   React.useEffect(() => {
     if (searchProblem) return;
     const p = new URLSearchParams(filterQuery);
     p.set("limit", String(PAGE));
     p.set("offset", String(offset));
     if (status !== "all") p.set("effective", status);
-    setList(null);
+    const mine = ++listSeq.current;
+    setListLoading(true);
     api
       .get<VoucherListResp>(`/vouchers/?${p.toString()}`)
       .then((m) => {
+        if (mine !== listSeq.current) return;
         setList(m);
         setListErr(null);
+        setUpdatedAt(Date.now());
       })
       .catch((e) => {
+        if (mine !== listSeq.current) return;
         setListErr(e);
-        setList({ vouchers: [] });
+      })
+      .finally(() => {
+        if (mine === listSeq.current) setListLoading(false);
       });
   }, [filterQuery, status, offset, reloadKey, searchProblem]);
 
@@ -189,6 +200,7 @@ export function VouchersView(props: {
   }, [canReadBranding]);
 
   const [issueOpen, setIssueOpen] = React.useState(false);
+  usePoll(() => reload(), 60000, { enabled: !issueOpen });
   const [selected, setSelected] = React.useState<VoucherRow | null>(null);
   const [focusBatch, setFocusBatch] = React.useState<{ id: string } | null>(null);
 
@@ -208,6 +220,10 @@ export function VouchersView(props: {
       <PageHeader
         title="Vouchers"
         description="Printed cards a client redeems for internet access."
+        meta={updatedAt !== null && (
+          <LiveStatus updatedAt={updatedAt} refreshing={listLoading} onRefresh={reload} intervalSeconds={60}
+            error={!!summaryErr || !!listErr} />
+        )}
         help={
           <>
             <HelpSection title="Four jobs">
@@ -257,7 +273,7 @@ export function VouchersView(props: {
       />
 
       {readOnly && <ReadOnlyNotice>Your role can see the voucher cards but not issue, cancel or reveal them.</ReadOnlyNotice>}
-      <ErrorBanner err={summaryErr} />
+      {!listErr && <ErrorBanner err={summaryErr} />}
       <StatGrid cols={5}>
         <StatCard
           label="Available now"
@@ -275,7 +291,7 @@ export function VouchersView(props: {
           label="Expired unused"
           value={summary ? (summary.expired_unused ?? summary.redemption_expired).toLocaleString() : "—"}
           icon={<CalendarClock />}
-          tone={summary && (summary.expired_unused ?? 0) > 0 ? "warn" : "default"}
+          tone={summary && (summary.expired_unused ?? summary.redemption_expired) > 0 ? "warn" : "default"}
           hint="Refused at sign-in"
         />
         <StatCard
@@ -312,6 +328,8 @@ export function VouchersView(props: {
                   delay={300}
                   placeholder="Last 4 characters"
                   label="Search by the last 4 characters of a code"
+                  aria-describedby={searchProblem ? "voucher-search-problem" : undefined}
+                  aria-invalid={searchProblem ? true : undefined}
                 />
               }
               actions={narrowed ? (
@@ -322,6 +340,7 @@ export function VouchersView(props: {
                     setSearch("");
                     setPkg("");
                     setBatch("");
+                    setStatus("available");
                   }}
                 >
                   Clear filters
@@ -338,7 +357,7 @@ export function VouchersView(props: {
               </Select>
               <Select aria-label="Batch" className="w-full sm:w-64" value={batch} onChange={(e) => setBatch(e.target.value)}>
                 <option value="">All batches</option>
-                {!batchKnown && <option value={batch}>Batch {batch.slice(0, 8)}</option>}
+                {!batchKnown && <option value={batch}>The chosen batch</option>}
                 {batches.map((b) => (
                   <option key={b.batch_id} value={b.batch_id}>
                     {batchLabel(b)} · {b.count} cards
@@ -346,7 +365,7 @@ export function VouchersView(props: {
                 ))}
               </Select>
             </FilterBar>
-            {searchProblem && <p className="border-b border-border px-4 py-2 text-xs text-destructive">{searchProblem}</p>}
+            {searchProblem && <p id="voucher-search-problem" role="status" className="border-b border-border px-4 py-2 text-xs text-destructive">{searchProblem}</p>}
             <FilterBar
               inset
               filters={
@@ -372,8 +391,16 @@ export function VouchersView(props: {
               }
             />
 
-            <ErrorBanner err={listErr} className="mx-4 mt-3" />
-            {rows === null ? (
+            {rows !== null && <ErrorBanner err={listErr} className="mx-4 mt-3" />}
+            {rows === null && listErr ? (
+              <EmptyState
+                size="sm"
+                icon={<AlertTriangle />}
+                title="The voucher cards could not be loaded"
+                hint={listErr instanceof Error ? listErr.message : undefined}
+                action={<Button size="sm" variant="secondary" disabled={listLoading} onClick={reload}><RefreshCw /> Try again</Button>}
+              />
+            ) : rows === null ? (
               <SkeletonRows rows={6} cols={5} />
             ) : rows.length === 0 ? (
               <EmptyState
@@ -396,6 +423,7 @@ export function VouchersView(props: {
                 }
               />
             ) : (
+              <div className={cn(listLoading && refreshingClass)}>
               <Table label="Voucher cards">
                   <THead>
                     <TR>
@@ -415,7 +443,7 @@ export function VouchersView(props: {
                           {r.package_name ?? <span className="text-muted-foreground">Earlier package version</span>}
                         </TD>
                         <TD nowrap>
-                          <StatusBadge status={effectiveStatus(r)} />
+                          <StatusBadge status={effectiveStatus(r)} focusable={false} />
                         </TD>
                         <TD nowrap className="hidden sm:table-cell">
                           {validityWords(r.redemption_valid_from, r.redemption_valid_until)}
@@ -423,21 +451,20 @@ export function VouchersView(props: {
                         <TD className="hidden md:table-cell">
                           {r.batch_id ? (() => {
                             const b = batches.find((x) => x.batch_id === r.batch_id);
-                            return b && batchName(b)
-                              ? <span className="text-sm">{batchName(b)}</span>
-                              : <span className="font-mono text-xs text-muted-foreground">{r.batch_id.slice(0, 8)}</span>;
+                            return <span className="text-sm">{batchLabel(b ?? { batch_id: r.batch_id!, created_at: r.created_at })}</span>;
                           })() : (
                             <span className="text-muted-foreground">—</span>
                           )}
                         </TD>
                         <TD nowrap className="hidden lg:table-cell">
-                          <When iso={r.created_at} />
+                          <When iso={r.created_at} focusable={false} />
                           {r.issued_by_label && <div className="text-xs text-muted-foreground">{r.issued_by_label}</div>}
                         </TD>
                       </TR>
                     ))}
                   </TBody>
               </Table>
+              </div>
             )}
             {rows && rows.length > 0 && (
               <CardFooter>

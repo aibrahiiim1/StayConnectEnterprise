@@ -16,6 +16,12 @@ describe("client activity wording", () => {
     expect(clientWords(ev({ client_kind: "voucher", client_label: "" }))).toBe("Voucher");
     expect(clientWords(ev({ mac: "02:00:00:00:00:01" }))).toBe("02:00:00:00:00:01");
   });
+  it("tells an automatic reconnection from a sign-in, and a guest who took no package from a connection", () => {
+    expect(activityWords(ev({ kind: "CONNECTED", detail: "REJOIN" })).detail).toBe("Reconnected automatically");
+    expect(activityWords(ev({ category: "sign_in", kind: "ROOM_SIGN_IN", detail: "VERIFIED_NO_PACKAGE_TAKEN" })).detail)
+      .toBe("Verified, no package taken");
+    expect(activityWords(ev({ category: "sign_in", kind: "ROOM_SIGN_IN", detail: "ADDRESS_CONFLICT" })).detail).toMatch(/old network address/i);
+  });
   it("reads a staff action with the audit trail's own words", () => {
     expect(activityWords(ev({ category: "staff", kind: "session.disconnected", detail: "guest asked" })).detail).toBe("Reason: guest asked");
   });
