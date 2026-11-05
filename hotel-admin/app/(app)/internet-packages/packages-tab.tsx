@@ -6,7 +6,7 @@
 import { eligibilityWords, type EligibilityNames } from "@/lib/package-eligibility";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, Ban, CheckCircle2, Gauge, Package, Pencil, Plus, Trash2, Users } from "lucide-react";
+import { AlertTriangle, Ban, CheckCircle2, Gauge, Package, Pencil, Plus, RefreshCw, Trash2, Users } from "lucide-react";
 import { api, ApiError, ListResp } from "@/lib/api";
 import { defaultCardAccount, type CardAccountView } from "@/lib/card-currency";
 import type { AccountsResp } from "@/lib/payment-admin";
@@ -59,6 +59,11 @@ function readableRefusal(e: unknown): unknown {
 }
 type Chip = "active" | "disabled" | "all";
 
+function sentenceWords(t: string): string {
+  const w = t.replace(/_/g, " ").trim().toLowerCase();
+  return w.charAt(0).toUpperCase() + w.slice(1);
+}
+
 export type TabProps = { guard: (e: unknown) => boolean; setErr: (s: string | null) => void };
 
 export function PackagesTab({
@@ -86,7 +91,8 @@ export function PackagesTab({
   const [editing, setEditing] = useState<PackageFormInitial | null>(null);
   const [formErr, setFormErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [opening, setOpening] = useState<string | null>(null);
   const [disabling, setDisabling] = useState<PackageSummary | null>(null);
   const [deleting, setDeleting] = useState<PackageSummary | null>(null);
   const [actionErr, setActionErr] = useState<unknown>(null);
@@ -137,6 +143,7 @@ export function PackagesTab({
   }, [formOpen]);
 
   const load = useCallback(async () => {
+    setLoadErr(null);
     try {
       const [pk, pl] = await Promise.all([
         api.get<ListResp<PackageSummary>>("/commercial-packages"),
@@ -160,14 +167,14 @@ export function PackagesTab({
       // skipped: asking would 404 and log an error on every load.
       const active = pkgs.filter((p) => p.active && !!p.current_revision_id);
       const names: EligibilityNames = { networks: new Map(), connections: new Map() };
-      await Promise.all([
+      const namesRead = Promise.all([
         api.get<ListResp<{ id: string; name: string }>>("/network/guest-networks").then((r) => { for (const n of r.data ?? []) names.networks.set(n.id, n.name); }).catch(() => {}),
         api.get<{ interfaces?: { id: string; display_label: string }[] }>("/pms-interfaces?include=retired").then((r) => { for (const c of r?.interfaces ?? []) names.connections.set(c.id, c.display_label); }).catch(() => {}),
       ]);
       const words: Record<string, string[]> = {};
       const ranges = await Promise.all(active.map(async (p): Promise<PackageStayRange> => {
         try {
-          const cur = await api.get<PackageCurrent>(`/commercial-packages/${p.package_id}/current`);
+          const [cur] = await Promise.all([api.get<PackageCurrent>(`/commercial-packages/${p.package_id}/current`), namesRead]);
           words[p.package_id] = eligibilityWords(cur.eligibility_rules, names);
           return {
             package_id: p.package_id, name: p.name || p.code, active: true,
@@ -182,9 +189,9 @@ export function PackagesTab({
       setStayWarnings(stayLengthWarnings(ranges));
       setEligibility(words);
     } catch (e) {
-      if (!guard(e)) { setRows([]); setErr((e as Error)?.message ?? "Could not load packages"); }
+      if (!guard(e)) setLoadErr((e as Error)?.message || "The packages could not be read.");
     }
-  }, [guard, setErr]);
+  }, [guard]);
   useEffect(() => { load(); }, [load]);
 
   // The header's "Add package" arrives as a new request number.
@@ -216,7 +223,8 @@ export function PackagesTab({
 
   // Loads the current configuration so nothing the form does not display is dropped on save.
   async function startEdit(p: PackageSummary) {
-    setErr(null); setNotice(null); setFormErr(null);
+    if (opening) return;
+    setErr(null); setFormErr(null); setOpening(p.package_id);
     try {
       const cur = await api.get<PackageCurrent>(`/commercial-packages/${p.package_id}/current`);
       setEditBase({ terms: revisionTermsOf(cur), carry: revisionCarryOf(cur) });
@@ -237,13 +245,15 @@ export function PackagesTab({
         acquisition: acquisitionToForm(cur),
       });
       setAdding(false);
+      setSelected(null);
     } catch (e) { if (!guard(e)) setErr((e as Error)?.message ?? "Could not open this package"); }
+    finally { setOpening(null); }
   }
 
   // Publishes a new immutable package revision and never edits a service plan. ADD sends create_only so a
   // taken code is refused (409 code_exists) instead of becoming a new version of the package that owns it.
   async function save(v: PackageFormValue, mode: "add" | "edit") {
-    setBusy(true); setFormErr(null); setNotice(null);
+    setBusy(true); setFormErr(null);
     try {
       const chosen = plans.find((x) => x.plan_id === v.selectedPlanID);
       if (!chosen?.current_revision_id) {
@@ -298,7 +308,6 @@ export function PackagesTab({
     lastBody.current = null;
     setAdding(false); setEditing(null); setEditBase(null); setPendingSave(null);
     const msg = saveOutcomeMessage({ pinPlanRevisionID: String(body.service_plan_revision_id ?? ""), planChanged, publishesPackageRevision: true });
-    setNotice(msg);
     toast.success(mode === "add" ? "Package added" : "Package saved", msg);
     await load();
   }
@@ -323,11 +332,10 @@ export function PackagesTab({
   async function enable({ password }: { password: string }) {
     if (!enabling) return;
     const p = enabling;
-    setBusy(true); setActionErr(null); setNotice(null);
+    setBusy(true); setActionErr(null);
     try {
       await api.post(`/commercial-packages/${p.package_id}/active`, { active: true, password });
-      const msg = `${p.name || p.code} is being offered to clients again.`;
-      setNotice(msg); toast.success("Package enabled", msg);
+      toast.success("Package enabled", `${p.name || p.code} is being offered to clients again.`);
       setEnabling(null);
       await load();
     } catch (e) {
@@ -341,14 +349,18 @@ export function PackagesTab({
 
   async function disable({ reason, password }: { reason: string; password: string }) {
     if (!disabling) return;
-    setBusy(true); setActionErr(null); setNotice(null);
+    setBusy(true); setActionErr(null);
     try {
       await api.post(`/commercial-packages/${disabling.package_id}/active`, { active: false, reason, password });
-      const msg = `${disabling.name || disabling.code} is no longer offered to clients. Anyone already online keeps what they have.`;
-      setNotice(msg); toast.success("Package disabled", msg);
+      toast.success("Package disabled", `${disabling.name || disabling.code} is no longer offered to clients. Anyone already online keeps what they have.`);
       setDisabling(null);
       await load();
-    } catch (e) { setActionErr(e); }
+    } catch (e) {
+      if (guard(e)) return;
+      setActionErr(e instanceof ApiError && e.code === "reauth_required"
+        ? new Error("That password is not correct. The package is still offered.")
+        : e);
+    }
     finally { setBusy(false); }
   }
 
@@ -371,7 +383,6 @@ export function PackagesTab({
           hint="Speed and allowances" />
       </StatGrid>
 
-      {notice && <Callout tone="success">{notice}</Callout>}
       {stayWarnings.length > 0 && (
         <div data-testid="stay-length-warnings">
           <Callout tone="warning" title="Overlapping stay lengths">
@@ -402,7 +413,10 @@ export function PackagesTab({
           }
           search={<SearchInput value={q} onChange={setQ} placeholder="Search packages" label="Search packages by name" />}
         />
-        {rows === null ? (
+        {rows === null && loadErr ? (
+          <EmptyState size="sm" icon={<AlertTriangle />} title="The packages could not be loaded" hint={loadErr}
+            action={<Button size="sm" variant="secondary" onClick={() => void load()}><RefreshCw /> Try again</Button>} />
+        ) : rows === null ? (
           <SkeletonRows rows={4} cols={7} />
         ) : rows.length === 0 ? (
           <EmptyState size="sm" icon={<Package />} title="No internet packages yet"
@@ -451,14 +465,14 @@ export function PackagesTab({
                       {writable && (
                         <RowActions
                           subject={name}
-                          primary={{ label: "Edit", disabled: busy, onSelect: () => startEdit(p) }}
+                          primary={{ label: opening === p.package_id ? "Opening…" : "Edit", disabled: busy || opening !== null, onSelect: () => startEdit(p) }}
                           items={[
                             {
                               label: p.active ? "Disable" : "Enable", disabled: busy,
                               icon: p.active ? <Ban /> : <CheckCircle2 />,
                               onSelect: () => { setActionErr(null); if (p.active) setDisabling(p); else setEnabling(p); },
                             },
-                            { label: "Delete…", danger: true, icon: <Trash2 />, onSelect: () => setDeleting(p) },
+                            { label: "Delete…", danger: true, icon: <Trash2 />, disabled: busy, onSelect: () => setDeleting(p) },
                           ]}
                         />
                       )}
@@ -490,7 +504,7 @@ export function PackagesTab({
                     ) : (
                       <Badge dot>Disabled</Badge>
                     )}
-                    {p.package_type && <Badge tone="neutral">{p.package_type.replace(/_/g, " ").toLowerCase()}</Badge>}
+                    {p.package_type && <Badge tone="neutral">{sentenceWords(p.package_type)}</Badge>}
                   </>}
                 />
                 <SheetBody>
@@ -579,7 +593,7 @@ export function PackagesTab({
                 </SheetBody>
                 {writable && (
                   <SheetFooter>
-                    <Button variant="ghost" className="me-auto text-destructive"
+                    <Button variant="ghost" className="me-auto text-destructive" disabled={busy}
                       onClick={() => { setDeleting(p); }}>
                       <Trash2 /> Delete…
                     </Button>
@@ -587,7 +601,9 @@ export function PackagesTab({
                       onClick={() => { setActionErr(null); if (p.active) setDisabling(p); else setEnabling(p); }}>
                       {p.active ? <><Ban /> Disable</> : <><CheckCircle2 /> Enable</>}
                     </Button>
-                    <Button disabled={busy} onClick={() => startEdit(p)}><Pencil /> Edit</Button>
+                    <Button disabled={busy || opening !== null} onClick={() => startEdit(p)}>
+                      <Pencil /> {opening === p.package_id ? "Opening…" : "Edit"}
+                    </Button>
                   </SheetFooter>
                 )}
               </>
@@ -606,8 +622,7 @@ export function PackagesTab({
             <DialogDescription className="sr-only">What the client is offered on the portal, and the service plan it hands out.</DialogDescription>
           </DialogHeader>
           <DialogBody className="space-y-4">
-            <ErrorBanner err={formErr} />
-            <PackageForm mode="add" plans={plans} busy={busy} onSave={(v) => save(v, "add")} onCancel={() => setAdding(false)}
+            <PackageForm mode="add" plans={plans} busy={busy} submitError={formErr} onSave={(v) => save(v, "add")} onCancel={() => setAdding(false)}
               modules={modules} roomChargeInterfaces={roomIfaces} clientGroups={clientGroups} cardAccount={cardAccount} />
           </DialogBody>
         </DialogContent>
@@ -626,9 +641,8 @@ export function PackagesTab({
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="space-y-4">
-            <ErrorBanner err={formErr} />
             {editing && (
-              <PackageForm mode="edit" initial={editing} plans={plans} busy={busy} onSave={(v) => save(v, "edit")}
+              <PackageForm mode="edit" initial={editing} plans={plans} busy={busy} submitError={formErr} onSave={(v) => save(v, "edit")}
                 onCancel={() => setEditing(null)} modules={modules} roomChargeInterfaces={roomIfaces} clientGroups={clientGroups}
                 cardAccount={cardAccount} />
             )}
@@ -662,7 +676,7 @@ export function PackagesTab({
 
       <ConfirmDialog
         open={disabling !== null}
-        onOpenChange={(v) => !v && setDisabling(null)}
+        onOpenChange={(v) => !v && !busy && setDisabling(null)}
         title={`Stop offering ${disabling?.name || disabling?.code || "this package"}?`}
         description="Clients will stop being offered it immediately. Anyone already online keeps the access they were given, its history is kept, and it can be switched back on at any time."
         confirmLabel="Stop offering it"
@@ -686,8 +700,8 @@ export function PackagesTab({
           onDelete={async ({ reason, password }) => {
             const p = deleting;
             await deletePackage(p.package_id, reason, password);
-            const msg = `${p.name || p.code} and its saved versions were removed permanently.`;
-            setDeleting(null); setNotice(msg); toast.success("Package deleted", msg);
+            setDeleting(null);
+            toast.success("Package deleted", `${p.name || p.code} and its saved versions were removed permanently.`);
             await load();
           }}
           onDisableInstead={deleting.active ? () => {
