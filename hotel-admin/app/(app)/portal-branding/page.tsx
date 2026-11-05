@@ -1,10 +1,5 @@
 "use client";
 
-// One current configuration and one verb, "Save"; history is shown with Restore, never as drafts or versions.
-// Ordinary settings need no password, but adding, changing or clearing custom CSS/HTML does (ADVANCED_KEYS /
-// advancedChanged, mirrored on the server). Welcome and help lines are single fields, not per-language.
-// Safety is the server's: every change goes to /portal-branding/validate and the preview renders the sanitised fields.
-
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { api, ApiError, ListResp, PortalAsset, PORTAL_IMAGE_MAX_BYTES } from "@/lib/api";
 import { PageHeader, PageShell } from "@/components/ui/page";
@@ -24,7 +19,9 @@ import { useToast } from "@/components/ui/toast";
 import { canRead, canWrite } from "@/lib/roles";
 import { SIGNIN_SETTING_GROUPS, SigninSettingsGroup } from "@/components/devices/signin-limits-card";
 import { cn, errMsg } from "@/lib/utils";
-import { Upload, Trash2, Check, AlertTriangle } from "lucide-react";
+import { Upload, Trash2, Check, AlertTriangle, RefreshCw } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
+import Image from "next/image";
 import {
   LIMITS, brandingBase, templateById, validateDesign, type BrandingState, type DesignIssue, type RevisionSummary,
   type TemplateId, type ValidateResp,
@@ -40,7 +37,6 @@ import { ProfileBar } from "./profiles";
 import { PRIVACY_TEMPLATE } from "./privacy-template";
 import { useOperatorRoles } from "@/lib/whoami-context";
 
-// Room numbers are mentioned only where hospitality is licensed.
 const pageHelp = (hospitality: boolean) => (
   <>
     <HelpSection title="How this page works">
@@ -56,12 +52,12 @@ const pageHelp = (hospitality: boolean) => (
     <HelpSection title="The sections">
       <HelpList
         items={[
-          <><strong>Template</strong> — each card is your own sign-in page in that layout. Every sign-in method works the same in all of them; only the arrangement changes. Only the options the chosen layout uses are shown.</>,
-          <><strong>Brand</strong> — logo, background photograph, colours and type. Images are stored on this appliance and served from it, so they load for a client who has no internet yet.</>,
-          <><strong>Content</strong> — your own words, shown to every client in every language.</>,
-          <><strong>Sign-in page text</strong> and <strong>Languages</strong> — the wording clients read, and which languages they are offered.</>,
-          <><strong>Advanced HTML &amp; CSS</strong> — your own styling and markup, checked before it is accepted.</>,
-          <><strong>History</strong> — the most recent saves of this page; restoring one makes it what clients see again.</>,
+          <><strong>Template</strong>: each card is your own sign-in page in that layout. Every sign-in method works the same in all of them; only the arrangement changes. Only the options the chosen layout uses are shown.</>,
+          <><strong>Brand</strong>: logo, background photograph, colours and type. Images are stored on this appliance and served from it, so they load for a client who has no internet yet.</>,
+          <><strong>Content</strong>: your own words, shown to every client in every language.</>,
+          <><strong>Sign-in page text</strong> and <strong>Languages</strong>: the wording clients read, and which languages they are offered.</>,
+          <><strong>Advanced HTML &amp; CSS</strong>: your own styling and markup, checked before it is accepted.</>,
+          <><strong>History</strong>: the most recent saves of this page; restoring one makes it what clients see again.</>,
         ]}
       />
     </HelpSection>
@@ -75,7 +71,7 @@ const pageHelp = (hospitality: boolean) => (
     </HelpSection>
     <HelpSection title="Languages">
       <p>
-        The portal ships complete wording for its built-in languages — nothing to translate, just choose which
+        The portal ships complete wording for its built-in languages. There is nothing to translate; just choose which
         your clients are offered. A client&apos;s device language is detected automatically and matched against
         that list; English is always available and is what anything else falls back to.
       </p>
@@ -83,7 +79,7 @@ const pageHelp = (hospitality: boolean) => (
     <HelpSection title="Custom CSS and HTML">
       <HelpList
         items={[
-          <>Custom CSS is wrapped in its own cascade layer: your rules beat the portal&apos;s styling and template, but cannot hide the sign-in forms. !important is removed — it is not needed.</>,
+          <>Custom CSS is wrapped in its own cascade layer: your rules beat the portal&apos;s styling and template, but cannot hide the sign-in forms. !important is removed. It is not needed.</>,
           <>Custom HTML is shown below the sign-in (as content blocks in the Editorial layout): text, headings, lists, tables, links and images from your uploads or https.</>,
           <>Saving a change to either asks for your password, because this page collects {collectedDetails(hospitality)}.</>,
         ]}
@@ -92,7 +88,6 @@ const pageHelp = (hospitality: boolean) => (
   </>
 );
 
-/** Mirrors the portal's unbranded values so an unset colour well shows what a guest sees, not black. */
 const DEFAULTS = {
   brand_color: "#0f6b63",
   brand_color_dark: "#0b544e",
@@ -119,7 +114,6 @@ const IMAGE_LABEL: Record<ImageKey, string> = {
 
 export default function PortalSettingsPage() {
   const toast = useToast();
-  // Picks the wording for what the sign-in page collects; unknown module state fails closed to the neutral wording.
   const hospitality = moduleLicensed(useCapabilities(), "hospitality");
   const [profile, setProfile] = useState<string | null>(null);
   const base = brandingBase(profile);
@@ -130,6 +124,10 @@ export default function PortalSettingsPage() {
   const [section, setSection] = useState<Section>("template");
   const [wordingLang, setWordingLang] = useState<string | undefined>(undefined);
   const [loadErr, setLoadErr] = useState<unknown>(null);
+  const [loading, setLoading] = useState(false);
+  const [askDiscard, setAskDiscard] = useState(false);
+  const [deleteAsset, setDeleteAsset] = useState<PortalAsset | null>(null);
+  const [deletingAsset, setDeletingAsset] = useState(false);
   const [saveErr, setSaveErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState<ImageKey | null>(null);
@@ -145,6 +143,7 @@ export default function PortalSettingsPage() {
     setD((p) => ({ ...p, template_options: { ...(p.template_options ?? {}), [k]: v } }));
 
   const load = useCallback(async () => {
+    setLoading(true);
     try {
       const s = await api.get<BrandingState<Design>>(base);
       const live = s.design ?? {};
@@ -157,6 +156,7 @@ export default function PortalSettingsPage() {
         setAssets(a.data ?? []);
       } catch { setAssets([]); }
     } catch (e) { setLoadErr(e); }
+    finally { setLoading(false); }
   }, [base]);
 
   useEffect(() => {
@@ -166,8 +166,6 @@ export default function PortalSettingsPage() {
   const dirty = useMemo(() => saved !== null && JSON.stringify(d) !== JSON.stringify(saved), [d, saved]);
   const needsPassword = useMemo(() => saved !== null && advancedChanged(d, saved), [d, saved]);
 
-  // Unsaved work is autosaved quietly as a draft. The server validates drafts like a save and returns 400 for
-  // refused markup, so send only once the verdict on this exact design is clean (or unobtainable).
   const settle = useRef<ReturnType<typeof setTimeout> | null>(null);
   const designKey = useMemo(() => JSON.stringify(d), [d]);
   const [verdictFor, setVerdictFor] = useState<{ key: string; clean: boolean | null } | null>(null);
@@ -177,12 +175,11 @@ export default function PortalSettingsPage() {
     if (!verdictFor || verdictFor.key !== designKey || verdictFor.clean === false) return;
     if (settle.current) clearTimeout(settle.current);
     settle.current = setTimeout(() => {
-      api.put(`${base}/draft`, { design: d }).catch(() => { /* a lost keystroke cache is not an error to report */ });
+      api.put(`${base}/draft`, { design: d }).catch(() => undefined);
     }, 1500);
     return () => { if (settle.current) clearTimeout(settle.current); };
   }, [d, designKey, dirty, writable, verdictFor]);
 
-  // The server's verdict as the operator types (debounced): the same rules that accept or refuse the save.
   useEffect(() => {
     if (saved === null || !writable) return;
     let live = true;
@@ -211,11 +208,10 @@ export default function PortalSettingsPage() {
 
   const issues: DesignIssue[] = validation?.issues ?? [];
   const errorsFor = (field: string) => issues.filter((i) => i.field === field && i.severity === "error");
-  const fieldError = (field: string) => errorsFor(field).map((i) => i.message).join("; ") || undefined;
+  const fieldError = (field: string) => errorsFor(field).map((i) => sentence(i.message)).join("; ") || undefined;
   const blocking = issues.filter((i) => i.severity === "error");
-  // Warnings outside the Advanced section, which lists its own.
   const notes = issues.filter((i) => i.severity === "warning" && i.field !== "custom_css" && i.field !== "custom_html");
-  const fieldNote = (field: string) => notes.filter((i) => i.field === field).map((i) => i.message).join("; ") || undefined;
+  const fieldNote = (field: string) => notes.filter((i) => i.field === field).map((i) => sentence(i.message)).join("; ") || undefined;
 
   async function save(password?: string) {
     if (needsPassword && password === undefined) {
@@ -236,15 +232,14 @@ export default function PortalSettingsPage() {
       } else {
         setStepUp(false);
         setSaveErr(e);
-        toast.error("Not saved", errMsg(e));
       }
     } finally { setBusy(false); }
   }
 
   async function discard() {
     if (!saved) return;
-    setD(saved); setSaveErr(null);
-    try { await api.put(`${base}/draft`, { design: saved }); } catch { /* best effort */ }
+    setD(saved); setSaveErr(null); setAskDiscard(false);
+    try { await api.put(`${base}/draft`, { design: saved }); } catch { return; }
   }
 
   async function upload(field: ImageKey, file: File) {
@@ -254,17 +249,13 @@ export default function PortalSettingsPage() {
     }
     setUploading(field); setSaveErr(null);
     try {
-      // Use the API client, which knows where edged is; a hand-written URL once broke uploads (see api.upload).
       const a = await api.upload<PortalAsset>("/portal-assets", file);
-      // The appliance now scales and compresses the file in the background. Its final name is asked for by the id THIS upload
-      // returned, so two uploads in flight at once (a logo and a background) can never take each other's result.
       let final: { url: string } | undefined;
       for (let i = 0; i < 40; i++) {
         let r: { status: string; url?: string; reason?: string };
         try {
           r = await api.get<{ status: string; url?: string; reason?: string }>(`/portal-assets/${encodeURIComponent(a.name)}/resolved`);
         } catch (e) {
-          // The appliance forgets an upload's result if it restarts meanwhile; the image itself is stored, so say that.
           if (e instanceof ApiError && e.status === 404) break;
           throw e;
         }
@@ -278,7 +269,11 @@ export default function PortalSettingsPage() {
       const list = await api.get<ListResp<PortalAsset>>("/portal-assets");
       setAssets(list.data ?? []);
       if (!final) {
-        toast.error("Still optimising", "The image is being prepared. Check again in a moment.");
+        toast.toast({
+          tone: "info",
+          title: "Still being prepared",
+          description: "It will be listed under Previously uploaded once it is ready; choose it there to use it.",
+        });
         return;
       }
       set(field, final.url);
@@ -289,12 +284,15 @@ export default function PortalSettingsPage() {
   }
 
   async function removeUnusedAsset(name: string) {
+    setDeletingAsset(true);
     try {
       await api.del(`/portal-assets/${encodeURIComponent(name)}`);
       const list = await api.get<ListResp<PortalAsset>>("/portal-assets");
       setAssets(list.data ?? []);
+      setDeleteAsset(null);
       toast.success("Image deleted");
     } catch (e) { toast.error("Could not delete the image", errMsg(e)); }
+    finally { setDeletingAsset(false); }
   }
 
   if (!saved) {
@@ -302,7 +300,18 @@ export default function PortalSettingsPage() {
       <PageShell width="wide">
         <PageHeader title="Portal settings"
           description="Design the Wi-Fi sign-in page clients see." help={pageHelp(hospitality)} />
-        {loadErr ? <ErrorBanner err={loadErr} /> : (
+        {loadErr ? (
+          <EmptyState
+            icon={<AlertTriangle />}
+            title="Portal settings could not be loaded"
+            hint="The appliance did not return the sign-in page design. Nothing has been changed."
+            action={
+              <Button variant="secondary" disabled={loading} onClick={() => void load()}>
+                <RefreshCw className={cn(loading && "animate-spin motion-reduce:animate-none")} /> Try again
+              </Button>
+            }
+          />
+        ) : (
           <div className="space-y-3" aria-label="Loading portal settings">
             <Skeleton className="h-16 w-full" />
             <Skeleton className="h-96 w-full" />
@@ -345,7 +354,7 @@ export default function PortalSettingsPage() {
                   ? <Badge tone="warn" dot>Unsaved changes</Badge>
                   : <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><Check className="size-3.5" aria-hidden /> All changes saved</span>}
               </span>
-              <Button variant="secondary" disabled={!dirty || busy} onClick={discard}>Discard</Button>
+              <Button variant="secondary" disabled={!dirty || busy} onClick={() => setAskDiscard(true)}>Discard</Button>
               <Button disabled={!dirty || busy || blocking.length > 0} onClick={() => save()}>
                 {busy ? "Saving…" : "Save changes"}
               </Button>
@@ -367,7 +376,7 @@ export default function PortalSettingsPage() {
           { label: "Custom code", value: advancedCount ? (advancedCount === 2 ? "CSS and HTML" : d.custom_css?.trim() ? "CSS" : "HTML") : "None" },
           {
             label: "Checks",
-            value: !writable ? "—" : checking ? "Checking…" : blocking.length ? `${blocking.length} to fix` : "All clear",
+            value: !writable ? "Not checked" : checking ? "Checking…" : blocking.length ? `${blocking.length} to fix` : "All clear",
             tone: !writable || checking ? undefined : blocking.length ? "err" : "ok",
           },
         ]}
@@ -382,7 +391,7 @@ export default function PortalSettingsPage() {
       {blocking.length > 0 && (
         <Callout tone="danger" title="Fix these before saving">
           <ul className="list-disc space-y-0.5 ps-4">
-            {blocking.slice(0, 5).map((i, n) => <li key={n}>{fieldName(i.field)}: {i.message}</li>)}
+            {blocking.slice(0, 5).map((i, n) => <li key={n}>{issueLine(i)}</li>)}
             {blocking.length > 5 && <li>and {blocking.length - 5} more</li>}
           </ul>
           {draftBlocked && (
@@ -393,7 +402,7 @@ export default function PortalSettingsPage() {
       {notes.length > 0 && blocking.length === 0 && (
         <Callout tone="warning" title="Worth knowing before you save">
           <ul className="list-disc space-y-0.5 ps-4">
-            {notes.map((i, n) => <li key={n}>{fieldName(i.field)}: {i.message}</li>)}
+            {notes.map((i, n) => <li key={n}>{issueLine(i)}</li>)}
           </ul>
         </Callout>
       )}
@@ -401,9 +410,7 @@ export default function PortalSettingsPage() {
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(20rem,0.7fr)]">
         <div className="min-w-0 space-y-5">
-        {/* The tablist is entered at its selected tab (roving tabIndex); jsx-a11y reads the container role as a control. */}
-        {/* eslint-disable-next-line jsx-a11y/interactive-supports-focus */}
-        <div role="tablist" aria-label="Portal settings sections" aria-orientation="horizontal"
+        <div role="tablist" tabIndex={-1} aria-label="Portal settings sections" aria-orientation="horizontal"
           onKeyDown={(e) => {
             const i = SECTIONS.findIndex((x) => x.id === section);
             const step = e.key === "ArrowDown" || e.key === "ArrowRight" ? 1 : e.key === "ArrowUp" || e.key === "ArrowLeft" ? -1 : 0;
@@ -473,7 +480,7 @@ export default function PortalSettingsPage() {
                       onPick={(f) => upload("hero_image_url", f)} onClear={() => set("hero_image_url", "")} />
                   )}
                   {tpl.options.includes("overlay") && (
-                    <Field label={`Photo darkening — ${opts.overlay ?? 35}%`}
+                    <Field label={`Photo darkening: ${opts.overlay ?? 35}%`}
                       hint="Darkens the photograph so the white headline over it stays readable.">
                       <input type="range" min={0} max={90} step={5} value={opts.overlay ?? 35} disabled={!writable}
                         onChange={(e) => setOpt("overlay", Number(e.target.value))}
@@ -553,15 +560,21 @@ export default function PortalSettingsPage() {
                       <p className="mb-2 text-xs text-muted-foreground">Not used by the current settings.</p>
                       <ul className="flex flex-wrap gap-3">
                         {unused.map((a) => (
-                          <li key={a.name} className="flex items-center gap-2 rounded-md border border-border p-2">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={assetSrc(a.url)} alt="" className="h-10 w-16 rounded object-contain" />
+                          <li key={a.name} className="flex flex-wrap items-center gap-2 rounded-md border border-border p-2">
+                            <AssetThumb src={assetSrc(a.url)} />
                             <span className="text-xs text-muted-foreground">{Math.round(a.size_bytes / 1024)} KB</span>
                             {writable && (
-                              <Button size="icon-sm" variant="ghost"
-                                onClick={() => removeUnusedAsset(a.name)} aria-label={`Delete ${a.name}`}>
-                                <Trash2 />
-                              </Button>
+                              <>
+                                <Button size="sm" variant="ghost" onClick={() => set("logo_url", a.url)}>Use as logo</Button>
+                                <Button size="sm" variant="ghost" onClick={() => set("background_url", a.url)}>Use as background</Button>
+                                {tpl.options.includes("hero") && (
+                                  <Button size="sm" variant="ghost" onClick={() => set("hero_image_url", a.url)}>Use as hero photograph</Button>
+                                )}
+                                <Button size="icon-sm" variant="ghost"
+                                  onClick={() => setDeleteAsset(a)} aria-label={`Delete ${a.name}`}>
+                                  <Trash2 />
+                                </Button>
+                              </>
                             )}
                           </li>
                         ))}
@@ -621,9 +634,9 @@ export default function PortalSettingsPage() {
                     onChange={(e) => set("hotel_name", e.target.value)} placeholder="Semantics Demo Site" />
                 </Field>
                 <Field label="Welcome line" error={fieldError("welcome_text")}
-                  hint={`One short sentence under the site name — the headline in the photographic layouts. Leave empty to show nothing. ${(d.welcome_text ?? "").length}/${LIMITS.welcomeText}`}>
+                  hint={`One short sentence under the site name; the headline in the photographic layouts. Leave empty to show nothing. ${(d.welcome_text ?? "").length}/${LIMITS.welcomeText}`}>
                   <Input value={d.welcome_text ?? ""} disabled={!writable} maxLength={LIMITS.welcomeText}
-                    onChange={(e) => set("welcome_text", e.target.value)} placeholder="Welcome — connect to our Wi-Fi" />
+                    onChange={(e) => set("welcome_text", e.target.value)} placeholder="Welcome. Connect to our Wi-Fi" />
                 </Field>
                 <Field label="Help line" error={fieldError("help_text")}
                   hint={`Shown below the sign-in, for clients who cannot get on. ${(d.help_text ?? "").length}/${LIMITS.helpText}`}>
@@ -713,7 +726,46 @@ export default function PortalSettingsPage() {
         requirePassword
         onConfirm={({ password }) => save(password)}
       />
+
+      <ConfirmDialog
+        open={askDiscard}
+        onOpenChange={(o) => { if (!o) setAskDiscard(false); }}
+        title="Discard the changes you made?"
+        description="The design goes back to what clients see now. Your unsaved changes cannot be brought back."
+        confirmLabel="Discard changes"
+        confirmVariant="danger"
+        onConfirm={() => discard()}
+      />
+
+      <ConfirmDialog
+        open={deleteAsset !== null}
+        onOpenChange={(o) => { if (!o) setDeleteAsset(null); }}
+        title="Delete this image?"
+        description="It is removed from this appliance and cannot be brought back. Upload it again if you need it later."
+        confirmLabel="Delete image"
+        confirmVariant="danger"
+        busy={deletingAsset}
+        onConfirm={() => (deleteAsset ? removeUnusedAsset(deleteAsset.name) : undefined)}
+      />
     </PageShell>
+  );
+}
+
+function sentence(m: string) {
+  const t = m.trim();
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) : t;
+}
+
+function issueLine(i: DesignIssue) {
+  const name = fieldName(i.field);
+  return i.message.toLowerCase().includes(name.toLowerCase()) ? sentence(i.message) : `${name}: ${sentence(i.message)}`;
+}
+
+function AssetThumb({ src }: { src?: string }) {
+  return (
+    <span className="relative flex h-10 w-16 items-center justify-center overflow-hidden rounded">
+      {src ? <Image src={src} alt="" fill unoptimized sizes="4rem" className="object-contain" /> : null}
+    </span>
   );
 }
 
@@ -741,7 +793,6 @@ function OptionRow({ label, hint, children }: { label: string; hint?: string; ch
   );
 }
 
-/** WCAG AA asks 4.5:1 for body text; warns rather than refuses since the colours are the hotel's. */
 function ContrastNote({ label, ratio }: { label: string; ratio: number | null }) {
   if (ratio === null) return null;
   const ok = ratio >= 4.5;
@@ -751,7 +802,7 @@ function ContrastNote({ label, ratio }: { label: string; ratio: number | null })
       ok ? "text-muted-foreground" : "rounded-md border border-warning/30 bg-warning-subtle px-3 py-2 text-warning-subtle-foreground",
     )}>
       {ok ? <Check className="mt-px size-3.5 shrink-0 text-success" aria-hidden /> : <AlertTriangle className="mt-px size-3.5 shrink-0" aria-hidden />}
-      {label}: {ratio.toFixed(1)}:1{ok ? "" : " — below the 4.5:1 many clients need to read it comfortably. Choose a darker colour."}
+      {label}: {ratio.toFixed(1)}:1{ok ? "" : ". That is below the 4.5:1 many clients need to read it comfortably. Choose a darker colour."}
     </p>
   );
 }
@@ -760,7 +811,6 @@ function ColorField({ label, help, value, fallback, disabled, error, onChange }:
   label: string; help: string; value?: string; fallback: string; disabled?: boolean; error?: string;
   onChange: (v: string) => void;
 }) {
-  // Two controls for one value, so the label binds to the well and the text field names itself (Field binds one control).
   const id = useId();
   return (
     <div className="min-w-0">
@@ -779,7 +829,6 @@ function ColorField({ label, help, value, fallback, disabled, error, onChange }:
   );
 }
 
-/** Reads the image back through the operator API: an /assets/ path resolves to nothing from the admin origin. */
 function ImageField({ label, help, src, busy, writable, wide, error, onPick, onClear }: {
   label: string; help: string; src?: string; busy: boolean; writable: boolean; wide?: boolean; error?: string;
   onPick: (f: File) => void; onClear: () => void;
@@ -791,13 +840,11 @@ function ImageField({ label, help, src, busy, writable, wide, error, onPick, onC
       <div className="flex flex-wrap items-center gap-3">
         <div className={cn("flex items-center justify-center overflow-hidden rounded-lg border border-border bg-surface", wide ? "h-24 w-44" : "h-20 w-32")}>
           {src
-            // eslint-disable-next-line @next/next/no-img-element
-            ? <img src={src} alt={`${label} currently set`} className="h-full w-full object-contain" />
-            : <span className="px-2 text-center text-2xs text-muted-foreground">Nothing set — the portal uses its own default</span>}
+            ? <span className="relative h-full w-full"><Image src={src} alt={`${label} currently set`} fill unoptimized sizes="11rem" className="object-contain" /></span>
+            : <span className="px-2 text-center text-2xs text-muted-foreground">Nothing set. The portal uses its own default.</span>}
         </div>
         {writable && (
           <div className="flex flex-col gap-2">
-            {/* The file input is visually hidden, not display:none, so the upload stays keyboard-reachable. */}
             <label className={cn(
               buttonVariants({ variant: "secondary", size: "sm" }),
               "cursor-pointer has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-offset-2",

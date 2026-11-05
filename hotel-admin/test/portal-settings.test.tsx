@@ -156,6 +156,7 @@ describe("the page speaks a hotel's language, not a release manager's", () => {
     open(/Content/);
     fireEvent.change(screen.getByLabelText(/Site name/i), { target: { value: "Something else" } });
     fireEvent.click(screen.getByRole("button", { name: /Discard/i }));
+    fireEvent.click(await screen.findByRole("button", { name: "Discard changes" }));
     await waitFor(() =>
       expect((screen.getByLabelText(/Site name/i) as HTMLInputElement).value).toBe("Semantics Demo"));
   });
