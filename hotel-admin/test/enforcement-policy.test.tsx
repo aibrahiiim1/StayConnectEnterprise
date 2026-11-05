@@ -139,6 +139,18 @@ describe("enforcement policy page", () => {
     expect((screen.getByLabelText(/Cut-off delay/) as HTMLInputElement).value).toBe("9");
   });
 
+  it("a clean page that lands on an earlier visit's guard entry lets Back carry on", async () => {
+    serve(doc(), ["site_admin"]);
+    window.history.replaceState({ leaveGuard: true }, "", window.location.href);
+    const back = vi.spyOn(window.history, "back").mockImplementation(() => {});
+    await renderPage();
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    expect(back).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Leave without saving?")).toBeNull();
+    back.mockRestore();
+    window.history.replaceState(null, "", window.location.href);
+  });
+
   it("keeps one history guard across edit, revert and edit again", async () => {
     serve(doc(), ["site_admin"]);
     const push = vi.spyOn(window.history, "pushState");

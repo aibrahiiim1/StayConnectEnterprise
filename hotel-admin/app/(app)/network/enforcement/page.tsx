@@ -87,6 +87,8 @@ function useLeaveGuard(dirty: boolean) {
     }
   }, [dirty]);
   useEffect(() => {
+    // Back from another screen can land on the guard entry left by an earlier visit: recognised, so a clean Back consumes it.
+    if ((window.history.state as { leaveGuard?: boolean } | null)?.leaveGuard) guarded.current = true;
     const onPop = () => {
       if (leaving.current || !guarded.current) return;
       if (!dirtyNow.current) {
