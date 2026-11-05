@@ -4,7 +4,7 @@
 // singleton on the appliance; every change needs a reason and is kept in the history below. The server holds the
 // bounds and sends them with the values.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
 import { canWrite } from "@/lib/roles";
@@ -67,9 +67,25 @@ function secondsWords(n: number): string {
   return [part(m, "minute"), part(r, "second")].filter(Boolean).join(" ");
 }
 
+// The browser's Back/Forward: neither a click nor beforeunload, so a guard entry is kept on top of history while there are changes.
+const HISTORY_BACK = "history:back";
+
 function useLeaveGuard(dirty: boolean) {
   const router = useRouter();
   const [target, setTarget] = useState<string | null>(null);
+  const leaving = useRef(false);
+  useEffect(() => {
+    if (!dirty) return;
+    const guard = () => window.history.pushState({ ...window.history.state, leaveGuard: true }, "", window.location.href);
+    guard();
+    const onPop = () => {
+      if (leaving.current) return;
+      guard();
+      setTarget(HISTORY_BACK);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [dirty]);
   useEffect(() => {
     if (!dirty) return;
     const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
@@ -97,7 +113,15 @@ function useLeaveGuard(dirty: boolean) {
       description="The protection settings you changed here have not been saved."
       confirmLabel="Discard and leave"
       confirmVariant="danger"
-      onConfirm={() => { const t = target; setTarget(null); if (t) router.push(t); }}
+      onConfirm={() => {
+        const t = target;
+        setTarget(null);
+        if (t === HISTORY_BACK) {
+          // Past the guard entry and the page itself, to where Back was going.
+          leaving.current = true;
+          window.history.go(-2);
+        } else if (t) router.push(t);
+      }}
     />
   );
 }

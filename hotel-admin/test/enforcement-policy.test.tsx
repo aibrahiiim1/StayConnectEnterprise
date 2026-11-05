@@ -127,6 +127,18 @@ describe("enforcement policy page", () => {
     expect(patch).not.toHaveBeenCalled();
   });
 
+  it("asks before the browser's Back leaves unsaved changes", async () => {
+    serve(doc(), ["site_admin"]);
+    const user = userEvent.setup();
+    await renderPage();
+    const cutoff = screen.getByLabelText(/Cut-off delay/);
+    await user.clear(cutoff);
+    await user.type(cutoff, "9");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    expect(await screen.findByText("Leave without saving?")).toBeTruthy();
+    expect((screen.getByLabelText(/Cut-off delay/) as HTMLInputElement).value).toBe("9");
+  });
+
   it("turning private denial off needs the confirmation text", async () => {
     serve(doc(), ["hotel_it_manager"]);
     patch.mockResolvedValue(doc({ policy: { private_deny_enabled: false, config_version: 2 } }));
