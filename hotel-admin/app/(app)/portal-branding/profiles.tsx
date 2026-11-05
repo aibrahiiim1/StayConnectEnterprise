@@ -1,14 +1,8 @@
 "use client";
 
-// Portal designs and where each one is shown.
-//
-// A design is appearance and wording only. The site default is the design every network shows unless it has been given one of its own (a "profile"); a profile can be
-// shown on any number of networks. Which sign-in methods a network offers, which PMS room sign-in uses and which packages apply are set elsewhere and are not touched here.
-// Only networks that are serving clients are offered a choice; switched-off and archived networks keep their assignment and are listed apart, read-only.
-
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, Layers, Pencil } from "lucide-react";
+import { ArrowRight, Layers, Pencil, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,7 +17,6 @@ import { SERVICE_STATE_WORDS, splitByState, topologyWords, type ServiceState } f
 type Profile = { id: string; name: string; network_ids: string[]; is_default: boolean };
 type DesignNetwork = {
   id: string; name: string; service_state: ServiceState; network_type: string; vlan_id?: number; ssid_label?: string; parent_interface: string;
-  /** "default" or a profile id. */
   profile_id: string;
 };
 type ProfileList = { default: Profile; profiles: Profile[]; networks?: DesignNetwork[] };
@@ -44,17 +37,23 @@ export function ProfileBar({ profile, onSelect, writable, dirty }: {
   const [copyFrom, setCopyFrom] = useState(DEFAULT);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<unknown>(null);
-  // Choices not yet applied: network id -> design id. Nothing reaches clients until Apply.
   const [pending, setPending] = useState<Record<string, string>>({});
   const [showOthers, setShowOthers] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [reading, setReading] = useState(false);
 
   const reload = useCallback(async () => {
+    setReading(true);
     try {
       const r = await api.get<ProfileList>(BASE);
       if (!r || !Array.isArray(r.profiles) || !r.default) throw new Error("unexpected answer");
       setList(r);
+      setFailed(false);
     } catch {
       setList(null);
+      setFailed(true);
+    } finally {
+      setReading(false);
     }
   }, []);
   useEffect(() => { void reload(); }, [reload]);
@@ -63,7 +62,17 @@ export function ProfileBar({ profile, onSelect, writable, dirty }: {
   const groups = useMemo(() => splitByState(networks), [networks]);
   const designName = useCallback((id: string) => id === DEFAULT ? "Site default" : list?.profiles.find((p) => p.id === id)?.name ?? "a deleted design", [list]);
 
-  if (!list) return null;
+  if (!list) {
+    if (!failed) return null;
+    return (
+      <Callout tone="warning" title="The designs per network could not be read">
+        <p>Some client networks may show a design of their own. What you edit here is the site default.</p>
+        <Button className="mt-2" size="sm" variant="secondary" disabled={reading} onClick={() => void reload()}>
+          <RefreshCw aria-hidden /> Try again
+        </Button>
+      </Callout>
+    );
+  }
   const current = list.profiles.find((p) => p.id === profile) ?? null;
   const editingId = current ? current.id : DEFAULT;
   const changes = Object.entries(pending).filter(([nid, to]) => networks.find((n) => n.id === nid)?.profile_id !== to);
