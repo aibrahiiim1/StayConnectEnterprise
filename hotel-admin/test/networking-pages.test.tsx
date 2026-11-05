@@ -300,6 +300,25 @@ describe("Config history", () => {
     expect(await within(sheet).findByText("gateway_reachable")).toBeTruthy();
     expect(within(sheet).getByText("Health checks")).toBeTruthy();
   });
+
+  it("says inside the details sheet why Keep this change was refused", async () => {
+    route({
+      "/auth/whoami": IT,
+      "/network/revisions": list([{ id: "r4", seq: 4, state: "pending_confirmation", summary: "apply from client networks" }]),
+      "/network/revisions/r4": { id: "r4", seq: 4, state: "pending_confirmation", validation: { ok: true }, events: [], health: [] },
+    });
+    post.mockRejectedValue(new Error("the packages on this network could not be preserved"));
+    render(<RevisionsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Details for revision 4" }));
+    const sheet = await screen.findByRole("dialog");
+    fireEvent.click(await within(sheet).findByRole("button", { name: "Keep this change" }));
+    const confirm = (await screen.findAllByRole("dialog")).find((d) => within(d).queryByLabelText(/Confirm your password/))!;
+    fireEvent.change(within(confirm).getByLabelText(/Confirm your password/), { target: { value: "right" } });
+    fireEvent.click(within(confirm).getByRole("button", { name: /Keep/ }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith("/network/revisions/r4/confirm", { password: "right" }));
+    const stillOpen = await screen.findByRole("dialog");
+    expect(await within(stillOpen).findByText(/could not be preserved/)).toBeTruthy();
+  });
 });
 
 describe("WAN / LAN settings", () => {

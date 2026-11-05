@@ -360,6 +360,8 @@ export default function RevisionsPage() {
       >
         {open && (
           <div className="space-y-6">
+            {/* Keep and Roll back run from here, so their failure is said here: the page banner sits behind the drawer. */}
+            {err && <ErrorBanner err={err} className="mb-0" />}
             <DescriptionList
               items={[
                 { label: "State", value: revisionStateLabel(open.state) },
