@@ -23,6 +23,14 @@ var ErrGrantIncomplete = errors.New("authctx: incomplete or invalid PMS grant")
 
 const nilUUID = "00000000-0000-0000-0000-000000000000"
 
+// AfterCheckoutLive is true for a stay st that holds an ACTIVE, in-window After Check-out entitlement: the one condition under
+// which a CHECKED_OUT stay may sign in again (0209). Room sign-in's probe, this package's consume and issue_or_return_pms_context
+// share it word for word.
+const AfterCheckoutLive = `EXISTS (SELECT 1 FROM iam_v2.entitlements e
+	                           WHERE e.tenant_id = st.tenant_id AND e.site_id = st.site_id AND e.stay_id = st.id
+	                             AND e.status = 'ACTIVE' AND e.end_mode = 'GRACE_AFTER_CHECKOUT'
+	                             AND (e.window_ends_at IS NULL OR e.window_ends_at > now()))`
+
 // Reports whether s is a canonical UUID and not the nil UUID; validating in Go returns a typed sanitized error BEFORE any SQL, never a raw PostgreSQL cast error.
 func validPinUUID(s string) bool {
 	if len(s) != 36 || s == nilUUID {
@@ -335,16 +343,19 @@ func (s *Store) ConsumeTx(ctx context.Context, tx pgx.Tx, id string, p Presenter
 			  -- is taken after that lock, so a Checkout that committed while we waited is what it reads,
 			  -- and the consume is refused. A STABLE function reading iam_v2.stays could answer from an
 			  -- older snapshot and let a departed guest through.
-			  AND st.status='IN_HOUSE'
-			  AND st.occupancy_revision_id = ac.authentication_interface_revision_id
-			  AND st.occupancy_evidence_at IS NOT NULL
-			  AND st.occupancy_evidence_version > 0
-			  AND st.occupancy_clock_suspect IS NOT TRUE
-			  -- Feed health and the freshness ceiling are the shared rule, re-evaluated at consume against the
-			  -- SAME Revision the context authenticated under and the locked tuple's own evidence timestamp.
-			  -- A feed that has gone away between issue and consume stops the consumption here.
-			  AND iam_v2.p3_feed_authorizes(st.tenant_id, st.site_id, st.pms_interface_id,
-			                                ac.authentication_interface_revision_id, st.occupancy_evidence_at)
+			  AND ((st.status='IN_HOUSE'
+			        AND st.occupancy_revision_id = ac.authentication_interface_revision_id
+			        AND st.occupancy_evidence_at IS NOT NULL
+			        AND st.occupancy_evidence_version > 0
+			        AND st.occupancy_clock_suspect IS NOT TRUE
+			        -- Feed health and the freshness ceiling are the shared rule, re-evaluated at consume against the
+			        -- SAME Revision the context authenticated under and the locked tuple's own evidence timestamp.
+			        -- A feed that has gone away between issue and consume stops the consumption here.
+			        AND iam_v2.p3_feed_authorizes(st.tenant_id, st.site_id, st.pms_interface_id,
+			                                      ac.authentication_interface_revision_id, st.occupancy_evidence_at))
+			       -- A departed stay while its After Check-out Access is valid, as issue_or_return_pms_context (0209): the
+			       -- context can only join that entitlement, and authorize_entitlement_device decides which devices may.
+			       OR (st.status='CHECKED_OUT' AND `+AfterCheckoutLive+`))
 			`, id).Scan(&one)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {

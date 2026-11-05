@@ -41,6 +41,16 @@ only**: no surname, first name, OTP or other factor. The sign-in is `POST /auth/
 **grants nothing**: it verifies, then lets the device back onto the stay's Entitlement. Correct credentials never authorise a
 device that lacks the lineage.
 
+**Reconnection through room sign-in (Product Owner, 2026-11-05; migration 0209).** The ordinary room sign-in also lets a returning
+device back, with the room number and the detail the site's room sign-in mode accepts (surname, first name or reservation number).
+A `CHECKED_OUT` stay is eligible there only while it holds an `ACTIVE`, in-window `GRACE_AFTER_CHECKOUT` Entitlement (the same
+condition in `iam_v2.issue_or_return_pms_context`, the context consume in `internal/authctx` and scd's room probe). Such a sign-in
+can only **join** that Entitlement: nothing is offered or bought, and the duration, quota and device list are unchanged. Which
+devices may join is decided by `iam_v2.authorize_entitlement_device` alone: a device the stay did not use before check-out is
+refused and recorded as `AFTER_CHECKOUT_NEW_DEVICE_REJECTED`. Once the After Check-out Access has ended the stay is refused as
+`STAY_NOT_ELIGIBLE`, as before. Before 0209 room sign-in refused every departed stay, and the post-stay route was not enabled on
+the appliance, so no device could reconnect.
+
 **No financial posting after checkout.** The Stay is `CHECKED_OUT` with `posting_allowed = false`; the After Check-out
 Entitlement is zero-price (`amount_minor = 0`, settlement `NOT_REQUIRED`). Local-first operation and licensing enforcement are
 unchanged: the sign-in answers to the same licence decision as every guest method (`pmsLicenseRefusal`), uses the appliance's last
