@@ -9,7 +9,7 @@ import {
 } from "@/lib/api";
 import { SectionCard } from "@/components/ui/card";
 import { Button, LinkButton } from "@/components/ui/button";
-import { Field, FieldGrid, Input, InputGroup, Select } from "@/components/ui/input";
+import { Field, FieldGrid, Input, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner, Callout } from "@/components/ui/error-banner";
@@ -18,16 +18,18 @@ import { DescriptionList } from "@/components/ui/data";
 import { MonoId, Skeleton, SkeletonRows } from "@/components/ui/misc";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
-import { ArrowLeft, Plus, Save, X, Pin, Shuffle } from "lucide-react";
+import { ArrowLeft, Network, Plus, RefreshCw, Save, X, Pin, Shuffle } from "lucide-react";
 import { HelpList, HelpSection } from "@/components/help";
 import { errMsg } from "@/lib/utils";
 import { SUBNET_SIZE_HINT, subnetSizeProblem } from "@/lib/network-subnet";
 import { ReplaceTopologyDialog, type ReplaceResult } from "@/components/network/replace-topology-dialog";
-import { DiagnosticsPanel } from "@/components/network/status";
+import { DiagnosticsPanel, NetworkStatusBadge } from "@/components/network/status";
+import type { NetworkOverview, OverviewNetwork } from "@/lib/api/network-overview";
+import { POLICY_WORDS, STATE_WORDS } from "@/lib/api/pms-routing";
 import { SignInCard } from "@/components/network/signin-card";
 import {
   AddReservationDialog, EditReservationDialog, RemoveReservationDialog, ReservationTable, SwitchRow,
-  DhcpModeBadge, EnabledBadge, networkTypeLabel, useNetworkAccess,
+  DhcpModeBadge, EnabledBadge, LeaseFields, leaseProblems, networkTypeLabel, plural, useLeaveGuard, useNetworkAccess,
 } from "@/components/network/shared";
 
 const FORM_ID = "guest-network-settings";
@@ -39,6 +41,9 @@ export default function EditGuestNetworkPage() {
   const [status, setStatus] = useState<GuestNetworkStatus | null>(null);
   const [reservations, setReservations] = useState<Reservation[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [live, setLive] = useState<OverviewNetwork | null>(null);
+  const [baseline, setBaseline] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
   const [replacing, setReplacing] = useState(false);
@@ -54,9 +59,7 @@ export default function EditGuestNetworkPage() {
   const [dnsMode, setDnsMode] = useState("appliance");
   const [dnsServers, setDnsServers] = useState("");
   const [domainName, setDomainName] = useState("");
-  const [leaseDefault, setLeaseDefault] = useState("");
-  const [leaseMin, setLeaseMin] = useState("");
-  const [leaseMax, setLeaseMax] = useState("");
+  const [lease, setLease] = useState({ def: "", min: "", max: "" });
   const [captivePortal, setCaptivePortal] = useState(true);
   const [internetAccess, setInternetAccess] = useState(true);
   const [nat, setNat] = useState(true);
@@ -77,14 +80,26 @@ export default function EditGuestNetworkPage() {
     setDnsMode(g.dns_mode);
     setDnsServers((g.dns_servers ?? []).join(", "));
     setDomainName(g.domain_name);
-    setLeaseDefault(String(g.lease_default_seconds));
-    setLeaseMin(String(g.lease_min_seconds));
-    setLeaseMax(String(g.lease_max_seconds));
+    setLease({ def: String(g.lease_default_seconds), min: String(g.lease_min_seconds), max: String(g.lease_max_seconds) });
     setCaptivePortal(g.captive_portal_enabled);
     setInternetAccess(g.internet_access_enabled);
     setNat(g.nat_enabled);
     setClientIsolation(g.client_isolation_enabled);
+    setBaseline(null);
   }
+
+  const formState = JSON.stringify([
+    name, description, ssidLabel, subnetCidr, gatewayIp, pools, dnsMode, dnsServers, domainName, lease,
+    captivePortal, internetAccess, nat, clientIsolation,
+  ]);
+  useEffect(() => {
+    if (net && baseline === null) setBaseline(formState);
+  }, [net, baseline, formState]);
+  const dirty = baseline !== null && baseline !== formState;
+  const leaveDialog = useLeaveGuard(writable && dirty);
+  const leaseErr = leaseProblems(lease);
+  const subnetErr = subnetSizeProblem(subnetCidr);
+  const blocked = Object.keys(leaseErr).length > 0 || !!subnetErr || !name.trim() || !gatewayIp.trim();
 
   async function loadReservations() {
     try {
@@ -96,17 +111,27 @@ export default function EditGuestNetworkPage() {
   async function loadStatus() {
     try { setStatus(await api.get<GuestNetworkStatus>(`/network/guest-networks/${id}/status`)); }
     catch { /* status optional */ }
+    try {
+      const o = await api.get<NetworkOverview>("/network/overview");
+      setLive((o.networks ?? []).find((n) => n.id === id) ?? null);
+    } catch { setLive(null); }
+  }
+
+  function loadNetwork() {
+    setLoadErr(null);
+    api.get<GuestNetwork>(`/network/guest-networks/${id}`).then(hydrate).catch((e) => setLoadErr(errMsg(e)));
   }
 
   useEffect(() => {
     if (!id) return;
-    api.get<GuestNetwork>(`/network/guest-networks/${id}`).then(hydrate).catch((e) => setErr(errMsg(e)));
+    loadNetwork();
     loadStatus();
     loadReservations();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   async function onSave() {
+    if (blocked) return;
     setBusy(true); setErr(null); setSaved(false);
     const body: GuestNetworkInput = {
       name: name.trim(),
@@ -118,9 +143,9 @@ export default function EditGuestNetworkPage() {
       dns_mode: dnsMode,
       dns_servers: dnsMode === "custom" ? dnsServers.split(",").map((s) => s.trim()).filter(Boolean) : undefined,
       domain_name: domainName.trim() || "guest.local",
-      lease_default_seconds: Number(leaseDefault) || 3600,
-      lease_min_seconds: Number(leaseMin) || 900,
-      lease_max_seconds: Number(leaseMax) || 7200,
+      lease_default_seconds: Number(lease.def),
+      lease_min_seconds: Number(lease.min),
+      lease_max_seconds: Number(lease.max),
       captive_portal_enabled: captivePortal,
       internet_access_enabled: internetAccess,
       nat_enabled: nat,
@@ -130,18 +155,20 @@ export default function EditGuestNetworkPage() {
     try {
       await api.put(`/network/guest-networks/${id}`, body);
       setSaved(true);
-      toast.success("Saved", "Apply changes from Client networks to put it live.");
+      setBaseline(formState);
     } catch (e) { setErr(errMsg(e)); }
     finally { setBusy(false); }
   }
 
   const ro = !writable;
   const enabled = status?.enabled ?? net?.enabled;
+  const statusBadge = live ? <NetworkStatusBadge status={live.status} reason={live.reason} /> : <EnabledBadge enabled={enabled} />;
   const saveButton = (
-    <Button type="submit" form={FORM_ID} disabled={busy}>
-      <Save /> {busy ? "Saving…" : "Save changes"}
+    <Button type="submit" form={FORM_ID} disabled={busy || !dirty || blocked}>
+      <Save /> {busy ? "Saving…" : dirty ? "Save changes" : "No changes to save"}
     </Button>
   );
+  const room = live?.room_sign_in;
 
   return (
     <PageShell>
@@ -153,10 +180,10 @@ export default function EditGuestNetworkPage() {
         meta={net && (
           <>
             <Badge tone={net.network_type === "vlan" ? "info" : "default"}>{networkTypeLabel(net)}</Badge>
-            <EnabledBadge enabled={enabled} />
+            {statusBadge}
           </>
         )}
-        description={net ? undefined : "Loading the network…"}
+        description={net || loadErr ? undefined : "Loading the network…"}
         helpTitle="Client network"
         help={
           <>
@@ -198,7 +225,7 @@ export default function EditGuestNetworkPage() {
 
       <ErrorBanner err={err} className="mb-0" />
 
-      {saved && (
+      {saved && !dirty && (
         <Callout tone="success" title="Saved — not applied yet">
           Clients are still on the previous settings.{" "}
           <Link href="/network" className="font-medium underline">Go to Client networks</Link> to validate and apply.
@@ -206,7 +233,14 @@ export default function EditGuestNetworkPage() {
       )}
 
       {!net ? (
-        err ? null : (
+        loadErr ? (
+          <EmptyState
+            icon={<Network />}
+            title="This client network could not be loaded"
+            hint={loadErr}
+            action={<Button variant="secondary" onClick={loadNetwork}><RefreshCw /> Try again</Button>}
+          />
+        ) : (
           <div className="space-y-4" aria-busy="true">
             <span className="sr-only">Loading</span>
             <Skeleton className="h-40 w-full" />
@@ -220,8 +254,8 @@ export default function EditGuestNetworkPage() {
               <p>
                 This network is still serving its clients. When you{" "}
                 <Link href="/network" className="font-medium underline">apply the configuration</Link> and confirm it, the
-                replacement takes over carrying {replaced.carries.pools} DHCP pool(s),{" "}
-                {replaced.carries.reservations} reservation(s) and {replaced.carries.pms_routes} PMS route(s).
+                replacement takes over carrying {plural(replaced.carries.pools, "DHCP pool")},{" "}
+                {plural(replaced.carries.reservations, "reservation")} and {plural(replaced.carries.pms_routes, "PMS route")}.
               </p>
               {!!replaced.packages?.length && (
                 <p className="mt-1">
@@ -255,8 +289,17 @@ export default function EditGuestNetworkPage() {
                 { label: "Parent interface", value: <span className="font-mono">{net.parent_interface}</span> },
                 { label: "Bridge", value: <span className="font-mono">{net.bridge_name}</span> },
                 { label: "Sign-in page URL", value: net.portal_url ? <span className="break-all font-mono">{net.portal_url}</span> : "—" },
-                { label: "Status", value: <EnabledBadge enabled={enabled} /> },
-                { label: "Devices connected", value: <span className="tabular">{String(status?.active_clients ?? "—")}</span> },
+                { label: "Devices connected", value: <span className="tabular">{String(live?.active_clients ?? status?.active_clients ?? "—")}</span> },
+                {
+                  label: "Room sign-in",
+                  value: (
+                    <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      {room ? <Badge tone={STATE_WORDS[room.state].tone} dot title={room.summary}>{STATE_WORDS[room.state].label}</Badge> : <span className="text-muted-foreground">Not known</span>}
+                      {room && <span className="text-xs text-muted-foreground">{POLICY_WORDS[room.policy]}</span>}
+                      <Link href="/pms-routing" className="text-xs font-medium text-primary underline-offset-2 hover:underline">Change in PMS routing</Link>
+                    </span>
+                  ),
+                },
                 { label: "DHCP", value: <DhcpModeBadge mode={net.dhcp_mode} /> },
                 { label: "Network ID", value: <MonoId value={net.id} title="Network ID" /> },
               ]}
@@ -348,17 +391,7 @@ export default function EditGuestNetworkPage() {
                   <Input value={dnsServers} onChange={(e) => setDnsServers(e.target.value)} disabled={ro} className="font-mono" />
                 </Field>
               )}
-              <FieldGrid cols={3}>
-                <Field label="Lease time">
-                  <InputGroup suffix="s"><Input type="number" value={leaseDefault} onChange={(e) => setLeaseDefault(e.target.value)} disabled={ro} /></InputGroup>
-                </Field>
-                <Field label="Shortest">
-                  <InputGroup suffix="s"><Input type="number" value={leaseMin} onChange={(e) => setLeaseMin(e.target.value)} disabled={ro} /></InputGroup>
-                </Field>
-                <Field label="Longest">
-                  <InputGroup suffix="s"><Input type="number" value={leaseMax} onChange={(e) => setLeaseMax(e.target.value)} disabled={ro} /></InputGroup>
-                </Field>
-              </FieldGrid>
+              <LeaseFields idPrefix="edit-lease" value={lease} onChange={setLease} problems={leaseErr} disabled={ro} />
             </SectionCard>
 
             <SectionCard title="Client access" bodyClassName="space-y-4" footer={writable ? saveButton : undefined}>
@@ -392,6 +425,7 @@ export default function EditGuestNetworkPage() {
         <>
           <AddReservationDialog open={adding} onOpenChange={setAdding} networkId={id} onSaved={() => { toast.success("Reservation added"); loadReservations(); }} />
           <EditReservationDialog reservation={editRes} onClose={() => setEditRes(null)} onSaved={() => { toast.success("Reservation saved"); loadReservations(); }} />
+          {leaveDialog}
           <RemoveReservationDialog reservation={removing} onClose={() => setRemoving(null)} onRemoved={() => { toast.success("Reservation removed"); loadReservations(); }} />
         </>
       )}
