@@ -3,7 +3,7 @@
 // Protel FIAS sends no record total before the end of a sync, so never show a progress bar, percentage or
 // "X of Y": only the real count received so far.
 
-import { useCallback, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { api, type PmsInterfaceHealth } from "@/lib/api";
 import { connectionEndWords } from "@/lib/api/pms-connections";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
@@ -47,6 +47,8 @@ const REASONS: { value: string; label: string }[] = [
 
 const when = (t?: string | null) => (t ? new Date(t).toLocaleString() : "—");
 
+export const SyncPollingContext = createContext<(on: boolean) => void>(() => {});
+
 export function SynchronizationCard({
   id,
   health,
@@ -73,6 +75,16 @@ export function SynchronizationCard({
   const delay = active ? 3000 : 10000;
   usePoll(() => refreshRef.current(), delay);
 
+  const ownPolling = useContext(SyncPollingContext);
+  useEffect(() => {
+    ownPolling(true);
+    return () => ownPolling(false);
+  }, [ownPolling]);
+
+  useEffect(() => {
+    if (active) setNote(null);
+  }, [active]);
+
   const canRequest =
     health?.transport_status === "CONNECTED" && !active && health?.sync_status !== "RESYNC_IN_PROGRESS";
 
@@ -87,7 +99,7 @@ export function SynchronizationCard({
           password,
         });
         setConfirming(false);
-        setNote(r?.note ?? "The refresh has been requested. Its progress appears above as the PMS responds.");
+        setNote(r?.note ?? `The refresh was requested at ${new Date().toLocaleTimeString()}. Its progress appears above as the PMS responds.`);
         await refreshRef.current();
       } catch (e) {
         setErr(e);

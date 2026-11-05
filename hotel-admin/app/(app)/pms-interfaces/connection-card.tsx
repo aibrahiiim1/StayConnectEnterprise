@@ -130,7 +130,7 @@ export function ConnectionCard({
         <ProviderTile label={providerLabel(iface, provider)} />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="truncate text-sm font-semibold">{iface.display_label || "Unnamed connection"}</h3>
+            <h2 className="truncate text-sm font-semibold">{iface.display_label || "Unnamed connection"}</h2>
             <Badge tone={lifecycleTone(iface.lifecycle_state)} dot>
               {wordsFor(LIFECYCLE_WORDS, iface.lifecycle_state, "State not recognised")}
             </Badge>
@@ -189,7 +189,7 @@ export function ConnectionCard({
           </div>
           <div className="col-span-2 min-w-0">
             <dt className="text-muted-foreground">Client networks</dt>
-            <dd className="truncate font-medium" title={networks?.join(", ")}>
+            <dd className="break-words font-medium">
               {networks === null ? "—" : networks.length === 0 ? "None in use for room sign-in" : networks.join(", ")}
               {archivedRoutes > 0 && (
                 <span className="font-normal text-muted-foreground"> · also routed to {archivedRoutes} archived or switched-off network{archivedRoutes === 1 ? "" : "s"}</span>

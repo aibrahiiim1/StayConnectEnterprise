@@ -127,3 +127,9 @@ export const CHECK_STATE_LABEL: Record<DiagCheckState, string> = {
   unknown: "Could not be read",
   info: "Observed",
 };
+
+/** Networks serving clients: what the overview says is running, not what a status label suggests (a staged activation is not
+ * serving yet; a failed change can leave the confirmed one serving). The saved switch counts only where the overview has no entry. */
+export function servingCount(rows: { id: string; enabled: boolean }[], overview: Record<string, Pick<OverviewNetwork, "running">>): number {
+  return rows.filter((n) => (overview[n.id] ? overview[n.id].running : n.enabled)).length;
+}
