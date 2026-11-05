@@ -7,6 +7,8 @@ package main
 
 import (
 	"context"
+	"slices"
+	"strconv"
 	"time"
 )
 
@@ -35,7 +37,11 @@ type sessionPackageSegment struct {
 	BytesAll      *int64     `json:"bytes_total,omitempty"`
 }
 
-// subjectPackagesSQL lists every package one access source was given, oldest first; the last row is the latest package.
+// packageHistoryMax bounds the package list; a source with more keeps its newest, so the latest package is always in it.
+const packageHistoryMax = 100
+
+// subjectPackagesSQL lists one access source's packages newest first, in the latest-package order of the lists, one past
+// the bound so a cut list is known; subjectPackages returns them oldest first.
 func subjectPackagesSQL(col string) string {
 	return `
 		SELECT e.id::text, ` + packageNameExpr + `, ` + packageTypeExpr + `, COALESCE(spr.name, ''),
@@ -44,8 +50,8 @@ func subjectPackagesSQL(col string) string {
 		  FROM iam_v2.entitlements e
 		  LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id` + packageJoins + `
 		 WHERE e.` + col + ` = $1 AND e.tenant_id = $2 AND e.site_id = $3
-		 ORDER BY e.activated_at ASC NULLS FIRST, e.id ASC
-		 LIMIT 100`
+		 ORDER BY e.activated_at DESC NULLS LAST, e.id DESC
+		 LIMIT ` + strconv.Itoa(packageHistoryMax+1)
 }
 
 // sessionSegmentsSQL reads the binding history of the sessions given that ran under more than one package, with the raw
@@ -68,22 +74,37 @@ const sessionSegmentsSQL = `
 		   AND (SELECT count(*) FROM iam_v2.session_entitlement_bindings b3 WHERE b3.session_id = b.session_id) > 1
 		 ORDER BY b.session_id, b.seq`
 
-func (s *server) subjectPackages(ctx context.Context, col, id string) ([]usagePackageRow, error) {
+// subjectPackages returns at most packageHistoryMax packages, oldest first, and whether older ones were left out.
+func (s *server) subjectPackages(ctx context.Context, col, id string) ([]usagePackageRow, bool, error) {
 	out := []usagePackageRow{}
 	rows, err := s.db.Query(ctx, subjectPackagesSQL(col), id, s.tenantID, s.siteID)
 	if err != nil {
-		return out, err
+		return out, false, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var p usagePackageRow
 		if err := rows.Scan(&p.EntitlementID, &p.Name, &p.Type, &p.ServicePlan, &p.Status, &p.Activated,
 			&p.Terminated, &p.EndReason, &p.QuotaBytes, &p.UsedBytes); err != nil {
-			return out, err
+			return out, false, err
 		}
 		out = append(out, p)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return out, false, err
+	}
+	out, more := oldestFirst(out)
+	return out, more, nil
+}
+
+// oldestFirst takes a newest-first list read one past the bound and returns the newest packageHistoryMax, oldest first.
+func oldestFirst(newest []usagePackageRow) ([]usagePackageRow, bool) {
+	more := len(newest) > packageHistoryMax
+	if more {
+		newest = newest[:packageHistoryMax]
+	}
+	slices.Reverse(newest)
+	return newest, more
 }
 
 type rawSegment struct {

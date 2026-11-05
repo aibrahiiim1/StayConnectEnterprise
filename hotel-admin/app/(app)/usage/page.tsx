@@ -70,7 +70,7 @@ type SourceRow = {
 } & LatestPackage;
 type SourceDetail = {
   source: SourceRow; service_plan?: string; access_status?: string;
-  packages?: PackageRow[]; devices: DeviceRow[]; sessions: SessionRow[];
+  packages?: PackageRow[]; older_packages_omitted?: boolean; devices: DeviceRow[]; sessions: SessionRow[];
   from?: string; to?: string;
 };
 
@@ -505,7 +505,7 @@ export default function UsageExplorerPage() {
               </Card>
 
               {source.packages && source.packages.length > 0 && (
-                <PackagesCard packages={source.packages} isStay={isStay} />
+                <PackagesCard packages={source.packages} isStay={isStay} olderOmitted={!!source.older_packages_omitted} />
               )}
 
               <Card className="overflow-hidden">
@@ -620,7 +620,7 @@ export default function UsageExplorerPage() {
 }
 
 /** Each package with its own meter, the one that enforced its allowance; oldest first, for the source's whole life. */
-function PackagesCard({ packages, isStay }: { packages: PackageRow[]; isStay: boolean }) {
+function PackagesCard({ packages, isStay, olderOmitted }: { packages: PackageRow[]; isStay: boolean; olderOmitted: boolean }) {
   return (
     <Card className="overflow-hidden">
       <CardHeader>
@@ -629,6 +629,7 @@ function PackagesCard({ packages, isStay }: { packages: PackageRow[]; isStay: bo
           <CardDescription>
             {isStay ? "Every package this stay was given, oldest first." : "Every package this access was given, oldest first."}{" "}
             Used is the package&apos;s own meter, the figure its allowance is enforced against. It is not limited to the period above.
+            {olderOmitted && ` Only the newest ${packages.length} are listed; older packages are not shown.`}
           </CardDescription>
         </div>
       </CardHeader>

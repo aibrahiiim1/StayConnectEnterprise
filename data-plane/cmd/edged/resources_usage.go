@@ -259,10 +259,12 @@ type stayUsageDetail struct {
 	Stay     usageStayRow      `json:"stay"`
 	Plan     string            `json:"service_plan,omitempty"`
 	Packages []usagePackageRow `json:"packages"`
-	Devices  []stayDeviceRow   `json:"devices"`
-	Sessions []staySessionRow  `json:"sessions"`
-	From     time.Time         `json:"from"`
-	To       time.Time         `json:"to"`
+	// OlderPackages: the list holds the newest packageHistoryMax only.
+	OlderPackages bool             `json:"older_packages_omitted,omitempty"`
+	Devices       []stayDeviceRow  `json:"devices"`
+	Sessions      []staySessionRow `json:"sessions"`
+	From          time.Time        `json:"from"`
+	To            time.Time        `json:"to"`
 }
 
 // withLatestPackage names the latest package on a header row: the last of the oldest-first package list.
@@ -274,13 +276,13 @@ func withLatestPackage(name, typ, status *string, pkgs []usagePackageRow) {
 	*name, *typ, *status = p.Name, p.Type, p.Status
 }
 
-// sourcePackagesAndSegments reads one source's packages and splits its carried sessions.
-func (s *server) sourcePackagesAndSegments(ctx context.Context, kind, id string, sessions []staySessionRow) ([]usagePackageRow, error) {
-	pkgs, err := s.subjectPackages(ctx, usageSubjectColumn[kind], id)
+// sourcePackagesAndSegments reads one source's packages (and whether older ones were left out) and splits its carried sessions.
+func (s *server) sourcePackagesAndSegments(ctx context.Context, kind, id string, sessions []staySessionRow) ([]usagePackageRow, bool, error) {
+	pkgs, more, err := s.subjectPackages(ctx, usageSubjectColumn[kind], id)
 	if err != nil {
-		return pkgs, err
+		return pkgs, more, err
 	}
-	return pkgs, s.attachSegments(ctx, sessions)
+	return pkgs, more, s.attachSegments(ctx, sessions)
 }
 
 // errNoSuchSource is "this site has no record of it" -- a 404, never a 500.
@@ -300,7 +302,7 @@ func (s *server) readStayUsage(ctx context.Context, stayID string, from, to time
 		return out, err
 	}
 	out.Devices, out.Sessions, out.Stay.Totals = devices, sessions, totals
-	if out.Packages, err = s.sourcePackagesAndSegments(ctx, "stay", stayID, out.Sessions); err != nil {
+	if out.Packages, out.OlderPackages, err = s.sourcePackagesAndSegments(ctx, "stay", stayID, out.Sessions); err != nil {
 		return out, err
 	}
 	withLatestPackage(&out.Stay.PackageName, &out.Stay.PackageType, &out.Stay.PackageStatus, out.Packages)
@@ -822,14 +824,15 @@ const openHeaderSQL = `
 		 ORDER BY x.activated_at DESC NULLS LAST LIMIT 1`
 
 type sourceUsageDetail struct {
-	Source       usageSourceRow    `json:"source"`
-	Plan         string            `json:"service_plan,omitempty"`
-	AccessStatus string            `json:"access_status,omitempty"`
-	Packages     []usagePackageRow `json:"packages"`
-	Devices      []stayDeviceRow   `json:"devices"`
-	Sessions     []staySessionRow  `json:"sessions"`
-	From         time.Time         `json:"from"`
-	To           time.Time         `json:"to"`
+	Source        usageSourceRow    `json:"source"`
+	Plan          string            `json:"service_plan,omitempty"`
+	AccessStatus  string            `json:"access_status,omitempty"`
+	Packages      []usagePackageRow `json:"packages"`
+	OlderPackages bool              `json:"older_packages_omitted,omitempty"`
+	Devices       []stayDeviceRow   `json:"devices"`
+	Sessions      []staySessionRow  `json:"sessions"`
+	From          time.Time         `json:"from"`
+	To            time.Time         `json:"to"`
 }
 
 // getSourceUsage is one access source, in full: totals, allowance, why access ended, devices, sessions.
@@ -885,7 +888,7 @@ func (s *server) readSourceUsage(ctx context.Context, kind, id string, from, to 
 		if len(st.Sessions) > 0 {
 			out.Source.LastActivity = st.Sessions[0].Started
 		}
-		out.Plan, out.Packages, out.Devices, out.Sessions = st.Plan, st.Packages, st.Devices, st.Sessions
+		out.Plan, out.Packages, out.OlderPackages, out.Devices, out.Sessions = st.Plan, st.Packages, st.OlderPackages, st.Devices, st.Sessions
 		return out, nil
 	case "account":
 		err = s.db.QueryRow(ctx, accountHeaderSQL, id, s.tenantID, s.siteID).Scan(
@@ -916,7 +919,7 @@ func (s *server) readSourceUsage(ctx context.Context, kind, id string, from, to 
 	if len(sessions) > 0 {
 		out.Source.LastActivity = sessions[0].Started
 	}
-	if out.Packages, err = s.sourcePackagesAndSegments(ctx, kind, id, out.Sessions); err != nil {
+	if out.Packages, out.OlderPackages, err = s.sourcePackagesAndSegments(ctx, kind, id, out.Sessions); err != nil {
 		return out, err
 	}
 	withLatestPackage(&out.Source.PackageName, &out.Source.PackageType, &out.Source.PackageStatus, out.Packages)

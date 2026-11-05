@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -146,9 +147,34 @@ func TestUsageListsShowTheMostRecentEntitlementsAllowance(t *testing.T) {
 			t.Errorf("the source list does not take %q from the most recent entitlement", col)
 		}
 	}
-	// The package list runs oldest first, the exact reverse, so its last row is the package the lists call the latest.
-	if !strings.Contains(subjectPackagesSQL("stay_id"), "ORDER BY e.activated_at ASC NULLS FIRST, e.id ASC") {
-		t.Error("the package list's order is not the reverse of the latest-package order")
+	// The package list is read in the lists' latest-package order, so a cut list always keeps the latest package.
+	if !strings.Contains(subjectPackagesSQL("stay_id"), "ORDER BY e.activated_at DESC NULLS LAST, e.id DESC\n\t\t LIMIT 101") {
+		t.Error("the package list is not read newest first, one past its bound")
+	}
+}
+
+// A SOURCE WITH MORE PACKAGES THAN THE BOUND KEEPS ITS NEWEST: the header's latest package must be in the list.
+func TestOldestFirstKeepsTheNewestPackages(t *testing.T) {
+	newest := make([]usagePackageRow, packageHistoryMax+1)
+	for i := range newest {
+		newest[i] = usagePackageRow{EntitlementID: strconv.Itoa(packageHistoryMax + 1 - i)} // 101 (newest) .. 1 (oldest)
+	}
+	out, more := oldestFirst(newest)
+	if !more || len(out) != packageHistoryMax {
+		t.Fatalf("more=%v len=%d", more, len(out))
+	}
+	if out[0].EntitlementID != "2" || out[len(out)-1].EntitlementID != "101" {
+		t.Errorf("kept %s..%s, want the newest 100 oldest first (2..101)", out[0].EntitlementID, out[len(out)-1].EntitlementID)
+	}
+	var name, typ, status string
+	out[len(out)-1].Name = "newest"
+	withLatestPackage(&name, &typ, &status, out)
+	if name != "newest" {
+		t.Errorf("latest package = %q", name)
+	}
+	few, more := oldestFirst([]usagePackageRow{{EntitlementID: "b"}, {EntitlementID: "a"}})
+	if more || few[0].EntitlementID != "a" || few[1].EntitlementID != "b" {
+		t.Errorf("a short list: more=%v %+v", more, few)
 	}
 }
 
