@@ -76,8 +76,12 @@ function useLeaveGuard(dirty: boolean) {
   const leaving = useRef(false);
   // The guard entry exists only while there are unsaved changes: pushed when they appear, stepped off when the draft is clean again
   // (saved or reverted), so no stale entry outlives the draft for Back or Forward to land on.
-  const onGuard = useRef(false);
+  // A guard entry the page finds itself on (reached by Forward, by Back from another screen, or a reload) is reused, never doubled.
+  const isGuard = (st: unknown) => !!(st as { leaveGuard?: boolean } | null)?.leaveGuard;
+  const onGuard = useRef(typeof window !== "undefined" && isGuard(window.history.state));
   const stepping = useRef(false);
+  const dirtyNow = useRef(dirty);
+  dirtyNow.current = dirty;
   const pushGuard = () => window.history.pushState({ ...window.history.state, leaveGuard: true }, "", window.location.href);
   useEffect(() => {
     if (dirty && !onGuard.current) {
@@ -91,11 +95,13 @@ function useLeaveGuard(dirty: boolean) {
   }, [dirty]);
   useEffect(() => {
     const here = window.location.pathname + window.location.search;
-    const onPop = () => {
+    const onPop = (e: PopStateEvent) => {
       if (stepping.current) { stepping.current = false; return; }
-      if (leaving.current || !onGuard.current) return;
-      // Back off the guard onto this page's own entry: the guard is restored and the operator is asked.
-      if (window.location.pathname + window.location.search !== here) return;
+      if (leaving.current || window.location.pathname + window.location.search !== here) return;
+      if (isGuard(e.state)) { onGuard.current = true; return; }
+      if (!onGuard.current) return;
+      // Back off the guard onto this page's own entry: with changes the guard is restored and the operator asked; without, it is simply left.
+      if (!dirtyNow.current) { onGuard.current = false; return; }
       pushGuard();
       setTarget(HISTORY_BACK);
     };
