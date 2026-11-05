@@ -1389,6 +1389,19 @@
       "authorization_evidence": "The Product Owner's missions of 2026-11-05: the Usage explorer improvements in PR #330 (\"GO -- Approved\"), and \"Approved. You have full end-to-end authorization to fix the D93 After Check-out Access defect, including the required database migration\" with deployment to the test appliance 172.21.96.97; preserve D93 (previously authorised devices reconnect while their After Check-out Access is valid, without resetting quotas or creating entitlements; new devices stay prohibited); keep the operator's After Check-out Access settings (10 devices, 5 GB).",
       "does_not_authorize": "Admitting new devices after check-out; enabling the post-stay route; changing the After Check-out Access settings; DHCP or other networking changes (Kea authoritative mode was reported, not changed); PMS configuration or financial changes; PKI or trust changes; the production Central; Go-Live.",
       "delivery_status": "Delivered on master 6935b49b (T0309); test appliance (T0310)."
+    },
+    {
+      "id": "D96",
+      "decided_on": "2026-11-05",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-11-05",
+      "status": "ACTIVE",
+      "title": "CONNECTIVITY IMPROVEMENTS (MIGRATION 0210): Kea answers authoritatively on the appliance-served client networks, so a device holding an address since leased to another device is refused (DHCPNAK) and asks for a new one; room sign-in from such an address is refused before anything is written and recorded as ADDRESS_CONFLICT instead of SERVICE_UNAVAILABLE. Room sign-in devices whose last session ended only because their address or network place changed (ADDRESS_NO_LONGER_OWNED, ADDRESS_CHANGED, SUPERSEDED_ON_DEVICE_MOVE, SUPERSEDED_ON_ADDRESS) are reconnected automatically on their next captive probe (session method REJOIN): same network, same stay, an ACTIVE in-window entitlement on which the device is still AUTHORIZED, netd confirming the device owns its DHCP lease, licence and slot checks unchanged; nothing is offered, bought, posted or reset, and sign-out, staff disconnect, device release, package end or check-out (outside After Check-out Access) stop it until a fresh sign-in. A grant or paid sign-in that meets a database deadlock or serialization failure is run once more on a buffered response without a second attempt record; a retried success replaces a retryable refusal on the same attempt (0210); a paid session is linked to its sign-in however long enforcement takes; a verified sign-in that took no package is shown as such in Client activity; a session torn down because its package ended records ENTITLEMENT_ENDED.",
+      "authorization_evidence": "The Product Owner's mission of 2026-11-05: \"Approved: complete the Connectivity Improvements mission end-to-end, using the simplest reliable solution with minimal code changes and no architectural redesign\", with Kea authoritative approved on the test appliance's client VLANs only, minimal automatic reconnection for Room Sign-in only reusing existing device authorizations and entitlements, no new settings, the necessary controlled migration with verified backup and rollback, and deployment to the test appliance 172.21.96.97.",
+      "does_not_authorize": "Treating DHCP lease ownership as proof of guest identity (a device that copies another's MAC address and obtains its lease remains a residual limitation, as for every MAC-based captive portal); automatic reconnection for vouchers, accounts, email or social sign-in; reconnection across networks or onto a different stay; changing DHCP lease durations, the offline device-slot policy, After Check-out Access settings or any financial behaviour; WAN or management networking; PMS configuration or postings; PKI or trust; the production Central; Go-Live.",
+      "delivery_status": "Delivered on master 12a00cba (T0311); test appliance (T0312)."
     }
   ]
 }
