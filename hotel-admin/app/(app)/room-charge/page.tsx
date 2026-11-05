@@ -346,8 +346,8 @@ export default function RoomChargePage() {
           }}
           onConflict={async (message) => {
             setApproving(null);
-            setErr(message);
             await load();
+            setErr(message);
           }}
         />
       )}
