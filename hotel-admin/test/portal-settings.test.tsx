@@ -295,7 +295,7 @@ describe("the server's verdict on the Advanced fields", () => {
     open(/Content/);
     fireEvent.change(screen.getByLabelText(/Terms of use link/i), { target: { value: "javascript:alert(1)" } });
     await waitFor(() => expect(screen.getByLabelText(/Terms of use link/i).getAttribute("aria-invalid")).toBe("true"));
-    expect(screen.getAllByText(/must be an https:\/\/ address/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Must be an https:\/\/ address/).length).toBeGreaterThan(0);
   });
 });
 
@@ -621,8 +621,8 @@ describe("the privacy notice", () => {
     await renderPage();
     const callout = await screen.findByText("Worth knowing before you save");
     const box = callout.closest("[class*=border]") as HTMLElement;
-    expect(within(box).getByText(/Logo: loads from cdn.example.com/)).toBeTruthy();
-    expect(within(box).getByText(/Privacy notice: still has 1 part/)).toBeTruthy();
+    expect(within(box).getByText(/Logo: Loads from cdn.example.com/)).toBeTruthy();
+    expect(within(box).getByText(/Privacy notice: Still has 1 part/)).toBeTruthy();
     open(/Content/);
     fireEvent.change(screen.getByLabelText(/Site name/i), { target: { value: "Semantics Demo Hotel" } });
     await waitFor(() => expect((screen.getByRole("button", { name: /Save changes/i }) as HTMLButtonElement).disabled).toBe(false));
