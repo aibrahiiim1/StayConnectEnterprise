@@ -48,7 +48,7 @@ func subjectPackagesSQL(col string) string {
 		       e.status, e.activated_at, e.terminated_at, COALESCE(e.terminal_reason, ''),
 		       COALESCE(e.data_quota_bytes, spr.data_quota_bytes), COALESCE(e.consumed_data_bytes, 0)
 		  FROM iam_v2.entitlements e
-		  LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id` + packageJoins + `
+		  LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id AND spr.tenant_id = e.tenant_id` + packageJoins + `
 		 WHERE e.` + col + ` = $1 AND e.tenant_id = $2 AND e.site_id = $3
 		 ORDER BY e.activated_at DESC NULLS LAST, e.id DESC
 		 LIMIT ` + strconv.Itoa(packageHistoryMax+1)
@@ -61,7 +61,7 @@ const sessionSegmentsSQL = `
 		SELECT b.session_id::text, b.entitlement_id::text, ` + packageNameExpr + `, ` + packageTypeExpr + `,
 		       b.bound_from, b.bound_until, COALESCE(seg.down, 0), COALESCE(seg.up, 0)
 		  FROM iam_v2.session_entitlement_bindings b
-		  JOIN iam_v2.entitlements e ON e.id = b.entitlement_id` + packageJoins + `
+		  JOIN iam_v2.entitlements e ON e.id = b.entitlement_id AND e.tenant_id = b.tenant_id` + packageJoins + `
 		  LEFT JOIN LATERAL (
 		      SELECT sum(ar.bytes_down) AS down, sum(ar.bytes_up) AS up
 		        FROM iam_v2.accounting_records ar

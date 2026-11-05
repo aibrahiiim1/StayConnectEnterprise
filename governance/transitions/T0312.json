@@ -1,0 +1,34 @@
+{
+  "transition_id": "T0312",
+  "seq": 312,
+  "timestamp": "2026-11-06T00:49:37+02:00",
+  "timestamp_derivation": "Read from the workstation clock (UTC+02:00) by the script that wrote this receipt, immediately before the commit that introduces it.",
+  "record_type": "TEST_APPLIANCE_UPGRADE",
+  "authorisation": "The Product Owner's Connectivity Improvements mission of 2026-11-05 (D96): deployment to the test appliance 172.21.96.97 under D79, including migration 0210 and Kea authoritative on its client VLANs.",
+  "delivery": "The test appliance was upgraded twice with appliance-install.sh --upgrade: to master 51e5030a95a2 (PR #363), applying migration 0210 behind the installer's verified pre-change backup db-20261105T220328Z.sql.gz.age, with netd re-applying the confirmed network configuration so Kea serves the client subnets authoritatively; then to master 12a00cba2092 (PR #367, no migration). Each upgrade passed the Gate-P reconcile (GATEP_RECONCILE = OK) and replaced every service binary and the Admin Console.",
+  "verification": "Every binary (scd, edged, pmsd, portald, netd, acctd, keybootstrap, svc-run) matched the release by SHA-256, and the release reads back vcs.revision 12a00cba2092, vcs.modified=false; APPLIANCE_UNITS = PASS; schema ledger head 0210; all services active; 444 sessions online after the restart. Live: Kea runs authoritative on both client bridges; netd's address-owner answer was 'owned' for an online device; the first real automatic reconnection after 12a00cba (22:48 UTC, three minutes after the restart) put a device whose 8-hour lease had expired back on its own ACTIVE entitlement as a REJOIN session, with no new entitlement for the stay and the device still AUTHORIZED; the permission refusals seen under 51e5030a stopped at the restart. NOT VERIFIED: a device absent for the full 8-hour lease through the portal page path rather than an OS probe, a randomised-MAC return, and NAK behaviour under a real address collision (none occurred in the observation window).",
+  "deployment": {
+    "test_appliance": "onegate-appliance-12a00cba2092; rollback tree /opt/stayconnect/.previous/20261105T224524Z and bin/*.bak-20261105T224524Z (scripts/binary-rollback.sh) back to 51e5030a, and /opt/stayconnect/.previous/20261105T222729Z back to 6935b49b; database rollback: the 0210 down migration (refuses while ADDRESS_CONFLICT rows exist) or the pre-change backup db-20261105T220328Z.sql.gz.age.",
+    "central": "Not changed."
+  },
+  "not_touched": "DHCP lease durations, WAN and management networking, After Check-out Access settings, PMS configuration and postings, payments, licences, the production Central.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "12a00cba2092237dc522234df9ddc600a8139b52",
+  "previous_delivery": "T0311",
+  "decision": "D96",
+  "go_live": "NOT authorised."
+}

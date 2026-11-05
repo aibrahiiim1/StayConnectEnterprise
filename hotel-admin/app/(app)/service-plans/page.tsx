@@ -3,8 +3,8 @@
 // No enable/disable switch on purpose: nothing that decides what a guest receives reads a plan's `enabled`
 // flag (packages hand out the plan version they pinned), so a switch would be a control that lies.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CircleSlash, Gauge, Layers, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, CircleSlash, Gauge, Layers, Pencil, Plus, RefreshCw, Trash2, X } from "lucide-react";
 import { api, ApiError, ListResp } from "@/lib/api";
 import { canWrite } from "@/lib/roles";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
@@ -70,7 +70,22 @@ export default function ServicePlansPage() {
   const [rows, setRows] = useState<PlanSummary[] | null>(null);
   const [packages, setPackages] = useState<PackageRef[]>([]);
   const [err, setErr] = useState<unknown>(null);
+  const [loadErr, setLoadErr] = useState<unknown>(null);
+  const [loading, setLoading] = useState(false);
   const [formErr, setFormErr] = useState<unknown>(null);
+  const formErrRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (formErr) formErrRef.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+  }, [formErr]);
+  const [formDirty, setFormDirty] = useState(false);
+  const [askDiscard, setAskDiscard] = useState(false);
+  const keepEditingRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (askDiscard) keepEditingRef.current?.focus();
+  }, [askDiscard]);
+  const [repinErr, setRepinErr] = useState<unknown>(null);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const repinRef = useRef<HTMLDivElement>(null);
   const [unavailable, setUnavailable] = useState(false);
   // Fails closed while loading; edged enforces the real gate.
   const roles = useOperatorRoles();
@@ -93,11 +108,19 @@ export default function ServicePlansPage() {
     chosen: Record<string, boolean>; standing: boolean;
   } | null>(null);
   const [repinPassword, setRepinPassword] = useState("");
-  useEffect(() => { if (!repin) setRepinPassword(""); }, [repin]);
+  useEffect(() => { if (!repin) { setRepinPassword(""); setRepinErr(null); } }, [repin]);
+  const repinOpen = repin !== null;
+  useEffect(() => {
+    if (!repinOpen) return;
+    repinRef.current?.scrollIntoView?.({ block: "start", behavior: "smooth" });
+    repinRef.current?.focus({ preventScroll: true });
+  }, [repinOpen]);
 
   const timeQuota = secondsToDurationField(prefill?.time_quota_seconds, ["hours", "days"]);
 
   const load = useCallback(async () => {
+    setLoading(true);
+    setLoadErr(null);
     try {
       const [r, pk] = await Promise.all([
         api.get<ListResp<PlanSummary>>("/commercial-packages/plans"),
@@ -108,9 +131,9 @@ export default function ServicePlansPage() {
       setSelected((s) => (s ? plans.find((p) => p.plan_id === s.plan_id) ?? null : s));
     } catch (e) {
       if (e instanceof ApiError && e.status === 503) { setUnavailable(true); setRows([]); return; }
-      setRows([]);
-      setErr(e);
+      setLoadErr(e);
     }
+    finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -143,7 +166,16 @@ export default function ServicePlansPage() {
   function startNew(from?: PlanSummary) {
     setPrefill(from ?? null);
     setFormErr(null);
+    setFormDirty(false);
+    setAskDiscard(false);
     setShowNew(true);
+  }
+
+  function closeForm() {
+    setShowNew(false);
+    setPrefill(null);
+    setFormDirty(false);
+    setAskDiscard(false);
   }
 
   async function onPublish(e: React.FormEvent<HTMLFormElement>) {
@@ -154,6 +186,15 @@ export default function ServicePlansPage() {
     const editingPlan = prefill;
     try {
       if (!str("name")) { setFormErr(new Error("Enter a name for the plan.")); return; }
+      const devices = int("max_concurrent_devices");
+      if (devices === undefined || !Number.isInteger(devices) || devices < 1) {
+        setFormErr(new Error("Enter how many devices can be online at once: a whole number, 1 or more."));
+        return;
+      }
+      if (str("speed_allocation") === "SHARED" && (!str("down_mbps") || !str("up_mbps"))) {
+        setFormErr(new Error("A shared speed needs both a download and an upload speed. Enter both, or choose Per device."));
+        return;
+      }
       const res = await api.post<{ current_revision_id: string }>("/commercial-packages/plans", {
         code: editingPlan?.code ?? generateShortCode(str("name")),
         name: str("name"),
@@ -173,8 +214,7 @@ export default function ServicePlansPage() {
         // create_only refuses an existing code; an edit is a step-up and carries the password.
         ...(editingPlan ? { password: (f.get("password") as string) ?? "" } : { create_only: true }),
       });
-      el.reset(); setShowNew(false);
-      toast.success(editingPlan ? "Plan saved" : "Plan added");
+      el.reset(); setShowNew(false); setFormDirty(false); setAskDiscard(false);
       const affected = editingPlan && res?.current_revision_id
         ? stalePackagesFor(
             { plan_id: editingPlan.plan_id, code: editingPlan.code, current_revision_id: res.current_revision_id },
@@ -205,7 +245,7 @@ export default function ServicePlansPage() {
   function startRepin(p: PlanSummary) {
     const stale = stalePackagesFor(p, packages);
     if (stale.length === 0) return;
-    setNotice(null); setErr(null); setSelected(null);
+    setNotice(null); setErr(null); setRepinErr(null); setSelected(null);
     setRepin({
       planRevisionID: p.current_revision_id,
       planLabel: p.name || p.code,
@@ -220,15 +260,20 @@ export default function ServicePlansPage() {
   async function applyRepin() {
     if (!repin) return;
     const chosen = repin.packages.filter((k) => repin.chosen[k.package_id]);
-    if (chosen.length > 0 && !repinPassword) {
-      setErr(new Error("Enter your password to apply the settings."));
+    if (chosen.length === 0) {
+      setRepinErr(new Error("Tick at least one package, or choose Not now."));
       return;
     }
-    setBusy(true); setErr(null);
+    if (!repinPassword) {
+      setRepinErr(new Error("Enter your password to apply the settings."));
+      return;
+    }
+    setBusy(true); setRepinErr(null);
     let moved = 0;
     const skipped: { name: string; missing: string[] }[] = [];
     try {
-      for (const k of chosen) {
+      for (const [i, k] of chosen.entries()) {
+        setProgress({ done: i, total: chosen.length });
         const cur = await api.get<PackageCurrentDTO>(`/commercial-packages/${k.package_id}/current`);
         const { missing } = commercialTermsOf(cur);
         if (missing.length > 0) { skipped.push({ name: k.name || k.code, missing }); continue; }
@@ -242,19 +287,18 @@ export default function ServicePlansPage() {
       const skippedMsg = repinSkippedMessage(skipped);
       const msg = [moved > 0 || skipped.length === 0 ? repinOutcomeMessage(moved) : null, skippedMsg].filter(Boolean).join(" ");
       setNotice(msg);
-      if (moved > 0) toast.success("Packages updated", repinOutcomeMessage(moved));
       await load();
     } catch (e) {
       if (e instanceof ApiError && (e as ApiError).code === "reauth_required") {
-        setErr(new Error(moved > 0
+        setRepinErr(new Error(moved > 0
           ? `That password was not accepted. ${moved} package${moved === 1 ? " was" : "s were"} already moved; the rest were not changed.`
           : "That password is not correct. Nothing was changed."));
       } else {
-        setErr(e);
+        setRepinErr(e);
       }
       if (moved > 0) await load();
     }
-    finally { setBusy(false); }
+    finally { setBusy(false); setProgress(null); }
   }
 
   const packagesOf = (p: PlanSummary) => packages.filter((k) => k.service_plan_id === p.plan_id);
@@ -294,14 +338,24 @@ export default function ServicePlansPage() {
         <ReadOnlyNotice>Your role can see the service plans but not change them.</ReadOnlyNotice>
       )}
       <ErrorBanner err={err} className="mb-0" />
-      {notice && <Callout tone="success">{notice}</Callout>}
+      {notice && (
+        <div className="relative">
+          <Callout tone="success">
+            <span className="block pe-8">{notice}</span>
+          </Callout>
+          <Button variant="ghost" size="icon" aria-label="Dismiss this message" className="absolute end-1.5 top-1.5 size-7"
+            onClick={() => setNotice(null)}>
+            <X />
+          </Button>
+        </div>
+      )}
 
       {!unavailable && (
         <StatGrid cols={4}>
           <StatCard label="Service plans" value={rows ? stats.all : "—"} icon={<Layers />} />
           <StatCard label="In use" value={rows ? stats.used : "—"} icon={<Gauge />}
             hint="By an active package" />
-          <StatCard label="On older settings" value={rows ? stats.stale : "—"} icon={<AlertTriangle />}
+          <StatCard label="Packages on older settings" value={rows ? stats.stale : "—"} icon={<AlertTriangle />}
             tone={stats.stale > 0 ? "warn" : "default"}
             hint={stats.stale > 0 ? "Packages to update" : "All up to date"} />
           <StatCard label="Not used" value={rows ? stats.unused : "—"} icon={<CircleSlash />}
@@ -310,8 +364,10 @@ export default function ServicePlansPage() {
       )}
 
       {repin && (
+        <div ref={repinRef} tabIndex={-1} role="region" aria-labelledby="repin-heading"
+          className="scroll-mt-4 rounded-lg focus:outline-none animate-in fade-in-0 slide-in-from-top-1 duration-base ease-onegate motion-reduce:animate-none">
         <Card className="border-primary/40">
-          <CardHeader><CardTitle data-testid="repin-title">
+          <CardHeader><CardTitle id="repin-heading" data-testid="repin-title">
             {repin.standing ? "Apply current settings to packages" : "Apply these settings to packages?"}
           </CardTitle></CardHeader>
           <CardBody>
@@ -337,7 +393,6 @@ export default function ServicePlansPage() {
                     checked={!!repin.chosen[k.package_id]}
                     onChange={(e) => setRepin((s2) => s2 && ({ ...s2, chosen: { ...s2.chosen, [k.package_id]: e.target.checked } }))} />
                   <span>{k.name || k.code}</span>
-                  <span className="text-xs text-muted-foreground">{k.code}</span>
                 </label>
               ))}
             </div>
@@ -346,10 +401,11 @@ export default function ServicePlansPage() {
               <Input id="repin-password" type="password" autoComplete="current-password" value={repinPassword}
                 onChange={(e) => setRepinPassword(e.target.value)} />
             </Field>
+            <ErrorBanner err={repinErr} className="mb-4" />
             <div className="flex gap-2">
               <Button onClick={applyRepin}
-                disabled={busy || (repin.packages.some((k) => repin.chosen[k.package_id]) && repinPassword === "")}>
-                {busy ? "Applying…" : "Apply to selected packages"}
+                disabled={busy || !repin.packages.some((k) => repin.chosen[k.package_id]) || repinPassword === ""}>
+                {busy ? (progress ? `Applying ${Math.min(progress.done + 1, progress.total)} of ${progress.total}…` : "Applying…") : "Apply to selected packages"}
               </Button>
               <Button variant="ghost" disabled={busy} onClick={() => {
                 const wasStanding = repin.standing;
@@ -361,6 +417,7 @@ export default function ServicePlansPage() {
             </div>
           </CardBody>
         </Card>
+        </div>
       )}
 
       {unavailable ? (
@@ -388,7 +445,14 @@ export default function ServicePlansPage() {
             }
             search={<SearchInput value={q} onChange={setQ} placeholder="Search plans" label="Search plans by name" />}
           />
-          {rows === null ? (
+          {rows === null && loadErr ? (
+            <EmptyState
+              size="sm"
+              icon={<AlertTriangle />}
+              title="The service plans could not be loaded"
+              hint={loadErr instanceof Error ? loadErr.message : undefined}
+              action={<Button size="sm" variant="secondary" disabled={loading} onClick={() => void load()}><RefreshCw /> Try again</Button>} />
+          ) : rows === null ? (
             <SkeletonRows rows={4} cols={7} />
           ) : rows.length === 0 ? (
             <EmptyState
@@ -420,8 +484,13 @@ export default function ServicePlansPage() {
                         {formatSpeedPair(p.down_kbps, p.up_kbps)}
                         {p.speed_allocation === "SHARED" && <span className="text-muted-foreground"> · shared</span>}
                       </TD>
-                      <TD nowrap title={DEVICE_LIMIT_POLICIES[p.device_limit_policy ?? ""] ?? undefined}>
-                        {formatDevices(p.max_concurrent_devices)}
+                      <TD className="max-w-[12rem]">
+                        <div className="whitespace-nowrap">{formatDevices(p.max_concurrent_devices)}</div>
+                        {DEVICE_LIMIT_POLICIES[p.device_limit_policy ?? ""] && (
+                          <div className="truncate text-caption text-muted-foreground" title={DEVICE_LIMIT_POLICIES[p.device_limit_policy ?? ""]}>
+                            {DEVICE_LIMIT_POLICIES[p.device_limit_policy ?? ""]}
+                          </div>
+                        )}
                       </TD>
                       <TD nowrap className="hidden md:table-cell">{formatDuration(p.time_quota_seconds)}</TD>
                       <TD nowrap className="hidden md:table-cell">{formatData(p.data_quota_bytes)}</TD>
@@ -447,7 +516,7 @@ export default function ServicePlansPage() {
                             <RowActions
                               subject={name}
                               primary={{ label: "Edit", onSelect: () => startNew(p) }}
-                              items={[{ label: "Delete…", danger: true, icon: <Trash2 />, onSelect: () => setDeleting(p) }]}
+                              items={[{ label: "Delete…", danger: true, icon: <Trash2 />, disabled: busy, onSelect: () => setDeleting(p) }]}
                             />
                           </div>
                         )}
@@ -562,7 +631,7 @@ export default function ServicePlansPage() {
                 </SheetBody>
                 {writable && (
                   <SheetFooter>
-                    <Button variant="ghost" className="me-auto text-destructive" onClick={() => setDeleting(p)}>
+                    <Button variant="ghost" className="me-auto text-destructive" disabled={busy} onClick={() => setDeleting(p)}>
                       <Trash2 /> Delete…
                     </Button>
                     {stale.length > 0 && (
@@ -590,7 +659,11 @@ export default function ServicePlansPage() {
           }} />
       )}
 
-      <Dialog open={showNew} onOpenChange={(v) => { if (!v && !busy) { setShowNew(false); setPrefill(null); } }}>
+      <Dialog open={showNew} onOpenChange={(v) => {
+        if (v || busy) return;
+        if (formDirty) { setAskDiscard(true); return; }
+        closeForm();
+      }}>
         <DialogContent size="lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-1">
@@ -608,12 +681,13 @@ export default function ServicePlansPage() {
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="space-y-4">
-            <ErrorBanner err={formErr} />
             {/* Keyed on the plan: uncontrolled inputs would otherwise keep the previous plan's numbers and publish them. */}
             <QuietHints>
-            <form id="service-plan-form" key={prefill?.plan_id ?? "new"} onSubmit={onPublish} className="grid gap-x-4 gap-y-4 sm:grid-cols-2">
+            <form id="service-plan-form" key={prefill?.plan_id ?? "new"} onSubmit={onPublish} noValidate
+              onInput={() => setFormDirty(true)} onChange={() => setFormDirty(true)}
+              className="grid gap-x-4 gap-y-4 sm:grid-cols-2">
               <Field label="Name" required className="sm:col-span-2" hint="What operators see in lists and on packages.">
-                <Input id="plan-name" name="name" required defaultValue={prefill?.name || prefill?.code || ""} placeholder="Premium Wi-Fi" />
+                <Input id="plan-name" name="name" aria-required defaultValue={prefill?.name || prefill?.code || ""} placeholder="Premium Wi-Fi" />
               </Field>
 
               <Field label="Download speed" htmlFor="plan-down" hint={`Empty for unlimited. Up to ${LIMITS.mbps} Mbps.`}>
@@ -630,8 +704,8 @@ export default function ServicePlansPage() {
               </Field>
 
               <Field label="Devices at once" required>
-                <Input id="plan-devices" name="max_concurrent_devices" type="number" min={1}
-                  defaultValue={prefill?.max_concurrent_devices ?? 1} required />
+                <Input id="plan-devices" name="max_concurrent_devices" type="number" min={1} step={1}
+                  defaultValue={prefill?.max_concurrent_devices ?? 1} aria-required />
               </Field>
               <Field label="When devices are full"
                 hint="Disconnecting the oldest device frees its place for the new one.">
@@ -692,16 +766,29 @@ export default function ServicePlansPage() {
               {prefill && (
                 <Field label="Confirm your password" required className="sm:col-span-2"
                   hint="Saving changes what every package using this plan can give future clients.">
-                  <Input id="plan-password" name="password" type="password" autoComplete="current-password" required />
+                  <Input id="plan-password" name="password" type="password" autoComplete="current-password" aria-required />
                 </Field>
               )}
 
             </form>
             </QuietHints>
+            <div ref={formErrRef} className="empty:hidden animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none" key={formErr ? String(formErr) : "none"}>
+              {formErr ? <ErrorBanner err={formErr} /> : null}
+            </div>
           </DialogBody>
           <DialogFooter>
-            <Button type="button" variant="secondary" disabled={busy} onClick={() => { setShowNew(false); setPrefill(null); }}>Cancel</Button>
-            <Button type="submit" form="service-plan-form" disabled={busy}>{busy ? "Saving…" : prefill ? "Save changes" : "Add plan"}</Button>
+            {askDiscard ? (
+              <>
+                <p role="alert" className="me-auto text-caption text-foreground">Discard the changes you made?</p>
+                <Button ref={keepEditingRef} type="button" variant="secondary" onClick={() => setAskDiscard(false)}>Keep editing</Button>
+                <Button type="button" variant="danger" onClick={closeForm}>Discard changes</Button>
+              </>
+            ) : (
+              <>
+                <Button type="button" variant="secondary" disabled={busy} onClick={closeForm}>Cancel</Button>
+                <Button type="submit" form="service-plan-form" disabled={busy}>{busy ? "Saving…" : prefill ? "Save changes" : "Add plan"}</Button>
+              </>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
