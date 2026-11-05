@@ -36972,6 +36972,7 @@ GRANT SELECT ON TABLE iam_v2.service_plans TO svc_pmsd;
 --
 
 GRANT SELECT ON TABLE iam_v2.session_entitlement_bindings TO svc_acctd;
+GRANT SELECT ON TABLE iam_v2.session_entitlement_bindings TO svc_edged;
 
 
 --

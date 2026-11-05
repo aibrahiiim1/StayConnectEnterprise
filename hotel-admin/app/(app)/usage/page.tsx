@@ -37,11 +37,22 @@ type DeviceRow = {
   mac: string; bytes_down: number; bytes_up: number; bytes_total: number; sessions: number;
   first_seen?: string; last_seen?: string;
 };
+// A session carried across packages (a package change, or check-out) lists each stretch; bytes only when the split is exact.
+type SessionPackage = {
+  entitlement_id: string; package_name: string; package_type?: string; from: string; until?: string;
+  bytes_down?: number; bytes_up?: number; bytes_total?: number;
+};
 type SessionRow = {
   session_id: string; mac?: string; ip?: string; credential_method?: string; state: string;
   started?: string; ended?: string; end_reason?: string;
   bytes_down: number; bytes_up: number; bytes_total: number;
+  packages?: SessionPackage[]; package_split_exact?: boolean;
 };
+type PackageRow = {
+  entitlement_id: string; name: string; package_type?: string; service_plan?: string; status: string;
+  activated_at?: string; terminated_at?: string; end_reason?: string; quota_bytes?: number | null; used_bytes: number;
+};
+type LatestPackage = { latest_package_name?: string; latest_package_type?: string; latest_package_status?: string };
 type DeviceDetail = {
   mac: string; from: string; to: string; first_seen?: string; last_seen?: string;
   totals: Totals; sessions: SessionRow[]; stays: StayRow[];
@@ -56,10 +67,10 @@ type SourceRow = {
   arrival?: string; departure?: string; effective_checkout_at?: string;
   totals: Totals; quota_bytes?: number | null; consumed_bytes?: number | null; end_reason?: string;
   last_activity?: string;
-};
+} & LatestPackage;
 type SourceDetail = {
   source: SourceRow; service_plan?: string; access_status?: string;
-  devices: DeviceRow[]; sessions: SessionRow[];
+  packages?: PackageRow[]; older_packages_omitted?: boolean; devices: DeviceRow[]; sessions: SessionRow[];
   from?: string; to?: string;
 };
 
@@ -120,17 +131,35 @@ function sourceTitle(s: SourceRow): string {
   }
 }
 
-function AllowanceCell({ consumed, quota }: { consumed?: number | null; quota?: number | null }) {
-  const pct = quotaPercent(consumed, quota);
-  if (pct === null) return <span className="text-sm text-muted-foreground">No limit</span>;
+/** A package by what an operator calls it: after-check-out and emergency access are system packages with internal names. */
+function packageLabel(name?: string, type?: string): string {
+  if (type === "CHECKOUT_GRACE") return "After check-out access";
+  if (type === "EMERGENCY_GRACE") return "Emergency access";
+  return name || "Package";
+}
+
+/** The latest package's own allowance and meter; never set against the source's totals, which span every package. */
+function allowanceText(consumed?: number | null, quota?: number | null): string {
+  if (!quota) return "No limit";
+  return `${formatBytes(Math.min(consumed ?? 0, quota))} of ${formatBytes(quota)}`;
+}
+
+function LatestPackageCell({ row }: { row: SourceRow }) {
+  if (!row.latest_package_name && !row.latest_package_type) return <span className="text-sm text-muted-foreground">—</span>;
+  const pct = quotaPercent(row.consumed_bytes, row.quota_bytes);
+  const label = packageLabel(row.latest_package_name, row.latest_package_type);
+  const state = [row.latest_package_status ? accessWords(row.latest_package_status) : "", endReasonWords(row.end_reason) ?? ""]
+    .filter(Boolean).join(" · ");
   return (
-    <Meter
-      className="min-w-40"
-      value={Math.min(pct, 100)}
-      max={100}
-      label={pct >= 100 ? "Allowance used up" : undefined}
-      caption={`${pct}% of ${formatBytes(quota)}`}
-    />
+    <div className="min-w-44 space-y-1">
+      <div className="truncate text-sm font-medium" title={label}>{label}</div>
+      {pct === null ? (
+        <div className="text-caption text-muted-foreground">No limit</div>
+      ) : (
+        <Meter className="min-w-40" value={pct} max={100} caption={allowanceText(row.consumed_bytes, row.quota_bytes)} />
+      )}
+      {state && <div className="truncate text-caption text-muted-foreground" title={state}>{state}</div>}
+    </div>
   );
 }
 
@@ -250,6 +279,11 @@ export default function UsageExplorerPage() {
                 evidence to see the recorded samples it was measured from, with their own total next to the
                 session&rsquo;s. Nothing here is estimated.
               </p>
+              <p>
+                The totals cover every package a source was given. The latest package column shows that package&rsquo;s
+                own allowance and use, which is what its limit is enforced against, so a total larger than the latest
+                allowance is not an overrun.
+              </p>
               <p>Only access sources that were given internet access appear. A source with no access has nothing to measure.</p>
             </HelpSection>
             <HelpSection title="A device is not a person">
@@ -327,8 +361,8 @@ export default function UsageExplorerPage() {
                         <TH className="hidden md:table-cell">Details</TH>
                         <TH numeric className="hidden sm:table-cell">Downloaded</TH>
                         <TH numeric className="hidden 2xl:table-cell">Uploaded</TH>
-                        <TH numeric>Total</TH>
-                        <TH className="hidden lg:table-cell">Allowance</TH>
+                        <TH numeric>Total, all packages</TH>
+                        <TH className="hidden lg:table-cell">Latest package</TH>
                         <TH pinEnd><span className="sr-only">Open</span></TH>
                       </TR>
                     </THead>
@@ -369,7 +403,7 @@ export default function UsageExplorerPage() {
                           <TD numeric className="hidden 2xl:table-cell">{formatBytes(r.totals.bytes_up)}</TD>
                           <TD numeric className="font-medium">{formatBytes(r.totals.bytes_total)}</TD>
                           <TD className="hidden lg:table-cell">
-                            <AllowanceCell consumed={r.consumed_bytes} quota={r.quota_bytes} />
+                            <LatestPackageCell row={r} />
                           </TD>
                           <TD pinEnd className="w-0 text-end">
                             <Button size="xs" variant="ghost" className="text-foreground"
@@ -446,20 +480,20 @@ export default function UsageExplorerPage() {
                     items={[
                       { label: "Downloaded", value: formatBytes(src.totals.bytes_down) },
                       { label: "Uploaded", value: formatBytes(src.totals.bytes_up) },
-                      { label: "Total used", value: formatBytes(src.totals.bytes_total) },
+                      { label: "Total, all packages", value: formatBytes(src.totals.bytes_total) },
                       {
-                        label: "Allowance",
-                        value: src.quota_bytes
-                          ? `${formatBytes(src.quota_bytes)}${quotaPercent(src.consumed_bytes, src.quota_bytes) !== null ? ` · ${quotaPercent(src.consumed_bytes, src.quota_bytes)}% used` : ""}`
-                          : "No limit",
-                        tone: (quotaPercent(src.consumed_bytes, src.quota_bytes) ?? 0) >= 100 ? "warn" : undefined,
+                        label: src.latest_package_name || src.latest_package_type
+                          ? `Latest package: ${packageLabel(src.latest_package_name, src.latest_package_type)}`
+                          : "Latest package",
+                        value: src.latest_package_name || src.latest_package_type ? allowanceText(src.consumed_bytes, src.quota_bytes) : "—",
                       },
                     ]}
                   />
                   {source.from && source.to && (
                     <p className="text-caption text-muted-foreground">
-                      Totals for {formatDate(source.from)} – {formatDate(source.to)}, the period chosen above. The
-                      allowance is the whole package&apos;s.
+                      Downloaded, uploaded and total cover every session from {formatDate(source.from)} to{" "}
+                      {formatDate(source.to)}, under every package. The latest package shows its own allowance and
+                      its own use only.
                     </p>
                   )}
                   <div className="flex flex-wrap gap-2">
@@ -469,6 +503,10 @@ export default function UsageExplorerPage() {
                   </div>
                 </CardBody>
               </Card>
+
+              {source.packages && source.packages.length > 0 && (
+                <PackagesCard packages={source.packages} isStay={isStay} olderOmitted={!!source.older_packages_omitted} />
+              )}
 
               <Card className="overflow-hidden">
                 <CardHeader>
@@ -581,6 +619,78 @@ export default function UsageExplorerPage() {
   );
 }
 
+/** Each package with its own meter, the one that enforced its allowance; oldest first, for the source's whole life. */
+function PackagesCard({ packages, isStay, olderOmitted }: { packages: PackageRow[]; isStay: boolean; olderOmitted: boolean }) {
+  return (
+    <Card className="overflow-hidden">
+      <CardHeader>
+        <div className="space-y-1">
+          <CardTitle>Packages</CardTitle>
+          <CardDescription>
+            {isStay ? "Every package this stay was given, oldest first." : "Every package this access was given, oldest first."}{" "}
+            Used is the package&apos;s own meter, the figure its allowance is enforced against. It is not limited to the period above.
+            {olderOmitted && ` Only the newest ${packages.length} are listed; older packages are not shown.`}
+          </CardDescription>
+        </div>
+      </CardHeader>
+      <Table label="Packages" aria-label="Packages">
+        <THead>
+          <TR>
+            <TH>Package</TH>
+            <TH className="hidden sm:table-cell">Started</TH>
+            <TH className="hidden sm:table-cell">Ended</TH>
+            <TH className="hidden md:table-cell">How it ended</TH>
+            <TH className="hidden lg:table-cell">Allowance</TH>
+            <TH numeric>Used</TH>
+          </TR>
+        </THead>
+        <TBody>
+          {packages.map((p) => {
+            const pct = quotaPercent(p.used_bytes, p.quota_bytes);
+            return (
+              <TR key={p.entitlement_id}>
+                <TD className="max-w-[16rem]">
+                  <div className="truncate font-medium">{packageLabel(p.name, p.package_type)}</div>
+                  <div className="text-caption text-muted-foreground">{accessWords(p.status)}</div>
+                </TD>
+                <TD nowrap className="hidden sm:table-cell">{p.activated_at ? formatDate(p.activated_at) : "—"}</TD>
+                <TD nowrap className="hidden sm:table-cell">
+                  {p.terminated_at ? formatDate(p.terminated_at) : p.status === "ACTIVE" ? <StatusBadge tone="ok">In use</StatusBadge> : "—"}
+                </TD>
+                <TD className="hidden text-sm md:table-cell">{endReasonWords(p.end_reason) ?? "—"}</TD>
+                <TD className="hidden lg:table-cell">
+                  {pct === null ? <span className="text-sm text-muted-foreground">No limit</span> : (
+                    <Meter className="min-w-36" value={pct} max={100} caption={allowanceText(p.used_bytes, p.quota_bytes)} />
+                  )}
+                </TD>
+                <TD numeric className="font-medium">{formatBytes(p.used_bytes)}</TD>
+              </TR>
+            );
+          })}
+        </TBody>
+      </Table>
+    </Card>
+  );
+}
+
+/** A carried session, stretch by stretch; without exact samples it says so instead of dividing the total. */
+function SessionPackages({ s }: { s: SessionRow }) {
+  if (!s.packages || s.packages.length < 2) return null;
+  return (
+    <div className="mt-1 space-y-0.5 text-caption text-muted-foreground">
+      {s.packages.map((p, i) => (
+        <div key={`${p.entitlement_id}:${i}`}>
+          {packageLabel(p.package_name, p.package_type)}
+          {s.package_split_exact && p.bytes_total !== undefined ? `: ${formatBytes(p.bytes_total)}` : ""}
+        </div>
+      ))}
+      {!s.package_split_exact && (
+        <div>Ran under these packages. The detailed samples needed to split its total by package are no longer kept.</div>
+      )}
+    </div>
+  );
+}
+
 /** Sample totals print next to the session total so the two can be seen to agree. */
 function SessionsCard({ sessions, samples, onOpenSamples }: {
   sessions: SessionRow[];
@@ -592,14 +702,17 @@ function SessionsCard({ sessions, samples, onOpenSamples }: {
       <CardHeader>
         <div className="space-y-1">
           <CardTitle>Sessions</CardTitle>
-          <CardDescription>Each period of connected access.</CardDescription>
+          <CardDescription>
+            Each period of connected access, counted once. A device that remained connected through a package change
+            keeps one session; its use is shown under each package it ran under.
+          </CardDescription>
         </div>
       </CardHeader>
       {sessions.length === 0 ? (
         <EmptyState size="sm" icon={<Activity />} title="No sessions recorded"
           hint="Nothing was measured in this period. That is not the same as zero usage — it means no session exists." />
       ) : (
-        <Table label="Sessions">
+        <Table label="Sessions" aria-label="Sessions">
           <THead>
             <TR>
               <TH>Started</TH>
@@ -628,6 +741,7 @@ function SessionsCard({ sessions, samples, onOpenSamples }: {
                         {sm.truncated ? " — the session has more; this is not its whole total" : ""}
                       </div>
                     )}
+                    <SessionPackages s={s} />
                   </TD>
                   <TD className="hidden text-sm lg:table-cell">{endReasonWords(s.end_reason) ?? "—"}</TD>
                   <TD pinEnd className="w-0 text-end">

@@ -23,6 +23,8 @@ const END_REASONS: Record<string, string> = {
   REVOKED: "Access was withdrawn by staff",
   DISCONNECTED: "The device disconnected",
   SUPERSEDED: "Replaced by newer access",
+  CONVERTED: "Moved to after check-out access",
+  ADMIN: "Ended by staff",
   TERMINATED: "Access was ended",
   IDLE: "The device went idle",
 };

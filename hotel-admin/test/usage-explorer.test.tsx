@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 class ResizeObserverStub {
@@ -200,6 +200,96 @@ describe("usage explorer by access source", () => {
     expect(span(detail)).toBe(30);
     expect(span(list[list.length - 1])).toBe(30);
     expect(period(detail)).not.toBe("null|null");
+  });
+
+  // Room 3311 on the test appliance: free, then unlimited, then after check-out; one device connected through all three.
+  const CARRIED_STAY = "dddddddd-4444-4444-8444-444444444444";
+  const UNLIMITED_STAY = "eeeeeeee-5555-4555-8555-555555555555";
+  const CARRIED_ROWS = [
+    { source_type: "stay", source_id: CARRIED_STAY, room: "3311", pms_interface: "Main PMS", stay_status: "CHECKED_OUT",
+      totals: T(20_000_000_000, 2_180_000_000), quota_bytes: 2_000_000_000, consumed_bytes: 2_001_000_000, end_reason: "DATA",
+      latest_package_name: "Checkout grace", latest_package_type: "CHECKOUT_GRACE", latest_package_status: "TERMINATED" },
+    { source_type: "stay", source_id: UNLIMITED_STAY, room: "1201", pms_interface: "Main PMS", stay_status: "IN_HOUSE",
+      totals: T(40_000_000_000, 5_330_000_000), consumed_bytes: 40_710_000_000,
+      latest_package_name: "Full Stay", latest_package_type: "GENERAL", latest_package_status: "ACTIVE" },
+  ];
+  const PACKAGES = [
+    { entitlement_id: "e1", name: "Free Internet", package_type: "GENERAL", status: "TERMINATED", activated_at: "2026-11-03T14:00:00Z",
+      terminated_at: "2026-11-03T18:06:00Z", end_reason: "SUPERSEDED", quota_bytes: 9_000_000_000, used_bytes: 3_468_000_000 },
+    { entitlement_id: "e2", name: "Full Stay", package_type: "GENERAL", status: "TERMINATED", activated_at: "2026-11-03T18:06:00Z",
+      terminated_at: "2026-11-04T10:46:00Z", end_reason: "CONVERTED", quota_bytes: null, used_bytes: 16_710_000_000 },
+    { entitlement_id: "e3", name: "Checkout grace", package_type: "CHECKOUT_GRACE", status: "TERMINATED", activated_at: "2026-11-04T10:46:00Z",
+      terminated_at: "2026-11-04T14:07:00Z", end_reason: "DATA", quota_bytes: 2_000_000_000, used_bytes: 2_001_000_000 },
+  ];
+  const CARRIED_SESSIONS = [
+    { session_id: "c1", mac: "02:00:00:aa:bb:01", state: "ended", started: "2026-11-03T14:11:00Z", ended: "2026-11-04T14:07:00Z",
+      end_reason: "ENTITLEMENT_ENDED", bytes_down: 5_690_000_000, bytes_up: 260_000_000, bytes_total: 5_950_000_000,
+      package_split_exact: true, packages: [
+        { entitlement_id: "e1", package_name: "Free Internet", package_type: "GENERAL", from: "2026-11-03T14:11:00Z", until: "2026-11-03T18:06:00Z", bytes_total: 1_200_000_000 },
+        { entitlement_id: "e2", package_name: "Full Stay", package_type: "GENERAL", from: "2026-11-03T18:06:00Z", until: "2026-11-04T10:46:00Z", bytes_total: 4_250_000_000 },
+        { entitlement_id: "e3", package_name: "Checkout grace", package_type: "CHECKOUT_GRACE", from: "2026-11-04T10:46:00Z", until: "2026-11-04T14:07:00Z", bytes_total: 500_000_000 },
+      ] },
+    { session_id: "c2", mac: "02:00:00:aa:bb:02", state: "ended", started: "2026-11-01T09:00:00Z", ended: "2026-11-03T20:00:00Z",
+      bytes_down: 3_000_000_000, bytes_up: 100_000_000, bytes_total: 3_100_000_000, package_split_exact: false, packages: [
+        { entitlement_id: "e1", package_name: "Free Internet", package_type: "GENERAL", from: "2026-11-01T09:00:00Z", until: "2026-11-03T18:06:00Z" },
+        { entitlement_id: "e2", package_name: "Full Stay", package_type: "GENERAL", from: "2026-11-03T18:06:00Z", until: "2026-11-03T20:00:00Z" },
+      ] },
+  ];
+  function wireCarried() {
+    get.mockImplementation((raw?: unknown) => {
+      const path = typeof raw === "string" ? raw : "";
+      if (path.startsWith("/usage/sources?")) return Promise.resolve({ data: CARRIED_ROWS, meta: { has_more: false } });
+      if (path.startsWith(`/usage/sources/stay/${CARRIED_STAY}`)) {
+        return Promise.resolve({ source: CARRIED_ROWS[0], packages: PACKAGES, devices: DEVICES, sessions: CARRIED_SESSIONS });
+      }
+      return Promise.resolve({ data: [], meta: { has_more: false } });
+    });
+  }
+
+  it("sets a stay's total over every package apart from the latest package's own allowance and use", async () => {
+    wireCarried();
+    await renderPage();
+    expect(await screen.findByText("Room 3311")).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Total, all packages" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Latest package" })).toBeTruthy();
+    expect(screen.getByText("22.2 GB")).toBeTruthy();
+    expect(screen.getByText("After check-out access")).toBeTruthy();
+    // its own meter, capped at the allowance: the cut-off delay's extra megabyte is not shown as an overrun
+    expect(screen.getByText("2.00 GB of 2.00 GB")).toBeTruthy();
+    expect(screen.getByText("Ended · The data allowance was used up")).toBeTruthy();
+    // an unlimited latest package has no meter at all, whatever an earlier package allowed
+    expect(screen.getByText("Full Stay")).toBeTruthy();
+    expect(screen.getAllByText("No limit").length).toBe(1);
+    expect(screen.queryByText("Allowance used up")).toBeNull();
+    expect(document.body.textContent ?? "").not.toMatch(/\d+% of /);
+  });
+
+  it("shows each package with its own use, dates and ending, and splits a carried session only when exact", async () => {
+    wireCarried();
+    const user = await renderPage();
+    await user.click(await screen.findByRole("button", { name: "Details for Room 3311" }));
+    const table = await screen.findByRole("table", { name: "Packages" });
+    const rows = within(table).getAllByRole("row").slice(1);
+    expect(rows.map((r) => within(r).getAllByRole("cell")[0].textContent)).toEqual([
+      "Free InternetEnded", "Full StayEnded", "After check-out accessEnded",
+    ]);
+    expect(within(rows[0]).getByText("3.47 GB")).toBeTruthy();
+    expect(within(rows[1]).getByText("16.7 GB")).toBeTruthy();
+    expect(within(rows[1]).getByText("No limit")).toBeTruthy();
+    expect(within(rows[1]).getByText("Moved to after check-out access")).toBeTruthy();
+    expect(within(rows[2]).getByText("2.00 GB of 2.00 GB")).toBeTruthy();
+    expect(within(rows[2]).getByText("The data allowance was used up")).toBeTruthy();
+
+    expect(screen.getByText("Latest package: After check-out access")).toBeTruthy();
+    expect(screen.getByText("Total, all packages")).toBeTruthy();
+
+    const sessions = screen.getByRole("table", { name: "Sessions" });
+    expect(within(sessions).getByText("Free Internet: 1.20 GB")).toBeTruthy();
+    expect(within(sessions).getByText("Full Stay: 4.25 GB")).toBeTruthy();
+    expect(within(sessions).getByText("After check-out access: 500 MB")).toBeTruthy();
+    // without the samples to split it, the session names its packages and shows no invented figure
+    expect(within(sessions).getByText(/no longer kept/)).toBeTruthy();
+    expect(within(sessions).queryByText(/Free Internet: .*3\.10 GB|Full Stay: 1\./)).toBeNull();
   });
 
   it("still opens a stay from the /usage?stay=<id> deep link", async () => {
