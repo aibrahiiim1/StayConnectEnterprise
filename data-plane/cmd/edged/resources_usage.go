@@ -45,17 +45,22 @@ type usageTotals struct {
 type usageStayRow struct {
 	StayID string `json:"stay_id"`
 	// Room and interface always travel together.
-	Room          string      `json:"room"`
-	PMSInterface  string      `json:"pms_interface"`
-	Reservation   string      `json:"reservation,omitempty"`
-	Status        string      `json:"stay_status"`
-	Arrival       *time.Time  `json:"arrival,omitempty"`
-	Departure     *time.Time  `json:"departure,omitempty"`
-	EffectiveOut  *time.Time  `json:"effective_checkout_at,omitempty"`
-	Totals        usageTotals `json:"totals"`
-	QuotaBytes    *int64      `json:"quota_bytes,omitempty"`
-	ConsumedBytes *int64      `json:"consumed_bytes,omitempty"`
-	EndReason     string      `json:"end_reason,omitempty"`
+	Room         string     `json:"room"`
+	PMSInterface string     `json:"pms_interface"`
+	Reservation  string     `json:"reservation,omitempty"`
+	Status       string     `json:"stay_status"`
+	Arrival      *time.Time `json:"arrival,omitempty"`
+	Departure    *time.Time `json:"departure,omitempty"`
+	EffectiveOut *time.Time `json:"effective_checkout_at,omitempty"`
+	// Totals is every session of the stay in the period, whichever package each ran under.
+	Totals usageTotals `json:"totals"`
+	// The rest is the latest package alone: its allowance and its own meter, never the stay's totals.
+	QuotaBytes    *int64 `json:"quota_bytes,omitempty"`
+	ConsumedBytes *int64 `json:"consumed_bytes,omitempty"`
+	EndReason     string `json:"end_reason,omitempty"`
+	PackageName   string `json:"latest_package_name,omitempty"`
+	PackageType   string `json:"latest_package_type,omitempty"`
+	PackageStatus string `json:"latest_package_status,omitempty"`
 }
 
 const usageSearchHeader = "X-Usage-Search"
@@ -131,7 +136,7 @@ func (s *server) listUsageStays(w http.ResponseWriter, r *http.Request) {
 		         `+currentEntitlementCols+`
 		    FROM iam_v2.entitlements e
 		    -- THE ENFORCED ALLOWANCE (internal/enforce): the entitlement's own frozen quota, else its plan's.
-		    LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id
+		    LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id`+packageJoins+`
 		    LEFT JOIN iam_v2.sessions se
 		           ON se.entitlement_id = e.id
 		          AND se.started < $4 AND (se.ended IS NULL OR se.ended > $3)
@@ -144,7 +149,8 @@ func (s *server) listUsageStays(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(st.external_reservation_id, ''),
 		       st.status,
 		       st.arrival, st.departure, st.effective_checkout_at,
-		       u.down, u.up, u.sessions, u.devices, u.quota, u.consumed, COALESCE(u.end_reason, '')
+		       u.down, u.up, u.sessions, u.devices, u.quota, u.consumed, COALESCE(u.end_reason, ''),
+		       COALESCE(u.pkg_name, ''), COALESCE(u.pkg_type, ''), COALESCE(u.pkg_status, '')
 		  FROM stay_usage u
 		  JOIN iam_v2.stays st ON st.id = u.stay_id
 		  LEFT JOIN iam_v2.pms_interfaces pi ON pi.id = st.pms_interface_id
@@ -167,7 +173,7 @@ func (s *server) listUsageStays(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&x.StayID, &x.Room, &x.PMSInterface, &x.Reservation, &x.Status,
 			&x.Arrival, &x.Departure, &x.EffectiveOut,
 			&x.Totals.BytesDown, &x.Totals.BytesUp, &x.Totals.Sessions, &x.Totals.Devices,
-			&quota, &consumed, &x.EndReason); err != nil {
+			&quota, &consumed, &x.EndReason, &x.PackageName, &x.PackageType, &x.PackageStatus); err != nil {
 			slog.Error("usage stay scan failed", "err", err)
 			jsonErr(w, http.StatusInternalServerError, "internal", "the usage records could not be read")
 			return
@@ -206,13 +212,30 @@ type staySessionRow struct {
 	BytesDown int64      `json:"bytes_down"`
 	BytesUp   int64      `json:"bytes_up"`
 	BytesAll  int64      `json:"bytes_total"`
+	// Packages is set only for a session that ran under more than one package; SplitExact says whether its bytes are split.
+	Packages   []sessionPackageSegment `json:"packages,omitempty"`
+	SplitExact *bool                   `json:"package_split_exact,omitempty"`
 }
 
-// currentEntitlementCols takes allowance, use and end reason from the source's most recent entitlement (as the headers do):
-// MAX skipped an unlimited current package and set an old package's allowance against every package's totals.
+// packageNameExpr is the name a package had when it was granted: its revision's display name, else its code.
+const packageNameExpr = `COALESCE(NULLIF(btrim(ipr.display->>'name'), ''), ip.code, '')`
+
+// packageTypeExpr separates the emergency grace from an ordinary after-check-out package; both are CHECKOUT_GRACE revisions.
+const packageTypeExpr = `CASE WHEN e.is_emergency_grace THEN 'EMERGENCY_GRACE' ELSE COALESCE(ipr.package_type, '') END`
+
+// packageJoins resolves an entitlement e to its package revision ipr and package ip.
+const packageJoins = `
+		    LEFT JOIN iam_v2.internet_package_revisions ipr ON ipr.id = e.package_revision_id
+		    LEFT JOIN iam_v2.internet_packages ip ON ip.id = ipr.package_id`
+
+// currentEntitlementCols takes the latest package's name, status, allowance, use and end reason from the source's most recent
+// entitlement (as the headers do): MAX skipped an unlimited current package and set an old package's allowance against every package's totals.
 const currentEntitlementCols = `(array_agg(COALESCE(e.data_quota_bytes, spr.data_quota_bytes) ORDER BY e.activated_at DESC NULLS LAST, e.id DESC))[1] AS quota,
 		         (array_agg(e.consumed_data_bytes ORDER BY e.activated_at DESC NULLS LAST, e.id DESC))[1] AS consumed,
-		         (array_agg(e.terminal_reason ORDER BY e.activated_at DESC NULLS LAST, e.id DESC))[1] AS end_reason`
+		         (array_agg(e.terminal_reason ORDER BY e.activated_at DESC NULLS LAST, e.id DESC))[1] AS end_reason,
+		         (array_agg(` + packageNameExpr + ` ORDER BY e.activated_at DESC NULLS LAST, e.id DESC))[1] AS pkg_name,
+		         (array_agg(` + packageTypeExpr + ` ORDER BY e.activated_at DESC NULLS LAST, e.id DESC))[1] AS pkg_type,
+		         (array_agg(e.status ORDER BY e.activated_at DESC NULLS LAST, e.id DESC))[1] AS pkg_status`
 
 // stayHeaderSQL reads one stay, the room always carrying its interface, with the allowance of its most recent entitlement.
 const stayHeaderSQL = `
@@ -233,12 +256,31 @@ const stayHeaderSQL = `
 		 WHERE st.id = $1 AND st.tenant_id = $2 AND st.site_id = $3`
 
 type stayUsageDetail struct {
-	Stay     usageStayRow     `json:"stay"`
-	Plan     string           `json:"service_plan,omitempty"`
-	Devices  []stayDeviceRow  `json:"devices"`
-	Sessions []staySessionRow `json:"sessions"`
-	From     time.Time        `json:"from"`
-	To       time.Time        `json:"to"`
+	Stay     usageStayRow      `json:"stay"`
+	Plan     string            `json:"service_plan,omitempty"`
+	Packages []usagePackageRow `json:"packages"`
+	Devices  []stayDeviceRow   `json:"devices"`
+	Sessions []staySessionRow  `json:"sessions"`
+	From     time.Time         `json:"from"`
+	To       time.Time         `json:"to"`
+}
+
+// withLatestPackage names the latest package on a header row: the last of the oldest-first package list.
+func withLatestPackage(name, typ, status *string, pkgs []usagePackageRow) {
+	if len(pkgs) == 0 {
+		return
+	}
+	p := pkgs[len(pkgs)-1]
+	*name, *typ, *status = p.Name, p.Type, p.Status
+}
+
+// sourcePackagesAndSegments reads one source's packages and splits its carried sessions.
+func (s *server) sourcePackagesAndSegments(ctx context.Context, kind, id string, sessions []staySessionRow) ([]usagePackageRow, error) {
+	pkgs, err := s.subjectPackages(ctx, usageSubjectColumn[kind], id)
+	if err != nil {
+		return pkgs, err
+	}
+	return pkgs, s.attachSegments(ctx, sessions)
 }
 
 // errNoSuchSource is "this site has no record of it" -- a 404, never a 500.
@@ -246,7 +288,7 @@ var errNoSuchSource = errors.New("no such access source at this site")
 
 // readStayUsage is the stay case of both /usage/stays/{id} and /usage/sources/stay/{id}, so they cannot disagree.
 func (s *server) readStayUsage(ctx context.Context, stayID string, from, to time.Time) (stayUsageDetail, error) {
-	out := stayUsageDetail{Devices: []stayDeviceRow{}, Sessions: []staySessionRow{}, From: from, To: to}
+	out := stayUsageDetail{Packages: []usagePackageRow{}, Devices: []stayDeviceRow{}, Sessions: []staySessionRow{}, From: from, To: to}
 	if err := s.db.QueryRow(ctx, stayHeaderSQL, stayID, s.tenantID, s.siteID).Scan(
 		&out.Stay.StayID, &out.Stay.Room, &out.Stay.PMSInterface, &out.Stay.Reservation,
 		&out.Stay.Status, &out.Stay.Arrival, &out.Stay.Departure, &out.Stay.EffectiveOut,
@@ -258,6 +300,10 @@ func (s *server) readStayUsage(ctx context.Context, stayID string, from, to time
 		return out, err
 	}
 	out.Devices, out.Sessions, out.Stay.Totals = devices, sessions, totals
+	if out.Packages, err = s.sourcePackagesAndSegments(ctx, "stay", stayID, out.Sessions); err != nil {
+		return out, err
+	}
+	withLatestPackage(&out.Stay.PackageName, &out.Stay.PackageType, &out.Stay.PackageStatus, out.Packages)
 	return out, nil
 }
 
@@ -464,6 +510,11 @@ func (s *server) getDeviceUsage(w http.ResponseWriter, r *http.Request) {
 	}
 	out.Totals.BytesAll = out.Totals.BytesDown + out.Totals.BytesUp
 	out.Totals.Devices = 1
+	if err := s.attachSegments(r.Context(), out.Sessions); err != nil {
+		slog.Error("device usage package split failed", "err", err)
+		jsonErr(w, http.StatusInternalServerError, "internal", "the usage records could not be read")
+		return
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -579,6 +630,9 @@ type usageSourceRow struct {
 	QuotaBytes    *int64      `json:"quota_bytes,omitempty"`
 	ConsumedBytes *int64      `json:"consumed_bytes,omitempty"`
 	EndReason     string      `json:"end_reason,omitempty"`
+	PackageName   string      `json:"latest_package_name,omitempty"`
+	PackageType   string      `json:"latest_package_type,omitempty"`
+	PackageStatus string      `json:"latest_package_status,omitempty"`
 	LastActivity  *time.Time  `json:"last_activity,omitempty"`
 }
 
@@ -601,7 +655,7 @@ func usageSourceListSQL(limit, offset int) string {
 		         MAX(se.started)                 AS last_started
 		    FROM iam_v2.entitlements e
 		    -- THE ENFORCED ALLOWANCE (internal/enforce): the entitlement's own frozen quota, else its plan's.
-		    LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id
+		    LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id` + packageJoins + `
 		    LEFT JOIN iam_v2.sessions se
 		           ON se.entitlement_id = e.id
 		          AND se.started < $4 AND (se.ended IS NULL OR se.ended > $3)
@@ -622,6 +676,7 @@ func usageSourceListSQL(limit, offset int) string {
 		       COALESCE(st.status, ''),
 		       st.arrival, st.departure, st.effective_checkout_at,
 		       u.down, u.up, u.sessions, u.devices, u.quota, u.consumed, COALESCE(u.end_reason, ''),
+		       COALESCE(u.pkg_name, ''), COALESCE(u.pkg_type, ''), COALESCE(u.pkg_status, ''),
 		       u.last_started
 		  FROM src u
 		  LEFT JOIN iam_v2.stays st
@@ -697,7 +752,8 @@ func (s *server) listUsageSources(w http.ResponseWriter, r *http.Request) {
 			&x.Room, &x.PMSInterface, &x.Reservation, &x.StayStatus,
 			&x.Arrival, &x.Departure, &x.EffectiveOut,
 			&x.Totals.BytesDown, &x.Totals.BytesUp, &x.Totals.Sessions, &x.Totals.Devices,
-			&x.QuotaBytes, &x.ConsumedBytes, &x.EndReason, &x.LastActivity); err != nil {
+			&x.QuotaBytes, &x.ConsumedBytes, &x.EndReason,
+			&x.PackageName, &x.PackageType, &x.PackageStatus, &x.LastActivity); err != nil {
 			slog.Error("usage source scan failed", "err", err)
 			jsonErr(w, http.StatusInternalServerError, "internal", "the usage records could not be read")
 			return
@@ -766,13 +822,14 @@ const openHeaderSQL = `
 		 ORDER BY x.activated_at DESC NULLS LAST LIMIT 1`
 
 type sourceUsageDetail struct {
-	Source       usageSourceRow   `json:"source"`
-	Plan         string           `json:"service_plan,omitempty"`
-	AccessStatus string           `json:"access_status,omitempty"`
-	Devices      []stayDeviceRow  `json:"devices"`
-	Sessions     []staySessionRow `json:"sessions"`
-	From         time.Time        `json:"from"`
-	To           time.Time        `json:"to"`
+	Source       usageSourceRow    `json:"source"`
+	Plan         string            `json:"service_plan,omitempty"`
+	AccessStatus string            `json:"access_status,omitempty"`
+	Packages     []usagePackageRow `json:"packages"`
+	Devices      []stayDeviceRow   `json:"devices"`
+	Sessions     []staySessionRow  `json:"sessions"`
+	From         time.Time         `json:"from"`
+	To           time.Time         `json:"to"`
 }
 
 // getSourceUsage is one access source, in full: totals, allowance, why access ended, devices, sessions.
@@ -807,7 +864,7 @@ func (s *server) getSourceUsage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) readSourceUsage(ctx context.Context, kind, id string, from, to time.Time) (sourceUsageDetail, error) {
-	out := sourceUsageDetail{Devices: []stayDeviceRow{}, Sessions: []staySessionRow{}, From: from, To: to}
+	out := sourceUsageDetail{Packages: []usagePackageRow{}, Devices: []stayDeviceRow{}, Sessions: []staySessionRow{}, From: from, To: to}
 	out.Source.Type = kind
 
 	var err error
@@ -823,11 +880,12 @@ func (s *server) readSourceUsage(ctx context.Context, kind, id string, from, to 
 			StayStatus: st.Stay.Status, Arrival: st.Stay.Arrival, Departure: st.Stay.Departure,
 			EffectiveOut: st.Stay.EffectiveOut, Totals: st.Stay.Totals,
 			QuotaBytes: st.Stay.QuotaBytes, ConsumedBytes: st.Stay.ConsumedBytes, EndReason: st.Stay.EndReason,
+			PackageName: st.Stay.PackageName, PackageType: st.Stay.PackageType, PackageStatus: st.Stay.PackageStatus,
 		}
 		if len(st.Sessions) > 0 {
 			out.Source.LastActivity = st.Sessions[0].Started
 		}
-		out.Plan, out.Devices, out.Sessions = st.Plan, st.Devices, st.Sessions
+		out.Plan, out.Packages, out.Devices, out.Sessions = st.Plan, st.Packages, st.Devices, st.Sessions
 		return out, nil
 	case "account":
 		err = s.db.QueryRow(ctx, accountHeaderSQL, id, s.tenantID, s.siteID).Scan(
@@ -858,6 +916,10 @@ func (s *server) readSourceUsage(ctx context.Context, kind, id string, from, to 
 	if len(sessions) > 0 {
 		out.Source.LastActivity = sessions[0].Started
 	}
+	if out.Packages, err = s.sourcePackagesAndSegments(ctx, kind, id, out.Sessions); err != nil {
+		return out, err
+	}
+	withLatestPackage(&out.Source.PackageName, &out.Source.PackageType, &out.Source.PackageStatus, out.Packages)
 	out.Source = finishSourceRow(out.Source)
 	return out, nil
 }

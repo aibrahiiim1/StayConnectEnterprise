@@ -272,6 +272,8 @@ GRANT SELECT ON public.audit_log TO svc_edged;
 -- device record that lets an operator name the handset.
 GRANT SELECT ON iam_v2.accounting_records TO svc_edged;
 GRANT SELECT ON iam_v2.devices            TO svc_edged;
+-- Which package a session ran under, and when it moved: the Usage explorer splits a carried session's samples by it.
+GRANT SELECT ON iam_v2.session_entitlement_bindings TO svc_edged;
 
 -- 0080: the service may read the ledger it writes. Append-only and enforced so by trigger; the only
 -- legitimate writer is the controlled publication operation, which carries its own privilege.

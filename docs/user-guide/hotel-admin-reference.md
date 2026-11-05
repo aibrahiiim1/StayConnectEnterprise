@@ -301,16 +301,26 @@ accounting samples behind them.
 - **By access source:** an access source is whatever granted the access — a **Client account**, a
   **Voucher** or a **Hotel room/stay**. Filter by type (*All*, *Client account*, *Voucher*, *Hotel
   room/stay*) and search by username, card reference, room number or reservation, or leave the search empty
-  for the heaviest users; the table shows each source's downloaded, uploaded and total data and its
-  allowance. Email, phone and social sign-ins are not listed as sources; the devices that used them still
-  appear under **By device**. Room and stay detail appears only for a Hotel room/stay.
+  for the heaviest users. The table shows each source's downloaded, uploaded and **Total, all packages** —
+  every session under every package it was given — and, separately, its **Latest package**: the package's
+  name, whether it is active or ended and why, and that package's own use against its own allowance (*No
+  limit* for an unlimited package). A total larger than the latest package's allowance is therefore not an
+  overrun: it is several packages added together. Email, phone and social sign-ins are not listed as sources;
+  the devices that used them still appear under **By device**. Room and stay detail appears only for a Hotel
+  room/stay.
 - **Period:** *Last 7 days*, *Last 30 days* (default), *Last 90 days*, *Last 12 months* or two dates. Every total
-  on the page — the list, a source's detail and a device — covers that period; the allowance is the whole
-  package's, and it is the allowance the appliance enforces (the package's own, else its service plan's).
+  on the page — the list, a source's detail and a device — covers that period. A package's allowance and use
+  are the whole package's: the allowance the appliance enforces (the package's own, else its service plan's)
+  and the package's own accounting meter, the figure that allowance is enforced against.
 - **By device:** look up a MAC address; a note reminds you that a device is not a person.
-- **Drill-down:** the source's totals and allowance, the devices used, the sessions, and **Show evidence**
-  to load the raw samples, with their own total next to the session's (the first 2,000 of a very long session,
-  said as such). Read-only.
+- **Drill-down:** the source's totals and latest package; **Packages**, every package the source was given,
+  oldest first, each with its dates, how it ended, its allowance and its own use; the devices used; the
+  sessions; and **Show evidence** to load the raw samples, with their own total next to the session's (the
+  first 2,000 of a very long session, said as such). A session is counted once. A device that stayed connected
+  through a package change or check-out keeps one session, and the session lists each package it ran under
+  with the use under each, taken from its accounting samples. When those samples are no longer kept (after
+  the raw-sample retention), the packages are still named but the split is not shown, rather than estimated.
+  Read-only.
 - **Who can see it:** Site admin, Site IT manager, Client services, Client relations, Payments operator, Site
   viewer.
 
