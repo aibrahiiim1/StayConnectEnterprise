@@ -10,4 +10,8 @@ describe("sign-in results in the console", () => {
     expect(resultLabel("AFTER_CHECKOUT_NEW_DEVICE_REJECTED")).toBe("New device refused after check-out");
     expect(resultLabel("AFTER_CHECKOUT_NEW_DEVICE_REJECTED")).not.toMatch(/unavailable|failure/i);
   });
+  it("names a stale network address as such, never as an internal failure", () => {
+    expect(resultLabel("ADDRESS_CONFLICT")).toMatch(/old network address/i);
+    expect(resultLabel("ADDRESS_CONFLICT")).not.toMatch(/unavailable|failure/i);
+  });
 });

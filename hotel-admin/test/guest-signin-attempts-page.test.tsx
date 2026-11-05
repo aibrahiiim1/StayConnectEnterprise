@@ -123,6 +123,26 @@ describe("guest sign-in attempts", () => {
     expect(screen.queryByText(/\*{3,}/)).toBeNull();
   });
 
+  it("shows a verified sign-in that took no package the same way in the list and in its details", async () => {
+    const noPackage = { ...ATTEMPT, result: "VERIFIED", result_label: "Verified, but no package was taken", succeeded: false, no_package_taken: true };
+    get.mockImplementation((raw?: unknown) => {
+      const path = typeof raw === "string" ? raw : "";
+      if (path === "/auth/whoami") return Promise.resolve({ roles: ["site_admin"] });
+      if (path.startsWith("/guest-signin-attempts?")) {
+        return Promise.resolve({ data: [noPackage], meta: { has_more: false }, page: 1, page_size: 50, total: 1,
+          summary: { total: 1, failed: 1, mismatch: 0, systemic: 0 } });
+      }
+      if (path.startsWith("/guest-signin-attempts/")) return Promise.resolve({ ...DETAIL, ...noPackage });
+      return Promise.resolve({ data: [], meta: { has_more: false } });
+    });
+    const user = await renderPage();
+    expect(await screen.findByText("No package taken")).toBeTruthy();
+    await user.click(await screen.findByRole("button", { name: /^Details/ }));
+    await waitFor(() => expect(screen.getAllByText("No package taken").length).toBeGreaterThanOrEqual(2));
+    // "Connected" may appear only as the result filter's option, never as this attempt's badge.
+    expect(screen.queryAllByText("Connected").every((el) => el.tagName === "OPTION")).toBe(true);
+    expect(screen.getByText(/no package was taken: the guest left at the package choice/)).toBeTruthy();
+  });
   it("tells an operator without the credential permission why the values are absent", async () => {
     wire(["site_viewer"]);
     const user = await renderPage();
