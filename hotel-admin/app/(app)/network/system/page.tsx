@@ -146,7 +146,8 @@ export default function NetworkSettingsPage() {
   }, []);
 
   const pendingNow = !!state?.pending || applyResp?.state === "pending_confirmation";
-  usePoll(() => { void load(); }, 30000, { enabled: !!state && !pendingNow && busy === null });
+  // The promise lets usePoll wait for a refresh in flight: /network/system runs connectivity checks, and stacked reads could overwrite newer state.
+  usePoll(() => load(), 30000, { enabled: !!state && !pendingNow && busy === null });
 
   function proposal(): SysNetProposal {
     return {
