@@ -83,6 +83,7 @@ export default function PortalHTTPSPage() {
   const [addressInput, setAddressInput] = useState("");
   const [addressErr, setAddressErr] = useState<string | null>(null);
   const [addressIssues, setAddressIssues] = useState<Issue[]>([]);
+  const [savedNotLive, setSavedNotLive] = useState(false);
 
   const [domainInput, setDomainInput] = useState("");
   const [domainTouched, setDomainTouched] = useState(false);
@@ -129,6 +130,7 @@ export default function PortalHTTPSPage() {
         portal_ip: addressInput.trim(), password,
       });
       setEditingAddress(false);
+      if (r.changed) setSavedNotLive(r.apply_required);
       if (r.changed) toast.success("Portal address saved", "Apply the network configuration on Client networks to make it live.");
       else toast.success("No change", "That is already the portal address.");
       await load();
@@ -190,7 +192,7 @@ export default function PortalHTTPSPage() {
   const showDomainProblem = domainTouched && domainProblem !== null;
   const historyRows = doc ? (allHistory ? doc.history : doc.history.slice(0, HISTORY_PREVIEW)) : [];
   const change = doc?.history.find((h) => String(h.id) === openChange) ?? null;
-  const applyNeeded = st?.fallback_reason === "PORTAL_ADDRESS_NOT_ACTIVE" && !st.https_active;
+  const applyNeeded = savedNotLive || (st?.fallback_reason === "PORTAL_ADDRESS_NOT_ACTIVE" && !st.https_active);
   const spin = cn(loading && "animate-spin motion-reduce:animate-none");
 
   return (
