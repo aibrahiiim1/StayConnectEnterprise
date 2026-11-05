@@ -327,7 +327,7 @@ export default function StaysPage() {
 
         {rows === null ? (
           loadFailed ? (
-            <div className={FADE}>
+            <div role="alert" className={FADE}>
               <EmptyState
                 icon={<AlertTriangle />}
                 title="Stays could not be loaded"
