@@ -678,22 +678,28 @@ func (p *phase3Auth) probeRoster(ctx context.Context, q probeQuerier, seen *obse
 		seen.add(obs)
 		return pmsresolve.Stale, "", nil
 	}
+	// A departed stay is eligible while its After Check-out Access is valid (D93, 0209): its devices sign in again onto that
+	// entitlement, and authorize_entitlement_device refuses any other device.
 	rows, err := q.Query(ctx, `
-		SELECT s.id::text,
-		       s.status IN ('IN_HOUSE','POST_STAY_ACTIVE') AS eligible,
+		WITH c AS (
+		  SELECT st.id, st.external_reservation_id,
+		         (st.status IN ('IN_HOUSE','POST_STAY_ACTIVE')
+		          OR (st.status = 'CHECKED_OUT' AND `+authctx.AfterCheckoutLive+`)) AS eligible
+		    FROM iam_v2.stays st
+		   WHERE st.tenant_id=$1 AND st.site_id=$2 AND st.pms_interface_id=$3
+		     AND st.normalized_room_number = $4)
+		SELECT c.id::text, c.eligible,
 		       ($5 <> '' AND EXISTS (SELECT 1 FROM iam_v2.stay_guests g
-		                              WHERE g.stay_id = s.id AND g.last_name_norm = $5))  AS family_hit,
+		                              WHERE g.stay_id = c.id AND g.last_name_norm = $5))  AS family_hit,
 		       ($6 <> '' AND EXISTS (SELECT 1 FROM iam_v2.stay_guests g
-		                              WHERE g.stay_id = s.id AND g.first_name_norm = $6)) AS first_hit,
-		       ($7 <> '' AND s.external_reservation_id = $7)                               AS reservation_hit
-		  FROM iam_v2.stays s
-		 WHERE s.tenant_id=$1 AND s.site_id=$2 AND s.pms_interface_id=$3
-		   AND s.normalized_room_number = $4
+		                              WHERE g.stay_id = c.id AND g.first_name_norm = $6)) AS first_hit,
+		       ($7 <> '' AND c.external_reservation_id = $7)                               AS reservation_hit
+		  FROM c
 		 -- ELIGIBLE STAYS FIRST. The window is bounded and a busy room accumulates departed stays; without an
 		 -- order the window is whatever the scan returns first, and on PRE-LIVE that was 16 departed stays with
 		 -- the in-house guest outside it (refused as STAY_NOT_ELIGIBLE). Departed stays still fill the rest of
 		 -- the window, so "the room exists" keeps its meaning.
-		 ORDER BY (s.status IN ('IN_HOUSE','POST_STAY_ACTIVE')) DESC, s.id
+		 ORDER BY c.eligible DESC, c.id
 		 LIMIT 16`, p.srv.tenID, p.srv.siteID, ifaceID, room, last, first, res)
 	if err != nil {
 		// Unreadable is indeterminate, never "no such guest".

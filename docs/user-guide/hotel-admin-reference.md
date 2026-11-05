@@ -583,8 +583,12 @@ Contract: `docs/architecture/ONEGATE_AFTER_CHECKOUT_ACCESS.md`.) The one place t
 after a **verified check-out**.
 
 - **The rules, in plain words:** every device that was authorised on the stay before check-out can reconnect;
-  they all share **one** data quota; the guest types only the **room number and reservation number**; new devices
-  are refused; the duration starts at the verified check-out; a change applies to **future check-outs only**.
+  they all share **one** data quota; the guest signs in again with the **normal room sign-in** (room number and the
+  same detail as during the stay: surname, first name or reservation number, as Room sign-in is set), or with the
+  room and reservation number on the *Post-stay* form where it is offered; reconnecting buys nothing and resets
+  nothing; new devices are refused (shown in Guest sign-in attempts as *New device refused after check-out*); once
+  the access has ended the stay is no longer accepted; the duration starts at the verified check-out; a change
+  applies to **future check-outs only** (stays already checked out keep the terms they were given).
 - **Shows:** tiles *Access after check-out* (on/off), *Setting in force* (**Site policy**, **Emergency fallback**
   or **Disabled**), *Last changed*, *Emergency fallback used*; any warnings; **what a departing client receives**
   in plain words; the **history** (every version, including turning the feature on or off; each opens with who

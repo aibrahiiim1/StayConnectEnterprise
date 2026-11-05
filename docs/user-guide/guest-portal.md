@@ -40,7 +40,7 @@ license.
 
 | Method | What the client enters | Notes |
 |---|---|---|
-| **Room** | Room Number, plus exactly one detail from the reservation: surname, first name, reservation number, or any one of the three in a single box that is compared against all three (the site chooses under **Admin Console → Hotel → Room sign-in**; a hint under the field says which) | Checked against the site's PMS through the appliance's guest list. If the guest qualifies for more than one internet package, the page offers **Choose your internet package**; with one package it is granted directly. |
+| **Room** | Room Number, plus exactly one detail from the reservation: surname, first name, reservation number, or any one of the three in a single box that is compared against all three (the site chooses under **Admin Console → Hotel → Room sign-in**; a hint under the field says which) | Checked against the site's PMS through the appliance's guest list. If the guest qualifies for more than one internet package, the page offers **Choose your internet package**; with one package it is granted directly. After check-out, a device that was on the stay signs in the same way and is let back onto the stay's **After Check-out Access** while it lasts; a new device is refused. |
 | **Voucher** | Voucher Code | A **Use Personal Account** switch changes to the account form when both are enabled. |
 | **Personal account** | Username, Password | Accounts created by staff under the **Admin Console → Client accounts**. |
 | **Email** | Email address → **Send code**, then the 6-digit code → **Verify** | Needs a sender under **Email & SMS**. *Try a different email* starts again. |

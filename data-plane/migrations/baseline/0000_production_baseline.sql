@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0208, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0209, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -5330,7 +5330,7 @@ CREATE FUNCTION iam_v2.issue_or_return_pms_context(p_tenant uuid, p_site uuid, p
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
-DECLARE v_existing uuid; v_lifecycle int; v_ev bigint;
+DECLARE v_existing uuid; v_lifecycle int; v_ev bigint; v_departed boolean;
 BEGIN
   PERFORM iam_v2.begin_controlled_operation('auth_context');
   IF p_request IS NULL THEN
@@ -5347,16 +5347,23 @@ BEGIN
 
   -- The row lock and the version snapshot still come from the Stay itself; whether the Stay may be authorised
   -- at all is the shared predicate's decision.
-  SELECT st.lifecycle_version, st.occupancy_evidence_version INTO v_lifecycle, v_ev
+  SELECT st.lifecycle_version, st.occupancy_evidence_version, st.status = 'CHECKED_OUT'
+    INTO v_lifecycle, v_ev, v_departed
     FROM iam_v2.stays st
    WHERE st.tenant_id=p_tenant AND st.site_id=p_site
      AND st.pms_interface_id=p_interface AND st.id=p_stay
      -- Stay-row conditions INLINE, so the FOR UPDATE recheck evaluates them against the locked tuple.
-     AND st.status='IN_HOUSE'
-     AND st.occupancy_evidence_at IS NOT NULL
-     AND st.occupancy_clock_suspect IS NOT TRUE
-     AND st.occupancy_evidence_version > 0
-     AND st.occupancy_revision_id = p_revision
+     AND ((st.status='IN_HOUSE'
+           AND st.occupancy_evidence_at IS NOT NULL
+           AND st.occupancy_clock_suspect IS NOT TRUE
+           AND st.occupancy_evidence_version > 0
+           AND st.occupancy_revision_id = p_revision)
+          -- A departed stay only while its After Check-out Access is valid (0209).
+          OR (st.status='CHECKED_OUT'
+              AND EXISTS (SELECT 1 FROM iam_v2.entitlements e
+                           WHERE e.tenant_id = st.tenant_id AND e.site_id = st.site_id AND e.stay_id = st.id
+                             AND e.status = 'ACTIVE' AND e.end_mode = 'GRACE_AFTER_CHECKOUT'
+                             AND (e.window_ends_at IS NULL OR e.window_ends_at > now()))))
    FOR UPDATE OF st;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'CONTEXT_INVALID: stay % is not eligible for a PMS context', p_stay;
@@ -5374,12 +5381,15 @@ BEGIN
     WHERE rt.tenant_id=p_tenant AND rt.site_id=p_site AND rt.pms_interface_id=p_interface
     FOR UPDATE;
 
-  -- Feed health, materialization readiness and the freshness ceiling, now judged under both locks.
-  PERFORM 1 FROM iam_v2.stays st
-   WHERE st.id = p_stay
-     AND iam_v2.p3_feed_authorizes(p_tenant, p_site, p_interface, p_revision, st.occupancy_evidence_at);
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'CONTEXT_INVALID: stay % is not eligible for a PMS context', p_stay;
+  -- Feed health, materialization readiness and the freshness ceiling, now judged under both locks. A departed stay's
+  -- check-out is already applied and a later reinstatement changes its lifecycle_version, which the context pins.
+  IF NOT v_departed THEN
+    PERFORM 1 FROM iam_v2.stays st
+     WHERE st.id = p_stay
+       AND iam_v2.p3_feed_authorizes(p_tenant, p_site, p_interface, p_revision, st.occupancy_evidence_at);
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'CONTEXT_INVALID: stay % is not eligible for a PMS context', p_stay;
+    END IF;
   END IF;
 
   RETURN QUERY
