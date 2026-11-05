@@ -22,6 +22,7 @@ import { LiveStatus, PendingChangeBanner, ReadOnlyNotice } from "@/components/ui
 import { useToast } from "@/components/ui/toast";
 import { errMsg } from "@/lib/utils";
 import { usePoll } from "@/lib/use-poll";
+import { clearExpiredLock } from "@/lib/sysnet-lock";
 import { ValidationIssueList, useNetworkAccess } from "@/components/network/shared";
 import { HelpList, HelpSection } from "@/components/help";
 import { AlertTriangle, Download, RefreshCw, ChevronDown, CheckCircle2 } from "lucide-react";
@@ -129,6 +130,8 @@ export default function NetworkSettingsPage() {
       const s = await api.get<SysNetState>("/network/system");
       setState(s);
       if (reseed || !dirtyRef.current) seed(s);
+      // Any read that finds no pending change after the deadline ends the local lock too, not only the settle loop's.
+      if (!s.pending) setApplyResp((r) => clearExpiredLock(r, Date.now()));
       if (s.pending) startCountdown(s.pending.deadline_unix);
       setLoadErr(null);
       setUpdatedAt(Date.now());
