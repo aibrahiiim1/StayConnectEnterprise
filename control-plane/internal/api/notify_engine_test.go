@@ -134,7 +134,7 @@ func TestGroupMessage(t *testing.T) {
 	}
 	two := append(one, outboxRow{kind: "licence_expiring", delivery: DeliveryImmediate, subject: "Licence", body: "b2"})
 	subj, body = groupMessage(two, s)
-	if subj != "OneGate Central: 2 new notices" || !strings.Contains(body, "1. Licence") || !strings.Contains(body, "2. Appliance SN1") {
+	if subj != "OneGate Central: 2 new notices" || !strings.Contains(body, "1. Appliance SN1") || !strings.Contains(body, "2. Licence") {
 		t.Errorf("grouped: %q %q", subj, body)
 	}
 	digest := []outboxRow{{kind: "appliance_waiting", delivery: DeliveryDigest, subject: "Waiting", body: "b"}}
