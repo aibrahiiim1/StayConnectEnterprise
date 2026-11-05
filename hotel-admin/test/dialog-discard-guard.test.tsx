@@ -19,4 +19,25 @@ describe("the unsaved-change guard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
+
+  it("does not submit on Enter while Save is disabled or the discard prompt waits", () => {
+    const onSubmit = vi.fn();
+    const { rerender } = render(
+      <DialogForm open onOpenChange={vi.fn()} title="Edit" submitLabel="Save" disabled onSubmit={onSubmit}>
+        <input aria-label="Name" />
+      </DialogForm>,
+    );
+    fireEvent.submit(screen.getByLabelText("Name").closest("form")!);
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    rerender(
+      <DialogForm open onOpenChange={vi.fn()} title="Edit" submitLabel="Save" dirty onSubmit={onSubmit}>
+        <input aria-label="Name" />
+      </DialogForm>,
+    );
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    expect(screen.getByText("Discard the changes you made?")).toBeInTheDocument();
+    fireEvent.submit(screen.getByLabelText("Name").closest("form")!);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
 });

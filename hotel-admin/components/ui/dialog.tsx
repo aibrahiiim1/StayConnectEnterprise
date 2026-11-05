@@ -217,6 +217,8 @@ export function DialogForm({
             id={formId}
             onSubmit={(e) => {
               e.preventDefault();
+              // Enter in an input submits too: held to the same rule as the Save button, and never while the discard prompt waits.
+              if (asking || busy || disabled) return;
               void onSubmit(e);
             }}
             onInput={() => setEdited(true)}
