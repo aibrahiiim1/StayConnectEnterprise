@@ -484,6 +484,24 @@ describe("editing a saved web-API connection", () => {
     },
   };
 
+  it("keeps an open configuration edit when the appliance time zone arrives later", async () => {
+    const { RevisionDialog } = await import("@/app/(app)/pms-interfaces/connection-sheet");
+    const props = { open: true, onOpenChange: vi.fn(), iface: { id: "i1" } as any, provider: REST_PROVIDER as any, onDone: vi.fn() };
+    const blank = { ...storedRevision, source_timezone: "" };
+    const { rerender } = render(<RevisionDialog {...props} from={blank as any} applianceTimezone="" />);
+    const dialog = await screen.findByRole("dialog");
+    const tz = within(dialog).getByLabelText(/PMS time zone/);
+    await userEvent.type(tz, "Europe/Rome");
+    rerender(<RevisionDialog {...props} from={blank as any} applianceTimezone="Africa/Cairo" />);
+    expect(within(dialog).getByLabelText(/PMS time zone/)).toHaveValue("Europe/Rome");
+
+    // A revision with its own time zone keeps it whatever the appliance reports.
+    rerender(<RevisionDialog {...props} open={false} from={storedRevision as any} applianceTimezone="" />);
+    rerender(<RevisionDialog {...props} from={storedRevision as any} applianceTimezone="" />);
+    rerender(<RevisionDialog {...props} from={storedRevision as any} applianceTimezone="Africa/Cairo" />);
+    expect((await screen.findByLabelText(/PMS time zone/))).toHaveValue("Europe/Berlin");
+  });
+
   it("reloads every persisted provider value instead of defaults or blanks", async () => {
     const { valuesFromRevision } = await import("@/lib/api/pms-connections");
     const { values, timezone } = valuesFromRevision(REST_PROVIDER as any, storedRevision);

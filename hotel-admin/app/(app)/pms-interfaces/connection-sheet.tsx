@@ -3,7 +3,7 @@
 // Guest-affecting changes require the operator's password; edged enforces it.
 
 import { RemoveConnectionDialog } from "@/components/pms/remove-connection-dialog";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { api, ApiError, type PmsConnectionSettings, type PmsGuestNetworkRoute, type PmsInterfaceHealth, type PmsRevision } from "@/lib/api";
 import { Sheet, SheetBody, SheetContent, SheetHeader, SheetSection } from "@/components/ui/sheet";
@@ -499,7 +499,7 @@ function ConfigurationTab({
   );
 }
 
-function RevisionDialog({
+export function RevisionDialog({
   open, onOpenChange, iface, provider, from, applianceTimezone, onDone,
 }: {
   open: boolean;
@@ -518,11 +518,18 @@ function RevisionDialog({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<unknown>(null);
 
+  const tzEdited = useRef(false);
   useEffect(() => {
     if (!open) return;
     const v = valuesFromRevision(provider, from, applianceTimezone);
     setValues(v.values); setTimezone(v.timezone); setShowErrors(false); setErr(null);
-  }, [open, provider, from, applianceTimezone]);
+    tzEdited.current = false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, provider, from]);
+  // A late appliance time zone fills only an untouched field of a revision that has none of its own; it never resets the form.
+  useEffect(() => {
+    if (open && applianceTimezone && !tzEdited.current && !from?.source_timezone) setTimezone(applianceTimezone);
+  }, [open, applianceTimezone, from]);
 
   const errors = validateAll(fields, values);
 
@@ -550,7 +557,7 @@ function RevisionDialog({
     >
       <Field label="PMS time zone" required hint="Time zone name, for example Europe/Berlin. Arrivals and departures are read in it."
         error={showErrors && !timezone.trim() ? "Required." : undefined}>
-        <Input value={timezone} spellCheck={false} onChange={(e) => setTimezone(e.target.value)} />
+        <Input value={timezone} spellCheck={false} onChange={(e) => { tzEdited.current = true; setTimezone(e.target.value); }} />
       </Field>
       <ProviderFieldsForm fields={fields} values={values} errors={showErrors ? errors : {}}
         onChange={(k, v) => setValues((s) => ({ ...s, [k]: v }))} disabled={busy} />
