@@ -68,7 +68,7 @@ function mockBackend(over: {
 } = {}) {
   get.mockImplementation((path: string) => {
     if (path === "/auth/whoami") return Promise.resolve({ roles: over.roles ?? ["site_admin"] });
-    if (path === "/pms-interfaces" || path === "/pms-interfaces?include=retired") return Promise.resolve({ interfaces: over.interfaces ?? [protel] });
+    if (path === "/pms-interfaces" || path === "/pms-interfaces?include=retired") return Promise.resolve({ interfaces: over.interfaces ?? [protel], appliance_timezone: "Africa/Cairo" });
     if (path === "/pms-providers") {
       return over.providers
         ? Promise.resolve({ providers: over.providers })
@@ -144,6 +144,31 @@ describe("adding a connection", () => {
     }]);
     expect(post.mock.calls.some(([p]) => /secret/.test(String(p)))).toBe(false);
     expect(await within(dialog).findByRole("button", { name: "Open the connection" })).toBeTruthy();
+  });
+
+  it("keeps what was entered when the appliance time zone arrives after the wizard opened", async () => {
+    const { AddConnectionWizard } = await import("@/app/(app)/pms-interfaces/add-connection-wizard");
+    const props = { open: true, onOpenChange: vi.fn(), providers: [PROTEL_PROVIDER as any], catalogueAvailable: true, onChanged: vi.fn(), onOpenConnection: vi.fn() };
+    const { rerender } = render(<AddConnectionWizard {...props} applianceTimezone="" />);
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Next" }));
+    await userEvent.type(within(dialog).getByLabelText(/^Name/), "Front office");
+    rerender(<AddConnectionWizard {...props} applianceTimezone="Africa/Cairo" />);
+    expect(within(dialog).getByLabelText(/^Name/)).toHaveValue("Front office");
+    expect(within(dialog).getByPlaceholderText("Africa/Cairo")).toHaveValue("Africa/Cairo");
+  });
+
+  it("never discards what was entered on a repeated dismissal, only on Discard", async () => {
+    mockBackend();
+    await renderPage();
+    const dialog = await openWizard();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Next" }));
+    await userEvent.type(within(dialog).getByLabelText(/^Name/), "Front office");
+    await userEvent.keyboard("{Escape}");
+    expect(await within(dialog).findByText("Discard what you entered for this connection?")).toBeTruthy();
+    await userEvent.keyboard("{Escape}");
+    expect(within(dialog).getByText("Discard what you entered for this connection?")).toBeTruthy();
+    expect(within(dialog).getByLabelText(/^Name/)).toHaveValue("Front office");
   });
 
   it("leaves a connection paused when it could not be put live, and resumes from that step", async () => {
@@ -458,6 +483,24 @@ describe("editing a saved web-API connection", () => {
       heartbeat_interval_ms: 300000,
     },
   };
+
+  it("keeps an open configuration edit when the appliance time zone arrives later", async () => {
+    const { RevisionDialog } = await import("@/app/(app)/pms-interfaces/connection-sheet");
+    const props = { open: true, onOpenChange: vi.fn(), iface: { id: "i1" } as any, provider: REST_PROVIDER as any, onDone: vi.fn() };
+    const blank = { ...storedRevision, source_timezone: "" };
+    const { rerender } = render(<RevisionDialog {...props} from={blank as any} applianceTimezone="" />);
+    const dialog = await screen.findByRole("dialog");
+    const tz = within(dialog).getByLabelText(/PMS time zone/);
+    await userEvent.type(tz, "Europe/Rome");
+    rerender(<RevisionDialog {...props} from={blank as any} applianceTimezone="Africa/Cairo" />);
+    expect(within(dialog).getByLabelText(/PMS time zone/)).toHaveValue("Europe/Rome");
+
+    // A revision with its own time zone keeps it whatever the appliance reports.
+    rerender(<RevisionDialog {...props} open={false} from={storedRevision as any} applianceTimezone="" />);
+    rerender(<RevisionDialog {...props} from={storedRevision as any} applianceTimezone="" />);
+    rerender(<RevisionDialog {...props} from={storedRevision as any} applianceTimezone="Africa/Cairo" />);
+    expect((await screen.findByLabelText(/PMS time zone/))).toHaveValue("Europe/Berlin");
+  });
 
   it("reloads every persisted provider value instead of defaults or blanks", async () => {
     const { valuesFromRevision } = await import("@/lib/api/pms-connections");

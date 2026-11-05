@@ -71,6 +71,9 @@ type phase3Shaping struct {
 	legacy      legacySet
 	enforcement enforcementRecorder
 	owner       addressOwner
+	// retired, once per pass, names the bridges of removed client networks (applier.retiredBridgeCheck); passRetired is that pass's answer.
+	retired     func(ctx context.Context) func(bridge string) bool
+	passRetired func(bridge string) bool
 	// unverified: sessions not renewed because ownership could not be checked; their bounded leases run down.
 	unverified map[string]bool
 	// leaseMem is the lease last verified for each session (see rememberLease).
@@ -417,6 +420,11 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 	}
 	p.passClasses, p.passGroups, p.passGroupClasses = nil, nil, nil
 	defer func() { p.passClasses, p.passGroups, p.passGroupClasses = nil, nil, nil }()
+	p.passRetired = nil
+	if p.retired != nil {
+		p.passRetired = p.retired(ctx)
+	}
+	defer func() { p.passRetired = nil }()
 	p.pruneLeaseMemory(now)
 	p.mark("setup")
 	if p.batching() {
@@ -456,6 +464,15 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 		if s.Bridge == "" {
 			res.Failed++
 			res.Problems = append(res.Problems, "session "+s.SessionID+": no bridge")
+			continue
+		}
+		// A removed client network (replaced or switched off): its sessions are ended straight from the plan, before class numbers are
+		// allocated (an absent /19 bridge's addresses fall back to colliding minors) and before anything is installed on the bridge.
+		if s.Entitled && p.passRetired != nil && p.passRetired(s.Bridge) {
+			res.Problems = append(res.Problems, "shape "+s.SessionID+": its client network was removed; the session is ended")
+			// Bookkeeping, queued after the pass's admissions and renewals so a large removed network cannot stall live ones.
+			p.queueEnd(ctx, classKey(s.Bridge, s.SessionID), s.SessionID, endReasonNetworkRemoved)
+			p.endSeries(s.Bridge, s.SessionID)
 			continue
 		}
 		if !bridges[s.Bridge] {

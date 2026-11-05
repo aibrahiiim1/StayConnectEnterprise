@@ -139,3 +139,25 @@
   }
   [data-scroll-under="true"] :is(.cell-pin-end, td:last-child:has([data-row-actions]), table:has(> tbody > tr > td:last-child [data-row-actions]) > thead > tr > th:last-child)::before { opacity: 1; }
 }
+
+@layer components {
+  .disclosure-motion { interpolate-size: allow-keywords; }
+  .disclosure-motion::details-content {
+    block-size: 0;
+    opacity: 0;
+    overflow-y: clip;
+    transition: block-size 150ms var(--motion-ease), opacity 150ms var(--motion-ease), content-visibility 150ms allow-discrete;
+  }
+  .disclosure-motion[open]::details-content {
+    block-size: auto;
+    opacity: 1;
+    transition-duration: 200ms;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .disclosure-motion::details-content,
+    .disclosure-motion[open]::details-content {
+      block-size: auto;
+      transition: opacity 120ms var(--motion-ease), content-visibility 120ms allow-discrete;
+    }
+  }
+}
