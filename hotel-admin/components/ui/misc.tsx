@@ -96,6 +96,7 @@ export function Meter({
   value,
   max,
   label,
+  name,
   caption,
   tone,
   className,
@@ -103,12 +104,15 @@ export function Meter({
   value: number;
   max: number;
   label?: React.ReactNode;
+  name?: string;
   caption?: React.ReactNode;
   tone?: "ok" | "warn" | "err" | "info" | "neutral";
   className?: string;
 }) {
   const safeMax = max > 0 ? max : 0;
   const pct = safeMax > 0 ? Math.min(100, Math.max(0, (value / safeMax) * 100)) : 0;
+  const accessibleName = name ?? (typeof label === "string" ? label : undefined);
+  const valueText = typeof caption === "string" ? caption : undefined;
   const auto: NonNullable<typeof tone> = pct >= 90 ? "err" : pct >= 75 ? "warn" : "ok";
   const resolved = tone ?? auto;
   const fill: Record<string, string> = {
@@ -128,13 +132,15 @@ export function Meter({
       )}
       <div
         role="meter"
-        aria-valuenow={value}
+        aria-label={accessibleName}
+        aria-valuenow={safeMax > 0 ? Math.min(safeMax, Math.max(0, value)) : 0}
         aria-valuemin={0}
         aria-valuemax={safeMax || undefined}
+        aria-valuetext={valueText}
         className="h-1.5 w-full overflow-hidden rounded-full bg-surface"
       >
         <div
-          className={cn("h-full rounded-full transition-[width] duration-300", fill[resolved])}
+          className={cn("h-full rounded-full transition-[width] duration-base ease-onegate motion-reduce:transition-none", fill[resolved])}
           style={{ width: `${pct}%` }}
         />
       </div>
@@ -231,7 +237,7 @@ export function Metric({
   const colors: Record<string, string> = {
     default: "text-foreground",
     ok: "text-success",
-    warn: "text-warning",
+    warn: "text-warning-subtle-foreground",
     err: "text-destructive",
   };
   return (

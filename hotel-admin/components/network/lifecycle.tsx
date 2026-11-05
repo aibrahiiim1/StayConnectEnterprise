@@ -2,7 +2,7 @@
 
 import { ImpactPanel } from "@/components/network/impact-panel";
 import { useEffect, useState } from "react";
-import { Layers, Rocket, X } from "lucide-react";
+import { Layers, Plus, Rocket, X } from "lucide-react";
 import { api } from "@/lib/api";
 import {
   CHANGE_VERB, FactoryInfo, GROUP_LABEL, PORT_MODE_LABEL, PortInfo, PortModePlan, PortNetwork, StagedGroup,
@@ -70,7 +70,7 @@ export function FactoryNetworkCard({ writable, onStaged }: { writable: boolean; 
       </dl>
       {info.conflicts.length > 0 && (
         <Callout tone="warning" title="Cannot be activated as it stands">
-          <ul className="list-disc space-y-1 pl-5">{info.conflicts.map((c) => <li key={c}>{c}</li>)}</ul>
+          <ul className="list-disc space-y-1 ps-5">{info.conflicts.map((c) => <li key={c}>{c}</li>)}</ul>
         </Callout>
       )}
       <DialogForm
@@ -88,7 +88,7 @@ export function FactoryNetworkCard({ writable, onStaged }: { writable: boolean; 
         <p className="text-sm text-muted-foreground">
           {t.name}: {t.subnet_cidr}, gateway {t.gateway_ip}, DHCP {t.pool.start_ip}–{t.pool.end_ip}, on {info.lan_interface ?? "the client port"}.
         </p>
-        <ul className="list-disc space-y-1 pl-5 text-sm">{info.checklist.map((c) => <li key={c}>{c}</li>)}</ul>
+        <ul className="list-disc space-y-1 ps-5 text-sm">{info.checklist.map((c) => <li key={c}>{c}</li>)}</ul>
         <Checkbox label="No other DHCP server serves this LAN segment." checked={ack} onChange={(e) => setAck(e.target.checked)} />
       </DialogForm>
     </SectionCard>
@@ -99,6 +99,7 @@ export function FactoryNetworkCard({ writable, onStaged }: { writable: boolean; 
 export function StagedChangesList({ writable, reloadKey, onCancelled }: { writable: boolean; reloadKey: number; onCancelled: () => void }) {
   const [groups, setGroups] = useState<StagedGroup[]>([]);
   const [err, setErr] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState<string | null>(null);
   const toast = useToast();
 
   useEffect(() => {
@@ -108,13 +109,17 @@ export function StagedChangesList({ writable, reloadKey, onCancelled }: { writab
   if (groups.length === 0) return null;
 
   async function cancel(g: StagedGroup) {
+    if (cancelling) return;
     setErr(null);
+    setCancelling(g.group_id);
     try {
       await api.del(`/network/changes/${g.group_id}`);
       toast.success(`${GROUP_LABEL[g.group_kind]} cancelled`, "Nothing had been applied.");
       onCancelled();
     } catch (e) {
       setErr(errMsg(e));
+    } finally {
+      setCancelling(null);
     }
   }
 
@@ -124,17 +129,25 @@ export function StagedChangesList({ writable, reloadKey, onCancelled }: { writab
       <ul className="space-y-2">
         {groups.map((g) => (
           <li key={g.group_id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
-            <span>
+            <span className="min-w-0 flex-1">
               <strong>{GROUP_LABEL[g.group_kind]}</strong>:{" "}
               {g.changes.map((c) => `${CHANGE_VERB[c.kind]} ${c.network || c.network_id}`).join("; ")}
             </span>
-            {writable && g.state === "PENDING" && (
-              <Button variant="ghost" size="sm" onClick={() => void cancel(g)} aria-label={`Cancel ${GROUP_LABEL[g.group_kind]}`}>
-                <X /> Cancel
-              </Button>
-            )}
-            {g.state === "PENDING" && <Badge tone="warn">Not applied yet</Badge>}
-            {g.state === "APPLIED" && <Badge tone="info">Awaiting confirmation</Badge>}
+            <span className="flex items-center gap-2">
+              {g.state === "PENDING" && <Badge tone="warn">Not applied yet</Badge>}
+              {g.state === "APPLIED" && <Badge tone="info">Awaiting confirmation</Badge>}
+              {writable && g.state === "PENDING" && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={cancelling !== null}
+                  onClick={() => void cancel(g)}
+                  aria-label={`Cancel ${GROUP_LABEL[g.group_kind]}`}
+                >
+                  <X /> {cancelling === g.group_id ? "Cancelling…" : "Cancel"}
+                </Button>
+              )}
+            </span>
           </li>
         ))}
       </ul>
@@ -243,7 +256,7 @@ export function PortModeCard({ writable, reloadKey, onStaged }: { writable: bool
                 {p.vlans.map((v) => <PortNetworkLine key={v.id} n={v} how={`Tagged VLAN ${v.vlan_id}`} state="serving" />)}
                 {(p.switched_off ?? []).map((v) => <PortNetworkLine key={v.id} n={v} how={v.vlan_id ? `Tagged VLAN ${v.vlan_id}` : "Untagged (native)"} state="off" />)}
               </ul>
-              {p.staged_changes > 0 && <p className="mt-1 text-caption text-muted-foreground">{p.staged_changes} change(s) staged.</p>}
+              {p.staged_changes > 0 && <p className="mt-1 text-caption text-muted-foreground">{p.staged_changes === 1 ? "1 change staged." : `${p.staged_changes} changes staged.`}</p>}
             </div>
             {writable && (
               <div className="flex gap-2">
@@ -275,31 +288,41 @@ export function PortModeCard({ writable, reloadKey, onStaged }: { writable: bool
         {target?.mode === "trunk" && (
           <div className="space-y-2">
             {rows.map((r, i) => (
-              <div key={i} className="grid grid-cols-[7rem_1fr] gap-2">
-                <Field label={i === 0 ? "VLAN id" : ""}>
+              <div key={i} className="grid grid-cols-[7rem_1fr_auto] items-end gap-2">
+                <Field label={i === 0 ? "VLAN id" : undefined}>
                   <Input inputMode="numeric" value={r.vlan} aria-label={`VLAN id ${i + 1}`}
                     onChange={(e) => { setPlan(null); setRows(rows.map((x, j) => (j === i ? { ...x, vlan: e.target.value } : x))); }} />
                 </Field>
-                <Field label={i === 0 ? "Name (optional)" : ""}>
+                <Field label={i === 0 ? "Name" : undefined} optional={i === 0}>
                   <Input value={r.name} aria-label={`Name ${i + 1}`}
                     onChange={(e) => { setPlan(null); setRows(rows.map((x, j) => (j === i ? { ...x, name: e.target.value } : x))); }} />
                 </Field>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  disabled={rows.length === 1}
+                  aria-label={`Remove VLAN row ${i + 1}`}
+                  onClick={() => { setPlan(null); setRows(rows.filter((_, j) => j !== i)); }}
+                >
+                  <X />
+                </Button>
               </div>
             ))}
-            <Button type="button" variant="ghost" size="sm" onClick={() => setRows([...rows, { vlan: "", name: "" }])}>Add another VLAN</Button>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setRows([...rows, { vlan: "", name: "" }])}><Plus /> Add another VLAN</Button>
           </div>
         )}
         {plan && (
           <div className="space-y-3 text-sm">
             {plan.conflicts.length > 0 && (
               <Callout tone="warning" title="Conflicts">
-                <ul className="list-disc space-y-1 pl-5">{plan.conflicts.map((c) => <li key={c}>{c}</li>)}</ul>
+                <ul className="list-disc space-y-1 ps-5">{plan.conflicts.map((c) => <li key={c}>{c}</li>)}</ul>
               </Callout>
             )}
             {plan.create.length > 0 && (
               <div>
                 <strong>Networks that would be created (switched on when applied)</strong>
-                <ul className="list-disc pl-5">
+                <ul className="list-disc ps-5">
                   {plan.create.map((c) => <li key={c.vlan_id}>VLAN {c.vlan_id} “{c.name}” — <span className="font-mono">{c.subnet_cidr}</span>, gateway <span className="font-mono">{c.gateway_ip}</span></li>)}
                 </ul>
               </div>
@@ -307,17 +330,17 @@ export function PortModeCard({ writable, reloadKey, onStaged }: { writable: bool
             {plan.switch_off.length > 0 && (
               <div>
                 <strong>Networks that would be switched off</strong>
-                <ul className="list-disc pl-5">{plan.switch_off.map((n) => <li key={n.id}>{n.name} (VLAN {n.vlan_id}) — {n.active_clients} connected</li>)}</ul>
+                <ul className="list-disc ps-5">{plan.switch_off.map((n) => <li key={n.id}>{n.name} (VLAN {n.vlan_id}) — {n.active_clients} connected</li>)}</ul>
               </div>
             )}
             <div>
               <strong>What this does to clients</strong>
-              <ul className="list-disc pl-5">{plan.impact.map((i) => <li key={i}>{i}</li>)}</ul>
+              <ul className="list-disc ps-5">{plan.impact.map((i) => <li key={i}>{i}</li>)}</ul>
             </div>
             <ImpactPanel affected={plan.affected} />
             <Callout tone="info" title="Check outside the appliance">
               <p className="mb-1">The appliance cannot verify these.</p>
-              <ul className="list-disc pl-5">{[...plan.switch_requirements, ...(plan.external_requirements ?? [])].map((i) => <li key={i}>{i}</li>)}</ul>
+              <ul className="list-disc ps-5">{[...plan.switch_requirements, ...(plan.external_requirements ?? [])].map((i) => <li key={i}>{i}</li>)}</ul>
             </Callout>
           </div>
         )}

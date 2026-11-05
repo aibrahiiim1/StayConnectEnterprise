@@ -2,12 +2,13 @@
 
 import { serviceStateOf } from "@/lib/network-state";
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import { api, Whoami, ValidationIssue, HealthCheck, Reservation, GuestNetwork } from "@/lib/api";
 import { canWrite } from "@/lib/roles";
 import { errMsg } from "@/lib/utils";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { ConfirmDialog, DialogForm } from "@/components/ui/dialog";
-import { Field, Input, Select } from "@/components/ui/input";
+import { Field, Input, InputGroup, Select } from "@/components/ui/input";
 import { Switch } from "@/components/ui/misc";
 import { RowActions } from "@/components/ui/row-actions";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
@@ -189,12 +190,14 @@ export function AddReservationDialog({
   onOpenChange,
   networkId,
   networks,
+  initial,
   onSaved,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   networkId?: string;
   networks?: GuestNetwork[];
+  initial?: Partial<NewReservation> | null;
   onSaved: () => void;
 }) {
   const blank: NewReservation = { guest_network_id: networkId ?? "", mac: "", reserved_ip: "", hostname: "", enabled: true };
@@ -203,9 +206,9 @@ export function AddReservationDialog({
   const [err, setErr] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    if (open) { setF({ ...blank }); setErr(null); }
+    if (open) { setF({ ...blank, ...(initial ?? {}) }); setErr(null); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, networkId]);
+  }, [open, networkId, initial]);
 
   async function submit() {
     const gid = networkId ?? f.guest_network_id;
@@ -386,4 +389,106 @@ export function SwitchRow({
       <Switch id={id} checked={checked} onCheckedChange={onChange} disabled={disabled} />
     </div>
   );
+}
+
+export function secondsWords(raw: string): string | null {
+  const n = Number(raw);
+  if (!raw.trim() || !Number.isInteger(n) || n <= 0) return null;
+  const d = Math.floor(n / 86400), h = Math.floor((n % 86400) / 3600), m = Math.floor((n % 3600) / 60), s = n % 60;
+  const part = (v: number, unit: string) => (v ? `${v} ${unit}${v === 1 ? "" : "s"}` : "");
+  return [part(d, "day"), part(h, "hour"), part(m, "minute"), part(s, "second")].filter(Boolean).slice(0, 2).join(" ");
+}
+
+export type LeaseValues = { def: string; min: string; max: string };
+export type LeaseProblems = Partial<Record<keyof LeaseValues, string>>;
+
+export function leaseProblems(v: LeaseValues): LeaseProblems {
+  const out: LeaseProblems = {};
+  for (const k of ["def", "min", "max"] as const) {
+    if (!secondsWords(v[k])) out[k] = "Enter a whole number of seconds above zero.";
+  }
+  if (Object.keys(out).length) return out;
+  const def = Number(v.def), min = Number(v.min), max = Number(v.max);
+  if (min > def) out.min = "The shortest lease cannot be longer than the lease time.";
+  if (max < def) out.max = "The longest lease cannot be shorter than the lease time.";
+  return out;
+}
+
+export function LeaseFields({
+  value,
+  onChange,
+  problems,
+  disabled,
+  idPrefix,
+}: {
+  value: LeaseValues;
+  onChange: (v: LeaseValues) => void;
+  problems?: LeaseProblems;
+  disabled?: boolean;
+  idPrefix: string;
+}) {
+  const fields: { key: keyof LeaseValues; label: string }[] = [
+    { key: "def", label: "Lease time" },
+    { key: "min", label: "Shortest lease" },
+    { key: "max", label: "Longest lease" },
+  ];
+  return (
+    <div className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
+      {fields.map((f) => (
+        <Field key={f.key} label={f.label} required error={problems?.[f.key]} hint={secondsWords(value[f.key]) ?? "In seconds."}>
+          <InputGroup suffix="s">
+            <Input
+              id={`${idPrefix}-${f.key}`}
+              type="number"
+              inputMode="numeric"
+              min={1}
+              step={1}
+              value={value[f.key]}
+              disabled={disabled}
+              onChange={(e) => onChange({ ...value, [f.key]: e.target.value })}
+            />
+          </InputGroup>
+        </Field>
+      ))}
+    </div>
+  );
+}
+
+export function useLeaveGuard(dirty: boolean, message = "The changes you made here have not been saved."): React.ReactNode {
+  const router = useRouter();
+  const [target, setTarget] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
+    const intercept = (e: MouseEvent) => {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const a = (e.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (!a || a.target === "_blank" || a.origin !== window.location.origin) return;
+      if (a.pathname === window.location.pathname && a.search === window.location.search) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setTarget(a.pathname + a.search + a.hash);
+    };
+    window.addEventListener("beforeunload", warn);
+    document.addEventListener("click", intercept, true);
+    return () => {
+      window.removeEventListener("beforeunload", warn);
+      document.removeEventListener("click", intercept, true);
+    };
+  }, [dirty]);
+  return (
+    <ConfirmDialog
+      open={target !== null}
+      onOpenChange={(v) => !v && setTarget(null)}
+      title="Leave without saving?"
+      description={message}
+      confirmLabel="Discard and leave"
+      confirmVariant="danger"
+      onConfirm={() => { const t = target; setTarget(null); if (t) router.push(t); }}
+    />
+  );
+}
+
+export function plural(n: number, one: string, many = `${one}s`): string {
+  return `${n.toLocaleString()} ${n === 1 ? one : many}`;
 }
