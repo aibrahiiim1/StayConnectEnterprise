@@ -344,7 +344,7 @@
   "next_authorized_action": "Work normal missions under the PRODUCT-OWNER-LED DELIVERY model D42 (2026-09-26): implement, target-test, deploy routine software to the test appliance 172.21.96.97 under its standing deployment authorization (current_state_facts.standing_test_appliance_deployment_authorization) (the production Central only when a mission names it), stop at READY FOR PRODUCT OWNER TESTING, and merge only after explicit Product Owner acceptance (po-merge-approved). The comprehensive validation runs only on 'FULL CHECK THE WHOLE CODE'. Retired hosts (current_state_facts.retired_hosts) are never contacted.",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase7-Plan.md",
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
-  "latest_accepted_po_decision": "D93",
+  "latest_accepted_po_decision": "D94",
   "current_state_facts": {
     "_note": "MACHINE-READABLE CURRENT STATE. Every current-state surface in this repository is validated against these fields by tools/validate-current-state-parity.py, which runs in the Project Governance gate. They exist because prose alone let a contradiction survive a green gate: current_maturity still said an authorization was awaited and iam_v2 was 49/0 while this file already recorded 63 tables and an executed Live Increment 9. A fact that is only asserted in sentences cannot be diffed; a fact recorded here can be.",
     "phase": "7",
@@ -1339,7 +1339,7 @@
       "_note": "The current test appliance (Product-Owner record, 2026-10-28, D78/T0264). Activated on the production Central, in its trust universe.",
       "host": "172.21.96.97",
       "central": "central.onegate.getsemantics.com (41.128.240.133)",
-      "release": "onegate-appliance-a66d93195320 (2026-11-04 22:47 UTC, appliance-install.sh --upgrade from master a66d93195320720556c0f1a722a473ae915b7eda, the merge of PR #321; T0306): every Go binary (scd, edged, portald, netd, acctd, pmsd, keybootstrap, svc-run) read back as vcs.revision a66d93195320, -tags=stayconnect_production, vcs.modified=false, each sha256 equal to DEPLOYED_BINARIES.sha256; Admin Console release 20261104-224820 (BUILD_ID 0GhzQ5KbKKeb9hhpv-wgb) with the previous release 20261104-182922 wired as its rollback; migration 0208 applied behind its verified pre-change backup and the Gate-P reconcile (schema ledger head 0208); the appliance Root CA pin unchanged. Rollback: the previous tree /opt/stayconnect/.previous/20261104T224707Z and bin/*.bak-20261104T224707Z (scripts/binary-rollback.sh). DHCP unchanged (VLAN 95 lease 3600 s; the 8-hour lease was not applied, T0305). Room-charge posting stays as the PO set it on 2026-11-02.",
+      "release": "onegate-appliance-901a41018c40 (2026-11-05 01:30 UTC, appliance-install.sh --upgrade from master 901a41018c406e7875658d906bb9950f4c7e69c0, after the merges of PRs #314-#326 and #328; T0308): every Go binary (scd, edged, portald, netd, acctd, pmsd, keybootstrap, svc-run) read back as vcs.revision 901a41018c40, -tags=stayconnect_production, vcs.modified=false, each sha256 equal to DEPLOYED_BINARIES.sha256; Admin Console release 20261105-013043 (BUILD_ID IaU52Ag5VN1pX5_3gwi6J) with 20261104-224820 wired as its rollback; schema ledger head 0208 (no migration in this release); the appliance Root CA pin unchanged. Rollback: the previous tree /opt/stayconnect/.previous/20261105T013032Z and bin/*.bak-* written by this upgrade (scripts/binary-rollback.sh). Client network VLAN 95 (T0307): 10.3.0.0/19, gateway 10.3.0.1, pool 10.3.0.100-10.3.31.250, lease 28,800 s (min and max 28,800 s), bridge br-g95-56c8. Room-charge posting stays as the PO set it on 2026-11-02.",
       "status": "TEST. Go-Live not authorised. Routine software deployments are covered by the standing authorization D79.",
       "deployed_note": "The closure round of the audit-decision mission (T0270 to T0272) is deployed and verified on this appliance (T0273): migrations through 0179, units active, licence Active over mutual TLS, appliance Root CA pinned against its fingerprint, client journey 12/12, 500 simultaneous sign-in attempts answered with no busy answer. The earlier release (T0269) had stopped safely once at migration 0162 and was fixed by PR #266."
     },
@@ -1362,7 +1362,7 @@
       "dispositions": "docs/AUDIT_DECISION_DISPOSITIONS.md"
     }
   },
-  "latest_transition_id": "T0306",
+  "latest_transition_id": "T0308",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1858,16 +1858,16 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "TEST_APPLIANCE_UPGRADE_2026_11_04D",
-    "decision": "Product Owner mission of 2026-11-04: upgrade of the test appliance to master a66d9319.",
+    "kind": "TEST_APPLIANCE_UPGRADE_2026_11_05",
+    "decision": "Product Owner mission of 2026-11-05: the final integrated version on the test appliance.",
     "decision_note": "Installed and read back; see test_appliance.release.",
-    "manifest": "docs/manifests/TestApplianceUpgrade20261104d-change-manifest.md",
-    "base": "a66d93195320720556c0f1a722a473ae915b7eda",
-    "base_note": "Master after the merge of PR #321.",
-    "transition": "T0306",
-    "previous_delivery": "T0305",
-    "branch": "governance/test-appliance-a66d9319",
-    "note": "T0306. Go-Live not authorised."
+    "manifest": "docs/manifests/Mission20261105-change-manifest.md",
+    "base": "901a41018c406e7875658d906bb9950f4c7e69c0",
+    "base_note": "Master after the merges of PRs #314-#326 and #328.",
+    "transition": "T0308",
+    "previous_delivery": "T0307",
+    "branch": "governance/mission-2026-11-05",
+    "note": "T0308. Go-Live not authorised."
   },
   "onboarding_reconciliation": {
     "decision": "D37",

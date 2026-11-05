@@ -1363,6 +1363,19 @@
       "authorization_evidence": "The Product Owner's mission of 2026-11-04: the Client Activity page tested and approved; a dedicated AFTER_CHECKOUT_NEW_DEVICE_REJECTED result and its narrowly scoped migration approved; PR, protected merge and deployment to the test appliance. The same mission's 8-hour DHCP lease on VLAN 95 was conditional on sufficient pool capacity and was not applied.",
       "does_not_authorize": "Any change to After Check-out eligibility, entitlements, accounting, PMS, payments or networking; Automatic Reconnection; the VLAN 95 /19 change (the Product Owner's own); the production Central; Go-Live.",
       "delivery_status": "Delivered on delivery/client-activity (T0305)."
+    },
+    {
+      "id": "D94",
+      "decided_on": "2026-11-05",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-11-05",
+      "status": "ACTIVE",
+      "title": "VLAN 95 ON /19 WITH AN 8-HOUR LEASE, SESSIONS OF A REMOVED NETWORK END, AND THE UI FIXES BATCH: the test appliance's VLAN 95 client network was widened from 10.3.0.0/22 to 10.3.0.0/19 (gateway 10.3.0.1 kept, DHCP pool 10.3.0.100-10.3.31.250) through the existing staged Replace contract, because a switched-on network is not widened in place (widenRefusal); its lease is 28,800 s with matching minimum and maximum. netd now ends the sessions of a replaced or switched-off client network (NETWORK_REMOVED) instead of retrying them on a bridge that no longer exists. /19 stays the default for new client networks. The twelve UI fixes pull requests #314-#326 were reviewed, corrected and merged.",
+      "authorization_evidence": "The Product Owner's mission of 2026-11-05: expand VLAN 95 to /19 keeping gateway 10.3.0.1 with a safe validated transition (temporary client disconnections accepted), then an 8-hour lease; verify the /19 default for new appliances and client networks; take ownership of and complete PRs #314-#320 and #322-#326 with protected merges; deploy the final integrated version to the test appliance.",
+      "does_not_authorize": "Changing the in-place widening rule (widenRefusal) or the network replacement contract; Automatic Reconnection; PMS configuration or financial changes; PKI or trust changes; the production Central; Go-Live.",
+      "delivery_status": "Delivered on master 901a4101 (T0307); test appliance (T0308)."
     }
   ]
 }
