@@ -1,4 +1,0 @@
-commit 1fcf19f3dce6df453b4671a24e71dec3cabecf8f
-Date:   Thu Nov 5 00:50:03 2026 +0200
-
-    Governance: T0306 records the test-appliance upgrade to master a66d9319

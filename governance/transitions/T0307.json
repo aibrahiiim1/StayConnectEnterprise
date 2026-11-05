@@ -1,0 +1,35 @@
+{
+  "transition_id": "T0307",
+  "seq": 307,
+  "timestamp": "2026-11-05T03:31:43+02:00",
+  "timestamp_derivation": "Read from the workstation clock (UTC+02:00) by the script that wrote this receipt, immediately before the commit that introduces it.",
+  "record_type": "VLAN95_SLASH19_LEASE_8H_REMOVED_NETWORK_SESSIONS_UI_FIXES",
+  "authorisation": "The Product Owner's mission of 2026-11-05 (D94): VLAN 95 to /19 with gateway 10.3.0.1 through a safe validated transition (temporary client disconnections accepted), then an 8-hour lease; the /19 default verified; ownership and protected merge of PRs #314-#320 and #322-#326; the final integrated version on the test appliance under D79.",
+  "delivery": "VLAN 95 (network wifisite2 on ens192) was replaced, as the replacement contract requires for a switched-on network (widenRefusal refuses widening in place), by a successor on 10.3.0.0/19 (gateway 10.3.0.1, pool 10.3.0.100-10.3.31.250, 8,087 addresses, bridge br-g95-56c8; PMS route, room sign-in policy, sign-in overrides and portal design carried; the original kept disabled as history); revision 12 applied and confirmed. Its lease then became 28,800 s (minimum and maximum 28,800 s), revision 13 applied and confirmed, and netd persisted the confirmed configuration to the Kea start file. 314 sessions left on the removed bridge were ended through iam_v2.end_session_enforcement (reason NETWORK_REPLACED); PR #328 makes netd end such sessions itself (NETWORK_REMOVED). PRs #314-#320, #322-#326 were reviewed, corrected for every review finding and merged; #328 merged; master 901a4101.",
+  "findings": "The replacement left the removed network's sessions active: their devices' leases moved to the new subnet, so netd retried their classes on a bridge that no longer existed every pass (0.2 s to 4 s per pass; 8 sign-ins timed out waiting for enforcement before the sessions were ended). The /19 default was already in the factory network, edged's and the console's subnet suggestions; the new-network subnet example and the Replace dialog's examples were the remaining gaps and are /19 now. The appliance and its site record a UTC time zone, so the PMS wizard's appliance time-zone default reads UTC on this appliance.",
+  "verification": "Console: 1,123 tests in 136 files (hotel-admin) and 263 in 26 files (cloud-admin) on the integrated master, type checks clean; Go: go vet and every package's unit tests; netd retired-bridge tests (gone and unnamed only, never during an apply, ended before bridge setup and before minor allocation, a live network unaffected); every PR's review clean on its merged head. Network: bridge 10.3.0.1/19, Kea serving 10.3.0.0/19 with 28,800 s leases (persisted), DNS from 10.3.0.1, portal answering, management on ens160 unchanged, VLAN 90 unchanged.",
+  "deployment": {
+    "test_appliance": "Network change applied and confirmed on the test appliance (revisions 12 and 13); software installed after the merges and recorded in T0308.",
+    "central": "Not changed."
+  },
+  "not_touched": "The widenRefusal rule and the replacement contract, PMS configuration and postings, payments, licences, PKI and trust, Automatic Reconnection, the production Central.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "901a41018c406e7875658d906bb9950f4c7e69c0",
+  "previous_delivery": "T0306",
+  "decision": "D94",
+  "go_live": "NOT authorised."
+}
