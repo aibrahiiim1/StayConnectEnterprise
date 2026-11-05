@@ -89,8 +89,12 @@ function useLeaveGuard(dirty: boolean) {
   useEffect(() => {
     // Back from another screen can land on the guard entry left by an earlier visit: recognised, so a clean Back consumes it.
     if ((window.history.state as { leaveGuard?: boolean } | null)?.leaveGuard) guarded.current = true;
-    const onPop = () => {
+    const here = window.location.pathname + window.location.search;
+    const onPop = (e: PopStateEvent) => {
       if (leaving.current || !guarded.current) return;
+      // Only a Back off the guard onto this page's own entry: Forward to another screen, or landing on the guard itself, is not leaving.
+      const landed = window.location.pathname + window.location.search;
+      if (landed !== here || (e.state as { leaveGuard?: boolean } | null)?.leaveGuard) return;
       if (!dirtyNow.current) {
         guarded.current = false;
         window.history.back();

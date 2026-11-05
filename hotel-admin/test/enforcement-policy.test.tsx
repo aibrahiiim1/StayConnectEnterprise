@@ -151,6 +151,19 @@ describe("enforcement policy page", () => {
     window.history.replaceState(null, "", window.location.href);
   });
 
+  it("Forward to another screen is not taken for a Back across the guard", async () => {
+    serve(doc(), ["site_admin"]);
+    const here = window.location.pathname + window.location.search;
+    window.history.replaceState({ leaveGuard: true }, "", here);
+    const back = vi.spyOn(window.history, "back").mockImplementation(() => {});
+    await renderPage();
+    window.history.replaceState({}, "", "/network/system");
+    window.dispatchEvent(new PopStateEvent("popstate", { state: {} }));
+    expect(back).not.toHaveBeenCalled();
+    back.mockRestore();
+    window.history.replaceState(null, "", here);
+  });
+
   it("keeps one history guard across edit, revert and edit again", async () => {
     serve(doc(), ["site_admin"]);
     const push = vi.spyOn(window.history, "pushState");
