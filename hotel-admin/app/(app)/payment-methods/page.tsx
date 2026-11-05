@@ -6,7 +6,7 @@
 // configuration is not rendered until Card payment is manageable, since its requests would be refused.
 // Roles fail closed while loading; edged enforces the real gate either way.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { canRead, canWrite } from "@/lib/roles";
@@ -14,13 +14,14 @@ import { SiteModule, SiteModules } from "@/lib/payment-admin";
 import { Card } from "@/components/ui/card";
 import { InfoHint } from "@/components/ui/quiet";
 import { StatusBadge } from "@/components/ui/badge";
-import { ErrorBanner } from "@/components/ui/error-banner";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Button } from "@/components/ui/button";
 import { PageHeader, PageShell } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { Skeleton } from "@/components/ui/misc";
 import { NotAvailable, ReadOnlyNotice } from "@/components/ui/patterns";
 import { cn } from "@/lib/utils";
-import { ArrowUpRight, BedDouble, CreditCard, Gift, Ticket } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, BedDouble, CreditCard, Gift, RefreshCw, Ticket } from "lucide-react";
 import { CardPaymentConfig } from "./card-config";
 import { CodeList } from "./codes";
 import { useOperatorRoles } from "@/lib/whoami-context";
@@ -76,12 +77,18 @@ export default function PaymentMethodsPage() {
 
   const [mods, setMods] = useState<SiteModules | null>(null);
   const [err, setErr] = useState<unknown>(null);
-  useEffect(() => {
-    if (!readable) return;
+  const [loading, setLoading] = useState(false);
+  const load = useCallback(() => {
+    setErr(null);
+    setLoading(true);
     api.get<SiteModules>("/modules")
       .then((m) => setMods(m ?? { site_type: null, modules: {} }))
-      .catch((e) => { setErr(e); setMods({ site_type: null, modules: {} }); });
-  }, [readable]);
+      .catch(setErr)
+      .finally(() => setLoading(false));
+  }, []);
+  useEffect(() => {
+    if (readable) load();
+  }, [readable, load]);
 
   const header = (
     <PageHeader
@@ -121,7 +128,7 @@ export default function PaymentMethodsPage() {
     />
   );
 
-  if (roles === null || (readable && mods === null)) {
+  if (roles === null || (readable && mods === null && !err)) {
     return (
       <PageShell>
         {header}
@@ -142,6 +149,20 @@ export default function PaymentMethodsPage() {
     );
   }
 
+  if (mods === null) {
+    return (
+      <PageShell>
+        {header}
+        <EmptyState
+          icon={<AlertTriangle />}
+          title="The payment methods could not be loaded"
+          hint={err instanceof Error ? err.message : undefined}
+          action={<Button size="sm" variant="secondary" disabled={loading} onClick={load}><RefreshCw /> Try again</Button>}
+        />
+      </PageShell>
+    );
+  }
+
   const card = mods?.modules?.card_payment;
   const room = mods?.modules?.room_charge;
   // A method the site is not licensed for is not presented at all; Settlements keeps any history.
@@ -154,7 +175,6 @@ export default function PaymentMethodsPage() {
     <PageShell>
       {header}
       {!writable && <ReadOnlyNotice>Your role can see how payments are configured but not change it.</ReadOnlyNotice>}
-      <ErrorBanner err={err} className="mb-0" />
 
       {(() => {
         const methods = (

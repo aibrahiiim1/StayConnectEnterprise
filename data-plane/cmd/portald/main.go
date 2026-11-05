@@ -72,6 +72,8 @@ type handler struct {
 
 	// accessQuiet remembers, per client address, that scd had no access-ended notice to show (AD-57); nil disables it.
 	accessQuiet *quietCache
+	// rejoinQuiet remembers, per client address, that scd had nothing to reconnect (rejoin.go); nil disables it.
+	rejoinQuiet *quietCache
 
 	// clock drives the Phase-3 response-time budget; nil is the real clock and only tests set it.
 	clock phase3Clock
@@ -117,6 +119,7 @@ func newHandler(c cfg) (*handler, error) {
 		commerceCfg: commCfg,
 		designs:     &designCache{},
 		accessQuiet: newQuietCache(),
+		rejoinQuiet: newQuietCache(),
 		portalTLS:   &tlsStateHolder{},
 		signIns:     newSignInDamper(),
 	}
@@ -201,6 +204,11 @@ func (h *handler) index(w http.ResponseWriter, r *http.Request) {
 				http.Redirect(w, r, "/packages", http.StatusSeeOther)
 				return
 			}
+		}
+		// A device the network disconnected is put back on its own package before the form is shown (rejoin.go).
+		if h.tryRejoin(r) {
+			http.Redirect(w, r, "/success", http.StatusSeeOther)
+			return
 		}
 	}
 	h.landing(w, r, "")
@@ -498,13 +506,29 @@ func (h *handler) status(w http.ResponseWriter, r *http.Request) {
 
 // Well-known captive-detect probes: unauthenticated devices get content that triggers the OS captive-portal UI.
 func (h *handler) appleProbe(w http.ResponseWriter, r *http.Request) {
-	// We deliberately do not serve the iOS/macOS "Success" page, so the captive UI appears.
+	// The iOS/macOS "Success" page is served only to a device just reconnected to its own package; anyone else gets the captive UI.
+	if h.tryRejoin(r) {
+		writeOnline(w, "text/html", appleOnlinePage, http.StatusOK)
+		return
+	}
 	h.landing(w, r, "")
 }
 func (h *handler) googleProbe(w http.ResponseWriter, r *http.Request) {
+	if h.tryRejoin(r) {
+		writeOnline(w, "", "", http.StatusNoContent)
+		return
+	}
 	http.Redirect(w, r, h.probeTarget(r), http.StatusFound)
 }
 func (h *handler) windowsProbe(w http.ResponseWriter, r *http.Request) {
+	if h.tryRejoin(r) {
+		body := "Microsoft Connect Test"
+		if strings.HasSuffix(r.URL.Path, "ncsi.txt") {
+			body = "Microsoft NCSI"
+		}
+		writeOnline(w, "text/plain", body, http.StatusOK)
+		return
+	}
 	http.Redirect(w, r, h.probeTarget(r), http.StatusFound)
 }
 
