@@ -318,6 +318,7 @@ export function storedProviderValues(cfg: Record<string, unknown>): Record<strin
 /** The values a revision already carries, to start an edit from what is live rather than from defaults. */
 export function valuesFromRevision(
   p: PmsProvider, rev: { config?: Record<string, unknown>; source_timezone?: string } | null | undefined,
+  applianceTimezone = "",
 ): { values: FormValues; timezone: string } {
   const fields = fieldsFor(p);
   const cfg = (rev?.config ?? {}) as Record<string, unknown>;
@@ -331,7 +332,7 @@ export function valuesFromRevision(
   if (typeof tls.cert_sha256 === "string") tlsValues.tls_cert_sha256 = tls.cert_sha256;
   const src: Record<string, unknown> = { ...cols, ...cfg, ...tlsValues, ...storedProviderValues(cfg) };
   for (const k of Object.keys(src)) if (src[k] === "[redacted]") delete src[k];
-  return { values: initialValues(fields, src), timezone: rev?.source_timezone || "Africa/Cairo" };
+  return { values: initialValues(fields, src), timezone: rev?.source_timezone || applianceTimezone };
 }
 
 export const LIFECYCLE_WORDS: Record<string, string> = {

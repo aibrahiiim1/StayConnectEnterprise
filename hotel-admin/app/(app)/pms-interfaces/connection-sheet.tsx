@@ -3,7 +3,7 @@
 // Guest-affecting changes require the operator's password; edged enforces it.
 
 import { RemoveConnectionDialog } from "@/components/pms/remove-connection-dialog";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { api, ApiError, type PmsConnectionSettings, type PmsGuestNetworkRoute, type PmsInterfaceHealth, type PmsRevision } from "@/lib/api";
 import { Sheet, SheetBody, SheetContent, SheetHeader, SheetSection } from "@/components/ui/sheet";
@@ -42,7 +42,7 @@ const UNKNOWN_PROVIDER = (kind: string): PmsProvider => ({
 });
 
 export function ConnectionSheet({
-  open, onOpenChange, iface, health, provider, writable, tab, onTab, onChanged,
+  open, onOpenChange, iface, health, provider, writable, tab, onTab, onChanged, applianceTimezone = "",
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -53,6 +53,7 @@ export function ConnectionSheet({
   tab: SheetTab;
   onTab: (t: SheetTab) => void;
   onChanged: () => void | Promise<void>;
+  applianceTimezone?: string;
 }) {
   const id = iface?.id ?? null;
   const [revisions, setRevisions] = useState<PmsRevision[] | null>(null);
@@ -133,7 +134,7 @@ export function ConnectionSheet({
             </TabsContent>
             <TabsContent value="configuration" className="space-y-5">
               <ConfigurationTab iface={iface} provider={p} revisions={revisions} provenance={provenance}
-                writable={writable && !retired} onChanged={reloadAll} />
+                writable={writable && !retired} onChanged={reloadAll} applianceTimezone={applianceTimezone} />
             </TabsContent>
             {showCreds && (
               <TabsContent value="credentials" className="space-y-5">
@@ -410,7 +411,7 @@ function orderRevisions(revisions: PmsRevision[] | null) {
 }
 
 function ConfigurationTab({
-  iface, provider, revisions, provenance, writable, onChanged,
+  iface, provider, revisions, provenance, writable, onChanged, applianceTimezone,
 }: {
   iface: PmsConnection;
   provider: PmsProvider;
@@ -418,6 +419,7 @@ function ConfigurationTab({
   provenance: string;
   writable: boolean;
   onChanged: () => void | Promise<void>;
+  applianceTimezone: string;
 }) {
   const [editing, setEditing] = useState(false);
   const [publishing, setPublishing] = useState<PmsRevision | null>(null);
@@ -489,6 +491,7 @@ function ConfigurationTab({
         iface={iface}
         provider={provider}
         from={current ?? ordered[0] ?? null}
+        applianceTimezone={applianceTimezone}
         onDone={onChanged}
       />
       <PublishDialog iface={iface} target={publishing} onClose={() => setPublishing(null)} onDone={onChanged} />
@@ -496,29 +499,37 @@ function ConfigurationTab({
   );
 }
 
-function RevisionDialog({
-  open, onOpenChange, iface, provider, from, onDone,
+export function RevisionDialog({
+  open, onOpenChange, iface, provider, from, applianceTimezone, onDone,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   iface: PmsConnection;
   provider: PmsProvider;
   from: PmsRevision | null;
+  applianceTimezone: string;
   onDone: () => void | Promise<void>;
 }) {
   const toast = useToast();
   const fields = useMemo(() => fieldsFor(provider), [provider]);
   const [values, setValues] = useState<FormValues>({});
-  const [timezone, setTimezone] = useState("Africa/Cairo");
+  const [timezone, setTimezone] = useState(applianceTimezone);
   const [showErrors, setShowErrors] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<unknown>(null);
 
+  const tzEdited = useRef(false);
   useEffect(() => {
     if (!open) return;
-    const v = valuesFromRevision(provider, from);
+    const v = valuesFromRevision(provider, from, applianceTimezone);
     setValues(v.values); setTimezone(v.timezone); setShowErrors(false); setErr(null);
+    tzEdited.current = false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, provider, from]);
+  // A late appliance time zone fills only an untouched field of a revision that has none of its own; it never resets the form.
+  useEffect(() => {
+    if (open && applianceTimezone && !tzEdited.current && !from?.source_timezone) setTimezone(applianceTimezone);
+  }, [open, applianceTimezone, from]);
 
   const errors = validateAll(fields, values);
 
@@ -546,7 +557,7 @@ function RevisionDialog({
     >
       <Field label="PMS time zone" required hint="Time zone name, for example Europe/Berlin. Arrivals and departures are read in it."
         error={showErrors && !timezone.trim() ? "Required." : undefined}>
-        <Input value={timezone} spellCheck={false} onChange={(e) => setTimezone(e.target.value)} />
+        <Input value={timezone} spellCheck={false} onChange={(e) => { tzEdited.current = true; setTimezone(e.target.value); }} />
       </Field>
       <ProviderFieldsForm fields={fields} values={values} errors={showErrors ? errors : {}}
         onChange={(k, v) => setValues((s) => ({ ...s, [k]: v }))} disabled={busy} />
@@ -1125,6 +1136,7 @@ function TestConnectionButton({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<unknown>(null);
   const [result, setResult] = useState<TestConnectionResult | null>(null);
+  const [ranAt, setRanAt] = useState<Date | null>(null);
 
   return (
     <div className="space-y-2">
@@ -1133,7 +1145,7 @@ function TestConnectionButton({
       </Button>
       {showResultInline && result && (
         result.ok ? (
-          <Callout tone="success" title="The connection test passed">
+          <Callout tone="success" title={`The connection test passed${ranAt ? ` at ${ranAt.toLocaleTimeString()}` : ""}`}>
             {provider.label} answered
             {typeof result.latency_ms === "number" ? ` in ${result.latency_ms.toLocaleString()} ms` : ""}.
             {typeof result.details?.sample_reservations === "number"
@@ -1142,7 +1154,7 @@ function TestConnectionButton({
             {result.details?.property ? ` Property: ${result.details.property}.` : ""}
           </Callout>
         ) : (
-          <Callout tone="danger" title={`The test failed while ${STAGE_WORDS[result.stage ?? ""] ?? "testing"}`}>
+          <Callout tone="danger" title={`The test failed while ${STAGE_WORDS[result.stage ?? ""] ?? "testing"}${ranAt ? ` at ${ranAt.toLocaleTimeString()}` : ""}`}>
             {result.message || "The provider did not accept the request."}
           </Callout>
         )
@@ -1163,6 +1175,7 @@ function TestConnectionButton({
             if (revision) body.revision_id = revision.id;
             const r = await api.post<TestConnectionResult>(`/pms-interfaces/${iface.id}/test-connection`, body);
             setResult(r ?? { ok: false, message: "No answer was returned." });
+            setRanAt(new Date());
             setOpen(false);
           } catch (e) { setErr(e); } finally { setBusy(false); }
         }}
