@@ -412,7 +412,7 @@ describe("Guest network routing page", () => {
   });
 });
 
-describe("Source conflicts page", () => {
+describe("Duplicate sources page", () => {
   it("names both interfaces by label, not by id", async () => {
     get.mockResolvedValue({
       conflicts: [{
@@ -430,11 +430,38 @@ describe("Source conflicts page", () => {
     expect(screen.queryByText("i2")).toBeNull();
   });
 
+  it("counts a same-source pair, says what to do, and links to where it is fixed", async () => {
+    get.mockResolvedValue({
+      conflicts: [{
+        id: "detected:i1:i2", interface_a: "i1", interface_a_label: "Main PMS",
+        interface_b: "i2", interface_b_label: "Spa PMS", severity: "DUPLICATE_SOURCE", detected: true,
+      }],
+    });
+    const Page = (await import("@/app/(app)/pms-source-conflicts/page")).default;
+    render(<Page />);
+    expect(await screen.findByText("Pairs found")).toBeTruthy();
+    expect(screen.getAllByText("Same PMS source").length).toBe(2);
+    expect(screen.getByText(/Retire one, or point it at its own PMS/)).toBeTruthy();
+    expect(screen.getAllByRole("link", { name: "PMS connection" })[0].getAttribute("href")).toBe("/pms-interfaces");
+    expect(screen.queryByText("High severity")).toBeNull();
+    expect(screen.queryByText("Not decided yet")).toBeNull();
+  });
+
+  it("shows Try again instead of a blank card when the list cannot be loaded", async () => {
+    get.mockRejectedValue(new Error("query failed"));
+    const Page = (await import("@/app/(app)/pms-source-conflicts/page")).default;
+    render(<Page />);
+    expect(await screen.findByText("Duplicate sources could not be loaded")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /try again/i })).toBeTruthy();
+    expect(screen.queryByText("query failed")).toBeNull();
+  });
+
   it("says so when there are none", async () => {
     get.mockResolvedValue({ conflicts: [] });
     const Page = (await import("@/app/(app)/pms-source-conflicts/page")).default;
     render(<Page />);
-    expect(await screen.findByText("No source conflicts")).toBeTruthy();
+    expect(await screen.findByText("No duplicate sources")).toBeTruthy();
+    expect(screen.getByText("No two PMS connections point at the same PMS.")).toBeTruthy();
   });
 });
 

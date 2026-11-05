@@ -291,7 +291,7 @@ function OverviewTab({
             <InfoHint>How the guest list is kept identical to the PMS&rsquo;s.</InfoHint></li>
           <li className="flex items-center gap-1"><Link href="/pms-reconciliation" className="font-medium underline underline-offset-2">Unresolved departures</Link>
             <InfoHint>Messages that could not be matched to a stay.</InfoHint></li>
-          <li className="flex items-center gap-1"><Link href="/pms-source-conflicts" className="font-medium underline underline-offset-2">Source conflicts</Link>
+          <li className="flex items-center gap-1"><Link href="/pms-source-conflicts" className="font-medium underline underline-offset-2">Duplicate sources</Link>
             <InfoHint>Two connections that may be the same PMS.</InfoHint></li>
         </ul>
       </Disclosure>
