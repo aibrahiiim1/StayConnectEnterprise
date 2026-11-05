@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Menu } from "lucide-react";
-import { Nav, NAV_ITEMS, NAV_SECTION_OF, activeNavHref } from "@/components/nav";
+import { Nav, NAV_ITEMS, activeNavHref } from "@/components/nav";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ApplianceStatus } from "@/components/appliance-status";
 import { Skeleton } from "@/components/ui/misc";
@@ -67,15 +67,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   useEffect(() => { setDrawer(false); }, [pathname]);
 
-  // Derived from the sidebar's own table so the top bar and the menu cannot disagree.
-  const here = useMemo(() => {
+  const menuLabel = useMemo(() => {
     const href = activeNavHref(pathname);
-    const item = NAV_ITEMS.find((i) => i.href === href);
-    return { section: href ? NAV_SECTION_OF[href] : undefined, label: item?.label };
+    return NAV_ITEMS.find((i) => i.href === href)?.label;
   }, [pathname]);
 
-  // The tab title follows the top bar's label (WCAG 2.4.2); off-menu screens name themselves from their table.
-  const pageLabel = here.label
+  const pageLabel = menuLabel
     ?? OFF_MENU_SCREENS.find((i) => pathname === i.href || pathname.startsWith(i.href + "/"))?.label;
   useEffect(() => {
     const wanted = pageLabel ? `${pageLabel} · ${APP_TITLE}` : APP_TITLE;
@@ -160,7 +157,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       onSignOut={() => void onLogout()}
       onExpired={() => void bounce()}
     />
-    <div className="flex h-screen overflow-hidden">
+    <div className="relative flex h-screen overflow-hidden">
       {/* Below `lg` the column becomes a drawer; an icon rail would not work because labels are not guessable from icons. */}
       <div className="hidden lg:block">
         <Nav
@@ -199,17 +196,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <Menu className="size-5" />
             </DialogPrimitive.Trigger>
 
-            <div className="min-w-0 flex-1">
-              <nav aria-label="Breadcrumb" className="flex items-baseline gap-1.5">
-                {here.section && (
-                  <>
-                    <span className="hidden truncate text-xs text-muted-foreground sm:inline">{here.section}</span>
-                    <span className="hidden text-xs text-muted-foreground/50 sm:inline" aria-hidden>/</span>
-                  </>
-                )}
-                <span className="truncate text-sm font-semibold">{here.label ?? "Admin Console"}</span>
-              </nav>
-            </div>
+            <div className="min-w-0 flex-1" />
 
             <ApplianceStatus />
             <ThemeToggle />
@@ -217,7 +204,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
           {/* The gutter and measure live here so no page can omit them; PageShell narrows the measure and owns
               vertical rhythm. This is the skip link's target (tabIndex -1: focusable, no tab stop). */}
-          <main ref={mainRef} id="content" tabIndex={-1} className="min-w-0 flex-1 overflow-y-auto focus:outline-none">
+          <main ref={mainRef} id="content" tabIndex={-1} className="relative min-w-0 flex-1 overflow-y-auto focus:outline-none">
             <div className="mx-auto w-full max-w-[104rem] px-4 py-5 sm:px-6 sm:py-6 lg:px-8">
               {!capsKnown ? <Skeleton className="h-64" />
                 : unavailable ? <SurfaceNotEnabled label={unavailable} />
