@@ -710,7 +710,7 @@ function ClientJourneyCard({ cfg, writable, busy, locked, error, httpsActive, ho
           {httpsActive === false && (
             <p className="text-xs text-warning-subtle-foreground md:col-span-2" role="status">
               The portal has no HTTPS address yet, so no device is remembered until{" "}
-              <Link href="/portal-https" className="underline underline-offset-2">Portal HTTPS</Link> is finished.
+              <Link href="/portal-https" className="underline underline-offset-2">Portal HTTPS setup</Link> is finished.
             </p>
           )}
           {storedOff && (
