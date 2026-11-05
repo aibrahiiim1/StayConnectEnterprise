@@ -209,6 +209,27 @@ describe("Central connection", () => {
     expect(post).toHaveBeenCalledWith("/central/refresh");
     expect(await screen.findByText(/no connection could be opened/)).toBeTruthy();
   });
+
+  it("shows a network error as a plain line and keeps the exact error under Technical details", async () => {
+    serve(status({ central: { state: "unreachable", last_error: "Post https://sc-central.example/v1/appliance/hello: dial tcp: i/o timeout" } }));
+    await renderPage();
+    expect(region("OneGate Central").getByText(/OneGate Central could not be reached/)).toBeTruthy();
+    expect(primaryText()).not.toContain("dial tcp");
+    expect(within(screen.getByTestId("technical-details")).getByText(/dial tcp/)).toBeTruthy();
+  });
+
+  it("offers Try again when the status cannot be loaded", async () => {
+    get.mockImplementation((path: string) => {
+      if (path === "/auth/whoami") return Promise.resolve({ roles: ["site_admin"] });
+      return Promise.reject(Object.assign(new Error("boom"), { status: 502 }));
+    });
+    const Page = (await import("@/app/(app)/appliance/page")).default;
+    render(<Page />);
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).getByText("The appliance status could not be loaded")).toBeTruthy();
+    expect(within(alert).getByRole("button", { name: /Try again/ })).toBeTruthy();
+    expect(screen.queryByText(/boom/)).toBeNull();
+  });
 });
 
 describe("offline activation and licence files", () => {
@@ -237,6 +258,26 @@ describe("offline activation and licence files", () => {
     const file = new File(['{"payload":"x"}'], "lic.license");
     fireEvent.change(screen.getByLabelText("Licence file"), { target: { files: [file] } });
     await waitFor(() => expect(postRaw).toHaveBeenCalledWith("/license", '{"payload":"x"}'));
+    expect(await screen.findByText("Licence file accepted and installed.")).toBeTruthy();
+  });
+
+  it("words a refused licence file instead of showing the appliance's error", async () => {
+    serve(status());
+    const { ApiError } = await import("@/lib/api");
+    postRaw.mockRejectedValue(new ApiError(409, { error: "LICENSE_ROLLBACK_REJECTED", detail: "LICENSE_ROLLBACK_REJECTED: license rollback rejected" }));
+    await renderPage();
+    fireEvent.change(screen.getByLabelText("Licence file"), { target: { files: [new File(['{"payload":"x"}'], "lic.license")] } });
+    expect(await screen.findByText(/This licence is not newer than the one already installed, so it was refused\. Nothing was changed\./)).toBeTruthy();
+    expect(screen.queryByText(/LICENSE_ROLLBACK_REJECTED/)).toBeNull();
+  });
+
+  it("words a used activation package", async () => {
+    serve(status({ activation: "not_registered", license: { state: "none" } }));
+    const { ApiError } = await import("@/lib/api");
+    postRaw.mockRejectedValue(new ApiError(409, { error: "this activation package has already been used" }));
+    await renderPage();
+    fireEvent.change(screen.getByLabelText("Activation package"), { target: { files: [new File(['{"request_id":"r1"}'], "p.json")] } });
+    expect(await screen.findByText(/This package has already been used\. Ask your OneGate vendor for a new one\./)).toBeTruthy();
   });
 
   it("a read-only role sees the status but no file actions", async () => {
