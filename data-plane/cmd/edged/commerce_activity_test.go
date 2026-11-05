@@ -180,13 +180,17 @@ func edgedSelectGrants(t *testing.T) map[string]bool {
 	if len(files) == 0 {
 		t.Fatal("no Gate-P grant files found")
 	}
-	re := regexp.MustCompile(`(?i)GRANT\s+([A-Z, ]+?)\s+ON\s+(?:TABLE\s+)?iam_v2\.(\w+)\s+TO\s+svc_edged`)
+	// One grant may name several tables ("ON iam_v2.a, iam_v2.b TO svc_edged").
+	re := regexp.MustCompile(`(?i)GRANT\s+([A-Z, ]+?)\s+ON\s+(?:TABLE\s+)?((?:iam_v2\.\w+\s*,\s*)*iam_v2\.\w+)\s+TO\s+svc_edged`)
+	tbl := regexp.MustCompile(`iam_v2\.(\w+)`)
 	out := map[string]bool{}
 	for _, f := range files {
 		b, _ := os.ReadFile(f)
 		for _, m := range re.FindAllStringSubmatch(string(b), -1) {
 			if strings.Contains(strings.ToUpper(m[1]), "SELECT") {
-				out[m[2]] = true
+				for _, t := range tbl.FindAllStringSubmatch(m[2], -1) {
+					out[t[1]] = true
+				}
 			}
 		}
 	}

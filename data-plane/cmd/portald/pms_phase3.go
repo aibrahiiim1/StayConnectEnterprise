@@ -31,6 +31,8 @@ const (
 
 const guestRoomDeviceLimitMessage = "Every device place for this room is in use. On a device that is online with it, remove one under “Your devices”, or contact the site team."
 
+const guestAfterCheckoutDeviceMessage = "After check-out, Internet access continues only on the devices that were connected during your stay. Please use one of those devices, or contact the site team."
+
 // The same sentences the voucher and account sign-in show (main.go, iamv2_commerce_session.go).
 const (
 	guestCapacityMessage       = "The Wi-Fi network is at capacity. Please try again shortly."
@@ -52,6 +54,8 @@ var guestAuthMessages = map[string]string{
 	"POST_STAY":  guestPostStayMessage,
 	// DEVICE_LIMIT: access is fine but there is no free device slot.
 	"DEVICE_LIMIT": guestRoomDeviceLimitMessage,
+	// AFTER_CHECKOUT_DEVICE: the departed guest is verified, but this device was not one of the stay's.
+	"AFTER_CHECKOUT_DEVICE": guestAfterCheckoutDeviceMessage,
 	// LICENSE and CAPACITY are property-wide facts, never about a room.
 	"LICENSE":  guestLicenseRefusedMessage,
 	"CAPACITY": guestCapacityMessage,

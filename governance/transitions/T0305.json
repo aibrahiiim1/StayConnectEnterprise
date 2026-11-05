@@ -1,0 +1,35 @@
+{
+  "transition_id": "T0305",
+  "seq": 305,
+  "timestamp": "2026-11-04T23:18:18+02:00",
+  "timestamp_derivation": "Read from the workstation clock (UTC+02:00) by the script that wrote this receipt, immediately before the commit that introduces it.",
+  "record_type": "CLIENT_ACTIVITY_AND_AFTER_CHECKOUT_REFUSAL_RESULT",
+  "authorisation": "The Product Owner's mission of 2026-11-04 (D93): the Client Activity page tested and approved; a dedicated AFTER_CHECKOUT_NEW_DEVICE_REJECTED result with its narrowly scoped migration approved; PR, protected merge and deployment to the test appliance under D79. The VLAN 95 lease change in the same mission was not applied (see findings).",
+  "delivery": "Admin Console Client activity (Clients section): one read-only timeline over GET /edge/v1/sessions/activity of connections and disconnections with their reason, packages started and ended, device replacements and releases, client accounts, staff actions on clients and, only where the Hotel module is on, room sign-in attempts, sign-in pauses and stays; each source is added only when the reader may read its own screen, staff actions need Activity; search travels in a header and the route is recorded as a guest-data read. scd records a room sign-in refused by After Check-out Access for a device the stay did not use before check-out as AFTER_CHECKOUT_NEW_DEVICE_REJECTED (migration 0208) instead of SERVICE_UNAVAILABLE, and the guest is told, in the six portal languages, that access after check-out continues only on the stay's own devices. The After Check-out eligibility rule is unchanged.",
+  "findings": "The Product Owner's 8-hour DHCP lease for VLAN 95 was not applied: replaying the appliance's own lease grants since 2026-11-03 gives a peak of 878 of 919 pool addresses held under an 8-hour lease (506 under the current 1 hour, against about 464 observed), so the current /22 pool cannot safely carry it. It is compatible with the planned /19 expansion when that is done first by editing the same network (Kea subnet ids derive from the network id).",
+  "verification": "signinattempt, portald and edged unit suites; scd integration tests as svc_scd including the new After Check-out refusal record and the device-limit record; checkout After Check-out integration suite unchanged and passing; console tests for navigation, the capability contract, wording and branding strings; factory-clean baseline regenerated, PASS.",
+  "deployment": {
+    "test_appliance": "Not deployed by this record; installed after the merge and recorded then.",
+    "central": "Not changed."
+  },
+  "not_touched": "After Check-out eligibility, entitlements, accounting, financial accounting, PMS postings and configuration, payments, DHCP and networking, licences, the production Central.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "567bddd41a0b8386c13279815bbf128a3ac7d99f",
+  "previous_delivery": "T0304",
+  "decision": "D93",
+  "go_live": "NOT authorised."
+}
