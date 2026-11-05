@@ -429,13 +429,15 @@ export default function GuestSignInAttemptsPage() {
         eyebrow="Sign-in attempt"
         title={detail?.room ? `Room ${detail.room}` : "Sign-in attempt"}
         description={detail ? detail.result_label : undefined}
-        badges={detail ? <StatusBadge tone={tone(detail.result)}>{detail.succeeded ? "Connected" : "Refused"}</StatusBadge> : undefined}
+        badges={detail ? <StatusBadge tone={detail.no_package_taken ? "neutral" : tone(detail.result)}>{detail.no_package_taken ? "No package taken" : detail.succeeded ? "Connected" : "Refused"}</StatusBadge> : undefined}
       >
         {detail && (
           <>
             <Callout tone={tone(detail.result) === "ok" ? "success" : tone(detail.result) === "err" ? "danger" : "warning"}
               title={detail.result_label}>
-              {RESULT_WORDS[detail.result]?.meaning ?? "No further explanation is recorded for this result."}
+              {detail.no_package_taken
+                    ? "The guest's details were right and the stay was found, but no package was taken: the guest left at the package choice (often when only paid packages were left). Nothing was granted."
+                    : RESULT_WORDS[detail.result]?.meaning ?? "No further explanation is recorded for this result."}
             </Callout>
 
             <DetailsSection title="What was entered, and what would have been accepted">

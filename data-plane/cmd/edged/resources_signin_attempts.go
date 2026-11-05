@@ -229,21 +229,25 @@ func (s *server) getSignInAttempt(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(a.matched_field,''), COALESCE(a.matched_stay_id::text,''),
 		       a.room_in_mirror, a.eligible_stay_candidates, a.mirror_last_complete_sync_at,
 		       COALESCE(a.entitlement_id::text,''), COALESCE(a.session_id::text,''),
-		       COALESCE(length(a.sensitive_ciphertext), 0)
+		       COALESCE(length(a.sensitive_ciphertext), 0),
+		       (a.result = 'VERIFIED' AND a.session_id IS NULL AND a.occurred_at < now() - interval '15 minutes')
 		  FROM iam_v2.sign_in_attempts a
 		 WHERE a.tenant_id=$1 AND a.site_id=$2 AND a.id=$3::uuid`,
 		s.tenantID, s.siteID, id).
 		Scan(&e.ID, &e.OccurredAt, &e.Room, &e.GuestNetwork, &e.Result, &e.VerifierKind, &e.MirrorAgeSeconds,
 			&e.TransportStatus, &e.DeviceIP, &e.DeviceMAC, &e.RequestID, &e.LatencyMS,
 			&e.MatchedField, &e.MatchedStayID, &e.RoomInMirror, &e.EligibleStayCandidates,
-			&e.MirrorLastCompleteSync, &e.EntitlementID, &e.SessionID, &sealedLen)
+			&e.MirrorLastCompleteSync, &e.EntitlementID, &e.SessionID, &sealedLen, &e.NoPackageTaken)
 	if err != nil {
 		// Another site's id and a nonexistent id answer identically (the site scope is in the WHERE), so ids cannot be probed.
 		jsonErr(w, http.StatusNotFound, "not_found", "no such attempt")
 		return
 	}
 	e.ResultLabel = signinattempt.Result(e.Result).Label()
-	e.Succeeded = signinattempt.Result(e.Result).Succeeded()
+	e.Succeeded = signinattempt.Result(e.Result).Succeeded() && !e.NoPackageTaken
+	if e.NoPackageTaken {
+		e.ResultLabel = "Verified, but no package was taken"
+	}
 	e.CredentialsAvailable = sealedLen > 0
 	writeJSON(w, http.StatusOK, e)
 }

@@ -311,9 +311,8 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 		// SessionsStarted counts only sessions that actually started.
 		s.met.SessionsStarted.WithLabelValues("iamv2").Inc()
 	}
-	if state == "active" {
-		s.linkPaidSignIn(ctx, req.EntitlementID, req.DeviceID, sessionID)
-	}
+	// The admitted session is durable whatever this request's wait saw, so it is linked even when enforcement confirms later.
+	s.linkPaidSignIn(ctx, req.EntitlementID, req.DeviceID, sessionID)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"session_id": sessionID,
 		"state":      state,
