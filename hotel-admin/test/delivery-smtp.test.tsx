@@ -218,6 +218,16 @@ describe("checks before saving", () => {
   });
 });
 
+describe("a test-only sender", () => {
+  it("is marked as reaching no client, even after a successful test", async () => {
+    routes([{ id: "p9", tenant_id: "t", channel: "sms", kind: "stub", enabled: true, display_name: "Trial",
+      last_success_at: new Date(Date.now() - 60_000).toISOString(), created_at: "2026-10-01T10:00:00Z", updated_at: "2026-10-01T10:00:00Z" }]);
+    render(<NotificationsPage />);
+    expect(await screen.findByText("Test only: clients get nothing")).toBeInTheDocument();
+    expect(screen.queryByText("Working")).toBeNull();
+  });
+});
+
 describe("Send a test message", () => {
   it("calls the test route with the typed address and shows the outcome, including the service's own error", async () => {
     routes([SMTP]);

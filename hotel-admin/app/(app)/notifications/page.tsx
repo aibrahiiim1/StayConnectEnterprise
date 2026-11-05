@@ -63,7 +63,8 @@ const wholeIn = (v: string, min: number, max: number) => {
   return /^\d+$/.test(v.trim()) && n >= min && n <= max;
 };
 
-function health(n: NotificationProvider): { tone: "ok" | "err" | "default"; label: string; detail?: string } {
+function health(n: NotificationProvider): { tone: "ok" | "err" | "warn" | "default"; label: string; detail?: string } {
+  if (n.kind === "stub") return { tone: "warn", label: "Test only: clients get nothing" };
   if (n.last_error_at && (!n.last_success_at || n.last_error_at > n.last_success_at)) {
     return { tone: "err", label: "Failing", detail: n.last_error ?? undefined };
   }
@@ -392,12 +393,12 @@ export default function NotificationsPage() {
                         )}
                       </TD>
                       <TD muted className="hidden max-w-[14rem] truncate text-xs lg:table-cell">
-                        {n.from_address || n.api_user || "—"}
+                        {n.from_address || n.api_user || "Not set"}
                         {n.from_name && <div>{n.from_name}</div>}
                       </TD>
                       <TD>
                         <StatusBadge tone={h.tone}>{h.label}</StatusBadge>
-                        {n.last_success_at && (
+                        {n.last_success_at && n.kind !== "stub" && (
                           <div className="mt-0.5 text-2xs text-muted-foreground">
                             Last delivered {formatRelative(n.last_success_at)}
                           </div>
@@ -452,7 +453,7 @@ export default function NotificationsPage() {
                 { label: "Channel", value: CHANNEL_LABELS[viewing.channel] ?? viewing.channel },
                 { label: "Service", value: KIND_LABELS[viewing.kind] ?? viewing.kind },
                 ...(viewing.kind === "smtp" ? [
-                  { label: "Mail server", value: <span className="break-all font-mono text-xs">{viewing.extra?.host || "—"}</span> },
+                  { label: "Mail server", value: <span className="break-all font-mono text-xs">{viewing.extra?.host || "Not set"}</span> },
                   { label: "Security", value: SECURITY_WORDS[(viewing.extra?.security as Security) ?? "starttls"] ?? "STARTTLS" },
                   { label: "Port", value: viewing.extra?.port || `Usual (${IMPLIED_PORT[(viewing.extra?.security as Security) ?? "starttls"] ?? "587"})` },
                   { label: "Username", value: viewing.extra?.username || "No login" },
@@ -463,10 +464,10 @@ export default function NotificationsPage() {
                   value: <span className="break-all font-mono text-xs">{viewing.api_user}</span>,
                 }] : []),
                 ...(viewing.kind === "meta_whatsapp" ? [
-                  { label: "Template", value: viewing.extra?.template_name || "—" },
-                  { label: "Template language", value: viewing.extra?.language || "—" },
+                  { label: "Template", value: viewing.extra?.template_name || "Not set" },
+                  { label: "Template language", value: viewing.extra?.language || "Not set" },
                 ] : []),
-                ...(viewing.kind === "twilio_whatsapp" ? [{ label: "Content SID", value: viewing.extra?.content_sid || "—" }] : []),
+                ...(viewing.kind === "twilio_whatsapp" ? [{ label: "Content SID", value: viewing.extra?.content_sid || "Not set" }] : []),
               ]} />
             </DetailsSection>
             {(viewing.from_address || viewing.from_name) && (
@@ -479,7 +480,7 @@ export default function NotificationsPage() {
             )}
             <DetailsSection title="Health">
               <DescriptionList items={[
-                { label: "Last delivered", value: viewing.last_success_at ? formatRelative(viewing.last_success_at) : "Never" },
+                { label: viewing.kind === "stub" ? "Last test run" : "Last delivered", value: viewing.last_success_at ? formatRelative(viewing.last_success_at) : "Never" },
                 ...(viewing.last_error ? [{ label: "Last error", value: `${viewing.last_error_at ? `${formatRelative(viewing.last_error_at)}: ` : ""}${viewing.last_error}` }] : []),
               ]} />
             </DetailsSection>
@@ -537,7 +538,7 @@ export default function NotificationsPage() {
                 <Select value={f.security} onChange={(e) => set("security", e.target.value as Security)}>
                   <option value="starttls">STARTTLS (port 587)</option>
                   <option value="tls">TLS (port 465)</option>
-                  <option value="none">None — internal relay only (port 25)</option>
+                  <option value="none">None, internal relay only (port 25)</option>
                 </Select>
               </Field>
               <Field label="Port" hint={`Leave blank for the usual port for the security chosen (${IMPLIED_PORT[f.security]}). 1–65535.`} error={fieldErr.port}>
