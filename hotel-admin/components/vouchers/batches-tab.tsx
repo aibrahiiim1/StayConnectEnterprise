@@ -4,10 +4,12 @@
 
 import { InfoHint } from "@/components/ui/quiet";
 import * as React from "react";
-import { Ban, Download, Layers, List } from "lucide-react";
+import { AlertTriangle, Ban, Download, Layers, List, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { refreshingClass } from "@/components/ui/patterns";
+import { cn } from "@/lib/utils";
 import { Card, CardFooter } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
@@ -51,19 +53,37 @@ export function BatchesTab({
   const [err, setErr] = React.useState<unknown>(null);
   const [offset, setOffset] = React.useState(0);
   const [open, setOpen] = React.useState<VoucherBatch | null>(null);
+  const [loading, setLoading] = React.useState(false);
+  const [holding, setHolding] = React.useState(false);
+  const [askClose, setAskClose] = React.useState(false);
 
   const load = React.useCallback(() => {
     setErr(null);
+    setLoading(true);
     api
       .get<VoucherBatchesResp>(`/vouchers/batches?limit=${PAGE}&offset=${offset}`)
       .then(setData)
-      .catch((e) => {
-        setErr(e);
-        setData({ batches: [] });
-      });
+      .catch(setErr)
+      .finally(() => setLoading(false));
   }, [offset]);
 
   React.useEffect(load, [load, reloadKey]);
+
+  const openID = open?.batch_id;
+  const refreshOpen = React.useCallback(() => {
+    load();
+    if (!openID) return;
+    api
+      .get<VoucherBatchesResp>(`/vouchers/batches?batch_id=${encodeURIComponent(openID)}`)
+      .then((m) => m.batches?.[0] && setOpen((cur) => (cur && cur.batch_id === openID ? m.batches![0] : cur)))
+      .catch(() => {});
+  }, [load, openID]);
+
+  function closeSheet() {
+    setOpen(null);
+    setHolding(false);
+    setAskClose(false);
+  }
 
   // Fetch by ID so a linked batch opens even when it is outside the current page.
   React.useEffect(() => {
@@ -78,7 +98,7 @@ export function BatchesTab({
 
   return (
     <div className="space-y-4">
-      <ErrorBanner err={err} />
+      {data && <ErrorBanner err={err} />}
       {!!data?.unbatched_vouchers && (
         <Callout tone="info">
           {data.unbatched_vouchers.toLocaleString()} card{data.unbatched_vouchers === 1 ? " was" : "s were"} printed
@@ -86,7 +106,15 @@ export function BatchesTab({
         </Callout>
       )}
       <Card className="overflow-hidden">
-        {rows === null ? (
+        {rows === null && err ? (
+          <EmptyState
+            size="sm"
+            icon={<AlertTriangle />}
+            title="The batches could not be loaded"
+            hint={err instanceof Error ? err.message : undefined}
+            action={<Button size="sm" variant="secondary" disabled={loading} onClick={load}><RefreshCw /> Try again</Button>}
+          />
+        ) : rows === null ? (
           <SkeletonRows rows={4} cols={5} />
         ) : rows.length === 0 ? (
           <EmptyState
@@ -96,6 +124,7 @@ export function BatchesTab({
             hint="Every time you issue vouchers, the cards form a batch here, ready to export or print again."
           />
         ) : (
+          <div className={cn(loading && refreshingClass)}>
           <Table label="Voucher batches">
               <THead>
                 <TR>
@@ -114,7 +143,7 @@ export function BatchesTab({
                         {batchName(b) ?? <span className="text-muted-foreground">Unnamed batch</span>}
                       </div>
                       <div className="text-xs text-muted-foreground">
-                        <When iso={b.created_at} />
+                        <When iso={b.created_at} focusable={false} />
                       </div>
                     </TD>
                     <TD truncate title={b.package_name ?? undefined} className="max-w-[14rem]">{b.package_name ?? "Earlier package version"}</TD>
@@ -133,6 +162,7 @@ export function BatchesTab({
                 ))}
               </TBody>
           </Table>
+          </div>
         )}
         {rows && rows.length > 0 && (
           <CardFooter>
@@ -143,15 +173,30 @@ export function BatchesTab({
 
       <BatchSheet
         batch={open}
-        onOpenChange={(v) => !v && setOpen(null)}
+        onOpenChange={(v) => {
+          if (v) return;
+          if (holding) { setAskClose(true); return; }
+          closeSheet();
+        }}
         canRevealCodes={canRevealCodes}
         onViewCards={(id) => {
-          setOpen(null);
+          closeSheet();
           onViewCards(id);
         }}
-        onExported={load}
+        onExported={refreshOpen}
+        onHolding={setHolding}
         canCancel={canCancel}
         hotelName={hotelName}
+      />
+
+      <ConfirmDialog
+        open={askClose}
+        onOpenChange={(v) => !v && setAskClose(false)}
+        title="Close the batch and drop the exported codes?"
+        description="The exported codes disappear when the panel closes. Getting them again is another export, recorded with your name and reason."
+        confirmLabel="Close and drop the codes"
+        confirmVariant="danger"
+        onConfirm={closeSheet}
       />
     </div>
   );
@@ -163,6 +208,7 @@ function BatchSheet({
   canRevealCodes,
   onViewCards,
   onExported,
+  onHolding,
   canCancel,
   hotelName,
 }: {
@@ -171,6 +217,7 @@ function BatchSheet({
   canRevealCodes: boolean;
   onViewCards: (id: string) => void;
   onExported: () => void;
+  onHolding: (v: boolean) => void;
   canCancel: boolean;
   hotelName?: string;
 }) {
@@ -191,6 +238,7 @@ function BatchSheet({
             canRevealCodes={canRevealCodes}
             onViewCards={onViewCards}
             onExported={onExported}
+            onHolding={onHolding}
             canCancel={canCancel}
             hotelName={hotelName}
           />
@@ -205,6 +253,7 @@ function BatchDetail({
   canRevealCodes,
   onViewCards,
   onExported,
+  onHolding,
   canCancel,
   hotelName,
 }: {
@@ -212,6 +261,7 @@ function BatchDetail({
   canRevealCodes: boolean;
   onViewCards: (id: string) => void;
   onExported: () => void;
+  onHolding: (v: boolean) => void;
   canCancel: boolean;
   hotelName?: string;
 }) {
@@ -245,6 +295,11 @@ function BatchDetail({
   const [err, setErr] = React.useState<unknown>(null);
   // Keep exported codes in component memory so closing the sheet drops them.
   const [exported, setExported] = React.useState<ExportedBatch | null>(null);
+  const exportedRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    onHolding(exported !== null);
+    if (exported) exportedRef.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+  }, [exported, onHolding]);
 
   const planned = scope === "unused" ? batch.unused : batch.count;
   const packageName = batch.package_name ?? "Internet access";
@@ -261,7 +316,6 @@ function BatchDetail({
       const out = await api.post<ExportedBatch>("/voucher-codes/export", body);
       setExported(out);
       setConfirming(false);
-      toast.success(`${out.count} code${out.count === 1 ? "" : "s"} exported`, "The export was recorded with your name and reason.");
       onExported();
     } catch (e) {
       setErr(stepUpError(e, "No codes were exported."));
@@ -295,12 +349,12 @@ function BatchDetail({
               { label: "Issued", value: <When iso={batch.created_at} /> },
               { label: "Issued by", value: batch.issued_by_label ?? (batch.issued_by ? "An operator account" : null) },
               { label: "Not yet valid", value: batch.not_yet_valid.toLocaleString() },
-              { label: "Batch reference", value: <MonoId value={batch.batch_id} title="Batch reference" /> },
               { label: "Note", value: batch.notes, wide: true },
             ]}
           />
         </SheetSection>
         {exported && (
+          <div ref={exportedRef} className="animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none">
           <SheetSection title={`Exported codes (${exported.count.toLocaleString()})`}>
             <CodesHeld
               codes={exported.vouchers}
@@ -316,7 +370,14 @@ function BatchDetail({
               }
             />
           </SheetSection>
+          </div>
         )}
+        <SheetSection title="For support">
+          <KeyValueGrid
+            columns={1}
+            items={[{ label: "Batch reference", value: <MonoId value={batch.batch_id} title="Batch reference" /> }]}
+          />
+        </SheetSection>
       </SheetBody>
       <SheetFooter>
         <Button variant="secondary" size="sm" onClick={() => onViewCards(batch.batch_id)}>
@@ -350,7 +411,7 @@ function BatchDetail({
 
       <ConfirmDialog
         open={cancelling}
-        onOpenChange={(v) => !v && setCancelling(false)}
+        onOpenChange={(v) => !v && !busy && setCancelling(false)}
         title="Cancel the unused cards of this batch"
         description={`${batch.unused.toLocaleString()} card${batch.unused === 1 ? "" : "s"} not used yet will stop working immediately. This cannot be undone.`}
         confirmLabel={`Cancel ${batch.unused.toLocaleString()} card${batch.unused === 1 ? "" : "s"}`}
@@ -370,7 +431,7 @@ function BatchDetail({
 
       <ConfirmDialog
         open={confirming}
-        onOpenChange={(v) => !v && setConfirming(false)}
+        onOpenChange={(v) => !v && !busy && setConfirming(false)}
         title="Export the codes of this batch"
         description={`${planned.toLocaleString()} code${planned === 1 ? "" : "s"} will be recovered and shown to you. One record is kept naming you, your reason and that number.`}
         confirmLabel={`Export ${planned.toLocaleString()} code${planned === 1 ? "" : "s"}`}
