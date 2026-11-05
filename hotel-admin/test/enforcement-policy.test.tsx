@@ -139,6 +139,21 @@ describe("enforcement policy page", () => {
     expect((screen.getByLabelText(/Cut-off delay/) as HTMLInputElement).value).toBe("9");
   });
 
+  it("keeps one history guard across edit, revert and edit again", async () => {
+    serve(doc(), ["site_admin"]);
+    const push = vi.spyOn(window.history, "pushState");
+    const user = userEvent.setup();
+    await renderPage();
+    const cutoff = screen.getByLabelText(/Cut-off delay/);
+    await user.clear(cutoff); await user.type(cutoff, "9");
+    await user.clear(cutoff); await user.type(cutoff, "5");
+    await user.clear(cutoff); await user.type(cutoff, "7");
+    expect(push.mock.calls.filter((c) => (c[0] as { leaveGuard?: boolean } | null)?.leaveGuard).length).toBe(1);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    expect(await screen.findByText("Leave without saving?")).toBeTruthy();
+    push.mockRestore();
+  });
+
   it("turning private denial off needs the confirmation text", async () => {
     serve(doc(), ["hotel_it_manager"]);
     patch.mockResolvedValue(doc({ policy: { private_deny_enabled: false, config_version: 2 } }));

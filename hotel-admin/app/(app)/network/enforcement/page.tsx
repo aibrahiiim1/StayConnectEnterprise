@@ -74,18 +74,32 @@ function useLeaveGuard(dirty: boolean) {
   const router = useRouter();
   const [target, setTarget] = useState<string | null>(null);
   const leaving = useRef(false);
+  // One guard entry, pushed the first time there are changes and reused by later edits; a Back that arrives once the draft is
+  // clean consumes it and carries on to where it was going.
+  const guarded = useRef(false);
+  const dirtyNow = useRef(dirty);
+  dirtyNow.current = dirty;
+  const pushGuard = () => window.history.pushState({ ...window.history.state, leaveGuard: true }, "", window.location.href);
   useEffect(() => {
-    if (!dirty) return;
-    const guard = () => window.history.pushState({ ...window.history.state, leaveGuard: true }, "", window.location.href);
-    guard();
+    if (dirty && !guarded.current) {
+      pushGuard();
+      guarded.current = true;
+    }
+  }, [dirty]);
+  useEffect(() => {
     const onPop = () => {
-      if (leaving.current) return;
-      guard();
+      if (leaving.current || !guarded.current) return;
+      if (!dirtyNow.current) {
+        guarded.current = false;
+        window.history.back();
+        return;
+      }
+      pushGuard();
       setTarget(HISTORY_BACK);
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
-  }, [dirty]);
+  }, []);
   useEffect(() => {
     if (!dirty) return;
     const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
