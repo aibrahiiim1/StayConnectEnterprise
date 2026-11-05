@@ -215,7 +215,7 @@ describe("Diagnostics", () => {
     routes({ "/diagnostics/services": { overall: "healthy", counts: { healthy: 1 }, services: [PG], generated_at: new Date().toISOString() } });
     const { default: Page } = await import("@/app/(app)/health/page");
     render(<Page />);
-    fireEvent.keyDown(await screen.findByRole("button", { name: "Actions for postgres" }), { key: "Enter" });
+    fireEvent.keyDown(await screen.findByRole("button", { name: "Actions for Database (postgres)" }), { key: "Enter" });
     fireEvent.click(await screen.findByRole("menuitem", { name: "Restart…" }));
     return screen.findByRole("dialog");
   }
