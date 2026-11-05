@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Eye, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
 import {
@@ -58,13 +58,23 @@ export function DiagnosticsPanel({ networkId }: { networkId: string }) {
   const [report, setReport] = useState<NetworkDiagnostics | null>(null);
   const [busy, setBusy] = useState<null | "check" | "watch">(null);
   const [err, setErr] = useState<string | null>(null);
+  const [checkedAt, setCheckedAt] = useState<Date | null>(null);
+  const [watchLeft, setWatchLeft] = useState(0);
+
+  useEffect(() => {
+    if (busy !== "watch" || watchLeft <= 0) return;
+    const t = setTimeout(() => setWatchLeft((n) => n - 1), 1000);
+    return () => clearTimeout(t);
+  }, [busy, watchLeft]);
 
   async function run(sampleMs: number) {
     setBusy(sampleMs > 0 ? "watch" : "check");
+    setWatchLeft(Math.round(sampleMs / 1000));
     setErr(null);
     try {
       const q = sampleMs > 0 ? `?sample_ms=${sampleMs}` : "";
       setReport(await api.get<NetworkDiagnostics>(`/network/guest-networks/${networkId}/diagnostics${q}`));
+      setCheckedAt(new Date());
     } catch (e) {
       setErr(errMsg(e));
     } finally {
@@ -82,12 +92,17 @@ export function DiagnosticsPanel({ networkId }: { networkId: string }) {
             <RefreshCw /> {busy === "check" ? "Checking…" : report ? "Check again" : "Run checks"}
           </Button>
           <Button variant="secondary" size="sm" disabled={busy !== null} onClick={() => void run(5000)}>
-            <Eye /> {busy === "watch" ? "Watching…" : "Watch frames for 5 seconds"}
+            <Eye /> {busy === "watch" ? (watchLeft > 0 ? `Watching… ${watchLeft} s left` : "Reading the results…") : "Watch frames for 5 seconds"}
           </Button>
         </>
       }
     >
       <ErrorBanner err={err} className="mb-3" />
+      {checkedAt && report && (
+        <p className="mb-3 text-caption text-muted-foreground">
+          Checked at <time dateTime={checkedAt.toISOString()}>{checkedAt.toLocaleTimeString()}</time>
+        </p>
+      )}
       {!report && !err && (
         <p className="text-sm text-muted-foreground">
           Run the checks to see the port link, the VLAN interface, the gateway, DHCP and DNS as the appliance sees them.
@@ -102,7 +117,7 @@ export function DiagnosticsPanel({ networkId }: { networkId: string }) {
         <div className="space-y-4">
           {report.network.findings.length > 0 && (
             <Callout tone="warning" title="What the appliance found">
-              <ul className="list-disc space-y-1 pl-5">
+              <ul className="list-disc space-y-1 ps-5">
                 {report.network.findings.map((f) => <li key={f}>{f}</li>)}
               </ul>
             </Callout>
@@ -111,7 +126,7 @@ export function DiagnosticsPanel({ networkId }: { networkId: string }) {
           {report.network.outside.length > 0 && (
             <Callout tone="info" title="Check outside the appliance">
               <p className="mb-1">The appliance cannot see these. They are places to look, not findings.</p>
-              <ul className="list-disc space-y-1 pl-5">
+              <ul className="list-disc space-y-1 ps-5">
                 {report.network.outside.map((o) => <li key={o}>{o}</li>)}
               </ul>
             </Callout>

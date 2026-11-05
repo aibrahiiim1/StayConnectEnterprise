@@ -19,12 +19,13 @@ import { PageShell, PageHeader, StatCard, StatGrid } from "@/components/ui/page"
 import { SkeletonRows } from "@/components/ui/misc";
 import { RowActions } from "@/components/ui/row-actions";
 import { useToast } from "@/components/ui/toast";
-import { PendingChangeBanner, ReadOnlyNotice, useSecondsLeft } from "@/components/ui/patterns";
-import { CheckCircle2, Network, Plus, Power, Users, Wifi } from "lucide-react";
+import { LiveStatus, PendingChangeBanner, ReadOnlyNotice, useSecondsLeft } from "@/components/ui/patterns";
+import { usePoll } from "@/lib/use-poll";
+import { CheckCircle2, Network, Plus, Power, RefreshCw, Users, Wifi } from "lucide-react";
 import { errMsg } from "@/lib/utils";
 import { HelpList, HelpSection } from "@/components/help";
 import {
-  ApplyResults, DhcpModeBadge, EnabledBadge, networkTypeLabel, useNetworkAccess,
+  ApplyResults, DhcpModeBadge, EnabledBadge, networkTypeLabel, plural, revisionStateLabel, useNetworkAccess,
 } from "@/components/network/shared";
 import { isReauth, useNetworkChangeStepUp } from "@/components/network/change-step-up";
 import { NetworkStatusBadge, PendingChangeNote } from "@/components/network/status";
@@ -33,6 +34,7 @@ import { ArchivedNetworks, DefaultNetworkCard } from "@/components/network/defau
 import { topologyWords } from "@/lib/network-state";
 import { POLICY_WORDS, STATE_WORDS, type RoomSignInBrief } from "@/lib/api/pms-routing";
 import type { NetworkOverview, OverviewNetwork } from "@/lib/api/network-overview";
+import { servingCount } from "@/lib/api/network-overview";
 
 function poolSummary(net: GuestNetwork): string {
   if (!net.pools || net.pools.length === 0) return "—";
@@ -46,6 +48,9 @@ export default function NetworkPage() {
   const [blocked, setBlocked] = useState<string | null>(null);
   const [pending, setPending] = useState<NetRevision | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState<null | "validate" | "apply" | "confirm" | "rollback">(null);
   const [acting, setActing] = useState<string | null>(null);
   const [validation, setValidation] = useState<{ ok: boolean; issues?: ValidationIssue[] } | null>(null);
@@ -57,6 +62,7 @@ export default function NetworkPage() {
   const { known, writable } = useNetworkAccess();
 
   async function loadNetworks() {
+    setRefreshing(true);
     try {
       const r = await api.get<ListResp<GuestNetwork>>("/network/guest-networks");
       const data = r.data ?? [];
@@ -78,7 +84,10 @@ export default function NetworkPage() {
         setOverview(byId);
         setBlocked(o.changes_blocked ? (o.blocked_detail ?? "Changes are being refused.") : null);
       } catch { setOverview({}); setBlocked(null); }
-    } catch (e) { setErr(errMsg(e)); }
+      setLoadErr(null);
+      setUpdatedAt(Date.now());
+    } catch (e) { setLoadErr(errMsg(e)); }
+    finally { setRefreshing(false); }
   }
 
   async function loadRevisions() {
@@ -95,6 +104,8 @@ export default function NetworkPage() {
     reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  usePoll(() => loadNetworks(), 30000, { enabled: busy === null && acting === null });
 
   // Refresh after the deadline because the appliance rolls back automatically.
   const left = useSecondsLeft(pending?.confirm_deadline ?? null);
@@ -169,7 +180,7 @@ export default function NetworkPage() {
       } else if (r.state === "failed") {
         setErr(r.message || "Apply failed.");
       } else {
-        toast.success(r.message || `Apply state: ${r.state}`);
+        toast.success(r.message || revisionStateLabel(r.state));
       }
       reload();
     } catch (e) { if (isReauth(e)) throw e; setErr(errMsg(e)); }
@@ -194,11 +205,14 @@ export default function NetworkPage() {
     });
   }
 
-  const enabledCount = (rows ?? []).filter((n) => n.enabled).length;
   const shownRows = (rows ?? []).filter((n) => !n.archived);
+  const enabledCount = servingCount(shownRows, overview);
+  const waiting = shownRows.filter((n) => (overview[n.id]?.changes.length ?? 0) > 0).length;
   const archivedCount = (rows ?? []).length - shownRows.length;
-  const knownClients = Object.values(status);
-  const clientTotal = knownClients.reduce((s, x) => s + (x.active_clients ?? 0), 0);
+  const clientCounts = shownRows
+    .map((n) => overview[n.id]?.active_clients ?? status[n.id]?.active_clients)
+    .filter((c): c is number => typeof c === "number");
+  const clientTotal = clientCounts.reduce((s, x) => s + x, 0);
   const hasResults = !!validation || !!(health && health.length);
 
   const newButton = (
@@ -212,6 +226,9 @@ export default function NetworkPage() {
       <PageHeader
         title="Client networks"
         description="The Wi-Fi networks clients join."
+        meta={rows !== null && (
+          <LiveStatus updatedAt={updatedAt} refreshing={refreshing} onRefresh={() => void loadNetworks()} intervalSeconds={30} error={!!loadErr && rows !== null} />
+        )}
         help={
           <>
             <HelpSection title="What a client network is">
@@ -237,8 +254,9 @@ export default function NetworkPage() {
             <Button variant="secondary" disabled={busy !== null} onClick={onValidate}>
               <CheckCircle2 /> {busy === "validate" ? "Validating…" : "Validate"}
             </Button>
-            <Button variant="secondary" disabled={busy !== null} onClick={onApply}>
-              <Power /> {busy === "apply" ? "Applying…" : "Apply changes"}
+            <Button variant={waiting > 0 ? "primary" : "secondary"} disabled={busy !== null} onClick={onApply}>
+              <Power /> {busy === "apply" ? "Applying…" : waiting > 0 ? `Apply changes (${waiting})` : "Apply changes"}
+              {waiting > 0 && busy !== "apply" && <span className="sr-only">{`, ${plural(waiting, "network")} with changes not applied`}</span>}
             </Button>
             <LinkButton variant="secondary" href="/network/recovery">Recovery</LinkButton>
             {newButton}
@@ -292,13 +310,13 @@ export default function NetworkPage() {
           <StatCard
             label="Serving clients"
             value={enabledCount}
-            hint={shownRows.length - enabledCount > 0 ? `${shownRows.length - enabledCount} switched off` : "All switched on"}
+            hint={shownRows.length - enabledCount > 0 ? `${shownRows.length - enabledCount} not serving` : "All serving"}
             icon={<Wifi />}
             tone={enabledCount === 0 ? "warn" : "default"}
           />
           <StatCard
             label="Devices connected"
-            value={knownClients.length ? clientTotal : "—"}
+            value={clientCounts.length ? clientTotal : "—"}
             hint="On all client networks, now"
             icon={<Users />}
           />
@@ -306,7 +324,14 @@ export default function NetworkPage() {
       )}
 
       <Card className="overflow-hidden">
-        {rows === null ? (
+        {rows === null && loadErr ? (
+          <EmptyState
+            icon={<Network />}
+            title="The client networks could not be loaded"
+            hint={loadErr}
+            action={<Button variant="secondary" onClick={() => void loadNetworks()}><RefreshCw /> Try again</Button>}
+          />
+        ) : rows === null ? (
           <SkeletonRows rows={4} cols={6} />
         ) : shownRows.length === 0 ? (
           <EmptyState
@@ -417,6 +442,7 @@ export default function NetworkPage() {
         )}
       </Card>
 
+      <PortModeCard writable={writable} reloadKey={stagedKey} onStaged={reload} />
       <ArchivedNetworks writable={writable} reloadKey={stagedKey} onRestored={reload} />
 
       <ConfirmDialog
@@ -447,7 +473,6 @@ export default function NetworkPage() {
         onConfirm={applyStagedRemoval}
       />
       {stepUp.dialog}
-      <PortModeCard writable={writable} reloadKey={stagedKey} onStaged={reload} />
     </PageShell>
   );
 }

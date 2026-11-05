@@ -255,6 +255,44 @@ describe("DHCP & leases", () => {
     await waitFor(() => expect(del).toHaveBeenCalledWith("/network/dhcp/reservations/res-1"));
     expect(confirmSpy).not.toHaveBeenCalled();
   });
+
+  it("names the network serving a lease, never a switched-off one that overlaps it", async () => {
+    const OLD = { ...NET, id: "net-old", name: "Old WiFi", enabled: false, bridge_name: "br-g20-old" };
+    const now = Math.floor(Date.now() / 1000);
+    route({
+      "/auth/whoami": IT,
+      "/network/dhcp/leases": { leases: [{ "ip-address": "10.20.0.60", "hw-address": "aa:bb:cc:00:00:60", hostname: "phone", "valid-lft": 3600, cltt: now, state: 0 }] },
+      "/network/dhcp/reservations": list([]),
+      "/network/guest-networks": list([OLD, NET]),
+    });
+    render(<DhcpPage />);
+    expect(await screen.findByText("Guest WiFi")).toBeTruthy();
+    expect(screen.queryByText("Old WiFi")).toBeNull();
+  });
+
+  it("says when the reservations could not be refreshed instead of silently showing the old rows", async () => {
+    let reservationReads = 0;
+    get.mockImplementation((path: string) => {
+      if (path === "/auth/whoami") return Promise.resolve(IT);
+      if (path.startsWith("/network/dhcp/leases")) return Promise.resolve({ leases: [] });
+      if (path.startsWith("/network/guest-networks")) return Promise.resolve(list([NET]));
+      if (path.startsWith("/network/dhcp/reservations")) {
+        reservationReads++;
+        return reservationReads === 1 ? Promise.resolve(list([RES])) : Promise.reject(new Error("the appliance did not answer"));
+      }
+      return Promise.reject(new Error(`unexpected GET ${path}`));
+    });
+    del.mockResolvedValue({});
+    render(<DhcpPage />);
+    const tab = await screen.findByRole("tab", { name: /Reservations/ });
+    fireEvent.mouseDown(tab, { button: 0 });
+    fireEvent.click(tab);
+    await rowAction("reservation 10.20.0.50", "Remove");
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove reservation" }));
+    expect(await screen.findByText("The reservations could not be refreshed")).toBeTruthy();
+    expect(screen.getByText("lobby-printer")).toBeTruthy();
+  });
 });
 
 describe("Client network detail", () => {
