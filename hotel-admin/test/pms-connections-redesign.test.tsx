@@ -146,6 +146,18 @@ describe("adding a connection", () => {
     expect(await within(dialog).findByRole("button", { name: "Open the connection" })).toBeTruthy();
   });
 
+  it("keeps what was entered when the appliance time zone arrives after the wizard opened", async () => {
+    const { AddConnectionWizard } = await import("@/app/(app)/pms-interfaces/add-connection-wizard");
+    const props = { open: true, onOpenChange: vi.fn(), providers: [PROTEL_PROVIDER as any], catalogueAvailable: true, onChanged: vi.fn(), onOpenConnection: vi.fn() };
+    const { rerender } = render(<AddConnectionWizard {...props} applianceTimezone="" />);
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Next" }));
+    await userEvent.type(within(dialog).getByLabelText(/^Name/), "Front office");
+    rerender(<AddConnectionWizard {...props} applianceTimezone="Africa/Cairo" />);
+    expect(within(dialog).getByLabelText(/^Name/)).toHaveValue("Front office");
+    expect(within(dialog).getByPlaceholderText("Africa/Cairo")).toHaveValue("Africa/Cairo");
+  });
+
   it("never discards what was entered on a repeated dismissal, only on Discard", async () => {
     mockBackend();
     await renderPage();

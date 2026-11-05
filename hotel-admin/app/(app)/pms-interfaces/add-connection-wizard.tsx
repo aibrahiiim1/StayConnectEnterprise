@@ -54,6 +54,7 @@ export function AddConnectionWizard({
   const [step, setStep] = useState(0);
   const [name, setName] = useState("");
   const [timezone, setTimezone] = useState(applianceTimezone);
+  const tzEdited = useRef(false);
   const [values, setValues] = useState<FormValues>({});
   const [creds, setCreds] = useState<Record<string, string>>({});
   const [secretReason] = useState("INITIAL_COMMISSIONING");
@@ -91,7 +92,15 @@ export function AddConnectionWizard({
     setDone(false);
     setTouched(false);
     setAsking(false);
-  }, [open, providers, applianceTimezone]);
+    tzEdited.current = false;
+    // The appliance time zone is read when the wizard opens; it is not a reason to reset what the operator entered.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, providers]);
+
+  // A time zone that arrives after the wizard opened fills the field only while the operator has not edited it.
+  useEffect(() => {
+    if (open && applianceTimezone && !tzEdited.current) setTimezone(applianceTimezone);
+  }, [open, applianceTimezone]);
 
   function choose(k: string) {
     setTouched(true);
@@ -271,7 +280,7 @@ export function AddConnectionWizard({
                     <Field label="PMS time zone" required hint="Time zone name, for example Europe/Berlin. Starts as the appliance's own time zone. Arrivals and departures are read in it."
                       error={showErrors ? tzError : undefined}>
                       <Input value={timezone} placeholder="Africa/Cairo" spellCheck={false}
-                        onChange={(e) => { setTouched(true); setTimezone(e.target.value); }} />
+                        onChange={(e) => { setTouched(true); tzEdited.current = true; setTimezone(e.target.value); }} />
                     </Field>
                   </FieldGrid>
                   <ProviderFieldsForm
