@@ -1,7 +1,5 @@
 "use client";
 
-// Readiness is the server's verdict (room_auth_ready) worded by describePmsReadiness; the card does not re-derive it.
-
 import Link from "next/link";
 import type { PmsInterfaceHealth } from "@/lib/api";
 import type { AssessmentInterfaceSummary } from "@/lib/api/pms-routing";
@@ -55,7 +53,7 @@ export function readinessChecks(h?: PmsInterfaceHealth | null): Check[] {
   const known = (v?: string) => (v ? v !== "UNKNOWN" : false);
   return [
     { label: "Connected", state: h ? h.transport_status === "CONNECTED" : null },
-    { label: "Receiving updates", state: h ? (known(h.continuity_status) ? h.continuity_status === "CONTINUOUS" : false) : null },
+    { label: "Receiving updates", state: h && known(h.continuity_status) ? h.continuity_status === "CONTINUOUS" : null },
     { label: "Guest list in sync", state: h ? h.sync_status === "IN_SYNC" : null },
     { label: "Room sign-in ready", state: h && h.room_auth_ready !== undefined ? h.room_auth_ready : null },
   ];
@@ -85,13 +83,14 @@ export function ChecksRow({ health }: { health?: PmsInterfaceHealth | null }) {
 }
 
 export function ConnectionCard({
-  iface, health, healthLoaded, provider, routing, onOpen,
+  iface, health, healthLoaded, routingKnown, writable, provider, routing, onOpen,
 }: {
   iface: PmsConnection;
   health?: PmsInterfaceHealth;
   healthLoaded: boolean;
+  routingKnown: boolean;
+  writable: boolean;
   provider: PmsProvider | null;
-  /** What this connection serves, from the one server assessment; null when it could not be read. */
   routing: AssessmentInterfaceSummary | null;
   onOpen: () => void;
 }) {
@@ -105,11 +104,8 @@ export function ConnectionCard({
   const host = safeHost(iface.endpoint);
   const verification = verificationWords(iface.verification ?? provider?.verification);
 
-  const networks = routing ? routing.serving_networks : null;
   const archivedRoutes = routing?.archived_or_off_routes ?? 0;
   const warnings: React.ReactNode[] = [];
-  // The connection's own state is always shown. That it also stops guests signing in is said only when a client network is actually routed to it: a connection that
-  // serves no active network is described, and nothing on the dashboard warns about it.
   if (active && h && !h.room_auth_ready && h.room_auth_reason) {
     const own = ROOM_AUTH_WORDS[h.room_auth_reason] ?? "Room sign-in is not available through this connection.";
     warnings.push(routing?.state === "IMPAIRED" ? `${own} Guests on ${routing.serving_networks.join(", ")} cannot sign in with a room number until it is.` : own);
@@ -149,13 +145,13 @@ export function ConnectionCard({
             <div className="text-sm font-medium">
               {!active
                 ? iface.lifecycle_state === "DRAINING"
-                  ? "Winding down — no new room sign-ins"
+                  ? "Winding down: no new room sign-ins"
                   : iface.lifecycle_state === "DECOMMISSIONED" ? "Retired" : "Room sign-in paused"
                 : !healthLoaded ? "Checking…" : !h ? "Status could not be read" : readiness.headline}
             </div>
             {active && syncing && (
               <div className="text-xs text-muted-foreground">
-                Loading the guest list now — {(h?.sync_records_received ?? 0).toLocaleString()} records received
+                Loading the guest list now: {(h?.sync_records_received ?? 0).toLocaleString()} records received
               </div>
             )}
           </div>
@@ -179,7 +175,7 @@ export function ConnectionCard({
           </div>
           <div className="min-w-0">
             <dt className="text-muted-foreground">Guests in house</dt>
-            <dd className="font-medium tabular">{h ? (h.in_house_stays ?? 0).toLocaleString() : "—"}</dd>
+            <dd className="font-medium tabular">{h ? (h.in_house_stays ?? 0).toLocaleString() : "Not known"}</dd>
           </div>
           <div className="min-w-0">
             <dt className="text-muted-foreground">Live configuration</dt>
@@ -190,7 +186,9 @@ export function ConnectionCard({
           <div className="col-span-2 min-w-0">
             <dt className="text-muted-foreground">Client networks</dt>
             <dd className="break-words font-medium">
-              {networks === null ? "—" : networks.length === 0 ? "None in use for room sign-in" : networks.join(", ")}
+              {routing && routing.serving_networks.length > 0
+                ? routing.serving_networks.join(", ")
+                : routing || routingKnown ? "None in use for room sign-in" : "Could not be read"}
               {archivedRoutes > 0 && (
                 <span className="font-normal text-muted-foreground"> · also routed to {archivedRoutes} archived or switched-off network{archivedRoutes === 1 ? "" : "s"}</span>
               )}
@@ -207,7 +205,7 @@ export function ConnectionCard({
 
       <div className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-2.5">
         <Badge tone={verification.tone} className="whitespace-normal">{verification.label}</Badge>
-        <Button size="sm" variant="secondary" onClick={onOpen}>Manage</Button>
+        <Button size="sm" variant="secondary" onClick={onOpen}>{writable ? "Manage" : "View"}</Button>
       </div>
     </Card>
   );
