@@ -1,5 +1,6 @@
 "use client";
 
+import { expiryState } from "@/lib/cert-expiry";
 import { certCheckDetail } from "@/lib/cert-check";
 import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
@@ -53,16 +54,23 @@ const words = (t?: string) => {
   const w = t.replace(/[_-]+/g, " ").trim();
   return w.charAt(0).toUpperCase() + w.slice(1);
 };
-function daysWords(days: number): string {
-  if (days < 0) return `Expired ${-days} ${days === -1 ? "day" : "days"} ago`;
-  if (days === 0) return "Expires today";
-  return `${days} ${days === 1 ? "day" : "days"} left`;
+const plural = (n: number) => `${n} ${n === 1 ? "day" : "days"}`;
+
+function daysWords(s: NonNullable<ReturnType<typeof expiryState>>): string {
+  if (s.kind === "expired") return s.days === 0 ? "Expired less than a day ago" : `Expired ${plural(s.days)} ago`;
+  if (s.kind === "within_day") return "Expires within a day";
+  return `${plural(s.days)} left`;
 }
-function expiresIn(days: number | null, at?: string): string | undefined {
-  if (days === null) return at ? `Expires ${formatDate(at)}` : undefined;
-  if (days < 0) return `Expired ${-days} ${days === -1 ? "day" : "days"} ago`;
-  if (days === 0) return "Expires today";
-  return `Expires in ${days} ${days === 1 ? "day" : "days"}. Renews automatically when 45 days are left.`;
+function expiresIn(s: ReturnType<typeof expiryState>, at?: string): string | undefined {
+  if (!s) return at ? `Expires ${formatDate(at)}` : undefined;
+  if (s.kind !== "days") return daysWords(s);
+  return `Expires in ${plural(s.days)}. Renews automatically when 45 days are left.`;
+}
+// The error is dated only when the recorded result says a renewal produced it: a failed check keeps the last renewal's time, not its own.
+function errorTitle(s: { last_renewal_result?: string; last_renewal_attempt?: string }): string {
+  if (s.last_renewal_result === "renewal_failed") return s.last_renewal_attempt ? `Last renewal error · ${when(s.last_renewal_attempt)}` : "Last renewal error";
+  if (s.last_renewal_result === "check_failed") return "Last certificate check failed";
+  return "Last error";
 }
 const mono = (s?: string) => (s ? <span className="break-all font-mono text-xs">{s}</span> : "—");
 
@@ -96,6 +104,7 @@ export default function CertificatePage() {
     label: st?.status_threshold ? `Other (${words(st.status_threshold)})` : "Not reported",
   };
   const days = typeof st?.days_remaining === "number" ? st.days_remaining : null;
+  const expiry = expiryState(st?.expires_at, days, Date.now());
 
   async function check() {
     setBusy("check"); setErr(null); setResult(null);
@@ -197,10 +206,10 @@ export default function CertificatePage() {
 
       <SectionCard
         title="Status"
-        description={st && st.available !== false ? expiresIn(days, st.expires_at) : undefined}
+        description={st && st.available !== false ? expiresIn(expiry, st.expires_at) : undefined}
         actions={st && st.available !== false && (
           <StatusBadge tone={thr.tone}>
-            {thr.label}{days !== null ? ` · ${daysWords(days)}` : ""}
+            {thr.label}{expiry ? ` · ${daysWords(expiry)}` : ""}
           </StatusBadge>
         )}
         bodyClassName="space-y-4"
@@ -231,7 +240,7 @@ export default function CertificatePage() {
         ) : (
           <>
             {st.last_error && (
-              <Callout tone="danger" title={st.last_renewal_attempt ? `Last renewal error · ${when(st.last_renewal_attempt)}` : "Last renewal error"}>
+              <Callout tone="danger" title={errorTitle(st)}>
                 {st.last_error}
               </Callout>
             )}
