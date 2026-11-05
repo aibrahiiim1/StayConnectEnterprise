@@ -1,15 +1,14 @@
 "use client";
 
-// edged enforces View_Guest_SignIn_Credentials; hiding a panel here is not the boundary.
-
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { KeyRound, ShieldAlert } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, KeyRound, RefreshCw, ShieldAlert } from "lucide-react";
 import {
-  api, SignInAttempt, SignInAttemptDetail, SignInAttemptCredentials } from "@/lib/api";
+  api, ApiError, SignInAttempt, SignInAttemptDetail, SignInAttemptCredentials } from "@/lib/api";
 import { canRead, canWrite } from "@/lib/roles";
 import { ActiveRestrictions } from "@/components/guest-signin-restrictions";
 import { NetworkPausesNotice } from "@/components/guest-signin-network-pause";
 import { cn, formatDate, formatRelative } from "@/lib/utils";
+import { OneGateLoader } from "@/components/brand";
 import { PageShell, PageHeader, StatCard, StatGrid } from "@/components/ui/page";
 import { Card, CardFooter } from "@/components/ui/card";
 import { Table, TBody, THead, TR, TH, TD } from "@/components/ui/table";
@@ -20,7 +19,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner, Callout, Notice } from "@/components/ui/error-banner";
 import { InfoHint } from "@/components/ui/quiet";
 import { HelpList, HelpSection } from "@/components/help";
-import { SkeletonRows, DList, MonoId } from "@/components/ui/misc";
+import { Skeleton, SkeletonRows, DList, MonoId } from "@/components/ui/misc";
 import { DetailsDrawer, DetailsSection } from "@/components/ui/details-drawer";
 import { DescriptionList, Pagination, SearchInput } from "@/components/ui/data";
 import { FilterBar } from "@/components/ui/toolbar";
@@ -28,7 +27,10 @@ import { RowActions } from "@/components/ui/row-actions";
 import { useServerPage, type PagedFields } from "@/lib/use-server-page";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LiveStatus, NotAvailable, refreshingClass } from "@/components/ui/patterns";
+import { useToast } from "@/components/ui/toast";
 import { useOperatorRoles } from "@/lib/whoami-context";
+
+const FADE = "animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none";
 
 const RESULT_WORDS: Record<string, { tone: "ok" | "warn" | "err" | "info" | "neutral"; meaning: string }> = {
   VERIFIED: { tone: "ok", meaning: "The guest proved who they are and was offered access." },
@@ -51,22 +53,22 @@ const RESULT_WORDS: Record<string, { tone: "ok" | "warn" | "err" | "info" | "neu
   },
   MIRROR_STALE_OR_MISSING_CHANGE: {
     tone: "err",
-    meaning: "The appliance's guest list could not authorise anybody at that moment — this affected every guest, not just this one.",
+    meaning: "The appliance's guest list could not authorise anybody at that moment. This affected every guest, not just this one.",
   },
   RATE_LIMITED: { tone: "info", meaning: "Refused before any details were evaluated: too many recent attempts." },
   ROUTING_OR_INTERFACE_FAILURE: {
     tone: "err",
-    meaning: "The request reached no PMS interface: the device was on no mapped client network, or the network maps to none.",
+    meaning: "The request reached no PMS connection: the device was on no mapped client network, or the network maps to none.",
   },
   SERVICE_UNAVAILABLE: { tone: "err", meaning: "An internal failure. The details were never compared." },
   SPENT_REQUEST_ID: {
     tone: "err",
-    meaning: "The portal page re-used a request id that had already been refused. This is a stale portal build, not a guest error.",
+    meaning: "The sign-in page re-used a request that had already been refused. This is an out-of-date sign-in page, not a guest error.",
   },
   MALFORMED_SUBMISSION: { tone: "neutral", meaning: "The submission could not be read: a missing room, no value, or an unusable device." },
   VERIFIED_NO_ELIGIBLE_PACKAGE: {
     tone: "err",
-    meaning: "The guest's details were RIGHT. The site had no package to offer that stay — this is a configuration problem, not theirs.",
+    meaning: "The guest's details were right. The site had no package to offer that stay, so this is a configuration problem, not the guest's.",
   },
   LICENSE_REFUSED: {
     tone: "err",
@@ -90,7 +92,7 @@ const RESULT_WORDS: Record<string, { tone: "ok" | "warn" | "err" | "info" | "neu
   },
 };
 
-const RESULT_FILTER_LABELS: Record<string, string> = {
+const RESULT_LABELS: Record<string, string> = {
   VERIFIED: "Connected",
   CREDENTIAL_MISMATCH: "Details did not match",
   ROOM_NOT_IN_MIRROR: "Room not in the guest list",
@@ -100,7 +102,7 @@ const RESULT_FILTER_LABELS: Record<string, string> = {
   RATE_LIMITED: "Too many attempts",
   ROUTING_OR_INTERFACE_FAILURE: "Network not pointed at a PMS",
   SERVICE_UNAVAILABLE: "Internal failure",
-  SPENT_REQUEST_ID: "Stale sign-in page",
+  SPENT_REQUEST_ID: "Out-of-date sign-in page",
   MALFORMED_SUBMISSION: "Unreadable submission",
   VERIFIED_NO_ELIGIBLE_PACKAGE: "Right details, no package to offer",
   LICENSE_REFUSED: "Licence refused new clients",
@@ -109,26 +111,48 @@ const RESULT_FILTER_LABELS: Record<string, string> = {
   AFTER_CHECKOUT_NEW_DEVICE_REJECTED: "New device after check-out",
 };
 
+const resultLabel = (code: string, serverLabel?: string) => RESULT_LABELS[code] ?? serverLabel ?? "Result not recognised";
+
 const RESULT_FILTERS = [
   { value: "", label: "Every result" },
-  ...Object.keys(RESULT_WORDS).map((v) => ({
-    value: v,
-    label: RESULT_FILTER_LABELS[v] ?? v.replace(/_/g, " ").toLowerCase(),
-  })),
+  ...Object.keys(RESULT_LABELS).map((v) => ({ value: v, label: RESULT_LABELS[v] })),
 ];
 
+const KIND_WORDS: Record<string, string> = {
+  FULL_NAME: "Looked like a name",
+  RESERVATION_NUMBER_LIKE: "Looked like a reservation number",
+  UNKNOWN: "Could not tell",
+};
+
 const KIND_FILTERS = [
-  { value: "", label: "Any credential type" },
-  { value: "FULL_NAME", label: "Name" },
-  { value: "RESERVATION_NUMBER_LIKE", label: "Reservation-number-like" },
-  { value: "UNKNOWN", label: "Unknown" },
+  { value: "", label: "Any kind of entry" },
+  ...Object.entries(KIND_WORDS).map(([value, label]) => ({ value, label })),
 ];
+
+const MATCHED_WORDS: Record<string, string> = {
+  FIRST_NAME: "First name",
+  FAMILY_NAME: "Surname",
+  RESERVATION_NUMBER: "Reservation number",
+};
+
+const TRANSPORT_WORDS: Record<string, string> = {
+  CONNECTED: "Connected",
+  CONNECTING: "Connecting",
+  DISCONNECTED: "Not connected",
+  ERROR: "In error",
+  UNKNOWN: "Not known",
+  LINK_BUSY: "Busy",
+  LINK_RESYNCING: "Refreshing the guest list",
+};
+
+const transportWords = (s?: string | null) => (s ? TRANSPORT_WORDS[s] ?? "Status not recognised" : "Not recorded");
 
 const RANGES = [
   { value: "24", label: "Last 24 hours" },
   { value: "72", label: "Last 3 days" },
   { value: "168", label: "Last 7 days" },
-  { value: "720", label: "Last 30 days (everything retained)" },
+  { value: "720", label: "Last 30 days" },
+  { value: "all", label: "Everything kept" },
 ];
 
 function tone(result: string) {
@@ -136,7 +160,7 @@ function tone(result: string) {
 }
 
 function mirrorAge(seconds?: number | null): string {
-  if (seconds === null || seconds === undefined) return "—";
+  if (seconds === null || seconds === undefined) return "Not recorded";
   if (seconds < 90) return `${seconds}s`;
   const mins = Math.floor(seconds / 60);
   if (mins < 90) return `${mins}m`;
@@ -145,16 +169,29 @@ function mirrorAge(seconds?: number | null): string {
   return `${Math.floor(hrs / 24)}d`;
 }
 
+const yesNo = (v?: boolean | null) => (v === null || v === undefined ? "Not reached" : v ? "Yes" : "No");
+
+function credentialsError(e: unknown): string {
+  if (e instanceof ApiError) {
+    if (e.code === "reauth_required") return "Your password was not accepted. Enter the password you sign in with.";
+    if (e.code === "reauth_unavailable") return "Your password cannot be checked right now. Try again shortly.";
+    if (e.code === "forbidden") return "Your role cannot see what guests typed.";
+  }
+  return "What the guest typed could not be read right now. Nothing has been changed. Try again.";
+}
+
 type AttemptsResp = PagedFields & {
   data?: SignInAttempt[];
   summary?: { total?: number; failed?: number; mismatch?: number; systemic?: number };
 };
 
 export default function GuestSignInAttemptsPage() {
+  const toast = useToast();
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const [anchor, setAnchor] = useState(() => Date.now());
-  const [openErr, setOpenErr] = useState<unknown>(null);
+  const [openingId, setOpeningId] = useState<string | null>(null);
 
+  const [roomInput, setRoomInput] = useState("");
   const [room, setRoom] = useState("");
   const [result, setResult] = useState("");
   const [kind, setKind] = useState("");
@@ -163,8 +200,7 @@ export default function GuestSignInAttemptsPage() {
 
   const [detail, setDetail] = useState<SignInAttemptDetail | null>(null);
   const [creds, setCreds] = useState<SignInAttemptCredentials | null>(null);
-  const [credsErr, setCredsErr] = useState<unknown>(null);
-  // Typed values need the operator's password; it is cleared after use and on close.
+  const [credsErr, setCredsErr] = useState<string | null>(null);
   const [credsPw, setCredsPw] = useState("");
   const [revealing, setRevealing] = useState(false);
 
@@ -175,13 +211,19 @@ export default function GuestSignInAttemptsPage() {
 
   const [tab, setTab] = useState<"attempts" | "restrictions">("attempts");
 
-  // Search goes in a header, never the URL.
+  useEffect(() => {
+    const t = setTimeout(() => setRoom(roomInput.trim()), 300);
+    return () => clearTimeout(t);
+  }, [roomInput]);
+
   const path = useMemo(() => {
-    const params = new URLSearchParams({ from: new Date(anchor - Number(range) * 3600_000).toISOString() });
-    if (room.trim()) params.set("room", room.trim());
+    const params = new URLSearchParams();
+    if (range !== "all") params.set("from", new Date(anchor - Number(range) * 3600_000).toISOString());
+    if (room) params.set("room", room);
     if (result) params.set("result", result);
     if (kind) params.set("credential_type", kind);
-    return "/guest-signin-attempts?" + params.toString();
+    const qs = params.toString();
+    return "/guest-signin-attempts" + (qs ? "?" + qs : "");
   }, [anchor, range, room, result, kind]);
   const needle = query.trim();
   const headers = useMemo(
@@ -190,9 +232,9 @@ export default function GuestSignInAttemptsPage() {
   );
   const list = useServerPage<AttemptsResp>({ path, headers });
   const { resp, current, err, loading: refreshing } = list;
-  const rows = current && resp ? resp.data ?? [] : err && !resp ? [] : null;
+  const loadFailed = err !== null && !resp;
+  const rows = current && resp ? resp.data ?? [] : null;
   useEffect(() => { if (current && resp) setUpdatedAt(Date.now()); }, [current, resp]);
-  const load = (_manual?: boolean) => setAnchor(Date.now());
 
   const sum = resp?.summary;
   const counts = {
@@ -201,15 +243,20 @@ export default function GuestSignInAttemptsPage() {
     mismatch: sum?.mismatch ?? 0,
     systemic: sum?.systemic ?? 0,
   };
+  const tile = (n: number) =>
+    rows !== null ? n.toLocaleString() : loadFailed ? <span className="text-muted-foreground">Not known</span> : <Skeleton className="h-6 w-16" />;
 
   async function open(a: SignInAttempt) {
     setCreds(null);
     setCredsErr(null);
+    setOpeningId(a.id);
     try {
       const d = await api.get<SignInAttemptDetail>("/guest-signin-attempts/" + a.id);
       setDetail(d);
-    } catch (e) {
-      setOpenErr(e);
+    } catch {
+      toast.error("This attempt could not be opened", "Nothing has been changed. Try again.");
+    } finally {
+      setOpeningId(null);
     }
   }
 
@@ -220,11 +267,19 @@ export default function GuestSignInAttemptsPage() {
     try {
       setCreds(await api.post<SignInAttemptCredentials>("/guest-signin-credentials/" + detail.id, { password: credsPw }));
     } catch (e) {
-      setCredsErr(e);
+      setCredsErr(credentialsError(e));
     } finally {
       setCredsPw("");
       setRevealing(false);
     }
+  }
+
+  function clearFilters() {
+    setQuery("");
+    setRoomInput("");
+    setRoom("");
+    setResult("");
+    setKind("");
   }
 
   const restrictionsView = (
@@ -233,6 +288,7 @@ export default function GuestSignInAttemptsPage() {
       onShowAttempts={(mac) => {
         setTab("attempts");
         setQuery(mac);
+        setRoomInput("");
         setRoom("");
         setResult("");
         setKind("");
@@ -242,21 +298,31 @@ export default function GuestSignInAttemptsPage() {
     />
   );
 
-  const filtered = needle !== "" || room.trim() !== "" || result !== "" || kind !== "";
+  const active = [
+    needle && "search",
+    room && "room",
+    result && "result",
+    kind && "kind of entry",
+  ].filter(Boolean) as string[];
+  const rangeLabel = RANGES.find((r) => r.value === range)?.label.toLowerCase() ?? "this period";
 
   const attemptsView = (
     <div className="space-y-5">
       <StatGrid cols={4}>
-        <StatCard label="Attempts" value={rows === null ? "—" : counts.total} hint="In the selected period" />
-        <StatCard label="Did not connect" value={rows === null ? "—" : counts.failed} tone={counts.failed ? "warn" : "default"} />
-        <StatCard label="Details did not match" value={rows === null ? "—" : counts.mismatch}
+        <StatCard label="Attempts" value={tile(counts.total)} hint="In the selected period" />
+        <StatCard label="Did not connect" value={tile(counts.failed)} tone={counts.failed ? "warn" : "default"} />
+        <StatCard label="Details did not match" value={tile(counts.mismatch)}
           hint="Wrong value, or room not in the guest list" />
-        <StatCard label="System-side failures" value={rows === null ? "—" : counts.systemic}
-          tone={counts.systemic ? "err" : "default"} hint="Nothing the guest typed could help" />
+        <StatCard label="System-side failures" value={tile(counts.systemic)}
+          tone={counts.systemic ? "err" : "default"} hint="Out-of-date guest list, routing or an internal fault" />
       </StatGrid>
 
       {counts.systemic > 0 && (
-        <Notice tone="warning" title={`${counts.systemic} attempt${counts.systemic === 1 ? "" : "s"} failed for reasons no guest could fix`}>
+        <Notice
+          tone="warning"
+          className={FADE}
+          title={`${counts.systemic.toLocaleString()} attempt${counts.systemic === 1 ? "" : "s"} failed for reasons no guest could fix`}
+        >
           Out-of-date guest list, PMS routing or an internal fault.
           <InfoHint className="ms-1">Guests saw &ldquo;we are unable to verify your stay right now&rdquo;, not a request to re-check their details.</InfoHint>
         </Notice>
@@ -272,36 +338,57 @@ export default function GuestSignInAttemptsPage() {
           }
           filters={
             <>
-              <Input value={room} onChange={(e) => setRoom(e.target.value)} placeholder="Room"
-                aria-label="Filter by room number" className="h-9 w-24" inputMode="numeric" />
+              <Input value={roomInput} onChange={(e) => setRoomInput(e.target.value)} placeholder="Room"
+                aria-label="Filter by room number" className="h-9 w-24" />
               <Select value={result} onChange={(e) => setResult(e.target.value)}
                 aria-label="Filter by result" className="h-9 w-full sm:w-56">
                 {RESULT_FILTERS.map((f) => <option key={f.value || "all"} value={f.value}>{f.label}</option>)}
               </Select>
               <Select value={kind} onChange={(e) => setKind(e.target.value)}
-                aria-label="Filter by credential type" className="h-9 w-full sm:w-48">
+                aria-label="Filter by what the entry looked like" className="h-9 w-full sm:w-56">
                 {KIND_FILTERS.map((f) => <option key={f.value || "any"} value={f.value}>{f.label}</option>)}
               </Select>
               <Select value={range} onChange={(e) => { setRange(e.target.value); setAnchor(Date.now()); }}
-                aria-label="Filter by time range" className="h-9 w-full sm:w-60">
+                aria-label="Filter by time range" className="h-9 w-full sm:w-48">
                 {RANGES.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
               </Select>
             </>
           }
         />
 
+        {err !== null && resp && <div className="px-4 pt-3"><ErrorBanner err={err} /></div>}
+
         <div className={cn(refreshing && rows !== null && refreshingClass)}>
           {rows === null ? (
-            <SkeletonRows rows={8} cols={7} />
+            loadFailed ? (
+              <div role="alert" className={FADE}>
+                <EmptyState
+                  size="sm"
+                  icon={<AlertTriangle />}
+                  title="Sign-in attempts could not be loaded"
+                  hint="The appliance did not return the attempts, so the list and the counts above are not known. Nothing has been changed."
+                  action={
+                    <Button variant="secondary" disabled={refreshing} onClick={() => void list.reload()}>
+                      <RefreshCw className={cn(refreshing && "animate-spin motion-reduce:animate-none")} /> Try again
+                    </Button>
+                  }
+                />
+              </div>
+            ) : (
+              <SkeletonRows rows={8} cols={7} />
+            )
           ) : rows.length === 0 ? (
-            <EmptyState
-              size="sm"
-              icon={<KeyRound />}
-              title={needle ? "Nothing matches this search" : "No sign-in attempts in this period"}
-              hint={filtered
-                ? "Clear the search box, or widen the filters above."
-                : "Every Connect submission is recorded here, including the ones that fail."}
-            />
+            <div className={FADE}>
+              <EmptyState
+                size="sm"
+                icon={<KeyRound />}
+                title={active.length > 0 ? "Nothing matches these filters" : `No sign-in attempts in the ${rangeLabel}`}
+                hint={active.length > 0
+                  ? `Filtering by ${active.join(", ")} over the ${rangeLabel}.`
+                  : "Every Connect submission is recorded here, including the ones that fail."}
+                action={active.length > 0 ? <Button variant="secondary" onClick={clearFilters}>Clear filters</Button> : undefined}
+              />
+            </div>
           ) : (
             <Table label="Sign-in attempts">
               <THead>
@@ -311,7 +398,7 @@ export default function GuestSignInAttemptsPage() {
                   <TH className="hidden md:table-cell">Network</TH>
                   <TH>Result</TH>
                   <TH className="hidden lg:table-cell">Why</TH>
-                  <TH className="hidden xl:table-cell">Entered as</TH>
+                  <TH className="hidden xl:table-cell">Entry looked like</TH>
                   <TH className="hidden xl:table-cell" numeric>Guest-list age</TH>
                   <TH className="hidden lg:table-cell">Device</TH>
                   <TH><span className="sr-only">Details</span></TH>
@@ -319,26 +406,31 @@ export default function GuestSignInAttemptsPage() {
               </THead>
               <TBody>
                 {rows.map((a) => (
-                  <TR key={a.id} onClick={() => void open(a)}>
+                  <TR key={a.id} onClick={() => { if (openingId === null) void open(a); }}>
                     <TD nowrap muted title={formatDate(a.occurred_at)}>{formatRelative(a.occurred_at)}</TD>
-                    <TD nowrap className="font-medium">{a.room || "—"}</TD>
-                    <TD truncate muted title={a.guest_network || undefined} className="hidden max-w-[12rem] md:table-cell">{a.guest_network || "—"}</TD>
+                    <TD nowrap className="font-medium">{a.room || <span className="font-normal text-muted-foreground">Not given</span>}</TD>
+                    <TD truncate muted title={a.guest_network || undefined} className="hidden max-w-[12rem] md:table-cell">{a.guest_network || "Not known"}</TD>
                     <TD nowrap>
                       <StatusBadge tone={tone(a.result)}>{a.succeeded ? "Connected" : "Refused"}</StatusBadge>
                     </TD>
-                    <TD className="hidden lg:table-cell">{a.result_label}</TD>
-                    <TD nowrap muted className="hidden xl:table-cell">
-                      {a.verifier_kind === "FULL_NAME" ? "Name"
-                        : a.verifier_kind === "RESERVATION_NUMBER_LIKE" ? "Reservation number"
-                          : "—"}
-                    </TD>
+                    <TD className="hidden lg:table-cell">{resultLabel(a.result, a.result_label)}</TD>
+                    <TD nowrap muted className="hidden xl:table-cell">{KIND_WORDS[a.verifier_kind] ?? "Could not tell"}</TD>
                     <TD numeric muted className="hidden xl:table-cell">{mirrorAge(a.mirror_age_seconds)}</TD>
                     <TD className="hidden whitespace-nowrap text-xs text-muted-foreground lg:table-cell">
-                      {a.device_ip || "—"}
+                      {a.device_ip || "No address recorded"}
                       {a.device_mac ? <span className="block font-mono">{a.device_mac}</span> : null}
                     </TD>
                     <TD className="w-0">
-                      <RowActions subject={a.room ? `room ${a.room}` : "attempt"} primary={{ label: "Details", onSelect: () => void open(a) }} />
+                      {openingId === a.id ? (
+                        <span role="status" className={cn("inline-flex size-8 items-center justify-center", FADE)}>
+                          <OneGateLoader className="size-4" label="Opening this attempt" />
+                        </span>
+                      ) : (
+                        <RowActions
+                          subject={a.room ? `room ${a.room}` : "attempt"}
+                          primary={{ label: "Details", onSelect: () => void open(a), disabled: openingId !== null }}
+                        />
+                      )}
                     </TD>
                   </TR>
                 ))}
@@ -368,7 +460,7 @@ export default function GuestSignInAttemptsPage() {
       <PageHeader
         title="Guest sign-in attempts"
         description="Every Connect submission and why it succeeded or failed."
-        actions={tab === "attempts" ? <LiveStatus updatedAt={updatedAt} refreshing={refreshing} onRefresh={() => void load(true)} /> : undefined}
+        actions={tab === "attempts" ? <LiveStatus updatedAt={updatedAt} refreshing={refreshing} error={!!err && !!resp} onRefresh={() => void list.reload()} /> : undefined}
         help={
           <>
             <HelpSection title="What this page is for">
@@ -400,7 +492,6 @@ export default function GuestSignInAttemptsPage() {
         }
       />
 
-      <ErrorBanner err={openErr ?? err} />
       {maySeeRestrictions && <NetworkPausesNotice canAct={mayRelease} />}
 
       {maySeeRestrictions ? (
@@ -422,14 +513,17 @@ export default function GuestSignInAttemptsPage() {
         width="lg"
         eyebrow="Sign-in attempt"
         title={detail?.room ? `Room ${detail.room}` : "Sign-in attempt"}
-        description={detail ? detail.result_label : undefined}
+        description={detail ? resultLabel(detail.result, detail.result_label) : undefined}
         badges={detail ? <StatusBadge tone={tone(detail.result)}>{detail.succeeded ? "Connected" : "Refused"}</StatusBadge> : undefined}
       >
         {detail && (
           <>
             <Callout tone={tone(detail.result) === "ok" ? "success" : tone(detail.result) === "err" ? "danger" : "warning"}
-              title={detail.result_label}>
+              title={resultLabel(detail.result, detail.result_label)}>
               {RESULT_WORDS[detail.result]?.meaning ?? "No further explanation is recorded for this result."}
+              {!RESULT_LABELS[detail.result] && (
+                <span className="mt-1 block text-xs">For support: result <span className="font-mono">{detail.result}</span></span>
+              )}
             </Callout>
 
             <DetailsSection title="What was entered, and what would have been accepted">
@@ -471,7 +565,7 @@ export default function GuestSignInAttemptsPage() {
                 </div>
               </form>
             ) : detail.room_in_mirror === false ? (
-              <Callout tone="warning" title="No eligible stay for this room exists in the appliance's guest list">
+              <Callout tone="warning" title="No eligible stay for this room exists in the appliance's guest list" className={FADE}>
                 <p>
                   There is nothing this attempt could have matched, so no expected values are shown. Inventing them
                   would be worse than showing none.
@@ -479,40 +573,40 @@ export default function GuestSignInAttemptsPage() {
                 <DList
                   columns={1}
                   items={[
-                    { label: "Verification value entered", value: <span className="font-medium">{creds.submitted_verifier || "—"}</span> },
+                    { label: "Verification value entered", value: <span className="font-medium">{creds.submitted_verifier || "Nothing entered"}</span> },
                     {
                       label: "PMS connection",
-                      value: `${detail.pms_transport_status || "unknown"} · last full sync ${detail.mirror_last_complete_sync_at ? formatDate(detail.mirror_last_complete_sync_at) : "never"}`,
+                      value: `${transportWords(detail.pms_transport_status)} · last full refresh ${detail.mirror_last_complete_sync_at ? formatDate(detail.mirror_last_complete_sync_at) : "never"}`,
                     },
                   ]}
                 />
                 <p className="mt-2 text-xs">
-                  Changes made in the PMS after the displayed last-sync time are not available on this appliance.
+                  Changes made in the PMS after the displayed last-refresh time are not available on this appliance.
                 </p>
               </Callout>
             ) : (
-              <DescriptionList
-                items={[
-                  { label: "Room entered", value: <span className="font-medium">{detail.room || "—"}</span> },
-                  { label: "Verification value entered", value: <span className="font-medium">{creds.submitted_verifier || "—"}</span> },
-                  { label: "Compared as", value: creds.normalized_verifier || "—" },
-                  {
-                    label: "Which field matched",
-                    value: detail.matched_field
-                      ? detail.matched_field.replace(/_/g, " ").toLowerCase()
-                      : "none of them",
-                  },
-                  { label: "First / given name expected", value: <span className="font-medium">{creds.accepted_first_name || "—"}</span> },
-                  { label: "Family name expected", value: <span className="font-medium">{creds.accepted_family_name || "—"}</span> },
-                  { label: "Reservation number expected", value: <span className="font-medium">{creds.accepted_reservation_number || "—"}</span> },
-                  {
-                    label: "Other guests on this stay",
-                    value: creds.additional_accepted_guests
-                      ? `${creds.additional_accepted_guests} — their names are accepted too`
-                      : "none",
-                  },
-                ]}
-              />
+              <div className={FADE}>
+                <DescriptionList
+                  items={[
+                    { label: "Room entered", value: <span className="font-medium">{detail.room || "Not given"}</span> },
+                    { label: "Verification value entered", value: <span className="font-medium">{creds.submitted_verifier || "Nothing entered"}</span> },
+                    { label: "Compared as", value: creds.normalized_verifier || "Nothing to compare" },
+                    {
+                      label: "Which field matched",
+                      value: detail.matched_field ? MATCHED_WORDS[detail.matched_field] ?? "Field not recognised" : "None of them",
+                    },
+                    { label: "First name expected", value: <span className="font-medium">{creds.accepted_first_name || "Not in the guest list"}</span> },
+                    { label: "Surname expected", value: <span className="font-medium">{creds.accepted_family_name || "Not in the guest list"}</span> },
+                    { label: "Reservation number expected", value: <span className="font-medium">{creds.accepted_reservation_number || "Not in the guest list"}</span> },
+                    {
+                      label: "Other guests on this stay",
+                      value: creds.additional_accepted_guests
+                        ? `${creds.additional_accepted_guests.toLocaleString()}, whose names are accepted too`
+                        : "None",
+                    },
+                  ]}
+                />
+              </div>
             )}
             </DetailsSection>
 
@@ -520,28 +614,34 @@ export default function GuestSignInAttemptsPage() {
             <DescriptionList
               items={[
                 { label: "Local date and time", value: formatDate(detail.occurred_at) },
-                { label: "Client network", value: detail.guest_network || "—" },
-                { label: "Room found in the guest list", value: detail.room_in_mirror === null || detail.room_in_mirror === undefined ? "not reached" : detail.room_in_mirror ? "yes" : "no" },
+                { label: "Client network", value: detail.guest_network || "Not known" },
+                { label: "Room found in the guest list", value: yesNo(detail.room_in_mirror) },
                 {
                   label: "Eligible stays on that room",
                   value: detail.eligible_stay_candidates === null || detail.eligible_stay_candidates === undefined
-                    ? "not reached" : String(detail.eligible_stay_candidates),
+                    ? "Not reached" : detail.eligible_stay_candidates.toLocaleString(),
                 },
-                { label: "PMS connection", value: detail.pms_transport_status || "—" },
+                { label: "PMS connection", value: transportWords(detail.pms_transport_status) },
                 {
                   label: "Guest list last full refresh",
                   value: detail.mirror_last_complete_sync_at
                     ? `${formatDate(detail.mirror_last_complete_sync_at)} (${mirrorAge(detail.mirror_age_seconds)} old)`
-                    : "never",
+                    : "Never",
                 },
-                { label: "Correlation id", value: <MonoId value={detail.request_id ?? ""} title="Correlation id" /> },
-                { label: "Response time", value: detail.latency_ms === null || detail.latency_ms === undefined ? "—" : `${detail.latency_ms} ms` },
-                { label: "Device", value: `${detail.device_ip || "—"}${detail.device_mac ? " · " + detail.device_mac : ""}` },
+                {
+                  label: "Correlation id",
+                  value: detail.request_id ? <MonoId value={detail.request_id} title="Correlation id" /> : "Not recorded",
+                },
+                { label: "Response time", value: detail.latency_ms === null || detail.latency_ms === undefined ? "Not recorded" : `${detail.latency_ms.toLocaleString()} ms` },
+                {
+                  label: "Device",
+                  value: `${detail.device_ip || "No address recorded"}${detail.device_mac ? " · " + detail.device_mac : ""}`,
+                },
                 {
                   label: "Access created",
                   value: detail.session_id
                     ? <MonoId value={detail.session_id} title="Session" />
-                    : detail.succeeded ? "identity proved, no session recorded" : "none",
+                    : detail.succeeded ? "Identity proved, no session recorded" : "None",
                 },
                 { label: "Attempt id", value: <MonoId value={detail.id} title="Attempt" /> },
               ]}
