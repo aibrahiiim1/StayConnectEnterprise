@@ -136,7 +136,7 @@ func (s *server) listUsageStays(w http.ResponseWriter, r *http.Request) {
 		         `+currentEntitlementCols+`
 		    FROM iam_v2.entitlements e
 		    -- THE ENFORCED ALLOWANCE (internal/enforce): the entitlement's own frozen quota, else its plan's.
-		    LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id`+packageJoins+`
+		    LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id AND spr.tenant_id = e.tenant_id`+packageJoins+`
 		    LEFT JOIN iam_v2.sessions se
 		           ON se.entitlement_id = e.id
 		          AND se.started < $4 AND (se.ended IS NULL OR se.ended > $3)
@@ -225,8 +225,8 @@ const packageTypeExpr = `CASE WHEN e.is_emergency_grace THEN 'EMERGENCY_GRACE' E
 
 // packageJoins resolves an entitlement e to its package revision ipr and package ip.
 const packageJoins = `
-		    LEFT JOIN iam_v2.internet_package_revisions ipr ON ipr.id = e.package_revision_id
-		    LEFT JOIN iam_v2.internet_packages ip ON ip.id = ipr.package_id`
+		    LEFT JOIN iam_v2.internet_package_revisions ipr ON ipr.id = e.package_revision_id AND ipr.tenant_id = e.tenant_id
+		    LEFT JOIN iam_v2.internet_packages ip ON ip.id = ipr.package_id AND ip.tenant_id = ipr.tenant_id`
 
 // currentEntitlementCols takes the latest package's name, status, allowance, use and end reason from the source's most recent
 // entitlement (as the headers do): MAX skipped an unlimited current package and set an old package's allowance against every package's totals.
@@ -657,7 +657,7 @@ func usageSourceListSQL(limit, offset int) string {
 		         MAX(se.started)                 AS last_started
 		    FROM iam_v2.entitlements e
 		    -- THE ENFORCED ALLOWANCE (internal/enforce): the entitlement's own frozen quota, else its plan's.
-		    LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id` + packageJoins + `
+		    LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id AND spr.tenant_id = e.tenant_id` + packageJoins + `
 		    LEFT JOIN iam_v2.sessions se
 		           ON se.entitlement_id = e.id
 		          AND se.started < $4 AND (se.ended IS NULL OR se.ended > $3)
