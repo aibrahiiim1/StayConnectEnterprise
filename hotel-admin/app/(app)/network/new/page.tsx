@@ -571,7 +571,7 @@ export default function NewGuestNetworkPage() {
                 </div>
               ) : (
                 <>
-                  <Field label="Subnet (CIDR)" required error={errFor("subnet")} hint={`The whole address range of this network, e.g. 10.20.0.0/22. ${SUBNET_SIZE_HINT}`}>
+                  <Field label="Subnet (CIDR)" required error={errFor("subnet")} hint={`The whole address range of this network, e.g. 10.20.0.0/19. ${SUBNET_SIZE_HINT}`}>
                     <Input id="nw-subnet" value={subnetCidr} onChange={(e) => setSubnetCidr(e.target.value)} placeholder="10.20.0.0/19" className="font-mono" />
                   </Field>
                   <Field

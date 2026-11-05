@@ -34,6 +34,7 @@ import { ArchivedNetworks, DefaultNetworkCard } from "@/components/network/defau
 import { topologyWords } from "@/lib/network-state";
 import { POLICY_WORDS, STATE_WORDS, type RoomSignInBrief } from "@/lib/api/pms-routing";
 import type { NetworkOverview, OverviewNetwork } from "@/lib/api/network-overview";
+import { servingCount } from "@/lib/api/network-overview";
 
 function poolSummary(net: GuestNetwork): string {
   if (!net.pools || net.pools.length === 0) return "—";
@@ -205,8 +206,7 @@ export default function NetworkPage() {
   }
 
   const shownRows = (rows ?? []).filter((n) => !n.archived);
-  const SERVING = new Set(["active", "active_degraded", "change_pending"]);
-  const enabledCount = shownRows.filter((n) => (overview[n.id] ? SERVING.has(overview[n.id].status) : n.enabled)).length;
+  const enabledCount = servingCount(shownRows, overview);
   const waiting = shownRows.filter((n) => (overview[n.id]?.changes.length ?? 0) > 0).length;
   const archivedCount = (rows ?? []).length - shownRows.length;
   const clientCounts = shownRows
