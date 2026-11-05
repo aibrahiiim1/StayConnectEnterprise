@@ -322,7 +322,7 @@ export function SettlementsView() {
               action={view ? <Button variant="secondary" size="sm" onClick={() => setView("")}>Show all</Button> : undefined}
             />
           ) : (
-            <Table label="Package payments">
+            <Table label="Package payments" aria-label="Package payments">
               <THead>
                 <TR>
                   <TH>When</TH>
@@ -444,7 +444,7 @@ export function SettlementsView() {
                       <p className="text-sm text-muted-foreground">No card payment has been started for this package.</p>
                     ) : (
                       <div className="overflow-hidden rounded-md border border-border">
-                        <Table label="Card payment history">
+                        <Table label="Card payment history" aria-label="Card payment history">
                           <THead>
                             <TR><TH>Step</TH><TH>Amount</TH><TH>Result</TH></TR>
                           </THead>
