@@ -175,9 +175,11 @@ type server struct {
 	nft            *localNFT
 	shp            *shape.Client
 	flows          flowEnder
-	mail           mail.Mailer
-	sms            sms.Sender
-	whatsapp       whatsapp.Sender
+	// owners asks netd whom DHCP says an address belongs to; nil means it cannot be asked (tests without netd).
+	owners   addressOwnerAsker
+	mail     mail.Mailer
+	sms      sms.Sender
+	whatsapp whatsapp.Sender
 	// otpIssuer issues a challenge; nil means otp.Issue against s.db. A test with no database supplies its own.
 	otpIssuer func(ctx context.Context, p otp.IssueParams) (*otp.Issued, error)
 	// Social sign-in: the live provider registry generation (swapped whole on reload), socialBase (dev stub only, never in production), socialKey (seals provider secrets), socialMu (serialises reloads).
@@ -591,10 +593,12 @@ func main() {
 	// the setup wizard and runs the assignment agent, then re-execs once a signed assignment arrives.
 	awaiting := c.TenantID == "" || c.SiteID == ""
 
+	netd := newNetdFlows(envOr("SCD_NETD_SOCKET", "/run/stayconnect/netd.sock"))
 	s := &server{
 		nft:          newLocalNFT(nft.New()),
 		shp:          shape.New(),
-		flows:        newNetdFlows(envOr("SCD_NETD_SOCKET", "/run/stayconnect/netd.sock")),
+		flows:        netd,
+		owners:       netd,
 		mail:         mail.NewStub(c.MailLogPath),
 		sms:          sms.NewStub(c.SMSLogPath),
 		whatsapp:     whatsapp.NewStub(c.WhatsAppLogPath),
@@ -894,6 +898,8 @@ func main() {
 		// The sealed half of a recorded attempt, opened for edged on an authorised operator's behalf; scd holds the key.
 		r.Post("/v1/phase3/signin-attempts/credentials", s.p3auth.signInAttemptCredentialsHandler)
 		r.Post("/v1/phase3/auth/pms/grant", s.p3auth.grantHandler)
+		// Automatic reconnection of a room-signed-in device the network disconnected (phase3_rejoin.go); it grants nothing new.
+		r.Post("/v1/phase3/auth/pms/rejoin", s.p3auth.rejoinHandler)
 		// Read-only: why the device's most recent access ended (DATA, TIME or nothing), so the portal can say so.
 		r.Post("/v1/phase3/access/status", s.p3auth.accessStatusHandler)
 		slog.Info("phase3 pms auth routes mounted", "flags", pmsCfg3.SafeFlagSummary())
