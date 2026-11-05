@@ -5,6 +5,8 @@
 // the reader may not read and every Hotel source on other sites; the chips follow what it reports.
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
+import { RowActions } from "@/components/ui/row-actions";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { Card, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,7 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { SkeletonRows } from "@/components/ui/misc";
-import { DescriptionList, FilterChips, Pagination, ResultsCount, SearchInput } from "@/components/ui/data";
+import { DescriptionList, FilterChips, Pagination, SearchInput } from "@/components/ui/data";
 import { FilterBar } from "@/components/ui/toolbar";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { DetailsDrawer } from "@/components/ui/details-drawer";
@@ -22,7 +24,7 @@ import { refreshingClass } from "@/components/ui/patterns";
 import { useServerPage, type PagedFields } from "@/lib/use-server-page";
 import { cn, formatDate } from "@/lib/utils";
 import { activityWords, clientWords, type ActivityEvent } from "@/lib/client-activity-words";
-import { Activity, RefreshCw } from "lucide-react";
+import { Activity, AlertTriangle, RefreshCw } from "lucide-react";
 
 type Resp = PagedFields & {
   data?: ActivityEvent[];
@@ -41,6 +43,8 @@ const RANGES = [
 type Chip = "all" | "problems" | "connection" | "package" | "device" | "account" | "sign_in" | "stay" | "staff";
 
 const TONE = { ok: "ok", info: "default", warning: "warn", error: "err" } as const;
+
+const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
 export default function ClientActivityPage() {
   const [range, setRange] = useState("24h");
@@ -65,18 +69,21 @@ export default function ClientActivityPage() {
   const cats = resp?.categories ?? {};
   const src = resp?.sources ?? {};
   const all = Object.values(cats).reduce((a, b) => a + b, 0);
+  const known = !!resp;
+  const n = (v: number | undefined) => (known ? v ?? 0 : undefined);
 
   const chipOptions: { value: Chip; label: React.ReactNode; count?: number; tone?: "warn" }[] = [
-    { value: "all", label: "Everything", count: resp ? all : undefined },
-    { value: "problems", label: "Problems", count: resp?.problems, tone: "warn" },
-    { value: "connection", label: "Connections", count: cats.connection ?? 0 },
-    { value: "package", label: "Packages", count: cats.package ?? 0 },
-    { value: "device", label: "Devices", count: cats.device ?? 0 },
-    ...(src.accounts ? [{ value: "account" as Chip, label: "Accounts", count: cats.account ?? 0 }] : []),
-    ...(src.room_sign_ins ? [{ value: "sign_in" as Chip, label: "Room sign-ins", count: cats.sign_in ?? 0 }] : []),
-    ...(src.stays ? [{ value: "stay" as Chip, label: "Stays", count: cats.stay ?? 0 }] : []),
-    ...(src.staff_actions ? [{ value: "staff" as Chip, label: "Staff actions", count: cats.staff ?? 0 }] : []),
+    { value: "all", label: "Everything", count: known ? all : undefined },
+    { value: "problems", label: "Problems", count: known ? resp?.problems : undefined, tone: "warn" },
+    { value: "connection", label: "Connections", count: n(cats.connection) },
+    { value: "package", label: "Packages", count: n(cats.package) },
+    { value: "device", label: "Devices", count: n(cats.device) },
+    ...(src.accounts ? [{ value: "account" as Chip, label: "Accounts", count: n(cats.account) }] : []),
+    ...(src.room_sign_ins ? [{ value: "sign_in" as Chip, label: "Room sign-ins", count: n(cats.sign_in) }] : []),
+    ...(src.stays ? [{ value: "stay" as Chip, label: "Stays", count: n(cats.stay) }] : []),
+    ...(src.staff_actions ? [{ value: "staff" as Chip, label: "Staff actions", count: n(cats.staff) }] : []),
   ];
+  const refresh = () => { setOpen(null); setAnchor(Date.now()); };
 
   const filtered = chip !== "all" || q !== "";
   const total = list.total;
@@ -100,25 +107,30 @@ export default function ClientActivityPage() {
           </HelpSection>
         }
         actions={
-          <Button variant="secondary" onClick={() => setAnchor(Date.now())} disabled={loading}>
-            <RefreshCw className={cn(loading && "animate-spin motion-reduce:animate-none")} />
-            {loading ? "Reading…" : "Refresh"}
-          </Button>
+          <div className="flex items-center gap-3">
+            {rows !== null && (
+              <span className="text-caption text-muted-foreground tabular">As of {clock(anchor)}</span>
+            )}
+            <Button variant="secondary" onClick={refresh} disabled={loading}>
+              <RefreshCw className={cn(loading && "animate-spin motion-reduce:animate-none")} />
+              {loading ? "Reading…" : "Refresh"}
+            </Button>
+          </div>
         }
       />
 
-      <ErrorBanner err={err} className="mb-0" />
+      {rows !== null && <ErrorBanner err={err} className="mb-0" />}
 
       <Card className="overflow-hidden">
         <FilterBar
           inset
           search={
             <SearchInput value={text} onChange={setText} label="Search client activity"
-              placeholder="Room, username, MAC, IP, package or staff member" delay={300} />
+              placeholder="Room, name, MAC, IP or package…" delay={300} />
           }
           filters={
             <Select aria-label="Period" className="h-9 w-full sm:w-44" value={range}
-              onChange={(e) => { setRange(e.target.value); setAnchor(Date.now()); }}>
+              onChange={(e) => { setRange(e.target.value); refresh(); }}>
               {RANGES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
             </Select>
           }
@@ -129,20 +141,27 @@ export default function ClientActivityPage() {
         <div className="border-b border-border px-4 py-2.5">
           <FilterChips<Chip> label="Show" value={chip} onChange={(c) => { setOpen(null); setChip(c); }} options={chipOptions} />
         </div>
-        <ResultsCount count={rows?.length} noun="event" plural="events" />
 
         <div className={cn(loading && rows && refreshingClass)}>
           {rows === null ? (
             err ? (
-              <EmptyState size="sm" icon={<Activity />} title="Client activity could not be read"
-                hint="It appears here once the appliance answers." />
+              <EmptyState icon={<AlertTriangle />} title="Client activity could not be loaded"
+                hint={err instanceof Error ? err.message : undefined}
+                action={<Button variant="secondary" disabled={loading} onClick={() => void list.reload()}><RefreshCw /> Try again</Button>} />
             ) : <SkeletonRows rows={8} cols={4} />
           ) : rows.length === 0 ? (
             <EmptyState size="sm" icon={<Activity />} title={filtered ? "Nothing matches" : "No client activity in this period"}
-              hint={filtered ? "Widen the period or clear the search." : "Choose a longer period to look further back."}
-              action={filtered
-                ? <Button variant="secondary" size="sm" onClick={() => { setChip("all"); setText(""); }}>Clear filters</Button>
-                : undefined} />
+              hint={filtered ? "Widen the period or clear the filters." : "Choose a longer period to look further back."}
+              action={
+                <div className="flex flex-wrap justify-center gap-2">
+                  {filtered && <Button variant="secondary" size="sm" onClick={() => { setChip("all"); setText(""); }}>Clear filters</Button>}
+                  {range !== "30d" && (
+                    <Button variant="secondary" size="sm" onClick={() => { setRange(range === "7d" ? "30d" : "7d"); refresh(); }}>
+                      {range === "7d" ? "Last 30 days" : "Last 7 days"}
+                    </Button>
+                  )}
+                </div>
+              } />
           ) : (
             <Table label="Client activity">
               <THead>
@@ -152,6 +171,7 @@ export default function ClientActivityPage() {
                   <TH>Client</TH>
                   <TH className="hidden md:table-cell">Device</TH>
                   <TH className="hidden lg:table-cell">Network · package</TH>
+                  <TH><span className="sr-only">Actions</span></TH>
                 </TR>
               </THead>
               <TBody>
@@ -169,12 +189,15 @@ export default function ClientActivityPage() {
                         </div>
                         {w.detail && <div className="mt-0.5 text-xs text-muted-foreground">{w.detail}</div>}
                       </TD>
-                      <TD truncate>{clientWords(r)}</TD>
+                      <TD truncate title={clientWords(r)}>{clientWords(r)}</TD>
                       <TD nowrap muted className="hidden font-mono text-xs md:table-cell">
                         {r.mac || "—"}{r.ip ? <span className="block">{r.ip}</span> : null}
                       </TD>
                       <TD truncate muted className="hidden lg:table-cell">
                         {[r.network, r.package].filter(Boolean).join(" · ") || "—"}
+                      </TD>
+                      <TD className="w-0">
+                        <RowActions subject={`${w.title}, ${formatDate(r.at)}`} primary={{ label: "Details", onSelect: () => setOpen(r) }} />
                       </TD>
                     </TR>
                   );
@@ -211,10 +234,17 @@ export default function ClientActivityPage() {
               { label: "Network", value: open.network || "—" },
               { label: "Package", value: open.package || "—" },
               ...(open.actor ? [{ label: "By", value: open.actor }] : []),
-              { label: "Recorded", value: <span className="font-mono text-xs">{new Date(open.at).toISOString()}</span> },
-              ...(open.stay_id ? [{ label: "Usage", value: <a className="text-primary underline-offset-2 hover:underline" href={`/usage?stay=${encodeURIComponent(open.stay_id)}`}>Usage for this stay</a> }] : []),
+              ...(open.stay_id ? [{ label: "Usage", value: <Link className="text-primary underline-offset-2 hover:underline" href={`/usage?stay=${encodeURIComponent(open.stay_id)}`}>Usage for this stay</Link> }] : []),
             ]}
           />
+        )}
+        {open && (
+          <section className="mt-5 space-y-2">
+            <h3 className="text-sm font-semibold">For support</h3>
+            <DescriptionList
+              items={[{ label: "Recorded (UTC)", value: <span className="font-mono text-xs">{new Date(open.at).toISOString()}</span> }]}
+            />
+          </section>
         )}
       </DetailsDrawer>
     </PageShell>

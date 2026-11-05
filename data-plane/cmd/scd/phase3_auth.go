@@ -11,10 +11,12 @@ package main
 // re-derives the guest network from the IP regardless of what the hop claimed.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -329,7 +331,6 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 		notVerified(w, at.Result, "pms_method_not_offered_on_network")
 		return
 	}
-
 	room := normalizeRoom(req.Room)
 	// The site's mode decides which fields may be compared; a field it does not accept is refused below, after the protection gate.
 	evidence := applyRoomSignInMode(roomSignInMode(methods), req.Verification,
@@ -356,6 +357,14 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	at.RequestID = strings.TrimSpace(req.RequestID)
+
+	// A device still using an address DHCP has leased to another device could never be enforced; it is asked to reconnect its Wi-Fi
+	// before any room is looked up, so the answer says nothing about a room. "unknown" is not a refusal: netd still checks every session.
+	if p.srv.addressState(ctx, dev.IP, dev.MAC) == addressForeign {
+		at.Result = signinattempt.AddressConflict
+		notVerified(w, at.Result, "address_leased_to_another_device")
+		return
+	}
 
 	// Guest sign-in protection is asked before any evidence is evaluated. It is keyed on the device MAC the
 	// appliance read itself, never on the room (a room-scoped throttle would lock out the real guest while the
@@ -678,22 +687,28 @@ func (p *phase3Auth) probeRoster(ctx context.Context, q probeQuerier, seen *obse
 		seen.add(obs)
 		return pmsresolve.Stale, "", nil
 	}
+	// A departed stay is eligible while its After Check-out Access is valid (D93, 0209): its devices sign in again onto that
+	// entitlement, and authorize_entitlement_device refuses any other device.
 	rows, err := q.Query(ctx, `
-		SELECT s.id::text,
-		       s.status IN ('IN_HOUSE','POST_STAY_ACTIVE') AS eligible,
+		WITH c AS (
+		  SELECT st.id, st.external_reservation_id,
+		         (st.status IN ('IN_HOUSE','POST_STAY_ACTIVE')
+		          OR (st.status = 'CHECKED_OUT' AND `+authctx.AfterCheckoutLive+`)) AS eligible
+		    FROM iam_v2.stays st
+		   WHERE st.tenant_id=$1 AND st.site_id=$2 AND st.pms_interface_id=$3
+		     AND st.normalized_room_number = $4)
+		SELECT c.id::text, c.eligible,
 		       ($5 <> '' AND EXISTS (SELECT 1 FROM iam_v2.stay_guests g
-		                              WHERE g.stay_id = s.id AND g.last_name_norm = $5))  AS family_hit,
+		                              WHERE g.stay_id = c.id AND g.last_name_norm = $5))  AS family_hit,
 		       ($6 <> '' AND EXISTS (SELECT 1 FROM iam_v2.stay_guests g
-		                              WHERE g.stay_id = s.id AND g.first_name_norm = $6)) AS first_hit,
-		       ($7 <> '' AND s.external_reservation_id = $7)                               AS reservation_hit
-		  FROM iam_v2.stays s
-		 WHERE s.tenant_id=$1 AND s.site_id=$2 AND s.pms_interface_id=$3
-		   AND s.normalized_room_number = $4
+		                              WHERE g.stay_id = c.id AND g.first_name_norm = $6)) AS first_hit,
+		       ($7 <> '' AND c.external_reservation_id = $7)                               AS reservation_hit
+		  FROM c
 		 -- ELIGIBLE STAYS FIRST. The window is bounded and a busy room accumulates departed stays; without an
 		 -- order the window is whatever the scan returns first, and on PRE-LIVE that was 16 departed stays with
 		 -- the in-house guest outside it (refused as STAY_NOT_ELIGIBLE). Departed stays still fill the rest of
 		 -- the window, so "the room exists" keeps its meaning.
-		 ORDER BY (s.status IN ('IN_HOUSE','POST_STAY_ACTIVE')) DESC, s.id
+		 ORDER BY c.eligible DESC, c.id
 		 LIMIT 16`, p.srv.tenID, p.srv.siteID, ifaceID, room, last, first, res)
 	if err != nil {
 		// Unreadable is indeterminate, never "no such guest".
@@ -883,9 +898,19 @@ type phase3GrantResp struct {
 // grantHandler turns a verified Auth Context into durable access; context consumption, Quote, Purchase,
 // Entitlement, device authorization and Session commit together or not at all. The Session is created from
 // the Entitlement id the grant returned, inside the same transaction, so access never exists without authority.
+// A deadlock or serialization failure is retried once (phase3_retry.go); every other outcome is answered as it was.
 func (p *phase3Auth) grantHandler(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<16))
+	if err != nil {
+		notVerified(w, signinattempt.MalformedSubmission, "malformed_request")
+		return
+	}
+	runRetried(w, r, func(w http.ResponseWriter, r *http.Request) { p.grantOnce(w, r, body) })
+}
+
+func (p *phase3Auth) grantOnce(w http.ResponseWriter, r *http.Request, body []byte) {
 	var req phase3GrantReq
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16))
+	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
 		notVerified(w, signinattempt.MalformedSubmission, "malformed_request")
@@ -897,7 +922,12 @@ func (p *phase3Auth) grantHandler(w http.ResponseWriter, r *http.Request) {
 	requestID := p.requestIDForContext(ctx, strings.TrimSpace(req.AuthContextID))
 	grantResult := signinattempt.ServiceUnavailable
 	var grantedEntitlement, grantedSession string
-	defer func() { p.completeAttempt(requestID, grantResult, grantedEntitlement, grantedSession) }()
+	defer func() {
+		if retrying(ctx) {
+			return // this pass is discarded and run again; only the pass that answers leaves a record
+		}
+		p.completeAttempt(requestID, grantResult, grantedEntitlement, grantedSession)
+	}()
 
 	dev, err := p.device(ctx, req.Device)
 	if err != nil {
@@ -963,6 +993,7 @@ func (p *phase3Auth) grantHandler(w http.ResponseWriter, r *http.Request) {
 				notVerified(w, grantResult, "package_not_offered_to_this_context")
 				return
 			}
+			noteRetry(ctx, err)
 			slog.Error("phase3 grant: offer lock failed", "err", err,
 				"context", strings.TrimSpace(req.AuthContextID))
 			notVerified(w, signinattempt.ServiceUnavailable, "offer_lock_unavailable")
@@ -975,6 +1006,7 @@ func (p *phase3Auth) grantHandler(w http.ResponseWriter, r *http.Request) {
 			  JOIN iam_v2.auth_contexts c ON c.stay_id = s.id
 			 WHERE c.id=$1::uuid AND c.tenant_id=$2 AND c.site_id=$3`,
 			strings.TrimSpace(req.AuthContextID), p.srv.tenID, p.srv.siteID).Scan(&nowEvidence); err != nil {
+			noteRetry(ctx, err)
 			notVerified(w, signinattempt.ServiceUnavailable, "stay_evidence_unreadable")
 			return
 		}
@@ -1005,6 +1037,7 @@ func (p *phase3Auth) grantHandler(w http.ResponseWriter, r *http.Request) {
 		PackageRevID: strings.TrimSpace(req.PackageRevID),
 	})
 	if err != nil {
+		noteRetry(ctx, err)
 		// Every grant failure is uniform to the guest; the operator record keeps that an already-entitled stay is an eligibility fact.
 		if errors.Is(err, staygrant.ErrAlreadyEntitled) || errors.Is(err, staygrant.ErrNoLiveAccess) {
 			grantResult = signinattempt.StayNotEligible
@@ -1032,6 +1065,7 @@ func (p *phase3Auth) grantHandler(w http.ResponseWriter, r *http.Request) {
 	if granted.Joined {
 		live, lerr := p.srv.liveSessionsOfDevice(ctx, tx, granted.EntitlementID, dev.DeviceID)
 		if lerr != nil {
+			noteRetry(ctx, lerr)
 			notVerified(w, signinattempt.ServiceUnavailable, "sessions: "+lerr.Error())
 			return
 		}
@@ -1042,6 +1076,7 @@ func (p *phase3Auth) grantHandler(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if _, eerr := p.srv.endSessionControlled(ctx, tx, ls.id, endReasonAddressChanged); eerr != nil {
+				noteRetry(ctx, eerr)
 				notVerified(w, signinattempt.ServiceUnavailable, "end old session: "+eerr.Error())
 				return
 			}
@@ -1058,19 +1093,24 @@ func (p *phase3Auth) grantHandler(w http.ResponseWriter, r *http.Request) {
 					fmt.Sprintf("licensed capacity %d reached (%d online)", capErr.Limit, capErr.Current))
 				return
 			}
+			noteRetry(ctx, err)
 			notVerified(w, signinattempt.ServiceUnavailable, "capacity: "+err.Error())
 			return
 		}
 		sessionID, err = p.openSessionTx(ctx, tx, granted.EntitlementID, dev)
 	}
 	if err != nil {
+		noteRetry(ctx, err)
 		notVerified(w, signinattempt.ServiceUnavailable, "session: "+err.Error())
 		return
 	}
 	if err := tx.Commit(ctx); err != nil {
+		noteRetry(ctx, err)
 		notVerified(w, signinattempt.ServiceUnavailable, "commit: "+err.Error())
 		return
 	}
+	// The committed session belongs on the attempt whatever enforcement reports, so the record never loses a grant that happened.
+	grantedEntitlement, grantedSession = granted.EntitlementID, sessionID
 	// Nothing is enforced in the kernel yet; wait for the enforcement owner before claiming the guest is connected.
 	enforced, werr := p.awaitEnforced(ctx, sessionID)
 	if werr != nil || !enforced {

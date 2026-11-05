@@ -68,6 +68,7 @@ var netdRoutes = []struct {
 	{http.MethodGet, "/v1/pending", classAdmin},
 	{http.MethodPost, "/v1/portal-ip/validate", classAdmin},
 	{http.MethodPost, "/v1/flows/end", classFlows},
+	{http.MethodPost, "/v1/address/owner", classFlows},
 	{http.MethodGet, "/v1/system-network", classAdmin},
 	{http.MethodPost, "/v1/system-network/validate", classAdmin},
 	{http.MethodPost, "/v1/system-network/apply", classAdmin},
