@@ -66,8 +66,9 @@ const rejoinCandidateSQL = `
 	  JOIN iam_v2.entitlements le ON le.id = last.entitlement_id AND le.tenant_id = $1 AND le.site_id = $2
 	  JOIN iam_v2.entitlements e ON e.stay_id = le.stay_id AND e.tenant_id = $1 AND e.site_id = $2
 	  JOIN iam_v2.stays st ON st.id = e.stay_id AND st.tenant_id = e.tenant_id AND st.site_id = e.site_id
-	  JOIN iam_v2.entitlement_device_authorizations a
-	    ON a.entitlement_id = e.id AND a.tenant_id = e.tenant_id AND a.device_id = $3 AND a.deauthorized_at IS NULL
+	  -- The device's place on the entitlement: AUTHORIZED exactly while its authorization interval is open (the same writers set both).
+	  JOIN iam_v2.entitlement_devices ed
+	    ON ed.entitlement_id = e.id AND ed.tenant_id = e.tenant_id AND ed.device_id = $3 AND ed.status = 'AUTHORIZED'
 	 WHERE last.ended IS NOT NULL AND last.end_reason = ANY($5::text[])
 	   AND COALESCE(last.ingress_interface, '') = $4
 	   AND e.stay_id IS NOT NULL
@@ -162,8 +163,8 @@ func (p *phase3Auth) rejoinOnce(w http.ResponseWriter, r *http.Request, body []b
 	// release, so a reconnection only ever uses the authorization the device already holds, and the session insert's own guard
 	// refuses a device without one.
 	var authorized bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM iam_v2.entitlement_device_authorizations
-		WHERE tenant_id=$1 AND entitlement_id=$2::uuid AND device_id=$3::uuid AND deauthorized_at IS NULL)`,
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM iam_v2.entitlement_devices
+		WHERE tenant_id=$1 AND entitlement_id=$2::uuid AND device_id=$3::uuid AND status = 'AUTHORIZED')`,
 		p.srv.tenID, ent, dev.DeviceID).Scan(&authorized); err != nil || !authorized {
 		noteRetry(ctx, err)
 		p.rejoinRefused(w, "authorization_closed")
