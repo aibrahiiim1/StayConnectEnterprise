@@ -63,6 +63,14 @@ func (p *phase3Shaping) provisionPrecheck(ctx context.Context, bridge string, mi
 		p.endClosed(ctx, bridge, ip, res, "shape "+s.SessionID+": "+why+"; not authorized")
 		return provCtx{}, false
 	}
+	// Its client network was replaced or switched off: the bridge is gone and nothing confirmed names it, so the session can never be served
+	// again. It is ended rather than retried every pass (2026-11-05: 315 such sessions after a replacement held every pass at four seconds).
+	if p.passRetired != nil && p.passRetired(bridge) {
+		p.endClosed(ctx, bridge, ip, res, "shape "+s.SessionID+": its client network was removed; the session is ended")
+		p.markEnded(ctx, s.SessionID, endReasonNetworkRemoved)
+		p.endSeries(bridge, s.SessionID)
+		return provCtx{}, false
+	}
 
 	// Before anything is installed or renewed, DHCP is asked whose address this is. A reassigned or released
 	// address fails closed and the Session is closed. UNKNOWN (Kea unreadable) is not a failure: tearing every

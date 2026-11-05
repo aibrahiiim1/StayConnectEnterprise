@@ -71,6 +71,9 @@ type phase3Shaping struct {
 	legacy      legacySet
 	enforcement enforcementRecorder
 	owner       addressOwner
+	// retired, once per pass, names the bridges of removed client networks (applier.retiredBridgeCheck); passRetired is that pass's answer.
+	retired     func(ctx context.Context) func(bridge string) bool
+	passRetired func(bridge string) bool
 	// unverified: sessions not renewed because ownership could not be checked; their bounded leases run down.
 	unverified map[string]bool
 	// leaseMem is the lease last verified for each session (see rememberLease).
@@ -417,6 +420,11 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 	}
 	p.passClasses, p.passGroups, p.passGroupClasses = nil, nil, nil
 	defer func() { p.passClasses, p.passGroups, p.passGroupClasses = nil, nil, nil }()
+	p.passRetired = nil
+	if p.retired != nil {
+		p.passRetired = p.retired(ctx)
+	}
+	defer func() { p.passRetired = nil }()
 	p.pruneLeaseMemory(now)
 	p.mark("setup")
 	if p.batching() {
