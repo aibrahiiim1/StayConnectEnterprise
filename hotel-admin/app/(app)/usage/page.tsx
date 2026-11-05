@@ -6,7 +6,7 @@
 // Room words appear only on a Hotel room/stay source, always with its PMS connection.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Activity, ArrowLeft, ChevronRight, FileSearch, KeyRound, Smartphone } from "lucide-react";
+import { Activity, AlertTriangle, ArrowLeft, ChevronRight, FileSearch, KeyRound, RefreshCw, Smartphone } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { PageHeader, PageShell } from "@/components/ui/page";
 import { FilterBar } from "@/components/ui/toolbar";
@@ -183,6 +183,7 @@ export default function UsageExplorerPage() {
   const [hasMore, setHasMore] = useState(false);
   const latest = useRef(0);
   const search = useCallback(async (type: TypeFilter = typeFilter, at = 0) => {
+    const range = periodQuery(period, fromDay, toDay);
     if (range.error) { setErr(range.error); return; }
     const mine = ++latest.current;
     setBusy(true); setErr(null);
@@ -203,13 +204,13 @@ export default function UsageExplorerPage() {
       if (mine !== latest.current) return;
       setErr(e instanceof ApiError ? e.message : "the usage records could not be read");
     } finally { if (mine === latest.current) setBusy(false); }
-  }, [q, typeFilter, range.qs, range.error]);
+  }, [q, typeFilter, period, fromDay, toDay]);
 
-  useEffect(() => { if (tab === "sources" && rows === null) search(); }, [tab, rows, search]);
+  useEffect(() => { if (tab === "sources" && rows === null && err === null) search(); }, [tab, rows, err, search]);
 
   async function openSource(type: SourceType, id: string) {
     setBusy(true); setErr(null);
-    try { setSource(await api.get<SourceDetail>(`/usage/sources/${type}/${encodeURIComponent(id)}?${range.qs}`)); }
+    try { setSource(await api.get<SourceDetail>(`/usage/sources/${type}/${encodeURIComponent(id)}?${periodQuery(period, fromDay, toDay).qs}`)); }
     catch (e) { setErr(e instanceof ApiError ? e.message : "that access source could not be read"); }
     finally { setBusy(false); }
   }
@@ -223,7 +224,7 @@ export default function UsageExplorerPage() {
 
   async function lookUpDevice(mac: string) {
     setBusy(true); setErr(null); setSource(null);
-    try { setDevice(await api.get<DeviceDetail>(`/usage/devices/${encodeURIComponent(mac)}?${range.qs}`)); setTab("devices"); }
+    try { setDevice(await api.get<DeviceDetail>(`/usage/devices/${encodeURIComponent(mac)}?${periodQuery(period, fromDay, toDay).qs}`)); setTab("devices"); }
     catch (e) { setErr(e instanceof ApiError ? e.message : "that device could not be read"); setDevice(null); }
     finally { setBusy(false); }
   }
@@ -301,14 +302,14 @@ export default function UsageExplorerPage() {
       <FilterBar>
         <span className="text-label text-muted-foreground" aria-hidden>Period</span>
         <Select aria-label="Period" className="w-full sm:w-48" value={period}
-          onChange={(e) => { setPeriod(e.target.value as Period); setRows(null); setSource(null); setDevice(null); }}>
+          onChange={(e) => { setPeriod(e.target.value as Period); setErr(null); setRows(null); setSource(null); setDevice(null); }}>
           {PERIODS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
         </Select>
         {period === "custom" && (
           <>
             <Input type="date" aria-label="From" className="w-full sm:w-44" value={fromDay} onChange={(e) => setFromDay(e.target.value)} />
             <Input type="date" aria-label="To" className="w-full sm:w-44" value={toDay} onChange={(e) => setToDay(e.target.value)} />
-            <Button variant="secondary" disabled={!!range.error} onClick={() => { setRows(null); setSource(null); setDevice(null); }}>Apply</Button>
+            <Button variant="secondary" disabled={!!range.error} onClick={() => { setErr(null); setRows(null); setSource(null); setDevice(null); }}>Apply</Button>
           </>
         )}
         <span className="text-xs text-muted-foreground">Every total on this page covers this period.</span>
@@ -349,7 +350,10 @@ export default function UsageExplorerPage() {
                 </div>
               </div>
 
-              {rows === null ? <SkeletonRows rows={4} cols={5} /> : rows.length === 0 ? (
+              {rows === null && err !== null ? (
+                <EmptyState size="sm" icon={<AlertTriangle />} title="The usage records could not be loaded"
+                  action={<Button size="sm" variant="secondary" disabled={busy} onClick={() => void search()}><RefreshCw /> Try again</Button>} />
+              ) : rows === null ? <SkeletonRows rows={4} cols={5} /> : rows.length === 0 ? (
                 <EmptyState size="sm" icon={<Activity />} title={q.trim() ? "No access source matched" : "No usage recorded yet"}
                   hint="Only access sources that were given internet access appear here." />
               ) : (
