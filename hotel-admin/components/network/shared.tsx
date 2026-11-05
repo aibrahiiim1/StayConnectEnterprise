@@ -190,12 +190,14 @@ export function AddReservationDialog({
   onOpenChange,
   networkId,
   networks,
+  initial,
   onSaved,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   networkId?: string;
   networks?: GuestNetwork[];
+  initial?: Partial<NewReservation> | null;
   onSaved: () => void;
 }) {
   const blank: NewReservation = { guest_network_id: networkId ?? "", mac: "", reserved_ip: "", hostname: "", enabled: true };
@@ -204,9 +206,9 @@ export function AddReservationDialog({
   const [err, setErr] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    if (open) { setF({ ...blank }); setErr(null); }
+    if (open) { setF({ ...blank, ...(initial ?? {}) }); setErr(null); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, networkId]);
+  }, [open, networkId, initial]);
 
   async function submit() {
     const gid = networkId ?? f.guest_network_id;
