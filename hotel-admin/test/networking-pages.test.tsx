@@ -443,10 +443,14 @@ describe("TLS certificate", () => {
   });
 
   it("a read-only role can see the certificate but has no Check or Rotate button", async () => {
-    route({ "/auth/whoami": VIEWER, "/hotel-admin-cert": { available: true, status_threshold: "warning", days_remaining: 20 } });
+    route({ "/auth/whoami": VIEWER, "/hotel-admin-cert": { available: true, status_threshold: "warning", days_remaining: 20,
+      last_renewal_result: "check_failed", last_error: "the SAN list does not match", last_renewal_attempt: "2026-10-01T08:00:00Z" } });
     render(<CertificatePage />);
     await screen.findByText(/Your role can view the certificate/);
     expect(screen.queryByRole("button", { name: /Check certificate/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /Rotate/ })).toBeNull();
+    // A failed check is not dated with an earlier renewal's time.
+    expect(screen.getByText("Last certificate check failed")).toBeTruthy();
+    expect(screen.queryByText(/Last renewal error/)).toBeNull();
   });
 });
