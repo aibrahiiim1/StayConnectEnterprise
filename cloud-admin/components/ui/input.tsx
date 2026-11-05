@@ -72,7 +72,7 @@ export const Checkbox = React.forwardRef<
       type="checkbox"
       aria-describedby={description ? `${cid}-desc` : undefined}
       className={cn(
-        "size-4 shrink-0 cursor-pointer rounded-[4px] border-input accent-[hsl(var(--primary))]",
+        "size-4 shrink-0 cursor-pointer rounded-sm border-input accent-primary",
         "disabled:cursor-not-allowed disabled:opacity-50",
         !label && className,
       )}
@@ -82,9 +82,9 @@ export const Checkbox = React.forwardRef<
   if (!label) return box;
   return (
     <div className={cn("flex items-start gap-2.5", className)}>
-      <span className="flex h-5 items-center">{box}</span>
+      <label htmlFor={cid} className="flex h-5 cursor-pointer items-center pointer-coarse:-my-3 pointer-coarse:h-11 pointer-coarse:-ms-3 pointer-coarse:px-3">{box}</label>
       <div className="min-w-0">
-        <label htmlFor={cid} className="cursor-pointer text-sm text-foreground">{label}</label>
+        <label htmlFor={cid} className="cursor-pointer text-sm text-foreground pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center pointer-coarse:-my-3">{label}</label>
         {description && quiet ? (
           <>
             <Explain className="ms-1">{description}</Explain>

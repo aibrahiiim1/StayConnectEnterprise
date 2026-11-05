@@ -6,6 +6,7 @@ import { MoreHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "./button";
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "./menu";
+import { Tooltip } from "./tooltip";
 
 export type RowAction = {
   label: string;
@@ -16,6 +17,7 @@ export type RowAction = {
   /** Destructive actions are drawn in red and listed last, after a separator. */
   danger?: boolean;
   disabled?: boolean;
+  reason?: string;
   /** Omits the action; lets callers list every action and gate each one by role inline. */
   hidden?: boolean;
 };
@@ -52,6 +54,20 @@ export function RowActions({
           >
             {primary.label}
           </Link>
+        ) : primary.disabled && primary.reason ? (
+          <Tooltip content={primary.reason}>
+            <Button
+              size="xs"
+              variant="ghost"
+              className="cursor-not-allowed text-foreground opacity-50"
+              aria-disabled="true"
+              onClick={(e) => e.preventDefault()}
+              aria-label={`${primary.label}: ${subject}. Not available: ${primary.reason}`}
+            >
+              {primary.icon}
+              {primary.label}
+            </Button>
+          </Tooltip>
         ) : (
           <Button
             size="xs"
@@ -85,6 +101,22 @@ export function RowActions({
 }
 
 function ActionItem({ action: a }: { action: RowAction }) {
+  if (a.disabled && a.reason) {
+    return (
+      <MenuItem
+        danger={a.danger}
+        icon={a.icon}
+        aria-disabled="true"
+        className="cursor-not-allowed items-start opacity-60 data-[highlighted]:bg-transparent"
+        onSelect={(e) => e.preventDefault()}
+      >
+        <span className="min-w-0">
+          <span className="block">{a.label}</span>
+          <span className="block text-2xs text-muted-foreground">{a.reason}</span>
+        </span>
+      </MenuItem>
+    );
+  }
   if (a.href) {
     return (
       <MenuItem asChild danger={a.danger} disabled={a.disabled}>
