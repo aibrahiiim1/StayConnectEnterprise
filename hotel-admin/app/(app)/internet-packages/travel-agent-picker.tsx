@@ -42,7 +42,7 @@ export function TravelAgentPicker({
   useEffect(() => {
     if (!open) return;
     const close = (e: MouseEvent) => {
-      if (root.current && !root.current.contains(e.target as Node)) setOpen(false);
+      if (root.current && !root.current.contains(e.target as Node)) { setOpen(false); setActive(0); }
     };
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
@@ -82,7 +82,7 @@ export function TravelAgentPicker({
       e.preventDefault();
       if (active < options.length && options[active]) toggle(options[active].name);
       else addTyped();
-    } else if (e.key === "Escape") setOpen(false);
+    } else if (e.key === "Escape") { setOpen(false); setActive(0); }
     else if (e.key === "Backspace" && query === "" && selected.length) remove(selected[selected.length - 1]);
   }
 
@@ -92,7 +92,8 @@ export function TravelAgentPicker({
         {selected.map((n) => (
           <Badge key={n.toLowerCase()} tone={known(n) || agents === null ? "info" : "warn"} className="gap-1">
             {n}
-            <button type="button" aria-label={`Remove ${n}`} onClick={() => remove(n)} className="opacity-70 hover:opacity-100">
+            <button type="button" aria-label={`Remove ${n}`} onClick={() => remove(n)}
+              className="-me-1 inline-flex size-5 items-center justify-center rounded opacity-70 hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:size-7">
               <X className="size-3" />
             </button>
           </Badge>
@@ -103,14 +104,16 @@ export function TravelAgentPicker({
           aria-expanded={open}
           aria-controls={listId}
           aria-autocomplete="list"
+          aria-activedescendant={open && rowCount > 0 ? `${listId}-opt-${Math.min(active, rowCount - 1)}` : undefined}
           placeholder={selected.length ? "Add another…" : "Search travel agents…"}
           className="h-7 min-w-32 flex-1 border-0 px-1 shadow-none focus-visible:ring-0"
           value={query}
-          onFocus={() => setOpen(true)}
+          onFocus={() => { if (!open) setActive(0); setOpen(true); }}
           onChange={(e) => { setQuery(e.target.value); setOpen(true); setActive(0); }}
           onKeyDown={onKeyDown}
         />
-        <button type="button" aria-label="Show travel agents" onClick={() => setOpen((o) => !o)} className="text-muted-foreground">
+        <button type="button" aria-label="Show travel agents" aria-expanded={open} onClick={() => { setActive(0); setOpen((o) => !o); }}
+          className="inline-flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:size-9">
           <ChevronDown className="size-4" />
         </button>
       </div>
@@ -121,7 +124,7 @@ export function TravelAgentPicker({
           role="listbox"
           aria-multiselectable="true"
           aria-label="Travel agents"
-          className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-md border border-border bg-surface p-1 shadow-lg"
+          className="absolute z-20 mt-1 max-h-64 w-full origin-top overflow-auto rounded-md border border-border bg-surface p-1 shadow-lg animate-in fade-in-0 zoom-in-95 duration-150 ease-onegate motion-reduce:animate-none"
         >
           {agents === null && <li className="px-2 py-1.5 text-sm text-muted-foreground">Loading travel agents…</li>}
           {agents !== null && options.length === 0 && !canAddTyped && (
@@ -140,6 +143,7 @@ export function TravelAgentPicker({
               // eslint-disable-next-line jsx-a11y/click-events-have-key-events
               <li
                 key={a.name}
+                id={`${listId}-opt-${i}`}
                 role="option"
                 aria-selected={on}
                 onMouseDown={(e) => e.preventDefault()}
@@ -158,6 +162,7 @@ export function TravelAgentPicker({
           {canAddTyped && (
             // eslint-disable-next-line jsx-a11y/click-events-have-key-events
             <li
+              id={`${listId}-opt-${options.length}`}
               role="option"
               aria-selected={false}
               onMouseDown={(e) => e.preventDefault()}

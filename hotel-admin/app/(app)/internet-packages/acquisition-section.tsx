@@ -5,6 +5,7 @@
 // shown disabled with the reason. The form owns the value; the server re-checks every rule.
 
 import { useId } from "react";
+import Link from "next/link";
 import { Trash2, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/input";
@@ -160,7 +161,7 @@ export function AcquisitionSection({
           {Array.isArray(interfaces) && interfaces.length === 0 && (
             <p className="text-xs text-muted-foreground mb-2" data-testid="no-interfaces-note">
               There is no PMS interface to charge to yet.{" "}
-              <a href="/room-charge" className="underline">Approve the interface for room charge</a> first.
+              <Link href="/room-charge" className="underline">Approve the interface for room charge</Link> first.
             </p>
           )}
           {value.room_charge.map((r, i) => {
@@ -172,7 +173,7 @@ export function AcquisitionSection({
               ? iface.financial_base_currency : null;
             return (
               <div key={i} className="mb-2" data-testid={`room-charge-${i}`}>
-                <div className="flex gap-2 items-center">
+                <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
                   <Select data-testid={`room-charge-interface-${i}`} aria-label={`${n}: PMS interface`}
                     className="h-9 w-auto shrink-0 ps-2.5" value={r.pms_interface_id}
                     onChange={(e) => setRow(i, { pms_interface_id: e.target.value })}>
@@ -203,7 +204,7 @@ export function AcquisitionSection({
                 {iface && !iface.ready && (
                   <p className="mt-1 text-xs text-muted-foreground" data-testid={`room-charge-not-ready-${i}`}>
                     {roomChargeNotReadyText(iface.reason)}.{" "}
-                    <a href="/room-charge" className="underline">Approve the interface for room charge</a>.
+                    <Link href="/room-charge" className="underline">Approve the interface for room charge</Link>.
                   </p>
                 )}
                 {mismatch && (
