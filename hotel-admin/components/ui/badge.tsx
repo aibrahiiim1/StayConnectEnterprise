@@ -42,7 +42,7 @@ export function Badge({
       title={title}
       className={cn(
         "inline-flex max-w-full items-center gap-1.5 whitespace-nowrap rounded-full border font-medium",
-        size === "sm" ? "h-5 px-1.5 text-[0.6875rem] leading-4" : "h-[1.375rem] px-2 text-2xs",
+        size === "sm" ? "h-5 px-1.5 text-nano font-medium" : "h-[1.375rem] px-2 text-2xs",
         TONES[tone] ?? TONES.default,
         className,
       )}

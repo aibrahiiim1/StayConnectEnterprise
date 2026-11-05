@@ -436,13 +436,31 @@ const SERVICE_STATES: Record<string, { label: string; tone: "ok" | "warn" | "err
 };
 export const serviceState = (s: string) => SERVICE_STATES[s] ?? { label: s, tone: "default" as const };
 
-/** x-axis label for a bucket start, in the viewer's locale. */
-export function bucketLabel(iso: string, range: OverviewRange): string {
+function knownZone(timeZone?: string): string | undefined {
+  if (!timeZone) return undefined;
+  try {
+    new Intl.DateTimeFormat(undefined, { timeZone });
+    return timeZone;
+  } catch {
+    return undefined;
+  }
+}
+
+export function bucketLabel(iso: string, range: OverviewRange, timeZone?: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
-  if (range === "24h") return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
-  if (range === "7d") return `${d.toLocaleDateString(undefined, { weekday: "short" })} ${d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`;
-  return d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  const tz = knownZone(timeZone);
+  const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", timeZone: tz });
+  if (range === "24h") return time;
+  if (range === "7d") return `${d.toLocaleDateString(undefined, { weekday: "short", timeZone: tz })} ${time}`;
+  return d.toLocaleDateString(undefined, { day: "numeric", month: "short", timeZone: tz });
+}
+
+export function bucketHour(iso: string, timeZone?: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const h = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", hourCycle: "h23", timeZone: knownZone(timeZone) }).format(d);
+  return h.padStart(2, "0");
 }
 
 export function formatDuration(seconds?: number): string {
