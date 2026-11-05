@@ -17,7 +17,7 @@ import { Table, THead, TBody, TR, TH, TD, TableWrap } from "@/components/ui/tabl
 import { cn, formatBytes, formatRelative } from "@/lib/utils";
 import { describeLicense, describePmsReadiness } from "@/lib/health-words";
 import {
-  type Block, type OverviewSnapshot, type OverviewRange, bucketLabel, fmtInt, formatDuration, methodLabel,
+  type Block, type OverviewSnapshot, type OverviewRange, bucketHour, bucketLabel, fmtInt, formatDuration, methodLabel,
   notRecordedLabel, reasonText, resultLabel, serviceState, terminationLabel,
 } from "@/lib/api/dashboard";
 
@@ -76,7 +76,7 @@ function BlockCard({
 const rangeWords: Record<OverviewRange, string> = { "24h": "last 24 hours", "7d": "last 7 days", "30d": "last 30 days" };
 
 function points(snap: OverviewSnapshot, ...series: number[][]) {
-  return snap.buckets.map((b, i) => ({ label: bucketLabel(b, snap.range), values: series.map((s) => s[i] ?? 0) }));
+  return snap.buckets.map((b, i) => ({ label: bucketLabel(b, snap.range, snap.timezone), values: series.map((s) => s[i] ?? 0) }));
 }
 
 export function TrafficCard({ snap }: { snap: OverviewSnapshot | null }) {
@@ -252,7 +252,7 @@ export function SignInPatternCard({ snap }: { snap: OverviewSnapshot | null }) {
       ) : hourly ? (
         <ColumnChart
           data={snap.buckets.map((b, i) => ({
-            label: String(new Date(b).getHours()).padStart(2, "0"),
+            label: bucketHour(b, snap.timezone),
             values: g.sign_ins_by_method.map((m) => m.series[i] ?? 0),
           }))}
           series={g.sign_ins_by_method.length ? g.sign_ins_by_method.map((m) => ({ name: methodLabel(m.method) })) : [{ name: "Sign-ins" }]}
@@ -355,17 +355,12 @@ export function PmsCard({ snap, canCharges }: { snap: OverviewSnapshot | null; c
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-2">
                     <StatusDot tone={words.tone === "default" ? "default" : words.tone} />
-                    {/* The readiness explanation is read on hover or focus of the name, not printed under it. */}
-                    <Tooltip content={words.summary}>
-                      <button type="button" className="cursor-help truncate rounded-sm text-start text-sm font-medium underline decoration-dotted decoration-muted-foreground/50 underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                        {i.display_label || "PMS connection"}
-                      </button>
-                    </Tooltip>
-                    <span className="sr-only">{words.summary}</span>
+                    <span className="truncate text-sm font-medium">{i.display_label || "PMS connection"}</span>
                     {i.lifecycle_state !== "ACTIVE" && <Badge tone="default">Not in use</Badge>}
                   </div>
                   <Badge tone={words.tone === "default" ? "default" : words.tone} dot>{words.headline}</Badge>
                 </div>
+                <p className="mt-1 text-xs text-muted-foreground">{words.summary}</p>
                 <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-4">
                   <Metric label="In house" value={fmtInt(i.in_house_stays)} />
                   <Metric label="Waiting to apply" value={fmtInt(i.pending_events)} tone={i.pending_events > 0 ? "warn" : "default"} />
@@ -383,7 +378,7 @@ export function PmsCard({ snap, canCharges }: { snap: OverviewSnapshot | null; c
               {neverConfigured === 1
                 ? "1 further connection is set up but has never been configured; it is not connected to any PMS."
                 : `${neverConfigured} further connections are set up but have never been configured; they are not connected to any PMS.`}{" "}
-              <Link href="/pms-interfaces" className="underline underline-offset-2 hover:text-foreground">Review</Link>
+              <Link href="/pms-interfaces" className="underline underline-offset-2 hover:text-foreground pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center">Review</Link>
             </p>
           )}
           {pms.occupancy.available && (
@@ -407,9 +402,7 @@ export function PmsCard({ snap, canCharges }: { snap: OverviewSnapshot | null; c
             <div className="space-y-2 border-t border-border pt-3">
               <div className="flex items-center justify-between gap-2">
                 <h3 className="text-xs font-medium text-muted-foreground">Room charges posted to the PMS</h3>
-                {canCharges && (
-                  <Link href="/financial-health" className="text-xs text-muted-foreground hover:text-foreground">Charge health →</Link>
-                )}
+                {canCharges && <BlockLink href="/financial-health" label="Charge health" />}
               </div>
               <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
                 <Metric label="Posted today" value={fmtInt(pms.postings.posted_today)} />
@@ -441,7 +434,7 @@ export function NetworksCard({ snap }: { snap: OverviewSnapshot | null }) {
             VLANs are on the Networking page.
           </QuietDescription>
         </div>
-        <Link href="/network" className="shrink-0 text-xs text-muted-foreground hover:text-foreground">Networking →</Link>
+        <BlockLink href="/network" label="Networking" />
       </CardHeader>
       {!snap || !nb ? (
         <CardBody><Skeleton className="h-32" /></CardBody>
@@ -502,6 +495,7 @@ export function NetworksCard({ snap }: { snap: OverviewSnapshot | null }) {
                       <Meter
                         value={n.leases_in_pool}
                         max={n.pool_size}
+                        name={`${n.name} address use`}
                         caption={`${fmtInt(n.leases_in_pool)} / ${fmtInt(n.pool_size)}${n.utilisation_pct != null ? ` · ${n.utilisation_pct}%` : ""}`}
                         label={n.expiring_soon ? `${fmtInt(n.expiring_soon)} expiring soon` : "Leased"}
                       />
@@ -652,6 +646,7 @@ export function ApplianceCard({ snap, licenseHeadline }: { snap: OverviewSnapsho
                   <Meter
                     value={res.load.one_per_cpu}
                     max={1}
+                    name="CPU load"
                     label={<span className="inline-flex items-center gap-1"><Cpu className="size-3" aria-hidden /> CPU</span>}
                     caption={`load ${res.load.one.toFixed(2)}`}
                   />
@@ -660,6 +655,7 @@ export function ApplianceCard({ snap, licenseHeadline }: { snap: OverviewSnapsho
                   <Meter
                     value={res.memory.used_pct}
                     max={100}
+                    name="Memory used"
                     label={<span className="inline-flex items-center gap-1"><MemoryStick className="size-3" aria-hidden /> Memory</span>}
                     caption={`${res.memory.used_pct}%`}
                   />
@@ -668,6 +664,7 @@ export function ApplianceCard({ snap, licenseHeadline }: { snap: OverviewSnapsho
                   <Meter
                     value={disk.used_pct}
                     max={100}
+                    name="Disk used"
                     label={<span className="inline-flex items-center gap-1"><HardDrive className="size-3" aria-hidden /> Disk</span>}
                     caption={`${formatBytes(disk.available_bytes)} free`}
                   />
