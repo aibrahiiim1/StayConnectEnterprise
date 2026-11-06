@@ -339,7 +339,8 @@ class Monitor:
                  f"{withdrawn} authorization(s) withdrawn because the address moved to another device in 15 min")
         try:
             db_online = n(self.s.sql("SELECT count(*) FROM iam_v2.sessions WHERE ended IS NULL AND state = 'active'")[0][0])
-        except Unavailable:
+        except Unavailable as e:
+            self.add("enf:consistency", "enforcement", NV, f"online sessions unreadable: {e}")
             return
         self.m["online"] = db_online
         gap = abs(db_online - sessions)
@@ -383,6 +384,8 @@ class Monitor:
         if wan:
             st = links.get(wan, {}).get("operstate")
             self.add("net:wan", "network", PASS if st == "UP" else CRIT, f"WAN {wan} {st}")
+        else:
+            self.add("net:wan", "network", NV, "WAN link unknown without a default route")
         try:
             want = [r[0] for r in self.s.sql("SELECT bridge_name FROM public.guest_networks WHERE enabled ORDER BY 1")]
         except Unavailable as e:
@@ -406,8 +409,8 @@ class Monitor:
         try:
             bad = n(self.s.sql(f"SELECT count(*) FROM iam_v2.sessions WHERE ended IS NULL AND state = 'active' AND ingress_interface NOT IN ({','.join(repr(x) for x in links) or repr('')})")[0][0])
             self.add("net:orphans", "network", WARN if bad else PASS, f"{bad} session(s) on a network interface that no longer exists")
-        except Unavailable:
-            pass
+        except Unavailable as e:
+            self.add("net:orphans", "network", NV, f"sessions unreadable: {e}")
 
     def check_dhcp(self, state):
         try:
@@ -537,6 +540,8 @@ class Monitor:
         if cap and online is not None:
             pct = 100 * online / cap
             self.add("lic:capacity", "licensing", CRIT if pct >= 100 else WARN if pct > 85 else PASS, f"{online} of {cap} licensed online guests")
+        else:
+            self.add("lic:capacity", "licensing", NV, "licensed capacity or online count unknown")
         self.m["licence_days"] = days
 
     def check_certs(self, state):

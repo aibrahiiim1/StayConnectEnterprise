@@ -282,6 +282,18 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(rec, [])
         self.assertIn("pms:link:OLD", [r.key for r, _ in active])
 
+    def test_an_unreadable_session_count_keeps_the_consistency_incident(self):
+        f = FakeSys()
+        f.cmds.append((["journalctl", "-u", "stayconnect-netd"], 0,
+                       '{"time":"2026-11-06T11:59:00Z","msg":"phase3: pass","sessions":400,"failed":0,"pass_ms":300}\n'))
+        state = {"incidents": {"enf:consistency": {"first": NOW.isoformat(), "last": NOW.isoformat(), "count": 2, "streak": 2,
+                                                   "raised": True, "status": om.WARN, "text": "gap", "area": "enforcement"}}}
+        mon = run(f, state=state)
+        self.assertEqual(by_key(mon)["enf:consistency"].status, om.NV)
+        self.assertNotIn("enf", mon.complete)
+        active, rec = om.Incidents(state, NOW).apply(mon.results, mon.complete)
+        self.assertEqual(rec, [])
+
     def test_the_headline_is_not_pass_while_evidence_is_missing(self):
         mon = run(FakeSys())
         nv = sum(1 for r in mon.results if r.status == om.NV)
