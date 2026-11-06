@@ -325,6 +325,34 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(om.overall([], 0), om.PASS)
 
 
+class DatabaseDiagnostics(unittest.TestCase):
+    def mon(self, settings, log):
+        f = FakeSys()
+        f.sqls += [(r"FROM pg_stat_activity\),", [["10", "100", "0", "0", "3"]]),
+                   (r"FROM pg_settings", [[k, v] for k, v in settings.items()]),
+                   (r"FROM pg_class WHERE oid IN", [["16420", "entitlements"], ["16500", "sessions"]])]
+        f.cmds.append((["docker", "logs"], 0, log))
+        state = {}
+        mon = om.Monitor(f, "quick")
+        mon.check_database(state)
+        return by_key(mon), state
+
+    def test_lock_waits_are_counted_once_by_table_and_logging_privacy_is_guarded(self):
+        log = "\n".join([
+            "2026-11-06 11:00:01.000 UTC [101] LOG:  process 101 still waiting for RowExclusiveLock on tuple (3,5) of relation 16420 of database 5 after 1000.1 ms",
+            "2026-11-06 11:00:02.000 UTC [102] LOG:  process 102 still waiting for ShareLock on transaction 9911 after 1000.2 ms",
+            "2026-11-06 11:00:03.000 UTC [103] LOG:  process 103 still waiting for RowExclusiveLock on tuple (1,1) of relation 16420 of database 5 after 1001.0 ms",
+            "2026-11-06 11:00:04.000 UTC [101] LOG:  process 101 acquired RowExclusiveLock on tuple (3,5) of relation 16420 of database 5 after 1500.0 ms"])
+        r, state = self.mon({"log_lock_waits": "on", "log_error_verbosity": "terse", "log_min_error_statement": "panic"}, log)
+        self.assertEqual(r["db:lock-wait-logging"].status, om.PASS)
+        self.assertEqual(r["db:log-privacy"].status, om.PASS)
+        self.assertIn("3 lock wait(s)", r["db:lock-waits-logged"].text)
+        self.assertEqual(state["lock_waits"]["2026-11-06"], {"entitlements": 2, "transaction": 1})
+        self.assertEqual(state["lock_waits_until"], "2026-11-06T12:00:00Z")
+        r, _ = self.mon({"log_lock_waits": "off", "log_error_verbosity": "default", "log_min_error_statement": "error"}, "")
+        self.assertEqual((r["db:lock-wait-logging"].status, r["db:log-privacy"].status), (om.WARN, om.WARN))
+
+
 class UnitParity(unittest.TestCase):
     def setup(self, installed):
         f = FakeSys()

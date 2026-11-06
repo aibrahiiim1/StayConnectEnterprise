@@ -214,6 +214,24 @@ stage_tree() {
   if [ -d "$SC/.previous" ]; then ls -1d "$SC/.previous"/*/ 2>/dev/null | sort | head -n -3 | xargs -r rm -rf || true; fi
   say "tree staged (previous tree: ${prev})"
 }
+# The Caddy unit is the release's after every upgrade, as after a fresh install; upgrades used to keep the first one forever.
+# Caddy restarts only when the unit changed beyond comments and its description, which a daemon-reload alone applies.
+sync_caddy_unit() {
+  local src="$SC/deploy/caddy/stayconnect-caddy.edge.service" dst=/etc/systemd/system/stayconnect-caddy.service
+  [ -f "$src" ] || return 0
+  cmp -s "$src" "$dst" && return 0
+  local strip='^[[:space:]]*(#|;|$|Description=|Documentation=)' restart=1
+  [ -f "$dst" ] && diff -q <(grep -vE "$strip" "$src") <(grep -vE "$strip" "$dst") >/dev/null 2>&1 && restart=0
+  install -m 0644 "$src" "$dst"
+  systemctl daemon-reload
+  if [ "$restart" = 1 ]; then
+    systemctl stop stayconnect-caddy >/dev/null 2>&1 || true; systemctl reset-failed stayconnect-caddy >/dev/null 2>&1 || true
+    systemctl start --no-block stayconnect-caddy
+    say "Caddy unit updated from the release; Caddy restarted"
+  else
+    say "Caddy unit updated from the release (description only; no restart)"
+  fi
+}
 install_binaries() { # copy binaries, keeping a differing installed one as <bin>.bak-$STAMP
   local changed=0
   for b in scd edged netd portald acctd pmsd keybootstrap svc-run; do
@@ -338,6 +356,7 @@ else
   changed="$(install_binaries)"
   step "6. units and the product profile"
   bash "$SC/deploy/scripts/install-service-units.sh" "$SC/deploy"
+  sync_caddy_unit
   # Kernel settings the release carries (deploy/sysctl): a fresh install applies them in provisioning, so an upgrade must too, or an appliance installed
   # before a setting existed (the neighbour table size for the licensed guest count) never gets it.
   cp "$SC/deploy/sysctl"/*.conf /etc/sysctl.d/ 2>/dev/null || true
@@ -369,6 +388,20 @@ else
   [ "$changed" = 1 ] && say "binary rollback, if needed: bash $SC/scripts/binary-rollback.sh --bin-dir $SC/bin --source-suffix .bak-$STAMP \\
       --unit scd=stayconnect-scd --unit edged=stayconnect-edged --unit netd=stayconnect-netd --unit portald=stayconnect-portald --unit acctd=stayconnect-acctd"
 fi
+
+# ================================================================= 7b. database diagnostics, 7c. monitor
+step "7b. database diagnostics"
+# Lock waits longer than deadlock_timeout are logged so deadlocks can be traced. Applied at run time (no restart); the
+# compose file carries the same setting for a new cluster. It logs lock targets and process ids, never values: the
+# terse error logging that keeps guest data out of the database log (GDPR audit C5) is unchanged.
+if docker exec stayconnect-pg psql -U stayconnect -d stayconnect -qAt -c "ALTER SYSTEM SET log_lock_waits = on" -c "SELECT pg_reload_conf()" >/dev/null 2>&1; then
+  say "lock waits are logged (log_error_verbosity stays terse)"
+else
+  say "WARNING: log_lock_waits could not be set; deadlocks stay untraceable. The product is unaffected."
+fi
+step "7c. appliance monitor"
+# Every appliance carries the read-only monitor (deploy/monitor/README.md); a failure here never fails the install.
+bash "$SC/deploy/monitor/install-monitor.sh" || say "WARNING: the appliance monitor could not be installed (above); the product is unaffected"
 
 # ================================================================= 8. record + verify
 step "8. record and verify"

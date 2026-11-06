@@ -316,6 +316,50 @@ class Monitor:
         self.m["deadlocks_1h"] = last_hour
         self.add("db:deadlocks", "database", WARN if last_hour > 5 else PASS,
                  f"{last_hour} deadlock(s) in the last hour ({deadlocks} since the database started)")
+        s = dict(self.s.sql("""SELECT name, setting FROM pg_settings
+                                WHERE name IN ('log_lock_waits', 'log_error_verbosity', 'log_min_error_statement')"""))
+        self.add("db:lock-wait-logging", "database", PASS if s.get("log_lock_waits") == "on" else WARN,
+                 "lock waits over deadlock_timeout are logged" if s.get("log_lock_waits") == "on" else
+                 "log_lock_waits is off: a deadlock's tables cannot be traced (the installer sets it)")
+        private = s.get("log_error_verbosity") == "terse" and s.get("log_min_error_statement") == "panic"
+        self.add("db:log-privacy", "database", PASS if private else WARN,
+                 "the database log keeps no statements or detail lines (GDPR audit C5)" if private else
+                 f"the database log may carry guest data: log_error_verbosity={s.get('log_error_verbosity')}, "
+                 f"log_min_error_statement={s.get('log_min_error_statement')} (C5 requires terse and panic)")
+        self.lock_waits(state)
+
+    def lock_waits(self, state):
+        """Lock waits the database logged since the previous run, by the table they waited on (relation ids resolved to names).
+        Each run reads only what is new, so the daily totals count every wait once."""
+        since = state.get("lock_waits_until") or (self.now - dt.timedelta(minutes=15)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        until = self.now.strftime("%Y-%m-%dT%H:%M:%SZ")
+        try:
+            rc, out = self.s.sh(["docker", "logs", "--since", since, "--until", until, "stayconnect-pg"], timeout=30)
+        except Unavailable:
+            rc, out = 1, ""
+        if rc != 0:
+            self.add("db:lock-waits-logged", "database", NV, "database log unreadable")
+            return
+        state["lock_waits_until"] = until
+        waits = [l for l in out.splitlines() if "still waiting for" in l]
+        rels = {}
+        for l in waits:
+            m = re.search(r"of relation (\d+)", l)
+            k = m.group(1) if m else ("transaction" if "on transaction" in l else "other")
+            rels[k] = rels.get(k, 0) + 1
+        oids = [k for k in rels if k.isdigit()]
+        names = dict(self.s.sql(f"SELECT oid::text, relname FROM pg_class WHERE oid IN ({','.join(oids)})")) if oids else {}
+        named = {names.get(k, k): v for k, v in rels.items()}
+        day = self.now.strftime("%Y-%m-%d")
+        hist = state.setdefault("lock_waits", {})
+        hist.setdefault(day, {})
+        for k, v in named.items():
+            hist[day][k] = hist[day].get(k, 0) + v
+        for d in sorted(hist)[:-8]:
+            del hist[d]
+        top = ", ".join(f"{k}={v}" for k, v in sorted(named.items(), key=lambda x: -x[1])[:4]) or "none"
+        self.add("db:lock-waits-logged", "database", WARN if len(waits) > 30 else PASS,
+                 f"{len(waits)} lock wait(s) over 1 s since {since[11:16]}Z (by what they waited on: {top})")
 
     def check_enforcement(self, state):
         try:
@@ -1120,6 +1164,11 @@ def render_report(mon, active, recovered, state):
         for (t1, v1), (t2, v2) in zip(dl, dl[1:]):
             daily[t2[:10]] = daily.get(t2[:10], 0) + max(0, v2 - v1)
         L.append("  " + ", ".join(f"{d}={c}" for d, c in sorted(daily.items())[-8:]))
+    lw = state.get("lock_waits", {})
+    if lw:
+        L += ["", "LOCK WAITS OVER 1 S, BY WHAT THEY WAITED ON (database log, log_lock_waits)"]
+        for d in sorted(lw)[-8:]:
+            L.append(f"  {d}: " + (", ".join(f"{k}={v}" for k, v in sorted(lw[d].items(), key=lambda x: -x[1])) or "none"))
     if state.get("resolved"):
         L += ["", "RECENTLY RESOLVED"] + [f"  {h['first'][:16]} to {h['cleared'][:16]}  {h.get('text')}" for h in state["resolved"][-10:]]
     return "\n".join(L) + "\n"
