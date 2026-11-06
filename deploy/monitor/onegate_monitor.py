@@ -618,8 +618,9 @@ class Monitor:
           (SELECT count(*) FROM iam_v2.entitlement_devices d WHERE d.status = 'AUTHORIZED' AND NOT EXISTS (
             SELECT 1 FROM iam_v2.entitlement_device_authorizations a WHERE a.entitlement_id = d.entitlement_id AND a.device_id = d.device_id AND a.deauthorized_at IS NULL)),
           (SELECT count(*) FROM (SELECT e.id FROM iam_v2.entitlements e JOIN iam_v2.sessions s ON s.entitlement_id = e.id AND s.ended IS NULL
-            WHERE NULLIF(e.policy_snapshot->>'max_concurrent_devices', '')::int > 0 GROUP BY e.id
-            HAVING count(*) > max(NULLIF(e.policy_snapshot->>'max_concurrent_devices', '')::int)) x),
+            LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id
+            WHERE COALESCE(spr.max_concurrent_devices, NULLIF(e.policy_snapshot->>'max_concurrent_devices', '')::int) > 0 GROUP BY e.id
+            HAVING count(*) > max(COALESCE(spr.max_concurrent_devices, NULLIF(e.policy_snapshot->>'max_concurrent_devices', '')::int))) x),
           (SELECT count(*) FROM iam_v2.entitlements e LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id
             WHERE e.status = 'ACTIVE' AND e.consumed_data_bytes > COALESCE(e.data_quota_bytes, spr.data_quota_bytes) + 100000000),
           (SELECT count(*) FROM (SELECT device_id FROM iam_v2.sessions WHERE ended IS NULL GROUP BY 1 HAVING count(*) > 1) x),
