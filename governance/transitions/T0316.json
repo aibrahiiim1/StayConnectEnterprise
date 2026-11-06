@@ -1,0 +1,35 @@
+{
+  "transition_id": "T0316",
+  "seq": 316,
+  "timestamp": "2026-11-06T17:24:16+02:00",
+  "timestamp_derivation": "Read from the workstation clock (UTC+02:00) by the script that wrote this receipt, immediately before the commit that introduces it.",
+  "record_type": "SYSTEM_HEALTH_AND_RELIABILITY_COMPLETION",
+  "authorisation": "The Product Owner's mission of 2026-11-06 (D98): complete the remaining reliability-audit work and deliver System Health & Monitoring in the Appliance Admin Console, with controlled TEST migrations behind verified backups and rollback, protected merge and deployment to the test appliance 172.21.96.97 only.",
+  "delivery": "PR #382 (merged d4675fae): the Admin Console System health page (overview, checks, client connectivity, device findings, history; System section of the sidebar), edged GET /diagnostics/monitor (diagnostics read permission, re-redacted, missing/unreadable/invalid/stale reported as such), the monitor's console snapshot (root:stayconnect 0640, no client IP address) created by install-monitor.sh on fresh installs and upgrades; acctd serialises its writer transactions (accounting ingest, expiry sweep, session limits); migration 0211 (device retention removes an idle device with its own network appearances, idle judged only from recorded timestamps); migration 0212 (0170's emptiness-checked drop of public.pms_providers.auth_key and api_key again, platform migration); baseline regenerated.",
+  "findings": "Deadlocks: acctd's accounting ingest (ingest_absolute_counters updates the session row, then its entitlement) and its expiry sweep (p6_tick_online_time locks entitlements in id order, then their sessions) run on separate concurrent tickers, a lock-order cycle; 75 of the 97 recorded deadlocks were the expiry pass and the ingest's silent one-by-one fallback explains those nothing else logged. Device retention: every device had its own device_network_appearances rows (ON DELETE NO ACTION) that were never removed, so AD-34 could not prune any device. Legacy PMS columns: 0 rows, no dependent objects, no column-specific grants, no product code reading them.",
+  "verification": "acctd integration suite including a new test that the expiry sweep and ingest never overlap; retention integration tests as svc_scd with pre-dated records (idle device removed with its appearance; devices seen recently on a network or as a device, and a device with no recorded time, kept; no timestamp written); 0211 applied as iam_v2_owner and down/up; 0212 on a fresh schema, emptied, with a stored secret (kept), twice, and down; edged endpoint tests (redaction, age, stale, missing, invalid); monitor unit tests (43) on Python 3.10 including every query against the current schema; Admin Console page, navigation and app-wide invariant tests; FACTORY_CLEAN_BASELINE = PASS (14,936 facts identical); MIGRATION_LOCATION = PASS; Codex review clean on both heads.",
+  "deployment": {
+    "test_appliance": "See T0317.",
+    "central": "Not changed."
+  },
+  "not_touched": "Database log privacy (GDPR C5), device timestamps (none back-filled), permissions and roles, networking, PMS configuration and postings, financial behaviour, licences, the production Central.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "d4675fae4d16d7ae37b6f0305a7bff9bcc7ab8ba",
+  "previous_delivery": "T0315",
+  "decision": "D98",
+  "go_live": "NOT authorised."
+}
