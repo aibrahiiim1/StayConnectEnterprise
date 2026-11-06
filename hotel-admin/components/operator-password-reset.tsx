@@ -126,6 +126,7 @@ export function OperatorPasswordReset({ writable }: { writable: boolean }) {
             <div className="flex items-start gap-3 text-sm">
               <Switch
                 id="reset-enabled"
+                label="Offer forgot password at sign-in"
                 checked={draft.enabled}
                 disabled={!writable}
                 onCheckedChange={(v) => setDraft({ ...draft, enabled: v })}
@@ -141,6 +142,7 @@ export function OperatorPasswordReset({ writable }: { writable: boolean }) {
             <div className="flex items-start gap-3 text-sm">
               <Switch
                 id="reset-last-admin"
+                label="Let the last site admin reset by email"
                 checked={draft.allow_last_site_admin}
                 disabled={!writable}
                 onCheckedChange={(v) => setDraft({ ...draft, allow_last_site_admin: v })}
@@ -191,6 +193,7 @@ export function OperatorPasswordReset({ writable }: { writable: boolean }) {
               ? "They apply right away, but forgot password stays off at sign-in until an SMTP mail server is set up."
               : "They apply right away."}
             confirmLabel="Save"
+            requirePassword
             strictPassword
             busy={saving}
             error={err}

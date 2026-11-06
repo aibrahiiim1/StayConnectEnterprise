@@ -105,7 +105,8 @@ function LoginInner() {
 
   useEffect(() => {
     let live = true;
-    api.get<{ available?: boolean }>("/auth/password-reset")
+    Promise.resolve()
+      .then(() => api.get<{ available?: boolean }>("/auth/password-reset"))
       .then((r) => { if (live) setResetOffered(r?.available === true); })
       .catch(() => { if (live) setResetOffered(false); });
     return () => { live = false; };
