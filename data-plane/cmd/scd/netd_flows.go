@@ -40,6 +40,51 @@ func newNetdFlows(socket string) *netdFlows {
 	}}
 }
 
+// addressOwnerAsker asks netd whom DHCP says an address belongs to: "owned", "foreign" or "unknown". An error means unknown.
+type addressOwnerAsker interface {
+	AddressOwner(ctx context.Context, ip net.IP, mac net.HardwareAddr) (string, error)
+}
+
+const (
+	addressOwned   = "owned"
+	addressForeign = "foreign"
+)
+
+func (n *netdFlows) AddressOwner(ctx context.Context, ip net.IP, mac net.HardwareAddr) (string, error) {
+	body, _ := json.Marshal(map[string]string{"ip": ip.String(), "mac": mac.String()})
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://netd/v1/address/owner", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := n.http.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	var out struct {
+		State string `json:"state"`
+	}
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&out) != nil {
+		return "", fmt.Errorf("netd /v1/address/owner: %s", resp.Status)
+	}
+	return out.State, nil
+}
+
+// addressState is the owner answer, with "unknown" for no client or no answer.
+func (s *server) addressState(ctx context.Context, ip net.IP, mac net.HardwareAddr) string {
+	if s.owners == nil {
+		return "unknown"
+	}
+	st, err := s.owners.AddressOwner(ctx, ip, mac)
+	if err != nil || st == "" {
+		return "unknown"
+	}
+	return st
+}
+
 func (n *netdFlows) EndFlows(ctx context.Context, ip net.IP) (flowsEnded, error) {
 	body, _ := json.Marshal(map[string]string{"ip": ip.String()})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://netd/v1/flows/end", bytes.NewReader(body))
