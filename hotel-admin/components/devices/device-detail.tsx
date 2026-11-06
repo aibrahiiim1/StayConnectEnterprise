@@ -4,7 +4,7 @@
 
 import { usePmsConnections } from "@/lib/pms-scope";
 import { reasonOk as reasonWithinBounds } from "@/lib/reason";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, type ClientDeviceDetail, type DevicePackage } from "@/lib/api";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogBody,
@@ -17,8 +17,10 @@ import { Field, Textarea } from "@/components/ui/input";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { SkeletonRows } from "@/components/ui/misc";
 import { useToast } from "@/components/ui/toast";
-import { Power, Unlink, KeyRound, FlaskConical } from "lucide-react";
+import { AlertTriangle, Power, Unlink, KeyRound, FlaskConical, RefreshCw } from "lucide-react";
 import { formatBytes, formatDate } from "@/lib/utils";
+import { EmptyState } from "@/components/ui/empty-state";
+import { endReasonWords, methodLabel } from "@/lib/session-words";
 
 type ActionKind = "disconnect" | "release" | "require-signin" | "prepare-test";
 
@@ -64,6 +66,20 @@ function subject(p: DevicePackage, multi = false): string {
 
 const LIVE = new Set(["PENDING", "ACTIVE", "SUSPENDED"]);
 
+const ACTION_WORDS: Record<string, string> = {
+  DISCONNECT: "disconnected the device",
+  RELEASE: "released a place",
+  REQUIRE_SIGNIN: "required a fresh sign-in",
+  REQUIRE_FRESH_SIGNIN: "required a fresh sign-in",
+  PREPARE_TEST: "prepared it for a sign-in test",
+  REPLACE: "replaced the device",
+  REMOVE: "removed the device",
+};
+
+const plain = (code: string) => code.toLowerCase().replaceAll("_", " ");
+
+const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
 export function DeviceDetailDialog({ deviceId, mayWrite, onClose, onChanged }: {
   deviceId: string | null;
   mayWrite: boolean;
@@ -77,34 +93,50 @@ export function DeviceDetailDialog({ deviceId, mayWrite, onClose, onChanged }: {
   const [pending, setPending] = useState<{ kind: ActionKind; ent?: DevicePackage } | null>(null);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
+  const [actionErr, setActionErr] = useState<unknown>(null);
+  const panelRef = useRef<HTMLElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
 
   const load = useCallback(async () => {
     if (!deviceId) return;
     setErr(null);
     try { setData(await api.get<ClientDeviceDetail>(`/client-devices/${deviceId}`)); } catch (e) { setErr(e); }
   }, [deviceId]);
-  useEffect(() => { setData(null); setPending(null); void load(); }, [load]);
+  useEffect(() => { setData(null); setPending(null); setActionErr(null); void load(); }, [load]);
+
+  const pendingKey = pending ? `${pending.kind}:${pending.ent?.entitlement_id ?? ""}` : null;
+  useEffect(() => {
+    if (!pendingKey) return;
+    panelRef.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+    headingRef.current?.focus();
+  }, [pendingKey]);
+
+  function ask(kind: ActionKind, ent?: DevicePackage) {
+    setPending({ kind, ent });
+    setReason("");
+    setActionErr(null);
+  }
 
   async function run() {
     if (!pending || !deviceId) return;
-    setBusy(true); setErr(null);
+    setBusy(true); setActionErr(null);
     try {
       const body: Record<string, string> = {};
       if (ACTIONS[pending.kind].reason) body.reason = reason.trim();
       if (pending.kind === "release" && pending.ent) body.entitlement_id = pending.ent.entitlement_id;
       const r = await api.post<Record<string, number | string>>(`/client-devices/${deviceId}/${pending.kind}`, body);
       const done: Record<ActionKind, string> = {
-        disconnect: `${r.disconnected_sessions ?? 0} session(s) ended.`,
+        disconnect: `${count(Number(r.disconnected_sessions ?? 0), "session", "sessions")} ended.`,
         release: "The place is free.",
-        "require-signin": "Done. Ask the client to turn Wi-Fi off and on, or open any http:// website, to see the sign-in page.",
-        "prepare-test": `Ready: ${r.places_released ?? 0} place(s) freed, remembered sign-in forgotten. Turn the device's Wi-Fi off and on, or open any http:// website.`,
+        "require-signin": "The remembered sign-in is forgotten. Ask the client to turn Wi-Fi off and on, or open any http:// website, to see the sign-in page.",
+        "prepare-test": `Ready: ${count(Number(r.places_released ?? 0), "place", "places")} freed, remembered sign-in forgotten. Turn the device's Wi-Fi off and on, or open any http:// website.`,
       };
       toast.success(done[pending.kind]);
       setPending(null); setReason("");
       onChanged();
       await load();
     } catch (e) {
-      setErr(e instanceof ApiError ? e : e);
+      setActionErr(e instanceof ApiError && e.code === "reauth_required" ? new Error("Your session needs you to sign in again.") : e);
     } finally { setBusy(false); }
   }
 
@@ -118,12 +150,22 @@ export function DeviceDetailDialog({ deviceId, mayWrite, onClose, onChanged }: {
         <DialogHeader>
           <DialogTitle><span className="font-mono">{d?.mac ?? "Device"}</span></DialogTitle>
           <DialogDescription>
-            {d ? `Last seen ${d.last_seen ? formatDate(d.last_seen) : "—"}${d.last_ip ? ` at ${d.last_ip}` : ""}.` : "Loading…"}
+            {d ? `Last seen ${d.last_seen ? formatDate(d.last_seen) : "—"}${d.last_ip ? ` at ${d.last_ip}` : ""}.` : ""}
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="space-y-5">
-          <ErrorBanner err={err} />
-          {!data && !err ? <SkeletonRows rows={3} /> : data && (
+          {!data && err ? (
+            <EmptyState
+              size="sm"
+              icon={<AlertTriangle />}
+              title="This device could not be loaded"
+              hint={err instanceof Error ? err.message : undefined}
+              action={<Button size="sm" variant="secondary" onClick={() => void load()}><RefreshCw /> Try again</Button>}
+            />
+          ) : !data ? <SkeletonRows rows={3} /> : (
+            <>
+          {err !== null && <ErrorBanner err={err} />}
+          {data && (
             <>
               <section className="flex flex-wrap items-center gap-1.5">
                 {data.device.online
@@ -138,7 +180,7 @@ export function DeviceDetailDialog({ deviceId, mayWrite, onClose, onChanged }: {
                   </span>
                 )}
                 {data.restriction.restricted && (
-                  <Badge tone="err">Sign-in restricted until {data.restriction.until ? formatDate(data.restriction.until) : "—"}</Badge>
+                  <Badge tone="err">{data.restriction.until ? `Sign-in restricted until ${formatDate(data.restriction.until)}` : "Sign-in restricted"}</Badge>
                 )}
                 {data.remembered_signins > 0 && <Badge tone="info">Remembered sign-in</Badge>}
                 {data.free_packages_used > 0 && (
@@ -149,22 +191,27 @@ export function DeviceDetailDialog({ deviceId, mayWrite, onClose, onChanged }: {
               {mayWrite && (
                 <section className="flex flex-wrap gap-1.5">
                   {data.device.online && (
-                    <Button size="sm" variant="secondary" disabled={busy} onClick={() => { setPending({ kind: "disconnect" }); setReason(""); }}>
+                    <Button size="sm" variant="secondary" disabled={busy} onClick={() => ask("disconnect")}>
                       <Power /> Disconnect
                     </Button>
                   )}
-                  <Button size="sm" variant="secondary" disabled={busy} onClick={() => { setPending({ kind: "require-signin" }); setReason(""); }}>
+                  <Button size="sm" variant="secondary" disabled={busy} onClick={() => ask("require-signin")}>
                     <KeyRound /> Require fresh sign-in
                   </Button>
-                  <Button size="sm" variant="secondary" disabled={busy} onClick={() => { setPending({ kind: "prepare-test" }); setReason(""); }}>
+                  <Button size="sm" variant="secondary" disabled={busy} onClick={() => ask("prepare-test")}>
                     <FlaskConical /> Prepare for a sign-in test
                   </Button>
                 </section>
               )}
 
               {action && (
-                <section className="space-y-2 rounded-md border border-border p-3" aria-live="polite">
-                  <h3 className="text-sm font-medium">
+                <section
+                  key={pendingKey ?? undefined}
+                  ref={panelRef}
+                  className="space-y-2 rounded-md border border-border p-3 animate-in fade-in-0 slide-in-from-top-1 duration-base ease-onegate motion-reduce:animate-none"
+                  aria-live="polite"
+                >
+                  <h3 ref={headingRef} tabIndex={-1} className="text-sm font-medium outline-none">
                     {action.title}{pending?.ent ? ` — ${pending.ent.package_name || "package"}` : ""}
                   </h3>
                   <p className="text-sm">{action.does}</p>
@@ -174,11 +221,18 @@ export function DeviceDetailDialog({ deviceId, mayWrite, onClose, onChanged }: {
                       <Textarea value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} />
                     </Field>
                   )}
-                  <div className="flex gap-2">
-                    <Button size="sm" variant="primary" disabled={busy || !reasonOk} onClick={() => void run()}>
+                  {actionErr !== null && <ErrorBanner err={actionErr} className="mb-0" />}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button size="sm" variant="primary" disabled={busy || !reasonOk} onClick={() => void run()}
+                      aria-describedby={!reasonOk ? "device-action-why" : undefined}>
                       {busy ? "Working…" : action.confirm}
                     </Button>
-                    <Button size="sm" variant="ghost" disabled={busy} onClick={() => setPending(null)}>Cancel</Button>
+                    <Button size="sm" variant="ghost" disabled={busy} onClick={() => { setPending(null); setActionErr(null); }}>Cancel</Button>
+                    {!reasonOk && (
+                      <span id="device-action-why" className="text-caption text-muted-foreground">
+                        Write a reason of 4 to 500 characters to continue.
+                      </span>
+                    )}
                   </div>
                 </section>
               )}
@@ -208,7 +262,7 @@ export function DeviceDetailDialog({ deviceId, mayWrite, onClose, onChanged }: {
                     </div>
                     {mayWrite && p.slot === "AUTHORIZED" && LIVE.has(p.status) && (
                       <Button className="mt-2" size="sm" variant="secondary" disabled={busy}
-                        onClick={() => { setPending({ kind: "release", ent: p }); setReason(""); }}>
+                        onClick={() => ask("release", p)}>
                         <Unlink /> Release this place
                       </Button>
                     )}
@@ -232,8 +286,15 @@ export function DeviceDetailDialog({ deviceId, mayWrite, onClose, onChanged }: {
                       {data.sessions.map((x) => (
                         <TR key={x.id}>
                           <TD className="text-sm">{x.started ? formatDate(x.started) : "—"}</TD>
-                          <TD className="text-sm">{x.ended ? `${formatDate(x.ended)}${x.end_reason ? ` (${x.end_reason})` : ""}` : <Badge tone="ok" dot>Live</Badge>}</TD>
-                          <TD className="hidden text-sm sm:table-cell">{x.method || "—"}</TD>
+                          <TD className="text-sm">
+                            {x.ended ? (
+                              <>
+                                {formatDate(x.ended)}
+                                {x.end_reason && <div className="text-caption text-muted-foreground">{endReasonWords(x.end_reason) ?? plain(x.end_reason)}</div>}
+                              </>
+                            ) : <Badge tone="ok" dot>Live</Badge>}
+                          </TD>
+                          <TD className="hidden text-sm sm:table-cell">{x.method ? methodLabel(x.method) : "—"}</TD>
                           <TD className="hidden text-sm sm:table-cell">{x.package_name || "—"}</TD>
                         </TR>
                       ))}
@@ -248,13 +309,15 @@ export function DeviceDetailDialog({ deviceId, mayWrite, onClose, onChanged }: {
                   <ul className="space-y-1 text-sm">
                     {data.actions.map((a, i) => (
                       <li key={i} className="text-muted-foreground">
-                        {formatDate(a.acted_at)} — {a.actor === "STAFF" ? (a.operator || "Staff") : "Client"}: {a.action.toLowerCase().replace("_", " ")} · {a.outcome === "OK" ? "done" : a.outcome.toLowerCase().replaceAll("_", " ")}
+                        {formatDate(a.acted_at)} — {a.actor === "STAFF" ? (a.operator || "Staff") : "Client"} {ACTION_WORDS[a.action] ?? plain(a.action)}{a.outcome === "OK" ? "" : ` (${plain(a.outcome)})`}
                         {a.reason ? ` · “${a.reason}”` : ""}
                       </li>
                     ))}
                   </ul>
                 </section>
               )}
+            </>
+          )}
             </>
           )}
         </DialogBody>

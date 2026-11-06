@@ -8,7 +8,6 @@ vi.mock("@/lib/api", async (orig) => {
   const actual = await (orig() as Promise<Record<string, unknown>>);
   return { ...actual, api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), del: vi.fn() } };
 });
-vi.mock("@/components/phase4/manual-review-view", () => ({ ManualReviewView: () => <div data-testid="review-queue" /> }));
 
 import { api, ApiError } from "@/lib/api";
 import FinancialReviewPage from "@/app/(app)/financial-review/page";
@@ -26,17 +25,19 @@ describe("Financial review page", () => {
     });
     render(<FinancialReviewPage />);
     expect(await screen.findByTestId("review-not-mounted")).toBeTruthy();
-    expect(screen.queryByTestId("review-queue")).toBeNull();
+    expect(screen.queryByText("Awaiting a decision")).toBeNull();
+    expect(g.mock.calls.filter(([p]) => p === "/financial-review/queue")).toHaveLength(1);
   });
 
   it("shows the review queue when it is mounted", async () => {
     g.mockImplementation(async (path: string) => {
       if (path === "/auth/whoami") return { roles: ["payments_operator"] };
-      if (path === "/financial-review/queue") return { queue: [] };
+      if (path === "/financial-review/queue") return { items: [] };
+      if (path === "/financial-review/actions") return { actions: [] };
       return { cases: [], refund_terminations: [] };
     });
     render(<FinancialReviewPage />);
-    expect(await screen.findByTestId("review-queue")).toBeTruthy();
+    expect(await screen.findByText("Nothing is waiting on you")).toBeTruthy();
     expect(screen.queryByTestId("review-not-mounted")).toBeNull();
   });
 });

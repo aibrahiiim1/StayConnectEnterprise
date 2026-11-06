@@ -13,7 +13,6 @@ import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { errMsg } from "@/lib/utils";
 
-/** What the network IS, from what the appliance confirmed and observes, with the reason as its tooltip. */
 export function NetworkStatusBadge({ status, reason }: { status: NetworkStatusValue; reason?: string }) {
   return (
     <StatusBadge tone={STATUS_TONE[status]} title={reason}>
@@ -22,7 +21,6 @@ export function NetworkStatusBadge({ status, reason }: { status: NetworkStatusVa
   );
 }
 
-/** For a network with a saved change that is not running yet: which settings differ. */
 export function PendingChangeNote({ changes }: { changes: NetworkChange[] }) {
   if (!changes.length) return null;
   return <div className="mt-1 text-caption text-muted-foreground">Not applied: {changeSummary(changes)}</div>;
@@ -53,7 +51,6 @@ function CheckTable({ checks, label }: { checks: DiagCheck[]; label: string }) {
   );
 }
 
-/** Read-only checks of one client network. Nothing here changes anything, and what the appliance cannot see is listed as such. */
 export function DiagnosticsPanel({ networkId }: { networkId: string }) {
   const [report, setReport] = useState<NetworkDiagnostics | null>(null);
   const [busy, setBusy] = useState<null | "check" | "watch">(null);

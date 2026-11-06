@@ -3,8 +3,10 @@
 import { serviceStateOf } from "@/lib/network-state";
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { api, Whoami, ValidationIssue, HealthCheck, Reservation, GuestNetwork } from "@/lib/api";
+import { api, ApiError, ValidationIssue, HealthCheck, Reservation, GuestNetwork } from "@/lib/api";
 import { canWrite } from "@/lib/roles";
+import { useOperatorRoles } from "@/lib/whoami-context";
+import { fieldLabel } from "@/lib/api/network-overview";
 import { errMsg } from "@/lib/utils";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { ConfirmDialog, DialogForm } from "@/components/ui/dialog";
@@ -14,12 +16,8 @@ import { RowActions } from "@/components/ui/row-actions";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
-/** Wait for whoami before offering writes or declaring the operator read-only. */
 export function useNetworkAccess(): { roles: string[]; known: boolean; writable: boolean } {
-  const [roles, setRoles] = React.useState<string[] | null>(null);
-  React.useEffect(() => {
-    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
-  }, []);
+  const roles = useOperatorRoles();
   const list = roles ?? [];
   return { roles: list, known: roles !== null, writable: canWrite("network", list) };
 }
@@ -43,7 +41,7 @@ export function RevisionStateBadge({ state }: { state: string }) {
 }
 
 export function EnabledBadge({ enabled }: { enabled: boolean | undefined }) {
-  return enabled ? <StatusBadge tone="ok">Enabled</StatusBadge> : <StatusBadge>Disabled</StatusBadge>;
+  return enabled ? <StatusBadge tone="ok">Switched on</StatusBadge> : <StatusBadge>Switched off</StatusBadge>;
 }
 
 export const DHCP_MODE: Record<string, { label: string; tone: "ok" | "warn" | "err" | "info" | "default" }> = {
@@ -68,10 +66,8 @@ export function ValidationIssueList({ issues, className }: { issues: ValidationI
     <ul className={cn("space-y-1.5", className)}>
       {issues.map((i, k) => (
         <li key={k} className="text-sm">
-          <span className="font-mono text-xs">{i.field}</span>
-          <span className="text-muted-foreground"> — </span>
-          {i.message}
-          <span className="ms-1 text-caption text-muted-foreground">({i.code})</span>
+          {issueField(i.field) ? <span className="font-medium">{issueField(i.field)}: </span> : null}
+          {sentence(i.message)}
         </li>
       ))}
     </ul>
@@ -129,7 +125,6 @@ export function ApplyResults({
   );
 }
 
-/** Reservations as a table, for the DHCP page (all networks) and a client network's own page. */
 export function ReservationTable({
   reservations,
   writable,
@@ -139,7 +134,6 @@ export function ReservationTable({
 }: {
   reservations: Reservation[];
   writable: boolean;
-  /** Shows the client-network column when given. */
   networkName?: (guestNetworkId: string) => string;
   onEdit: (r: Reservation) => void;
   onRemove: (r: Reservation) => void;
@@ -487,6 +481,35 @@ export function useLeaveGuard(dirty: boolean, message = "The changes you made he
       onConfirm={() => { const t = target; setTarget(null); if (t) router.push(t); }}
     />
   );
+}
+
+function issueField(field: string): string {
+  const label = fieldLabel(field);
+  return label === field ? "" : label;
+}
+
+function sentence(text: string): string {
+  const t = text.trim();
+  if (!t) return t;
+  const s = t.charAt(0).toUpperCase() + t.slice(1);
+  return /[.!?]$/.test(s) ? s : `${s}.`;
+}
+
+export function netErrorWords(e: unknown, live = false): string {
+  const x = e instanceof ApiError ? e : null;
+  const code = x?.code ?? "";
+  if (code === "reauth_required") return "Your password was not accepted. Nothing was changed.";
+  if (code === "apply_in_progress") return "Another change is being applied right now. Wait for it to finish, then try again. Nothing was changed.";
+  if (code === "apply_unidentifiable" || code === "revision_not_recorded") {
+    return "The appliance did not confirm what happened to this change. Check Config history before trying again.";
+  }
+  if (code === "not_found") return "This client network no longer exists. Refresh the page to see the current list.";
+  if (x && (x.status === 400 || x.status === 409 || x.status === 422) && x.message && x.message !== code) {
+    return `${sentence(x.message)} Nothing was changed.`;
+  }
+  return live
+    ? "The appliance could not complete this. Check Config history for the current state, then try again."
+    : "The appliance could not complete this. Check it is reachable, then try again. Nothing was changed.";
 }
 
 export function plural(n: number, one: string, many = `${one}s`): string {

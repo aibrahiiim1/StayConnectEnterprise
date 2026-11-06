@@ -57,11 +57,11 @@ beforeEach(() => {
 });
 
 describe("the words", () => {
-  it("names every fallback reason and passes an unknown one through", () => {
+  it("names every fallback reason and never shows an unknown one raw", () => {
     for (const r of ["NOT_CONFIGURED", "NO_HOSTNAME", "NO_CERTIFICATE", "CERTIFICATE_EXPIRED", "PORTAL_ADDRESS_NOT_ACTIVE", "CENTRAL_UNREACHABLE"]) {
       expect(fallbackWords(r)).not.toMatch(/_/);
     }
-    expect(fallbackWords("SOMETHING_NEW")).toBe("something new");
+    expect(fallbackWords("SOMETHING_NEW")).toBe("The appliance gave a reason this console does not recognise.");
   });
 
   it("headlines a fallback after HTTPS had worked as an outage", () => {
@@ -150,7 +150,8 @@ describe("Portal HTTPS page", () => {
     fireEvent.change(within(dlg).getByLabelText(/^Portal address/), { target: { value: "10.254.254.1" } });
     fireEvent.change(within(dlg).getByLabelText(/Confirm your password/), { target: { value: "pw" } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Save address" }));
-    expect(await within(dlg).findByText("10.254.254.0/24 is the Lobby network")).toBeInTheDocument();
+    expect(await within(dlg).findByText("10.254.254.0/24 is the Lobby network.")).toBeInTheDocument();
+    expect(within(dlg).queryByText(/cannot be used on this appliance/)).toBeNull();
   });
 
   it("registers a hotel domain with the password", async () => {

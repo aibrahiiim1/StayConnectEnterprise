@@ -1,17 +1,15 @@
 "use client";
 
-// Only a vendor-confirmed "not posted" status fails a purchase; any other answer is UNKNOWN.
-// edged enforces site-administrator approval.
-
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { api, ApiError } from "@/lib/api";
 import { canRead } from "@/lib/roles";
 import {
   ANSWER_EFFECT_WORDS, ANSWER_NAMES, AnswerMeaning, OnboardingInterface, OnboardingResp, SiteModules,
-  postingTargetLabel, saveErrorMessage,
+  postingTargetLabel,
 } from "@/lib/payment-admin";
-import { formatDate } from "@/lib/utils";
+import { LIFECYCLE_WORDS, wordsFor } from "@/lib/api/pms-connections";
+import { cn, formatDate } from "@/lib/utils";
 import { Card, CardDescription, CardHeader, CardTitle, SectionCard } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Badge, StatusBadge } from "@/components/ui/badge";
@@ -26,7 +24,7 @@ import { Disclosure, InfoHint } from "@/components/ui/quiet";
 import { NotAvailable, ReadOnlyNotice } from "@/components/ui/patterns";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
-import { ArrowUpRight, CheckCircle2, ShieldCheck, Undo2 } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, CheckCircle2, RefreshCw, ShieldCheck, Undo2 } from "lucide-react";
 import { CodeList, CodeText } from "../payment-methods/codes";
 import { RoomChargeLiveNotice } from "@/components/room-charge-live-notice";
 import { useOperatorRoles } from "@/lib/whoami-context";
@@ -40,6 +38,30 @@ const EVIDENCE_MAX = 2000;
 
 type AnswerChange = { iface: OnboardingInterface; meaning: AnswerMeaning; action: "CONFIRM" | "WITHDRAW" };
 
+const FADE = "animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none";
+
+const CONNECTOR_WORDS: Record<string, string> = {
+  "protel-fias": "Protel FIAS",
+  "opera-fias": "Opera FIAS",
+  "fidelio-fias": "Fidelio FIAS",
+  mews: "Mews",
+  apaleo: "Apaleo",
+  stub: "Test connector",
+};
+
+function roomChargeError(e: unknown): string {
+  if (e instanceof ApiError) {
+    const code = typeof e.body?.error === "string" ? (e.body.error as string) : e.code;
+    if (code === "reauth_required" || e.status === 401) return "Your password was not accepted. Nothing was saved.";
+    if (code === "forbidden" || e.status === 403) return "Only a site administrator can make this change. Nothing was saved.";
+    if (code === "revision_conflict") return "This connection changed while the form was open. It has been reloaded; review it and try again.";
+    if (code === "scd_unreachable") return "The payment service could not be reached. Nothing was saved; try again.";
+    if (code === "not_approved") return "The appliance did not accept this approval. Nothing was saved.";
+    if (code === "not_changed" || code === "not_recorded") return "The appliance did not accept this change. Nothing was saved.";
+    if (code === "bad_request") return "Something required was missing. Check each field and try again.";
+  }
+  return "The change could not be saved. Nothing was saved; try again.";
+}
 export default function RoomChargePage() {
   const toast = useToast();
   const roles = useOperatorRoles();
@@ -52,16 +74,20 @@ export default function RoomChargePage() {
   const [approving, setApproving] = useState<OnboardingInterface | null>(null);
   const [answerChange, setAnswerChange] = useState<AnswerChange | null>(null);
   const [mirrorChange, setMirrorChange] = useState<OnboardingInterface | null>(null);
-  // Never show operator ids.
   const [approvers, setApprovers] = useState<Map<string, string> | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [readinessFailed, setReadinessFailed] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const load = useCallback(async () => {
+    setLoading(true);
     try {
       const r = await api.get<OnboardingResp>("/pms-financial-onboarding");
       setData({ interfaces: r?.interfaces ?? [], posting_target_models: r?.posting_target_models ?? [] });
-    } catch (e) {
-      setErr(e);
-      setData({ interfaces: [], posting_target_models: [] });
+      setLoadFailed(false);
+      setErr(null);
+    } catch {
+      setLoadFailed(true);
     }
     if (roles !== null && canRead("operators", roles)) {
       try {
@@ -74,7 +100,11 @@ export default function RoomChargePage() {
     try {
       const m = await api.get<SiteModules>("/modules");
       setReadiness(m?.modules?.room_charge?.readiness ?? []);
-    } catch { /* readiness is advisory */ }
+      setReadinessFailed(false);
+    } catch {
+      setReadinessFailed(true);
+    }
+    setLoading(false);
   }, [roles]);
   useEffect(() => { if (readable) load(); }, [readable, load]);
 
@@ -119,7 +149,7 @@ export default function RoomChargePage() {
     />
   );
 
-  if (roles === null || (readable && data === null)) {
+  if (roles === null || (readable && data === null && !loadFailed)) {
     return (
       <PageShell>
         {header}
@@ -138,6 +168,27 @@ export default function RoomChargePage() {
   }
 
   const interfaces = data?.interfaces ?? [];
+  const tryAgain = (
+    <Button variant="secondary" size="sm" disabled={loading} onClick={() => void load()}>
+      <RefreshCw className={cn(loading && "animate-spin motion-reduce:animate-none")} /> Try again
+    </Button>
+  );
+
+  if (data === null) {
+    return (
+      <PageShell>
+        {header}
+        <Card role="alert" className={FADE}>
+          <EmptyState
+            icon={<AlertTriangle />}
+            title="Room charge could not be loaded"
+            hint="The appliance did not return the PMS connections and their room charge approval, so they are not known. Nothing has been changed."
+            action={tryAgain}
+          />
+        </Card>
+      </PageShell>
+    );
+  }
 
   return (
     <PageShell>
@@ -146,18 +197,27 @@ export default function RoomChargePage() {
       {!isSiteAdmin && (
         <ReadOnlyNotice>Approving a PMS interface for room charge is a site administrator decision.</ReadOnlyNotice>
       )}
-      {postingWithheld && <SetupChecklist interfaces={data?.interfaces ?? []} />}
+      {readinessFailed && (
+        <Callout tone="warning" title="Whether room charge is ready could not be checked" className={FADE}>
+          <p>Nothing has been changed. The approvals below are still shown.</p>
+          <div className="mt-2">{tryAgain}</div>
+        </Callout>
+      )}
+      {postingWithheld && <div className={FADE}><SetupChecklist interfaces={interfaces} /></div>}
       {otherReadiness.length > 0 && (
-        <Callout tone="info" title="Room charge is not ready">
+        <Callout tone="info" title="Room charge is not ready" className={FADE}>
           <CodeList codes={otherReadiness} />
         </Callout>
+      )}
+      {loadFailed && (
+        <ErrorBanner err="Room charge could not be refreshed. What is shown may be out of date." className="mb-0" />
       )}
       <ErrorBanner err={err} className="mb-0" />
 
       <SectionCard
         flush
-        title="PMS interfaces"
-        description="Room charge is supported on FIAS interfaces."
+        title="PMS connections"
+        description="Room charge is supported on FIAS connections."
         actions={
           <Link href="/payment-methods" className="inline-flex items-center gap-0.5 text-xs font-medium text-primary hover:underline">
             Payment methods <ArrowUpRight className="size-3.5" aria-hidden />
@@ -165,12 +225,16 @@ export default function RoomChargePage() {
         }
       >
           {interfaces.length === 0 ? (
-            <EmptyState size="sm" title="No PMS interface exists yet" hint="Add one under Hotel → PMS connection." />
+            <EmptyState
+              size="sm"
+              title="No PMS connection exists yet"
+              hint={<>Add one in <Link href="/pms-interfaces" className="font-medium underline underline-offset-2">PMS connection</Link>.</>}
+            />
           ) : (
-            <Table label="PMS interfaces">
+            <Table label="PMS connections">
               <THead>
                 <TR>
-                  <TH>Interface</TH>
+                  <TH>Connection</TH>
                   <TH>Room charge</TH>
                   <TH>Currency</TH>
                   <TH>Posting target</TH>
@@ -184,7 +248,7 @@ export default function RoomChargePage() {
                     <TD>
                       <div className="font-medium">{i.display_label || i.pms_interface_id}</div>
                       <div className="text-xs text-muted-foreground">
-                        {i.connector_kind === FIAS ? "Protel FIAS" : i.connector_kind} · {i.lifecycle_state}
+                        {CONNECTOR_WORDS[i.connector_kind] ?? "Connector not recognised"} · {wordsFor(LIFECYCLE_WORDS, i.lifecycle_state, "State not recognised")}
                       </div>
                     </TD>
                     <TD>
@@ -197,7 +261,7 @@ export default function RoomChargePage() {
                         </div>
                       )}
                     </TD>
-                    <TD nowrap className="font-mono">{i.financial_base_currency ?? "—"}</TD>
+                    <TD nowrap className={cn(i.financial_base_currency ? "font-mono" : "text-muted-foreground")}>{i.financial_base_currency ?? "Not set"}</TD>
                     <TD>{postingTargetLabel(i.posting_target_model)}</TD>
                     <TD className="text-xs">
                       {i.approved_at ? (
@@ -209,7 +273,7 @@ export default function RoomChargePage() {
                             </div>
                           )}
                         </>
-                      ) : "—"}
+                      ) : <span className="text-muted-foreground">Not approved</span>}
                     </TD>
                     {isSiteAdmin && (
                       <TD className="whitespace-nowrap text-end">
@@ -235,7 +299,7 @@ export default function RoomChargePage() {
       </SectionCard>
 
       {interfaces.filter((i) => i.connector_kind === FIAS).map((i) => (
-        <SectionCard key={i.pms_interface_id} title={`Room charge checks — ${i.display_label || i.pms_interface_id}`} bodyClassName="space-y-4">
+        <SectionCard key={i.pms_interface_id} title={`Room charge checks: ${i.display_label || i.pms_interface_id}`} bodyClassName="space-y-4">
           {i.financial_mirror && (
             <GuestListProof iface={i} canChange={isSiteAdmin} onChange={() => setMirrorChange(i)} />
           )}
@@ -282,8 +346,8 @@ export default function RoomChargePage() {
           }}
           onConflict={async (message) => {
             setApproving(null);
-            setErr(message);
             await load();
+            setErr(message);
           }}
         />
       )}
@@ -291,7 +355,6 @@ export default function RoomChargePage() {
   );
 }
 
-// Posting is an install-time safety switch, never a page setting.
 function SetupChecklist({ interfaces }: { interfaces: OnboardingInterface[] }) {
   const fias = interfaces.filter((i) => i.connector_kind === FIAS);
   const approved = fias.filter((i) => i.approved_at || i.posting_target_model === "RESERVATION");
@@ -303,7 +366,7 @@ function SetupChecklist({ interfaces }: { interfaces: OnboardingInterface[] }) {
       title: "Approve a PMS interface for room charge",
       detail: approved.length > 0
         ? `Done: ${approved.map((i) => i.display_label || "FIAS interface").join(", ")}.`
-        : "Use “Approve for room charge” on the FIAS interface below.",
+        : "Use “Approve for room charge” on the FIAS connection below.",
     },
     {
       done: meanings.length > 0 && confirmed === meanings.length,
@@ -316,7 +379,7 @@ function SetupChecklist({ interfaces }: { interfaces: OnboardingInterface[] }) {
     {
       done: false,
       title: "Switch on sending charges to the PMS on this appliance",
-      detail: "Off. This is a safety switch set when the appliance is installed, not a setting on this page, because it lets real charges reach Protel. Switching it on is a Product Owner decision; ask your OneGate installer.",
+      detail: "Off. This is a safety switch set when the appliance is installed, not a setting on this page, because it lets real charges reach Protel. OneGate decides this when the appliance is installed; ask your OneGate installer.",
     },
   ];
   return (
@@ -372,6 +435,7 @@ function ApproveDialog({
   }, [iface]);
 
   const ready = /^[A-Z]{3}$/.test(currency);
+  const updating = !!iface?.approved_at || !!iface?.ready;
 
   async function submit() {
     if (!iface || !ready) return;
@@ -385,10 +449,10 @@ function ApproveDialog({
       await onApproved();
     } catch (e) {
       if (e instanceof ApiError && e.body?.error === "revision_conflict") {
-        await onConflict(saveErrorMessage(e));
+        await onConflict(roomChargeError(e));
         return;
       }
-      setError(saveErrorMessage(e));
+      setError(roomChargeError(e));
     } finally {
       setBusy(false);
     }
@@ -398,17 +462,24 @@ function ApproveDialog({
     <DialogForm
       open={open}
       onOpenChange={(v) => { if (!v) onClose(); }}
-      title={`Approve ${iface?.display_label || "interface"} for room charge?`}
-      description="Charges will be posted to the guest's reservation (room + reservation number) through this interface."
-      submitLabel="Yes, approve"
-      cancelLabel="No"
-      busyLabel="Approving…"
+      title={updating
+        ? `Update the room charge approval for ${iface?.display_label || "this connection"}?`
+        : `Approve ${iface?.display_label || "this connection"} for room charge?`}
+      description="Charges will be posted to the guest's reservation (room + reservation number) through this connection."
+      submitLabel={updating ? "Save" : "Yes, approve"}
+      cancelLabel={updating ? "Cancel" : "No"}
+      busyLabel={updating ? "Saving…" : "Approving…"}
       busy={busy}
       error={error}
       disabled={!ready}
+      disabledReason={ready ? undefined : "Enter a 3-letter currency code, such as USD."}
       onSubmit={submit}
     >
-      <Field label="Currency" hint="The currency the PMS posts in. USD unless you change it.">
+      <Field
+        label="Currency"
+        hint="The currency the PMS posts in. USD unless you change it."
+        error={ready || currency === "" ? undefined : "Enter a 3-letter currency code, such as USD."}
+      >
         <Input
           value={currency}
           maxLength={3}
@@ -449,7 +520,11 @@ function AnswerMeanings({
       className="[&>div]:p-0"
     >
         {meanings.length === 0 ? (
-          <p className="px-5 py-4 text-sm text-muted-foreground">The answer meanings could not be read for this interface.</p>
+          <p className="px-5 py-4 text-sm text-muted-foreground">
+            {iface.answer_meanings === undefined
+              ? "The answer meanings could not be read for this connection."
+              : "Protel has no answer statuses to confirm on this connection."}
+          </p>
         ) : (
           <Table aria-label={`Answer meanings for ${name}`}>
             <THead>
@@ -468,11 +543,11 @@ function AnswerMeanings({
                     <div className="text-xs text-muted-foreground">{ANSWER_NAMES[m.as_status] ?? ""}</div>
                   </TD>
                   <TD className="max-w-md text-sm">{ANSWER_EFFECT_WORDS[m.effect] ?? m.effect}</TD>
-                  <TD className="text-xs">
+                  <TD key={`${m.as_status}-${m.confirmed}`} className={cn("text-xs", FADE)}>
                     {m.confirmed ? (
                       <StatusBadge tone="ok">Confirmed</StatusBadge>
                     ) : (
-                      <Badge tone="default">Not confirmed — unknown</Badge>
+                      <Badge tone="default">Not confirmed, treated as unknown</Badge>
                     )}
                     {m.recorded_at && (
                       <div className="mt-1 text-muted-foreground">
@@ -528,7 +603,6 @@ function AnswerDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Clear the password whenever the dialog changes or closes.
   useEffect(() => {
     setEvidence("");
     setReason("");
@@ -537,10 +611,15 @@ function AnswerDialog({
   }, [change]);
 
   const evLen = evidence.trim().length;
-  const ready =
-    evLen >= EVIDENCE_MIN && evLen <= EVIDENCE_MAX &&
-    reason.trim().length >= REASON_MIN && reason.trim().length <= REASON_MAX &&
-    password !== "";
+  const reasonLen = reason.trim().length;
+  const blocked = evLen < EVIDENCE_MIN || evLen > EVIDENCE_MAX
+    ? `Enter the vendor evidence: at least ${EVIDENCE_MIN} characters.`
+    : reasonLen < REASON_MIN || reasonLen > REASON_MAX
+      ? `Enter a reason of at least ${REASON_MIN} characters.`
+      : password === ""
+        ? "Enter your password."
+        : undefined;
+  const ready = blocked === undefined;
 
   async function submit() {
     if (!change || !ready) return;
@@ -558,7 +637,7 @@ function AnswerDialog({
       );
       await onRecorded(change.action);
     } catch (e) {
-      setError(saveErrorMessage(e));
+      setError(roomChargeError(e));
       setPassword("");
     } finally {
       setBusy(false);
@@ -583,6 +662,7 @@ function AnswerDialog({
       busy={busy}
       error={error}
       disabled={!ready}
+      disabledReason={blocked}
       onSubmit={submit}
     >
       {confirm && change && (
@@ -593,7 +673,7 @@ function AnswerDialog({
       <Field
         label="Vendor evidence"
         required
-        hint={`Who at the vendor confirmed it, when, and the document reference. ${evLen}/${EVIDENCE_MAX}, at least ${EVIDENCE_MIN}.`}
+        hint={`Who at the vendor confirmed it, when, and the document reference. ${evLen.toLocaleString()} of at least ${EVIDENCE_MIN} characters, at most ${EVIDENCE_MAX.toLocaleString()}.`}
       >
         <Textarea
           value={evidence}
@@ -603,7 +683,7 @@ function AnswerDialog({
           onChange={(e) => setEvidence(e.target.value)}
         />
       </Field>
-      <Field label="Reason" required hint={`Recorded in the activity log. ${reason.length}/${REASON_MAX}`}>
+      <Field label="Reason" required hint={`Recorded in the activity log. ${reasonLen.toLocaleString()} of at least ${REASON_MIN} characters, at most ${REASON_MAX}.`}>
         <Input value={reason} maxLength={REASON_MAX} onChange={(e) => setReason(e.target.value)} />
       </Field>
       <Field label="Confirm your password" required>
@@ -614,13 +694,14 @@ function AnswerDialog({
 }
 
 function ago(iso: string | null | undefined): string {
-  if (!iso) return "never";
+  if (!iso) return "Never";
   const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
-  if (s < 90) return "just now";
+  if (s < 90) return "Just now";
   const m = Math.round(s / 60);
-  if (m < 90) return `${m} min ago`;
+  const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
+  if (m < 90) return `${plural(m, "minute")} ago`;
   const h = Math.floor(m / 60);
-  return `${h} h ${m % 60} min ago`;
+  return m % 60 === 0 ? `${plural(h, "hour")} ago` : `${plural(h, "hour")} ${plural(m % 60, "minute")} ago`;
 }
 
 function hoursWords(seconds: number): string {
@@ -645,7 +726,7 @@ function GuestListProof({ iface, canChange, onChange }: { iface: OnboardingInter
       </span>
       {withinLimit
         ? <StatusBadge tone="ok">Within the limit</StatusBadge>
-        : <StatusBadge tone="warn">Older than the limit — room charge paused</StatusBadge>}
+        : <StatusBadge tone="warn">Older than the limit, so room charge is paused</StatusBadge>}
       <span className="text-muted-foreground">
         Last complete list <time dateTime={last ?? undefined} title={last ? formatDate(last) : undefined} className="text-foreground">{ago(last)}</time>
         {" · "}limit <span className="text-foreground">{hoursWords(m.max_age_seconds)}</span>
@@ -662,27 +743,36 @@ function GuestListProof({ iface, canChange, onChange }: { iface: OnboardingInter
 }
 function MirrorAgeDialog({ iface, onClose, onSaved }: { iface: OnboardingInterface | null; onClose: () => void; onSaved: () => Promise<void> }) {
   const open = iface !== null;
-  const [hours, setHours] = useState(4);
+  const [hours, setHours] = useState("4");
   const [reason, setReason] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    setHours(Math.round((iface?.financial_mirror?.max_age_seconds ?? 14400) / 3600));
+    setHours(String(Math.round((iface?.financial_mirror?.max_age_seconds ?? 14400) / 3600)));
     setReason("");
     setPassword("");
     setError(null);
   }, [iface]);
-  const ready = hours >= 1 && hours <= 24 && reason.trim().length >= REASON_MIN && password !== "";
+  const h = hours.trim() === "" ? NaN : Number(hours);
+  const hoursOk = Number.isInteger(h) && h >= 1 && h <= 24;
+  const blocked = !hoursOk
+    ? "Enter a whole number of hours between 1 and 24."
+    : reason.trim().length < REASON_MIN
+      ? `Enter a reason of at least ${REASON_MIN} characters.`
+      : password === ""
+        ? "Enter your password."
+        : undefined;
+  const ready = blocked === undefined;
   async function submit() {
     if (!iface || !ready) return;
     setBusy(true); setError(null);
     try {
       await api.post(`/pms-financial-onboarding/${encodeURIComponent(iface.pms_interface_id)}/financial-mirror-max-age`,
-        { max_age_seconds: hours * 3600, reason: reason.trim(), password });
+        { max_age_seconds: h * 3600, reason: reason.trim(), password });
       await onSaved();
     } catch (e) {
-      setError(saveErrorMessage(e));
+      setError(roomChargeError(e));
       setPassword("");
     } finally {
       setBusy(false);
@@ -692,7 +782,7 @@ function MirrorAgeDialog({ iface, onClose, onSaved }: { iface: OnboardingInterfa
     <DialogForm
       open={open}
       onOpenChange={(v) => { if (!v) onClose(); }}
-      title={`Guest list maximum age — ${iface?.display_label || "Protel"}`}
+      title={`Guest list maximum age: ${iface?.display_label || "Protel"}`}
       description="How long room charge may rely on the guest list after Protel last sent it complete. OneGate asks for a fresh complete list at half this time."
       size="md"
       submitLabel="Save"
@@ -700,10 +790,12 @@ function MirrorAgeDialog({ iface, onClose, onSaved }: { iface: OnboardingInterfa
       busy={busy}
       error={error}
       disabled={!ready}
+      disabledReason={blocked}
       onSubmit={submit}
     >
-      <Field label="Maximum age (hours)" required hint="Between 1 and 24 hours. 4 hours is the default.">
-        <InputGroup suffix="hours" className="w-40"><Input type="number" inputMode="numeric" min={1} max={24} step={1} value={hours} onChange={(e) => setHours(Number(e.target.value))} aria-label="Maximum age in hours" /></InputGroup>
+      <Field label="Maximum age (hours)" required hint="Between 1 and 24 hours. 4 hours is the default."
+        error={hoursOk ? undefined : "Enter a whole number of hours between 1 and 24."}>
+        <InputGroup suffix="hours" className="w-40"><Input type="number" inputMode="numeric" min={1} max={24} step={1} value={hours} onChange={(e) => setHours(e.target.value)} aria-label="Maximum age in hours" /></InputGroup>
       </Field>
       <Field label="Reason" required hint="Recorded in the activity log.">
         <Input value={reason} maxLength={REASON_MAX} onChange={(e) => setReason(e.target.value)} />

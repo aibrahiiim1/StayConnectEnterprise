@@ -18,7 +18,6 @@ import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
-import { ErrorBanner } from "@/components/ui/error-banner";
 import { Segmented } from "@/components/ui/tabs";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { DetailsDrawer } from "@/components/ui/details-drawer";
@@ -34,7 +33,7 @@ import {
   identifySession, methodLabel, stateWords, endReasonWords, speedPair, acquisitionOrdinal,
 } from "@/lib/session-words";
 import { moduleHasHistory, moduleLicensed, useCapabilities } from "@/lib/capabilities";
-import { Users, Monitor, ArrowDownUp, Hotel, KeyRound, Ticket, UserCircle, Power, PackageOpen } from "lucide-react";
+import { AlertTriangle, Users, Monitor, ArrowDownUp, Hotel, KeyRound, Ticket, UserCircle, Power, PackageOpen, RefreshCw } from "lucide-react";
 
 type Tab = "active" | "recent";
 
@@ -57,6 +56,23 @@ const secs = (n?: number | null) => {
   return `${n}s`;
 };
 
+const ACCESS_WORDS: Record<string, string> = {
+  PENDING: "Access not started",
+  SUSPENDED: "Access paused",
+  TERMINATED: "Access ended",
+  EXPIRED: "Access expired",
+  REVOKED: "Access withdrawn",
+};
+
+function accessWords(status: string): string {
+  const known = ACCESS_WORDS[status.toUpperCase()];
+  if (known) return known;
+  const w = status.toLowerCase().replace(/_/g, " ");
+  return `Access ${w}`;
+}
+
+const STUCK_AFTER_MS = 15_000;
+
 type SessionsResp = PagedFields & {
   data?: Session[];
   summary?: {
@@ -75,7 +91,8 @@ export default function SessionsPage() {
   // Ended sessions: the last 30 days by default, the whole history on request (audit AD-56).
   const [history, setHistory] = useState<"recent" | "all">("recent");
   const [detailSnap, setDetail] = useState<Session | null>(null);
-  const [disconnecting, setDisconnecting] = useState<ReadonlySet<string>>(() => new Set());
+  const [disconnecting, setDisconnecting] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const [roomsSeen, setRoomsSeen] = useState(false);
   const [confirm, setConfirm] = useState<Session | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionErr, setActionErr] = useState<unknown>(null);
@@ -108,12 +125,15 @@ export default function SessionsPage() {
   // Unchanged sessions keep object identity across polls so memoised rows re-render only on change.
   // null shows the skeleton for a new query; a failed first load yields an empty list.
   const prevRows = useRef<Session[] | null>(null);
+  const failed = !!err && !current;
   const rows = useMemo(() => {
-    if (!current || !resp) return err && !resp ? [] : null;
+    if (!current || !resp) return null;
     const next = keepUnchanged(prevRows.current, resp.data ?? []);
     prevRows.current = next;
     return next;
-  }, [current, resp, err]);
+  }, [current, resp]);
+  const rowsRef = useRef<Session[] | null>(null);
+  useEffect(() => { rowsRef.current = rows; }, [rows]);
   useEffect(() => { if (current && resp) setUpdatedAt(Date.now()); }, [current, resp]);
 
   usePoll(() => list.reload(), 10_000, { enabled: tab === "active" });
@@ -132,18 +152,38 @@ export default function SessionsPage() {
 
   useEffect(() => {
     if (disconnecting.size === 0 || !rows) return;
-    const still = new Set([...disconnecting].filter((id) => rows.some((r) => r.id === id && r.state === "active")));
+    const still = new Map<string, string>();
+    for (const [id, title] of disconnecting) {
+      if (rows.some((r) => r.id === id && r.state === "active")) still.set(id, title);
+      else toast.success(`${title} — device disconnected.`);
+    }
     if (still.size !== disconnecting.size) setDisconnecting(still);
-  }, [rows, disconnecting]);
+  }, [rows, disconnecting, toast]);
+
+  const pendingRef = useRef(disconnecting);
+  useEffect(() => { pendingRef.current = disconnecting; }, [disconnecting]);
+  const giveUp = useCallback((id: string, title: string) => {
+    if (!pendingRef.current.has(id)) return;
+    setDisconnecting((cur) => {
+      const next = new Map(cur);
+      next.delete(id);
+      return next;
+    });
+    if (rowsRef.current?.some((r) => r.id === id && r.state === "active")) {
+      toast.error(`${title} is still online.`, "The disconnect did not take effect. Try again, or look in Client activity.");
+    }
+  }, [toast]);
 
   async function onDisconnect(s: Session) {
     setBusy(true); setActionErr(null);
     try {
       await api.post(`/sessions/${s.id}/disconnect`, { reason: "admin" });
-      toast.success(`${identifySession(s, multi).title} — device disconnected.`);
+      const title = identifySession(s, multi).title;
+      toast.toast({ tone: "info", title: `Disconnecting ${title}'s device…` });
       setConfirm(null);
       setDetail(null);
-      setDisconnecting((cur) => new Set(cur).add(s.id));
+      setDisconnecting((cur) => new Map(cur).set(s.id, title));
+      setTimeout(() => giveUp(s.id, title), STUCK_AFTER_MS);
       // scd enforces asynchronously; reloading immediately would still show the session active.
       setTimeout(() => void list.reload(), 600);
       setTimeout(() => void list.reload(), 2500);
@@ -168,6 +208,8 @@ export default function SessionsPage() {
   const kindCounts: Record<string, number> = tiles?.kinds ?? {};
   const haveSummary = !!tiles;
   const searching = needle !== "" || kind !== "";
+  useEffect(() => { if (summary.rooms > 0) setRoomsSeen(true); }, [summary.rooms]);
+  const clearFilters = () => { setQuery(""); setKind(""); };
 
   // Room / email-social options show only where the module is licensed or has history, or rows of that kind
   // exist (a filter must never hide existing rows). Unknown module state hides them.
@@ -180,7 +222,7 @@ export default function SessionsPage() {
   return (
     <PageShell width="wide">
       <PageHeader
-        title={tab === "active" ? "Active sessions" : "Recent sessions"}
+        title="Active sessions"
         helpTitle="Sessions"
         description={tab === "active" ? "Which devices are online, and whose they are." : "Sessions that are online or ended recently, and whose they were."}
         help={
@@ -204,7 +246,7 @@ export default function SessionsPage() {
           <Segmented
             label="Which sessions"
             value={tab}
-            onChange={(v) => { setTab(v); setQuery(""); }}
+            onChange={(v) => setTab(v)}
             options={[
               { value: "active", label: "Online now" },
               { value: "recent", label: "Recent" },
@@ -214,19 +256,19 @@ export default function SessionsPage() {
       />
 
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <LiveStatus
-          updatedAt={updatedAt}
-          refreshing={refreshing && rows !== null}
-          intervalSeconds={tab === "active" ? 10 : undefined}
-          error={!!err && rows !== null && rows.length > 0}
-          onRefresh={() => void list.reload()}
-        />
+        {failed && updatedAt === null ? <span /> : (
+          <LiveStatus
+            updatedAt={updatedAt}
+            refreshing={refreshing}
+            intervalSeconds={tab === "active" ? 10 : undefined}
+            error={!!err}
+            onRefresh={() => void list.reload()}
+          />
+        )}
         {roles !== null && !mayDisconnect && (
           <ReadOnlyNotice className="py-1.5">Your role can see who is online but not disconnect a device.</ReadOnlyNotice>
         )}
       </div>
-
-      <ErrorBanner err={err} />
 
       <StatGrid cols={4}>
         <StatCard
@@ -245,13 +287,15 @@ export default function SessionsPage() {
             </Explain>
           }
         />
-        {haveSummary && summary.rooms > 0 && (
-          <StatCard
-            label="Rooms online"
-            value={summary.rooms.toLocaleString()}
-            icon={<Hotel />}
-            hint="Signed in with a room number"
-          />
+        {roomsSeen && (
+          <div className="animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none">
+            <StatCard
+              label="Rooms online"
+              value={haveSummary ? summary.rooms.toLocaleString() : "—"}
+              icon={<Hotel />}
+              hint="Signed in with a room number"
+            />
+          </div>
         )}
         <StatCard
           label={tab === "active" ? "Data, all sessions online now" : "Data, all recent sessions"}
@@ -273,7 +317,7 @@ export default function SessionsPage() {
               delay={300}
             />
           }
-          actions={<ResultsCount count={rows?.length} noun="session" more={list.hasMore} />}
+          actions={<ResultsCount count={list.total ?? rows?.length} noun="session" more={list.total == null && list.hasMore} />}
         >
               <FilterChips<string>
                 label="How the client signed in"
@@ -281,11 +325,11 @@ export default function SessionsPage() {
                 onChange={(v) => setKind(v === "all" ? "" : v)}
                 options={[
                   { value: "all", label: "All" },
-                  ...(rooms ? [{ value: "room", label: "Room", count: kindCounts.room ?? 0 }] : []),
-                  { value: "account", label: "Account", count: kindCounts.account ?? 0 },
-                  { value: "voucher", label: "Voucher", count: kindCounts.voucher ?? 0 },
-                  ...(identity ? [{ value: "guest", label: "Email / social", count: kindCounts.guest ?? 0 }] : []),
-                  { value: "open", label: "No sign-in", count: kindCounts.open ?? 0 },
+                  ...(rooms ? [{ value: "room", label: "Room", count: resp ? kindCounts.room ?? 0 : undefined }] : []),
+                  { value: "account", label: "Account", count: resp ? kindCounts.account ?? 0 : undefined },
+                  { value: "voucher", label: "Voucher", count: resp ? kindCounts.voucher ?? 0 : undefined },
+                  ...(identity ? [{ value: "guest", label: "Email / social", count: resp ? kindCounts.guest ?? 0 : undefined }] : []),
+                  { value: "open", label: "No sign-in", count: resp ? kindCounts.open ?? 0 : undefined },
                 ]}
               />
               {tab !== "active" && (
@@ -300,14 +344,21 @@ export default function SessionsPage() {
                 </Select>
               )}
               {(query || kind) && (
-                <Button variant="ghost" size="sm" onClick={() => { setQuery(""); setKind(""); }}>
+                <Button variant="ghost" size="sm" onClick={clearFilters}>
                   Clear
                 </Button>
               )}
         </FilterBar>
 
         <div className={cn(refreshing && rows !== null && refreshingClass)}>
-          {rows === null ? (
+          {failed ? (
+            <EmptyState
+              icon={<AlertTriangle />}
+              title="The sessions could not be loaded"
+              hint={err instanceof Error ? err.message : undefined}
+              action={<Button variant="secondary" disabled={refreshing} onClick={() => void list.reload()}><RefreshCw /> Try again</Button>}
+            />
+          ) : rows === null ? (
             <SkeletonRows rows={6} cols={6} />
           ) : rows.length === 0 ? (
             <EmptyState
@@ -329,6 +380,7 @@ export default function SessionsPage() {
                       ? "Only the last 30 days are listed. Choose All history to look further back."
                       : undefined
               }
+              action={searching ? <Button variant="secondary" size="sm" onClick={clearFilters}>Clear filters</Button> : undefined}
             />
           ) : (
             <Table label="Sessions">
@@ -341,7 +393,7 @@ export default function SessionsPage() {
                   <TH className="hidden lg:table-cell">Network / device</TH>
                   <TH numeric className="hidden sm:table-cell">Data (down / up)</TH>
                   <TH>Status</TH>
-                  {mayDisconnect && <TH><span className="sr-only">Actions</span></TH>}
+                  {roles !== null && <TH><span className="sr-only">Actions</span></TH>}
                 </TR>
               </THead>
               <TBody>
@@ -351,6 +403,7 @@ export default function SessionsPage() {
                     s={s}
                     pending={disconnecting.has(s.id)}
                     mayDisconnect={mayDisconnect}
+                    showActions={roles !== null}
                     onOpen={openDetail}
                     onDisconnect={askDisconnect}
                   />
@@ -419,7 +472,7 @@ export default function SessionsPage() {
               items={[
                 { label: "Device", value: <span className="font-mono">{confirm.mac}</span> },
                 { label: "Address", value: <span className="font-mono">{confirm.ip}</span> },
-                { label: "Network", value: confirm.guest_network_name ?? "—" },
+                { label: "Network", value: confirm.guest_network_name ?? "Not recorded" },
                 {
                   label: "Other devices on this client",
                   value:
@@ -438,11 +491,12 @@ export default function SessionsPage() {
 
 // Memoised: relies on `keepUnchanged` preserving object identity across polls.
 const SessionRow = memo(function SessionRow({
-  s, pending, mayDisconnect, onOpen, onDisconnect,
+  s, pending, mayDisconnect, showActions, onOpen, onDisconnect,
 }: {
   s: Session;
   pending: boolean;
   mayDisconnect: boolean;
+  showActions: boolean;
   onOpen: (s: Session) => void;
   onDisconnect: (s: Session) => void;
 }) {
@@ -516,7 +570,7 @@ const SessionRow = memo(function SessionRow({
       </TD>
       <TD nowrap>
         {pending && s.state === "active" ? (
-          <StatusBadge tone="warn">Disconnecting…</StatusBadge>
+          <StatusBadge tone="warn" className="motion-safe:[&>span:first-child]:animate-pulse">Disconnecting…</StatusBadge>
         ) : (
           <StatusBadge tone={st.tone}>{st.label}</StatusBadge>
         )}
@@ -526,17 +580,17 @@ const SessionRow = memo(function SessionRow({
           </div>
         )}
       </TD>
-      {mayDisconnect && (
+      {showActions && (
         <TD className="w-0">
-          {s.state === "active" && !pending && (
-            <RowActions
-              subject={id.title}
-              items={[
-                { label: "Details", onSelect: () => onOpen(s) },
-                { label: "Disconnect this device", icon: <Power />, danger: true, onSelect: () => onDisconnect(s) },
-              ]}
-            />
-          )}
+          <RowActions
+            subject={id.title}
+            items={[
+              { label: "Details", onSelect: () => onOpen(s) },
+              ...(mayDisconnect && s.state === "active" && !pending
+                ? [{ label: "Disconnect this device", icon: <Power />, danger: true, onSelect: () => onDisconnect(s) }]
+                : []),
+            ]}
+          />
         </TD>
       )}
     </TR>
@@ -590,7 +644,7 @@ function SessionDetail({ s }: { s: Session }) {
         <StatusBadge tone={st.tone}>{st.label}</StatusBadge>
         <Badge tone="neutral">{id.kindLabel}</Badge>
         {s.entitlement_status && s.entitlement_status !== "ACTIVE" && (
-          <Badge tone="warn">Access {s.entitlement_status.toLowerCase()}</Badge>
+          <Badge tone="warn">{accessWords(s.entitlement_status)}</Badge>
         )}
         {typeof s.active_devices === "number" && (
           <span className="text-xs text-muted-foreground">
@@ -640,12 +694,7 @@ function SessionDetail({ s }: { s: Session }) {
               ? `${s.package_acquisitions}${s.package_acquisitions === 1 ? " (first time)" : ""}`
               : "—",
           },
-          {
-            label: "Service plan",
-            value: s.service_plan_code
-              ? `${s.service_plan_code}${speedPair(s.down_kbps, s.up_kbps) ? ` — ${speedPair(s.down_kbps, s.up_kbps)}` : ""}`
-              : "—",
-          },
+          { label: "Speed", value: speedPair(s.down_kbps, s.up_kbps) ?? "—" },
           ...(s.subject_kind === "room"
             ? [
                 { label: "Room", value: s.room ?? "—" },
@@ -665,9 +714,18 @@ function SessionDetail({ s }: { s: Session }) {
             : []),
           { label: "Started at", value: <span className="text-xs">{formatDate(s.started_at)}</span> },
           ...(s.end_reason ? [{ label: "Ended because", value: endReasonWords(s.end_reason) }] : []),
-          { label: "Session id", value: <MonoId value={s.id} title="Session" /> },
         ]}
       />
+
+      <section className="space-y-2">
+        <h3 className="text-sm font-semibold">For support</h3>
+        <DList
+          items={[
+            { label: "Service plan", value: s.service_plan_code ? <span className="font-mono text-xs">{s.service_plan_code}</span> : "—" },
+            { label: "Session id", value: <MonoId value={s.id} title="Session" /> },
+          ]}
+        />
+      </section>
     </>
   );
 }

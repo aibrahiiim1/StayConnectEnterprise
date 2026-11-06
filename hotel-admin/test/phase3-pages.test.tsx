@@ -28,6 +28,12 @@ afterEach(() => vi.resetModules());
 describe("Stays page", () => {
   it("shows a stay with its guest, dates and sharing count, and opens details", async () => {
     get.mockImplementation((path: string) => {
+      if (path === "/capabilities") {
+        return Promise.resolve({
+          surfaces: ["pms-stays", "pms-financial-onboarding"],
+          modules: { room_charge: { deployed: true, licensed: true, enabled: true, ready: true, effective: true, manageable: true } },
+        });
+      }
       if (path.startsWith("/pms-stays/")) {
         return Promise.resolve({
           id: "s1", pms_interface_id: "i1", external_reservation_id: "R900", room: "900",
@@ -177,11 +183,15 @@ describe("Stays page — room charge on a stay", () => {
     expect(within(section).queryByRole("button")).toBeNull();
   });
 
-  it("offers no block action where room charge is not licensed", async () => {
+  it("shows no room charge at all where room charge is not licensed", async () => {
     routes({ posting_allowed: true, posting_blocks: [] }, ["site_admin"], { surfaces: ["pms-stays"], modules: {} });
-    const section = await openStay();
-    expect(within(section).getByText(/charge goes to this guest.s reservation/i)).toBeTruthy();
-    expect(within(section).queryByRole("button")).toBeNull();
+    const { default: StaysPage } = await import("@/app/(app)/stays/page");
+    render(<StaysPage />);
+    await userEvent.click(await screen.findByRole("button", { name: /^View\b/ }));
+    await screen.findByText("Packages of this stay");
+    expect(screen.queryByRole("region", { name: "Room charge" })).toBeNull();
+    expect(screen.queryByText(/Room charge allowed/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /Block room charge/ })).toBeNull();
   });
 });
 
@@ -202,7 +212,7 @@ describe("Stay events page", () => {
     await waitFor(() => expect(get).toHaveBeenCalled());
     expect(get.mock.calls[0][0]).not.toContain("processing_status=");
     expect(await screen.findByText(/folio claimed by other stay/i)).toBeTruthy();
-    expect(screen.getByText(/need a decision/i)).toBeTruthy();
+    expect(screen.getByText(/1 message needs a decision/i)).toBeTruthy();
   });
 });
 
