@@ -1,0 +1,35 @@
+{
+  "transition_id": "T0318",
+  "seq": 318,
+  "timestamp": "2026-11-06T19:29:32+02:00",
+  "timestamp_derivation": "Read from the workstation clock (UTC+02:00) by the script that wrote this receipt, immediately before the commit that introduces it.",
+  "record_type": "AUTOMATIC_RECONNECTION_COMPLETION",
+  "authorisation": "The Product Owner's mission of 2026-11-06 (D99): complete Automatic Reconnection end to end with deployment to the test appliance 172.21.96.97 only.",
+  "delivery": "PR #386 (merged c0176a9c): netd /v1/address/owner falls back to Kea's live lease table when the enforcement pass's lease list does not show the address owned; portald logs why it stopped before asking scd (mac_unresolved, scd_unreachable); scd's rejoin answers carry the device address; monitor README explains how to read a waiting device.",
+  "findings": "Of the devices the monitor reported as waiting (4 to 7), every one held a lease taken before the fix and sent nothing the appliance could act on: scd's own candidate query found each eligible, no probe from their addresses was redirected all day, a 15-minute capture by hardware address saw zero frames, and their neighbour entries were STALE (phones asleep or out of range with an 8 h lease). Verified defect: during an enforcement pass the ownership query read the lease list fetched when the pass began; a device that probed right after joining was refused (live: lease at 16:10:41.274, refusal address_not_owned unknown at .420 inside a 438 ms pass) and portald's 15 s quiet window dropped the rest of its probe burst; 6 eligible devices earlier that day had probed at join, been turned away and reconnected 1 to 30 min later. Explained non-defect: a device whose last session ran on a client network since replaced (11-04) is declined by the approved same-network rule. Observation: an appliance-internal check from the gateway address reaches the portal page 3 times a minute and is logged as mac_unresolved; it does not affect guests.",
+  "verification": "netd owner-query test during a pass (fresh lease owned, reassigned foreign) with -race; portald rejoin tests; vet; Codex review clean. Live, 40 min before the fix: 16 eligible devices joined, 11 reconnected within 10 min, 3 silent, 2 probe-and-refused (one same-network refusal); 40 min after: 3 joined, 1 reconnected, 1 silent, 1 the same-network case; 0 address_not_owned refusals after the fix against 1 before; no eligible device that probed was turned away. Through the day: 119 reconnections without user interaction, median 9 s from DHCP to online. NOT VERIFIED: the fix under a full day's load (the window after it had few joins).",
+  "deployment": {
+    "test_appliance": "onegate-appliance-45aa6ee97b4b (diagnostics release 5e2949b28751 at 16:06 UTC before it); rollback tree /opt/stayconnect/.previous/20261106T164516Z and bin/*.bak-20261106T164516Z.",
+    "central": "Not changed."
+  },
+  "not_touched": "Schema, entitlement and device limits, check-out, logout, licensing, PMS, financial behaviour, captive-portal security, networking, the production Central.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "c0176a9cb4f5ef6615a6302c0cbe1e4a1cf36bd1",
+  "previous_delivery": "T0317",
+  "decision": "D99",
+  "go_live": "NOT authorised."
+}

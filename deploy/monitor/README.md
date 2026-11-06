@@ -93,6 +93,12 @@ clears. A check that did not run (deep-only checks during a quick run) keeps its
 | installation (deep) | binaries differ from the installed release; shipped migration not applied | | any |
 | installation (deep) | service units differ from the release (ignoring comments and descriptions) | any | |
 
+"Back on the network" means the device holds a DHCP lease, which a phone keeps for the whole lease time (8 h) while asleep or
+out of range. Reconnection happens on the device's next captive probe or page load. Before calling a waiting device a fault, check that
+it sends anything: portald logs every probe it redirects with the client address (`captive probe redirected`), every reason it
+stopped before asking scd (`rejoin: not attempted`), and scd logs every reconnection answer with the address (`phase3 rejoin`).
+A device with none of these since its lease has not asked to reconnect (2026-11-06: every waiting device was silent, not refused).
+
 Devices stuck at the portal on wrong details or package policy are counted in the summary (`stuck_60m=N(M system)`) but
 not raised: they are guest errors or the policy working as set, not faults.
 
