@@ -105,6 +105,20 @@ func (b *Base) CloudRoutes(off *OfflineBase) http.Handler {
 	tm.Put("/notifications/smtp-password", b.putNotificationPassword)
 	tm.Post("/notifications/test", b.testNotification)
 
+	sv := r.With(perm(auth.PermFleetView))
+	sv.Get("/search", b.search)
+	sv.Get("/notes", b.listNotes)
+	sv.Get("/tags", b.listTags)
+	sv.Get("/tags/links", b.getSubjectTags)
+	nw := r.With(perm(auth.PermCustomersManage))
+	nw.Post("/notes", b.postNote)
+	nw.Patch("/notes/{id}", b.patchNote)
+	nw.Delete("/notes/{id}", b.deleteNote)
+	nw.Post("/tags", b.postTag)
+	nw.Patch("/tags/{id}", b.patchTag)
+	nw.Delete("/tags/{id}", b.deleteTag)
+	nw.Put("/tags/links", b.putSubjectTags)
+
 	b.portalTLSRoutes(r)
 
 	return r
