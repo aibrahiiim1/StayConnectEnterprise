@@ -928,6 +928,10 @@ class Incidents:
                 inc["raised"] = True
                 active.append((r, inc))
             self.st[key] = inc
+        for key, inc in self.st.items():
+            if key not in failing and key not in evaluated and inc.get("raised"):
+                carried = Result(key, inc.get("area", ""), inc.get("status", WARN), inc.get("text", key) + f"; last checked {hm(ts(inc['last']))}")
+                active.append((carried, inc))
         for key in list(self.st):
             if key in failing or key not in evaluated:
                 continue

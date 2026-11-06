@@ -193,12 +193,15 @@ class IncidentLifecycle(unittest.TestCase):
         a, rec = om.Incidents(state, NOW).apply([om.Result("k", "a", om.PASS, "t", persist=2)])
         self.assertEqual(rec, [])
 
-    def test_a_check_that_did_not_run_keeps_its_incident(self):
+    def test_a_check_that_did_not_run_keeps_its_incident_and_still_shows_it(self):
         state = {}
         om.Incidents(state, NOW).apply([om.Result("parity:units", "installation", om.WARN, "differs")])
-        a, rec = om.Incidents(state, NOW).apply([om.Result("svc:scd", "services", om.PASS, "ok")])
+        a, rec = om.Incidents(state, NOW + dt.timedelta(minutes=5)).apply([om.Result("svc:scd", "services", om.PASS, "ok")])
         self.assertEqual(rec, [])
         self.assertIn("parity:units", state["incidents"])
+        self.assertEqual([r.key for r, _ in a], ["parity:units"])
+        self.assertIn("last checked 12:00Z", om.issue_lines(a, rec, NOW)[0])
+        self.assertEqual(state["incidents"]["parity:units"]["count"], 1, "a carried incident is not counted as a new run")
 
 
 class Output(unittest.TestCase):
