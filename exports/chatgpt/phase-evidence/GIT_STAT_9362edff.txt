@@ -1,4 +1,0 @@
-commit 9362edff98465b5d8733a75e47c78d2b9ed669a9
-Date:   Fri Nov 6 15:26:12 2026 +0200
-
-    Governance: manifest for the 2026-11-06 missions

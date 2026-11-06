@@ -1415,6 +1415,19 @@
       "authorization_evidence": "The Product Owner's missions of 2026-11-06: the reliability audit with monitoring implementation, protected merge and verified deployment to the test appliance 172.21.96.97 only; and the end-to-end remediation of its actionable defects and installation/upgrade gaps with deployment to the test appliance only, a non-destructive plan for the legacy PMS secret columns, and no destructive schema change without separate authorization.",
       "does_not_authorize": "Dropping public.pms_providers.auth_key and api_key (plan in docs/runbooks/LEGACY_PMS_PROVIDER_COLUMNS.md, awaiting separate authorization); relaxing the database log privacy of GDPR audit C5 (log_error_verbosity, log_min_error_statement); changing lock order in check-out, expiry or financial code on an unconfirmed deadlock cause; back-filling historical first_seen; the production Central; networking or PMS changes; Go-Live.",
       "delivery_status": "Delivered on master 5d09ab73 (T0313, T0314); test appliance (T0315)."
+    },
+    {
+      "id": "D98",
+      "decided_on": "2026-11-06",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-11-06",
+      "status": "ACTIVE",
+      "title": "SYSTEM HEALTH IN THE ADMIN CONSOLE AND THE REMAINING RELIABILITY-AUDIT WORK: the Admin Console has a read-only System health page (overview, checks, client connectivity, device findings, history) fed by the appliance monitor's snapshot (/var/lib/onegate-monitor-console/health.json, root:stayconnect 0640, no client IP address, hardware addresses masked) and served by edged at /diagnostics/monitor under the existing diagnostics read permission, re-redacted, with a missing, unreadable or stale report shown as such. The deadlock root cause is fixed: acctd's accounting ingest (session then entitlement) and its expiry sweep (entitlement then session) ran concurrently; acctd now serialises its writer transactions, with no SQL, quota or financial change. Migration 0211 lets AD-34 device retention remove an idle device together with its own network appearances, judging idle only from recorded timestamps and never removing a device with none. Migration 0212 re-runs 0170's emptiness-checked drop of the retired public.pms_providers.auth_key and api_key, so an appliance that kept them converges on upgrade.",
+      "authorization_evidence": "The Product Owner's mission of 2026-11-06: complete the remaining reliability-audit work and deliver System Health & Monitoring in the Appliance Admin Console; authorized to investigate, implement, perform controlled TEST database migrations with verified backups and rollback, test, resolve review findings, merge through protected PRs, deploy to the test appliance 172.21.96.97, verify live, and synchronize governance and documentation.",
+      "does_not_authorize": "Relaxing the database log privacy of GDPR audit C5; back-filling or inferring device timestamps; a new permission or role; the production Central; networking, PMS or financial changes; Go-Live.",
+      "delivery_status": "Delivered on master d4675fae (PR #382, T0316); test appliance (T0317)."
     }
   ]
 }

@@ -1,0 +1,34 @@
+{
+  "transition_id": "T0317",
+  "seq": 317,
+  "timestamp": "2026-11-06T17:24:16+02:00",
+  "timestamp_derivation": "Read from the workstation clock (UTC+02:00) by the script that wrote this receipt, immediately before the commit that introduces it.",
+  "record_type": "TEST_APPLIANCE_UPGRADE",
+  "authorisation": "The Product Owner's mission of 2026-11-06 (D98): controlled TEST migrations with verified backups and rollback, and deployment to the test appliance 172.21.96.97 only.",
+  "delivery": "A verified pre-change backup (scd backup-now: db-20261106T150210Z.sql.gz.age, 252 tables, encrypted and proven restorable), then appliance-install.sh --upgrade to 5d30e8df45163cd3 at 15:03 UTC: migrations 0211 and 0212 applied, each behind the installer's own mandatory pre-change backup, Gate-P reconciled, services replaced, monitor reinstalled with the console snapshot directory. At 15:19 UTC the PR head c938c761f7de (wording changes on the page only, no migration) was installed the same way; its tree equals master d4675fae.",
+  "verification": "Ledger 0211 and 0212; public.pms_providers has neither auth_key nor api_key; prune_idle_devices is the 0211 body, owned by iam_v2_owner with EXECUTE for svc_scd only; every Go binary matched the release by SHA-256 and the release reads back vcs.revision c938c761f7de, stayconnect_production, vcs.modified=false; APPLIANCE_UNITS = PASS; 476-477 sessions online before, during and after. Snapshot /var/lib/onegate-monitor-console/health.json root:stayconnect 0640 (directory 0750), readable by the stayconnect user, refused to others, no IP field; signed in to the Admin Console in a browser with every write request blocked: GET /diagnostics/monitor 200, available, not stale, deep sections present, no IP-like string, every tab rendered, no horizontal overflow at phone width; a quick run carries the last deep run's sections with their time. Rollback: both down migrations applied on the live schema inside a transaction (columns back, 0162 body back) and rolled back; acctd rolled back to the pre-delivery binary and forward again with scripts/binary-rollback.sh, each verified on disk and in the running process, no acctd error and no client lost. Deadlocks: counter 97 before and after, none since 12:58 UTC. NOT VERIFIED: a live device removal by retention (no device is idle beyond the 90-day setting; oldest appearance 2026-10-27), and the deadlock fix under a day of production load.",
+  "deployment": {
+    "test_appliance": "onegate-appliance-c938c761f7de; rollback trees /opt/stayconnect/.previous/20261106T150349Z (to 5d09ab7396a1) and 20261106T151939Z, bin/*.bak-20261106T150349Z; schema rollback by the 0212 and 0211 down migrations (rehearsed live); the pre-change backup db-20261106T150210Z.",
+    "central": "Not changed."
+  },
+  "not_touched": "Database log privacy (C5), device timestamps, networking, DHCP, PMS configuration and postings, financial behaviour, licences, the production Central.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "d4675fae4d16d7ae37b6f0305a7bff9bcc7ab8ba",
+  "previous_delivery": "T0316",
+  "decision": "D98",
+  "go_live": "NOT authorised."
+}
