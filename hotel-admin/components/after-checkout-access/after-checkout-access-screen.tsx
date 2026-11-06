@@ -2,7 +2,7 @@
 
 import { SIGNIN_SETTING_GROUPS, SigninSettingsGroup } from "@/components/devices/signin-limits-card";
 import * as React from "react";
-import { History, Pencil, RefreshCw } from "lucide-react";
+import { AlertTriangle, History, Pencil, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
 import {
   type AccessHistoryItem,
@@ -31,8 +31,9 @@ import { Button } from "@/components/ui/button";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/misc";
-import { useToast } from "@/components/ui/toast";
-import { formatRelative } from "@/lib/utils";
+import { cn, formatRelative } from "@/lib/utils";
+
+const FADE = "animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none";
 import { AccessEditorSheet } from "./access-editor-sheet";
 import { AccessHistory } from "./access-history";
 import { PostStayView } from "@/components/phase5/post-stay-view";
@@ -46,15 +47,17 @@ export function AfterCheckoutAccessScreen({
   canActOnReconnections?: boolean;
   rolesKnown?: boolean;
 }) {
-  const toast = useToast();
   const [state, setState] = React.useState<AccessState | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [history, setHistory] = React.useState<AccessHistoryItem[]>([]);
   const [historyAvailable, setHistoryAvailable] = React.useState(true);
+  const [historyFailed, setHistoryFailed] = React.useState(false);
+  const [loading, setLoading] = React.useState(false);
   const [editing, setEditing] = React.useState(false);
   const [justSaved, setJustSaved] = React.useState<number | null>(null);
 
   const load = React.useCallback(async () => {
+    setLoading(true);
     try {
       const s = await api.get<AccessState>("/after-checkout-access");
       setState(s);
@@ -63,16 +66,18 @@ export function AfterCheckoutAccessScreen({
         const h = await api.get<AccessHistoryResp>("/after-checkout-access/history");
         setHistory(h?.data ?? []);
         setHistoryAvailable(h?.available !== false);
+        setHistoryFailed(false);
       } catch {
-        setHistory([]);
-        setHistoryAvailable(false);
+        setHistoryFailed(true);
       }
     } catch (e: any) {
       setLoadError(
         e?.status === 404
           ? "After Check-out Access is not available on this appliance, so there is nothing to show."
-          : `After Check-out Access could not be loaded${e?.message ? `: ${e.message}` : "."}`,
+          : "After Check-out Access could not be loaded. Nothing has been changed.",
       );
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -87,14 +92,13 @@ export function AfterCheckoutAccessScreen({
   const latest = history.find((h) => h.config_version === version);
   const bounds = boundsOf(state);
   const supported = state?.supported_device_policies?.length ? state.supported_device_policies : ["REJECT_NEW_DEVICE"];
-  const warnings = state ? accessWarnings(state, historyAvailable) : [];
+  const warnings = state ? accessWarnings(state) : [];
   const used = state?.emergency_history?.count ?? 0;
   const lastUsed = state?.emergency_history?.last_at;
 
   async function onSaved(newVersion: number) {
     setEditing(false);
     setJustSaved(newVersion);
-    toast.success("After Check-out Access saved", `Version ${newVersion} applies to future check-outs.`);
     await load();
   }
 
@@ -146,10 +150,10 @@ export function AfterCheckoutAccessScreen({
       {!canWrite && state && <ReadOnlyNotice>Your role can view these settings but not change them.</ReadOnlyNotice>}
 
       {loadError && (
-        <div className="space-y-2">
+        <div className={cn("space-y-2", FADE)}>
           <ErrorBanner err={loadError} className="mb-0" />
-          <Button variant="secondary" size="sm" onClick={() => void load()}>
-            <RefreshCw /> Try again
+          <Button variant="secondary" size="sm" disabled={loading} onClick={() => void load()}>
+            <RefreshCw className={cn(loading && "animate-spin motion-reduce:animate-none")} /> Try again
           </Button>
         </div>
       )}
@@ -169,8 +173,11 @@ export function AfterCheckoutAccessScreen({
       {state && (
         <>
           {justSaved !== null && (
-            <Callout tone="success" title={`Version ${justSaved} saved`}>
-              It applies to future check-outs. Guests who have already checked out keep the terms they were given.
+            <Callout tone="success" title={`Version ${justSaved.toLocaleString()} saved`} className={FADE}>
+              It applies to future check-outs. Guests who have already checked out keep the terms they were given.{" "}
+              <Button variant="link" size="xs" className="h-auto p-0 font-medium" onClick={() => setJustSaved(null)}>
+                Dismiss
+              </Button>
             </Callout>
           )}
 
@@ -192,13 +199,13 @@ export function AfterCheckoutAccessScreen({
               value={
                 latest ? (
                   <time dateTime={latest.published_at} title={fmtWhen(latest.published_at)}>{formatRelative(latest.published_at)}</time>
-                ) : version > 0 ? "Unknown" : "Never"
+                ) : version > 0 ? "Not known" : "Never"
               }
-              hint={latest ? `by ${latest.actor}` : !historyAvailable ? "History cannot be read" : version > 0 ? "Not in the record" : "Nothing saved yet"}
+              hint={latest ? `by ${latest.actor || "an operator not recorded"}` : historyFailed ? "History could not be loaded" : !historyAvailable ? "History cannot be read" : version > 0 ? "Not in the record" : "Nothing saved yet"}
             />
             <StatCard
               label="Emergency fallback used"
-              value={used}
+              value={used.toLocaleString()}
               tone={used > 0 ? "warn" : "default"}
               hint={used > 0 && lastUsed ? <>Last <span title={fmtWhen(lastUsed)}>{formatRelative(lastUsed)}</span> · critical alert</> : "Never used on this appliance"}
               href={used > 0 ? "/operational-alerts" : undefined}
@@ -206,7 +213,7 @@ export function AfterCheckoutAccessScreen({
           </StatGrid>
 
           {warnings.length > 0 && (
-            <section aria-label="Needs attention" className="space-y-2">
+            <section aria-label="Needs attention" className={cn("space-y-2", FADE)}>
               {warnings.map((w) => (
                 <Callout key={w.id} tone={w.tone} title={w.title}>
                   <p>{w.body}</p>
@@ -277,9 +284,19 @@ export function AfterCheckoutAccessScreen({
             flush
             title="History"
             description="Every saved version, including turning the feature on or off. Newest first."
-            actions={historyAvailable && history.length > 0 ? <Badge tone="neutral">{history.length} version{history.length === 1 ? "" : "s"}</Badge> : undefined}
+            actions={!historyFailed && historyAvailable && history.length > 0 ? <Badge tone="neutral">{history.length.toLocaleString()} version{history.length === 1 ? "" : "s"}</Badge> : undefined}
           >
-            {!historyAvailable ? (
+            {historyFailed ? (
+              <div role="alert" className={FADE}>
+                <EmptyState size="sm" icon={<AlertTriangle />} title="History could not be loaded"
+                  hint="The appliance did not return the saved versions. The setting in force is not affected. Nothing has been changed."
+                  action={
+                    <Button variant="secondary" size="sm" disabled={loading} onClick={() => void load()}>
+                      <RefreshCw className={cn(loading && "animate-spin motion-reduce:animate-none")} /> Try again
+                    </Button>
+                  } />
+              </div>
+            ) : !historyAvailable ? (
               <EmptyState size="sm" icon={<History />} title="History cannot be read on this appliance"
                 hint="The record exists, but this appliance's admin service cannot read it." />
             ) : history.length === 0 ? (
