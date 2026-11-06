@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0210, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0212, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -13625,8 +13625,8 @@ BEGIN
     RAISE EXCEPTION 'batch must be 1-5000' USING ERRCODE = 'invalid_parameter_value';
   END IF;
   SELECT g.device_retention_days INTO v_days FROM iam_v2.signin_capacity_settings_get(p_tenant, p_site) g;
-  -- Every foreign key to devices, single-column or composite ((tenant_id, site_id, device_id) is the usual shape): the
-  -- referencing row matches the device on ALL the key's columns, each paired with the column it references.
+  -- Every foreign key to devices except the device's own appearances, single-column or composite: the referencing row matches the
+  -- device on ALL the key's columns, each paired with the column it references.
   FOR r IN
     SELECT c.conrelid::regclass::text AS tbl,
            string_agg(format('x.%I = d.%I', ra.attname, pa.attname), ' AND ' ORDER BY k.ord) AS cond
@@ -13635,19 +13635,29 @@ BEGIN
       JOIN pg_attribute ra ON ra.attrelid = c.conrelid AND ra.attnum = k.refing
       JOIN pg_attribute pa ON pa.attrelid = c.confrelid AND pa.attnum = k.refed
      WHERE c.contype = 'f' AND c.confrelid = 'iam_v2.devices'::regclass
+       AND c.conrelid <> 'iam_v2.device_network_appearances'::regclass
      GROUP BY c.oid, c.conrelid
   LOOP
     v_not := v_not || format(' AND NOT EXISTS (SELECT 1 FROM %s x WHERE %s)', r.tbl, r.cond);
   END LOOP;
   v_sql := format($q$
-    WITH doomed AS (
-      SELECT d.id FROM iam_v2.devices d
-       WHERE d.tenant_id = %L AND d.site_id = %L
-         AND COALESCE(d.last_seen, d.first_seen) < now() - make_interval(days => %s)
-         %s
-       ORDER BY COALESCE(d.last_seen, d.first_seen) LIMIT %s)
+    WITH seen AS (
+      SELECT d.id, GREATEST(d.last_seen, d.first_seen, a.last_seen, a.first_seen) AS at
+        FROM iam_v2.devices d
+        LEFT JOIN LATERAL (
+          SELECT max(x.last_seen) AS last_seen, max(x.first_seen) AS first_seen
+            FROM iam_v2.device_network_appearances x
+           WHERE x.tenant_id = d.tenant_id AND x.site_id = d.site_id AND x.device_id = d.id) a ON true
+       WHERE d.tenant_id = %L AND d.site_id = %L %s),
+    doomed AS (
+      SELECT s.id FROM seen s
+       WHERE s.at < now() - make_interval(days => %s)
+       ORDER BY s.at LIMIT %s),
+    gone_appearances AS (
+      DELETE FROM iam_v2.device_network_appearances x USING doomed
+       WHERE x.tenant_id = %L AND x.site_id = %L AND x.device_id = doomed.id)
     DELETE FROM iam_v2.devices d USING doomed WHERE d.id = doomed.id$q$,
-    p_tenant, p_site, v_days, v_not, p_batch);
+    p_tenant, p_site, v_not, v_days, p_batch, p_tenant, p_site);
   EXECUTE v_sql;
   GET DIAGNOSTICS v_n = ROW_COUNT;
   RETURN v_n;
@@ -13658,7 +13668,7 @@ END $_$;
 -- Name: FUNCTION prune_idle_devices(p_tenant uuid, p_site uuid, p_batch integer); Type: COMMENT; Schema: iam_v2; Owner: -
 --
 
-COMMENT ON FUNCTION iam_v2.prune_idle_devices(p_tenant uuid, p_site uuid, p_batch integer) IS 'AD-34: removes devices unseen for device_retention_days that nothing references (every foreign key to iam_v2.devices is consulted from the catalogue). Never removes a device with a session, a slot, a credential or any other dependent row.';
+COMMENT ON FUNCTION iam_v2.prune_idle_devices(p_tenant uuid, p_site uuid, p_batch integer) IS 'AD-34: removes devices unseen for device_retention_days (latest recorded device or network-appearance timestamp; never a device with none) that nothing but their own network appearances references (every other foreign key to iam_v2.devices is consulted from the catalogue). The appearances go with the device. Never removes a device with a session, a slot, a credential or any other dependent row.';
 
 
 --
