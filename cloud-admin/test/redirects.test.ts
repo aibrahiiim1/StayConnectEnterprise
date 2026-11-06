@@ -59,7 +59,7 @@ describe("old addresses (docs/CENTRAL_CONTROL_PLANE.md §2)", () => {
   it("every new route exists", () => {
     for (const p of [
       "overview", "customers", "customers/[id]", "appliances", "appliances/[id]", "licenses",
-      "system/security-alerts", "system/trust", "system/audit", "system/team", "system/backup-health",
+      "system/security-alerts", "system/trust", "system/audit", "system/team", "system/backup-health", "system/notifications",
     ]) {
       expect(existsSync(join(root, "app", "(app)", p, "page.tsx")), p).toBe(true);
     }

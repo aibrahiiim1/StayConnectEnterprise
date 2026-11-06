@@ -1,7 +1,5 @@
 "use client";
 
-// The history is append-only; Show more only collapses older versions. Switch events sit in the same list.
-
 import * as React from "react";
 import {
   type AccessHistoryItem,
@@ -48,7 +46,7 @@ export function AccessHistory({ history, inForce }: { history: AccessHistoryItem
                 : `Version ${h.config_version}`,
               badge: h.config_version === inForce ? <Badge tone="ok" dot size="sm">Latest</Badge> : undefined,
               tone: h.config_version === inForce ? "ok" : "neutral",
-              actor: `${h.actor} · ${reasonLabel(h.reason_code)}`,
+              actor: `${h.actor || "Operator not recorded"} · ${reasonLabel(h.reason_code)}`,
               at: <time dateTime={h.published_at} title={fmtWhen(h.published_at)}>{formatRelative(h.published_at)}</time>,
               summary: changeLine(history, idx),
             };
@@ -58,7 +56,7 @@ export function AccessHistory({ history, inForce }: { history: AccessHistoryItem
       {history.length > PREVIEW && (
         <div className="border-t border-border px-4 py-2.5">
           <Button variant="ghost" size="sm" onClick={() => setShowAll((v) => !v)}>
-            {showAll ? `Show the latest ${PREVIEW} only` : `Show ${history.length - PREVIEW} older version${history.length - PREVIEW === 1 ? "" : "s"}`}
+            {showAll ? `Show the latest ${PREVIEW} only` : `Show ${(history.length - PREVIEW).toLocaleString()} older version${history.length - PREVIEW === 1 ? "" : "s"}`}
           </Button>
         </div>
       )}
@@ -68,7 +66,7 @@ export function AccessHistory({ history, inForce }: { history: AccessHistoryItem
         onOpenChange={(v) => !v && setOpenVersion(null)}
         eyebrow="After Check-out Access version"
         title={open ? `Version ${open.config_version}` : ""}
-        description={open ? `Saved ${fmtWhen(open.published_at)} by ${open.actor}` : undefined}
+        description={open ? `Saved ${fmtWhen(open.published_at)} by ${open.actor || "an operator not recorded"}` : undefined}
         badges={open ? (
           open.config_version === inForce ? <Badge tone="ok" dot>Latest</Badge> : <Badge tone="neutral">Superseded</Badge>
         ) : undefined}
@@ -79,7 +77,7 @@ export function AccessHistory({ history, inForce }: { history: AccessHistoryItem
               <DescriptionList
                 items={[
                   { label: "Reason", value: reasonLabel(open.reason_code), hint: open.reason_code || undefined },
-                  { label: "Saved by", value: open.actor },
+                  { label: "Saved by", value: open.actor || "Not recorded" },
                 ]}
               />
             </DetailsSection>

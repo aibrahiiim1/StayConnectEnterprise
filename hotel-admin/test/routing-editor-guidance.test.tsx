@@ -81,7 +81,7 @@ describe("the room sign-in editor guides the choice", () => {
     await userEvent.click(screen.getByRole("button", { name: "Confirm and apply" }));
     await waitFor(() => expect(screen.getByText(/can no longer be confirmed/)).toBeTruthy());
     expect(screen.getByText(/Step 1 of 2/)).toBeTruthy();
-    await waitFor(() => expect(screen.getByText(/Now: One dedicated PMS — Protel A/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Now: One dedicated PMS \(Protel A\)/)).toBeTruthy());
   });
 });
 
