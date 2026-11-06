@@ -111,7 +111,8 @@ CREATE TABLE iam_v2.room_move_restorations (
   superseded_entitlement_id uuid,
   restored_entitlement_id uuid,
   purchase_id uuid,
-  outcome text NOT NULL CHECK (outcome IN ('RESTORED','NOTHING_TO_RESTORE','EXPIRED','DATA_USED_UP','LIVE_ACCESS_PRESENT','UNSUPPORTED')),
+  outcome text NOT NULL CHECK (outcome IN ('RESTORED','NOTHING_TO_RESTORE','EXPIRED','DATA_USED_UP','LIVE_ACCESS_PRESENT','UNSUPPORTED',
+                                           'FUNDING_REVERSED')),
   source text NOT NULL CHECK (source IN ('ROOM_MOVE','RECOVERY')),
   remaining_data_bytes bigint,
   devices integer NOT NULL DEFAULT 0,
@@ -147,6 +148,32 @@ CREATE FUNCTION iam_v2.stay_next_applied_checkin(p_stay uuid, p_after uuid) RETU
    ORDER BY li.processed_at, li.id LIMIT 1
 $fn$;
 
+-- Whether the purchase that funded this access (found by walking back through room-move continuations) was refunded or reversed:
+-- a settlement marked REVERSED, card refunds reaching the captured amount, any chargeback, or a reversal posting of the room charge.
+CREATE FUNCTION iam_v2.entitlement_funding_reversed(p_ent uuid) RETURNS boolean
+  LANGUAGE plpgsql STABLE AS $fn$
+DECLARE v_ent uuid := p_ent; v_purchase uuid; v_trigger text; v_restores text; i integer := 0;
+BEGIN
+  LOOP
+    SELECT e.purchase_id, pu.trigger, e.policy_snapshot->>'restores' INTO v_purchase, v_trigger, v_restores
+      FROM iam_v2.entitlements e JOIN iam_v2.purchases pu ON pu.id = e.purchase_id WHERE e.id = v_ent;
+    EXIT WHEN v_trigger IS DISTINCT FROM 'ROOM_MOVE_RESTORE' OR v_restores IS NULL OR i >= 50;
+    v_ent := v_restores::uuid; i := i + 1;
+  END LOOP;
+  IF v_purchase IS NULL THEN
+    RETURN false;
+  END IF;
+  RETURN EXISTS (SELECT 1 FROM iam_v2.settlements se WHERE se.purchase_id = v_purchase AND se.status = 'REVERSED')
+      OR EXISTS (SELECT 1 FROM iam_v2.settlements se
+                   JOIN iam_v2.payment_transactions c ON c.settlement_id = se.id AND c.transaction_type = 'CHARGE' AND c.status = 'CAPTURED'
+                  WHERE se.purchase_id = v_purchase
+                    AND ((SELECT COALESCE(sum(r.amount_minor), 0) FROM iam_v2.payment_transactions r
+                           WHERE r.parent_transaction_id = c.id AND r.transaction_type = 'REFUND' AND r.status = 'CAPTURED') >= c.amount_minor
+                         OR EXISTS (SELECT 1 FROM iam_v2.payment_transactions b
+                                     WHERE b.parent_transaction_id = c.id AND b.transaction_type = 'CHARGEBACK' AND b.status = 'CAPTURED')))
+      OR EXISTS (SELECT 1 FROM iam_v2.pms_postings ch JOIN iam_v2.pms_postings rv ON rv.reverses_posting_id = ch.id AND rv.posting_type = 'REVERSAL'
+                  WHERE ch.purchase_id = v_purchase AND ch.posting_type = 'CHARGE');
+END $fn$;
 -- Continues the package a checkout converted, when the verified events show the checkout was half of a room move. p_checkin is the
 -- check-in that completed the move (ROOM_MOVE), or NULL for RECOVERY, which then finds the stay's first check-in into another room
 -- after that checkout. p_supersede_dominated (RECOVERY only) lets an unlimited, stay-long original replace a live package of the
@@ -213,7 +240,9 @@ BEGIN
    ORDER BY e.id LIMIT 1 FOR UPDATE;
   v_out := CASE WHEN NOT FOUND THEN 'NOTHING_TO_RESTORE'
                 WHEN o.time_accounting_mode <> 'VALIDITY_WINDOW' THEN 'UNSUPPORTED'
-                WHEN o.window_ends_at IS NOT NULL AND o.window_ends_at <= now() THEN 'EXPIRED' END;
+                WHEN o.window_ends_at IS NOT NULL AND o.window_ends_at <= now() THEN 'EXPIRED'
+                -- A refund or reversal of what paid for the package ends it for good (0115); a move never brings it back.
+                WHEN iam_v2.entitlement_funding_reversed(o.id) THEN 'FUNDING_REVERSED' END;
 
   IF au.grace_entitlement_id IS NOT NULL THEN
     SELECT e.status INTO v_grace_status FROM iam_v2.entitlements e WHERE e.id = au.grace_entitlement_id FOR UPDATE;
@@ -409,6 +438,7 @@ BEGIN
     EXECUTE 'ALTER FUNCTION iam_v2.room_move_restorations_append_only() OWNER TO iam_v2_owner';
     EXECUTE 'ALTER FUNCTION iam_v2.stay_event_room(jsonb) OWNER TO iam_v2_owner';
     EXECUTE 'ALTER FUNCTION iam_v2.stay_next_applied_checkin(uuid, uuid) OWNER TO iam_v2_owner';
+    EXECUTE 'ALTER FUNCTION iam_v2.entitlement_funding_reversed(uuid) OWNER TO iam_v2_owner';
     EXECUTE 'ALTER FUNCTION iam_v2.restore_room_move_access(uuid, uuid, uuid, integer, uuid, text, boolean) OWNER TO iam_v2_owner';
   END IF;
 END $own$;

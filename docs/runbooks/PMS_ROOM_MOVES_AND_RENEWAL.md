@@ -29,7 +29,8 @@ check-out event of this stay naming room A, and a check-in event of the same sta
   live sessions across without a disconnect;
 - writes a **zero-price** `ROOM_MOVE_RESTORE` purchase: no settlement, no posting, no room charge.
 
-It never replaces other live access of the stay (`LIVE_ACCESS_PRESENT`), never runs twice for one episode, and records
+It never continues a package whose payment was refunded, charged back or whose room charge was reversed (`FUNDING_REVERSED`;
+a full refund after a move also ends the continuation), never replaces other live access of the stay (`LIVE_ACCESS_PRESENT`), never runs twice for one episode, and records
 every decision in `iam_v2.room_move_restorations` (append-only, one row per checkout episode). A failure is logged by pmsd
 (`stayengine: room move not restored`) and leaves the reinstatement applied; the PMS feed is never held on it.
 
