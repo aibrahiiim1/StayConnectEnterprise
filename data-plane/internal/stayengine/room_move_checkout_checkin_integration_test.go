@@ -153,6 +153,44 @@ func TestIntegration_RoomMoveCheckoutFirstContinuesThePackage(t *testing.T) {
 	}
 }
 
+// Two moves in a row, the second check-in arriving only with the next roster resync (seen on the test appliance, 2026-11-06): the
+// package survives both, with its original end time.
+func TestIntegration_TwoRoomMovesInARowKeepThePackage(t *testing.T) {
+	p, s, pr, pkgRev := moveFixture(t)
+	ctx := context.Background()
+	insertLive(t, p, s, "T-GI", "GI", pay("RM5", "500", "Twice", "Ed", "F5", "260101", "260110"))
+	process(t, pr, s)
+	stayID := stayOf(t, p, s, "RM5")
+	ent := grantEntitlement(t, p, s, stayID, pkgRev, time.Now().Add(-3*time.Hour))
+	var window time.Time
+	if err := p.QueryRow(ctx, `SELECT window_ends_at FROM iam_v2.entitlements WHERE id=$1`, ent).Scan(&window); err != nil {
+		t.Fatal(err)
+	}
+	insertLiveAt(t, p, s, "T-GO1", "GO", pay("RM5", "500", "Twice", "Ed", "F5", "260101", "260110"), time.Now().Add(-2*time.Hour))
+	process(t, pr, s)
+	insertLive(t, p, s, "T-GI1", "GI", pay("RM5", "501", "Twice", "Ed", "F5", "260101", "260110"))
+	process(t, pr, s)
+	insertLiveAt(t, p, s, "T-GO2", "GO", pay("RM5", "501", "Twice", "Ed", "F5", "260101", "260110"), time.Now())
+	process(t, pr, s)
+	insertLive(t, p, s, "T-GI2", "GI", pay("RM5", "500", "Twice", "Ed", "F5", "260101", "260110"))
+	process(t, pr, s)
+
+	if status, lv, room := stayState(t, p, s, "RM5"); status != "IN_HOUSE" || lv != 3 || room != "500" {
+		t.Fatalf("stay %s/%d/%s, want IN_HOUSE/3/500", status, lv, room)
+	}
+	if n := countIn(t, p, `SELECT count(*) FROM iam_v2.room_move_restorations WHERE stay_id=$1 AND outcome='RESTORED'`, stayID); n != 2 {
+		t.Fatalf("%d restorations, want one per move", n)
+	}
+	var got time.Time
+	if err := p.QueryRow(ctx, `SELECT e.window_ends_at FROM iam_v2.entitlements e JOIN iam_v2.purchases pu ON pu.id=e.purchase_id
+		WHERE e.stay_id=$1 AND e.status='ACTIVE' AND pu.trigger='ROOM_MOVE_RESTORE'`, stayID).Scan(&got); err != nil {
+		t.Fatalf("no live continuation after the second move: %v", err)
+	}
+	if !got.Equal(window) {
+		t.Fatalf("after two moves the package ends %v, want the original %v", got, window)
+	}
+}
+
 func TestIntegration_RoomMoveCheckinFirstNeverChecksOut(t *testing.T) {
 	p, s, pr, pkgRev := moveFixture(t)
 	insertLive(t, p, s, "N-GI", "GI", pay("RM2", "700", "Early", "Bo", "F2", "260101", "260110"))

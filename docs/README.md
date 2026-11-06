@@ -26,7 +26,8 @@ each from: [ARCHIVE.md](ARCHIVE.md). Audit findings and their status: [AUDIT_BAC
 | Central: deploy, upgrade, move | [DEPLOYMENT_CLOUD.md](DEPLOYMENT_CLOUD.md) · [ROLLBACK_POLICY.md](ROLLBACK_POLICY.md) |
 | Appliance: services, ports, security notes | [DEPLOYMENT_APPLIANCE.md](DEPLOYMENT_APPLIANCE.md) |
 | Appliance health monitoring, client activity and device diagnostics | [../deploy/monitor/README.md](../deploy/monitor/README.md) |
-| Retired PMS provider secret columns left by 0170 (plan, awaiting authorization) | [runbooks/LEGACY_PMS_PROVIDER_COLUMNS.md](runbooks/LEGACY_PMS_PROVIDER_COLUMNS.md) |
+| Retired PMS provider secret columns left by 0170 (dropped by 0212) | [runbooks/LEGACY_PMS_PROVIDER_COLUMNS.md](runbooks/LEGACY_PMS_PROVIDER_COLUMNS.md) |
+| PMS room moves sent as check-out plus check-in, and package renewal (0213) | [runbooks/PMS_ROOM_MOVES_AND_RENEWAL.md](runbooks/PMS_ROOM_MOVES_AND_RENEWAL.md) |
 | Activation, licensing, entitlements | [APPLIANCE_ACTIVATION_AND_LICENSING.md](APPLIANCE_ACTIVATION_AND_LICENSING.md) · [LICENSING_AND_ENTITLEMENTS.md](LICENSING_AND_ENTITLEMENTS.md) |
 | Backup, restore, disaster recovery | [BACKUP_AND_RESTORE.md](BACKUP_AND_RESTORE.md) · [BACKUP_RETENTION.md](BACKUP_RETENTION.md) · [DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md](DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md) |
 | Migrations and the Central-outage behaviour | [MIGRATION_RUNBOOK.md](MIGRATION_RUNBOOK.md) · [OFFLINE_OPERATION.md](OFFLINE_OPERATION.md) |

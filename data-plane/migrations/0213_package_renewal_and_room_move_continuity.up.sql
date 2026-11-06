@@ -155,6 +155,18 @@ BEGIN
   IF NOT FOUND OR st.status <> 'IN_HOUSE' OR p_episode >= st.lifecycle_version THEN
     RAISE EXCEPTION 'ROOM_MOVE_STAY_NOT_REINSTATED' USING ERRCODE = 'P0001';
   END IF;
+  -- An older episode is continued only when every later checkout of the stay was itself a proven room move: a genuine departure in
+  -- between would have ended the package anyway (contract 7.2).
+  IF EXISTS (SELECT 1 FROM iam_v2.checkout_grace_audit la
+              WHERE la.stay_id = p_stay AND la.lifecycle_version > p_episode AND la.lifecycle_version < st.lifecycle_version
+                AND NOT EXISTS (SELECT 1 FROM iam_v2.stay_events lg, iam_v2.stay_events li
+                                 WHERE lg.id = la.boundary_event_id AND lg.event_type = 'GO'
+                                   AND li.stay_id = p_stay AND li.event_type = 'GI' AND li.processing_status = 'APPLIED'
+                                   AND li.received_at >= lg.received_at
+                                   AND iam_v2.stay_event_room(li.payload) IS DISTINCT FROM iam_v2.stay_event_room(lg.payload)
+                                   AND iam_v2.stay_event_room(lg.payload) IS NOT NULL AND iam_v2.stay_event_room(li.payload) IS NOT NULL)) THEN
+    RAISE EXCEPTION 'ROOM_MOVE_SUPERSEDED: a later checkout of this stay was not a room move' USING ERRCODE = 'P0001';
+  END IF;
   IF EXISTS (SELECT 1 FROM iam_v2.room_move_restorations x WHERE x.stay_id = p_stay AND x.lifecycle_version = p_episode) THEN
     RETURN QUERY SELECT x.outcome, x.restored_entitlement_id, x.devices, x.sessions
                    FROM iam_v2.room_move_restorations x WHERE x.stay_id = p_stay AND x.lifecycle_version = p_episode;
@@ -177,7 +189,7 @@ BEGIN
      WHERE e.id = p_checkin AND e.stay_id = p_stay AND e.event_type = 'GI';
   ELSE
     SELECT e.id, iam_v2.stay_event_room(e.payload) INTO v_in, v_in_room FROM iam_v2.stay_events e
-     WHERE e.stay_id = p_stay AND e.event_type = 'GI' AND e.admission_kind = 'LIVE'
+     WHERE e.stay_id = p_stay AND e.event_type = 'GI' AND e.processing_status = 'APPLIED'
        AND e.received_at >= (SELECT b.received_at FROM iam_v2.stay_events b WHERE b.id = au.boundary_event_id)
        AND e.id <> au.boundary_event_id
        AND iam_v2.stay_event_room(e.payload) IS DISTINCT FROM v_go_room
