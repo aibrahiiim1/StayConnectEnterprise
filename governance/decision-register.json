@@ -1428,6 +1428,19 @@
       "authorization_evidence": "The Product Owner's mission of 2026-11-06: complete the remaining reliability-audit work and deliver System Health & Monitoring in the Appliance Admin Console; authorized to investigate, implement, perform controlled TEST database migrations with verified backups and rollback, test, resolve review findings, merge through protected PRs, deploy to the test appliance 172.21.96.97, verify live, and synchronize governance and documentation.",
       "does_not_authorize": "Relaxing the database log privacy of GDPR audit C5; back-filling or inferring device timestamps; a new permission or role; the production Central; networking, PMS or financial changes; Go-Live.",
       "delivery_status": "Delivered on master d4675fae (PR #382, T0316); test appliance (T0317)."
+    },
+    {
+      "id": "D99",
+      "decided_on": "2026-11-06",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-11-06",
+      "status": "ACTIVE",
+      "title": "AUTOMATIC RECONNECTION COMPLETED: a device probing right after it joins is no longer refused because netd answered address ownership from the lease list an enforcement pass fetched before Kea issued the lease; /v1/address/owner now re-reads Kea's live lease table when that list does not show the address owned (DHCP's current record still decides; a reassigned address stays foreign). portald and scd log why each reconnection attempt stopped, with the device address. The approved behaviour (D96) is unchanged.",
+      "authorization_evidence": "The Product Owner's mission of 2026-11-06: complete the Automatic Reconnection mission end to end, fix verified defects within the existing authorization, merge through protected PRs, deploy to the test appliance 172.21.96.97, verify, and synchronize documentation and governance.",
+      "does_not_authorize": "Treating a replaced client network as the device's previous network (a product decision); changing portald's quiet window, captive-portal security, entitlement, device-limit, check-out, logout, licensing, PMS, financial or network rules; the production Central; Go-Live.",
+      "delivery_status": "Delivered on master c0176a9c (PR #386) and installed on the test appliance (T0318)."
     }
   ]
 }
