@@ -77,9 +77,16 @@ function when(ts?: string | null): string {
   const d = new Date(ts);
   return Number.isNaN(d.getTime()) ? ts : d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
+const ACRONYMS: Record<string, string> = { dhcp: "DHCP", pms: "PMS", http: "HTTP", https: "HTTPS", cpu: "CPU", ip: "IP", os: "OS" };
+// "automatic reconnection" -> "Automatic reconnection"; "ADDRESS_NO_LONGER_OWNED" -> "Address no longer owned".
+function words(s: string): string {
+  const w = s.replace(/_/g, " ").toLowerCase().split(" ").map((x) => ACRONYMS[x] ?? x).join(" ");
+  return w.charAt(0).toUpperCase() + w.slice(1);
+}
 const num = (v: unknown) => (typeof v === "number" ? v : Number(v));
 const shown = (v: unknown, unit = "") => (v === undefined || v === null || v === "?" || v === "" ? "Not reported" : `${v}${unit}`);
-const pairs = (rows?: Row[]) => (rows ?? []).map((r) => ({ name: String(r[0]), value: num(r[1]) || 0, key: String(r[0]) }));
+const pairs = (rows?: Row[]) => (rows ?? []).map((r) => ({ name: words(String(r[0])), value: num(r[1]) || 0, key: String(r[0]) }));
+const stuckParts = (v: unknown) => /^(\d+)\((\d+) system\)$/.exec(String(v ?? ""));
 
 function StatusPill({ status }: { status: string }) {
   const s = statusOf(status);
@@ -227,7 +234,7 @@ export default function SystemHealthPage() {
                       const bad = a.cs.filter((c) => c.status !== "PASS");
                       return (
                         <TR key={a.area}>
-                          <TD nowrap className="font-medium capitalize">{a.area}</TD>
+                          <TD nowrap className="font-medium">{words(a.area)}</TD>
                           <TD nowrap><StatusPill status={a.worst} /></TD>
                           <TD numeric>{a.cs.length}</TD>
                           <TD className="hidden max-w-[32rem] text-xs text-muted-foreground md:table-cell">
@@ -261,7 +268,7 @@ export default function SystemHealthPage() {
                       <TBody>
                         {rows.map((c) => (
                           <TR key={c.key}>
-                            <TD nowrap className="capitalize">{c.area}</TD>
+                            <TD nowrap>{words(c.area)}</TD>
                             <TD nowrap><StatusPill status={c.status} /></TD>
                             <TD className="text-xs">{c.text}</TD>
                           </TR>
@@ -278,15 +285,15 @@ export default function SystemHealthPage() {
                 <StatCard label="Sign-ins, last 15 min" value={shown(m.signin)} hint="verified / service unavailable / all" />
                 <StatCard label="Automatic reconnections" value={shown(m.rejoined)} hint="in the last 15 min" />
                 <StatCard label="Cut off twice or more" value={shown(m.recut)} hint="devices, last 6 h" tone={num(m.recut) > 0 ? "warn" : "default"} />
-                <StatCard label="Stuck devices" value={shown(m.stuck)} hint="refused 5+ times in 60 min" />
+                <StatCard label="Stuck devices" value={stuckParts(m.stuck)?.[1] ?? shown(m.stuck)} hint={stuckParts(m.stuck) ? `refused 5+ times in 60 min; ${stuckParts(m.stuck)![2]} for a system reason` : "refused 5+ times in 60 min"} />
               </StatGrid>
               {!deep?.breakdowns ? (
                 <EmptyState size="sm" icon={<Radar />} title="No client activity yet" hint="It is added by the monitor's full run every 30 minutes." />
               ) : (
                 <>
-                  <SectionCard title="Last 24 hours, by hour" description="Manual room sign-ins and automatic reconnections (UTC hours).">
+                  <SectionCard title="Last 24 hours, by hour" description="Manual room sign-ins and automatic reconnections, by UTC hour.">
                     <ColumnChart
-                      data={deep.breakdowns.hourly.map((r) => ({ label: String(r[0]).slice(-5), values: [num(r[2]) || 0, num(r[3]) || 0] }))}
+                      data={deep.breakdowns.hourly.map((r) => ({ label: String(r[0]).slice(-5, -3), values: [num(r[2]) || 0, num(r[3]) || 0] }))}
                       series={[{ name: "Manual sign-ins", token: "chart-1" }, { name: "Automatic reconnections", token: "chart-2" }]}
                     />
                   </SectionCard>
@@ -346,7 +353,7 @@ export default function SystemHealthPage() {
                           <TD nowrap><StatusBadge tone={d.severity === "HIGH" ? "err" : d.severity === "MEDIUM" ? "warn" : "default"}>{d.severity.toLowerCase()}</StatusBadge></TD>
                           <TD nowrap className="font-mono text-xs">{d.mac}<div className="text-caption text-muted-foreground">{d.device}</div></TD>
                           <TD className="text-xs">{d.issue}<div className="text-caption text-muted-foreground lg:hidden">{d.cause}</div></TD>
-                          <TD className="hidden max-w-[22rem] text-xs text-muted-foreground lg:table-cell">{d.cause}<div className="text-caption">{d.action}</div></TD>
+                          <TD className="hidden max-w-[22rem] text-xs text-muted-foreground lg:table-cell"><span className="line-clamp-2" title={d.cause}>{d.cause}</span><div className="line-clamp-2 text-caption" title={d.action}>Next: {d.action}</div></TD>
                           <TD nowrap className="hidden text-xs md:table-cell">{d.network || "Not recorded"}</TD>
                           <TD numeric className="text-xs">{d.count}</TD>
                           <TD nowrap muted className="hidden text-xs sm:table-cell">{d.last}</TD>
@@ -419,7 +426,7 @@ function IncidentTable({ rows }: { rows: Incident[] }) {
         {rows.map((i) => (
           <TR key={i.key}>
             <TD nowrap><StatusPill status={i.status} /></TD>
-            <TD nowrap className="capitalize">{i.area}</TD>
+            <TD nowrap>{words(i.area)}</TD>
             <TD className="text-xs">{i.text}</TD>
             <TD nowrap muted className="hidden text-xs sm:table-cell">{ago(i.first)}</TD>
             <TD numeric className="hidden text-xs md:table-cell">{i.count}</TD>
