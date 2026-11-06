@@ -199,18 +199,25 @@ class Monitor:
         return self._journal[k]
 
     def leases(self):
+        if self.m.get("leases") is Unavailable:
+            raise Unavailable("Kea lease files unreadable")
         if "leases" not in self.m:
             live = {}
             now = self.now.timestamp()
+            read = 0
             for f in (self.cfg["kea_leases"] + ".2", self.cfg["kea_leases"] + ".1", self.cfg["kea_leases"]):
                 try:
                     text = self.s.read(f)
+                    read += 1
                 except Unavailable:
                     continue
                 for line in text.splitlines():
                     r = line.split(",")
                     if len(r) > 9 and r[0][:1].isdigit():
                         live[r[0]] = (r[1].lower(), n(r[4]), n(r[3]), r[9] == "0")
+            if not read:
+                self.m["leases"] = Unavailable
+                raise Unavailable("Kea lease files unreadable")
             self.m["leases"] = {ip: (mac, exp, exp - valid) for ip, (mac, exp, valid, ok) in live.items() if ok and exp > now}
         return self.m["leases"]
 
@@ -407,10 +414,14 @@ class Monitor:
         self.add("dhcp:authoritative", "dhcp", WARN if notauth else PASS,
                  f"{len(subnets)} client subnet(s) authoritative" if not notauth else "not authoritative: " + " ".join(map(str, notauth)))
         import ipaddress
-        live = self.leases()
+        try:
+            live = self.leases()
+        except Unavailable as e:
+            self.add("dhcp:pools", "dhcp", NV, f"pool use unknown: {e}")
+            live = None
         pools = []
         worst = PASS
-        for s in subnets:
+        for s in subnets if live is not None else []:
             size = used = 0
             for p in s.get("pools", []):
                 a, b = (ipaddress.ip_address(x.strip()) for x in p["pool"].split("-"))
@@ -420,8 +431,9 @@ class Monitor:
             st = CRIT if pct > 95 else WARN if pct > 85 else PASS
             worst = max(worst, st, key=RANK.get)
             pools.append(f"{str(s.get('interface', '?')).split('/')[0]}={used}/{size}" + ("!" if st != PASS else ""))
-        self.m["pools"] = " ".join(pools)
-        self.add("dhcp:pools", "dhcp", worst, "address pools " + " ".join(pools))
+        if live is not None:
+            self.m["pools"] = " ".join(pools)
+            self.add("dhcp:pools", "dhcp", worst, "address pools " + " ".join(pools))
         try:
             text = self.s.read(self.cfg["kea_log"], tail=4 << 20)
         except Unavailable as e:
@@ -620,11 +632,12 @@ class Monitor:
             m = re.search(r'"msg":"([^"]*)"', msg)
             msgs.setdefault(u, {}).setdefault(m.group(1) if m else msg[:60], 0)
             msgs[u][m.group(1) if m else msg[:60]] += 1
-        for u, c in per.items():
-            top = max(msgs[u].items(), key=lambda x: x[1])[0]
-            self.add(f"errors:{u}", "errors", WARN if c > 20 else PASS, f"{u}: {c} error line(s) in 15 min, most often '{top[:80]}'")
-        if not per:
-            self.add("errors:none", "errors", PASS, "no service logged an error in 15 min")
+        units = sorted(set(per) | {u for u in UNITS if u.startswith("stayconnect-")} | {k.split(":", 1)[1] for k in state.get("incidents", {}) if k.startswith("errors:")})
+        for u in units:
+            c = per.get(u, 0)
+            top = max(msgs[u].items(), key=lambda x: x[1])[0] if c else ""
+            self.add(f"errors:{u}", "errors", WARN if c > 20 else PASS,
+                     f"{u}: {c} error line(s) in 15 min" + (f", most often '{top[:80]}'" if c else ""))
 
     # ---- deep checks ---------------------------------------------------------------------------------------------------
     def check_backup(self, state):
@@ -777,9 +790,11 @@ class Monitor:
             items.append(dict(device=short(dev), mac=mask_mac(mac), ip=ip or "", network=net or "", issue=issue, cause=cause,
                               confidence=confidence, severity=sev, first=first, last=last, count=n(count), status=status, action=action))
 
-        leases_by_mac = {}
-        for ip, (mac, exp, granted) in self.leases().items():
-            leases_by_mac[mac] = (ip, granted)
+        try:
+            leases_by_mac = {mac: (ip, granted) for ip, (mac, exp, granted) in self.leases().items()}
+        except Unavailable as e:
+            leases_by_mac = None
+            self.add("reconnect:missed", "automatic reconnection", NV, f"returning devices unknown: {e}")
         live = {r[0] for r in self.s.sql("SELECT DISTINCT device_id::text FROM iam_v2.sessions WHERE ended IS NULL")}
         now_or_past = lambda dev: "RESOLVED" if dev in live else "ONGOING"
         for mac, mode, cnt, first, last, ip, net, dev, online in self.s.sql("""SELECT a.device_mac::text, mode() WITHIN GROUP (ORDER BY a.result), count(*),
@@ -807,7 +822,7 @@ class Monitor:
                  "previous session on the same network ended on an address change with the package still valid", "confirmed", "MEDIUM",
                  first, last, cnt, now_or_past(dev), "check whether the device's captive probe reached automatic reconnection")
         missed = 0
-        for dev, mac, ip, net, ended, ended_epoch in self.s.sql("""SELECT s.device_id::text, lower(s.mac::text), host(s.ip), s.ingress_interface,
+        for dev, mac, ip, net, ended, ended_epoch in [] if leases_by_mac is None else self.s.sql("""SELECT s.device_id::text, lower(s.mac::text), host(s.ip), s.ingress_interface,
                   to_char(s.ended, 'MM-DD HH24:MI'), extract(epoch FROM s.ended)::bigint
                 FROM iam_v2.sessions s JOIN iam_v2.entitlements e ON e.id = s.entitlement_id
                 JOIN iam_v2.entitlement_devices d ON d.entitlement_id = e.id AND d.device_id = s.device_id AND d.status = 'AUTHORIZED'
@@ -823,8 +838,9 @@ class Monitor:
                      f"took a new lease at {back} after its session ended; still eligible (package valid, device authorized)", "confirmed", "MEDIUM",
                      ended, back, 1, "ONGOING", "reconnects when its portal page loads; while the HTTPS portal redirects OS probes first, devices that "
                      "only notify (Android) wait for the guest to tap")
-        self.add("reconnect:missed", "automatic reconnection", WARN if missed else PASS,
-                 f"{missed} eligible device(s) back on the network more than 10 min without being reconnected", persist=2)
+        if leases_by_mac is not None:
+            self.add("reconnect:missed", "automatic reconnection", WARN if missed else PASS,
+                     f"{missed} eligible device(s) back on the network more than 10 min without being reconnected", persist=2)
         for mac, cnt, first, last, ip, net, dev in self.s.sql("""SELECT a.device_mac::text, count(*), to_char(min(a.occurred_at), 'MM-DD HH24:MI'), to_char(max(a.occurred_at), 'MM-DD HH24:MI'),
                   host(max(a.device_ip)), max(a.guest_network_name), (SELECT d.id::text FROM iam_v2.devices d WHERE d.mac = a.device_mac LIMIT 1)
                 FROM iam_v2.sign_in_attempts a WHERE a.occurred_at > now() - interval '24 hours' AND a.result = 'ADDRESS_CONFLICT' GROUP BY a.device_mac"""):
@@ -943,9 +959,15 @@ class Incidents:
         return active, recovered
 
 
+def overall(active, nv):
+    """The headline: the worst active issue, NOT_VERIFIED when evidence is missing and nothing worse is active."""
+    worst = max([r.status for r, _ in active] + [PASS], key=RANK.get)
+    return NV if worst == PASS and nv else worst
+
+
 def summary_line(mon, active, nv):
     m = mon.m
-    worst = max([r.status for r, _ in active] + [PASS], key=RANK.get)
+    worst = overall(active, nv)
     clients = (f"refused_15m: {m.get('refused', 'none')} | ended_15m: {m.get('ends', 'none')} | rejoined_15m={m.get('rejoined', '?')} "
                f"recut2x_6h={m.get('recut', '?')} inhouse_allowance_used_up={m.get('usedup', '?')} stuck_60m={m.get('stuck', '?')}")
     return (f"{mon.now.strftime('%Y-%m-%dT%H:%M:%SZ')} signin={m.get('signin', '?')} online={m.get('online', '?')} netd_sessions={m.get('netd_sessions', '?')} "
@@ -974,8 +996,8 @@ def table(headers, rows):
 def render_report(mon, active, recovered, state):
     now = mon.now.strftime("%Y-%m-%d %H:%M UTC")
     res = mon.results
-    worst = max([r.status for r, _ in active] + [PASS], key=RANK.get)
     counts = {s: sum(1 for r in res if r.status == s) for s in (PASS, WARN, CRIT, NV)}
+    worst = overall(active, counts[NV])
     L = [f"OneGate appliance health report - {now} ({mon.mode})", "",
          f"OVERALL: {worst}   checks: {counts[PASS]} PASS, {counts[WARN]} WARN, {counts[CRIT]} CRITICAL, {counts[NV]} NOT VERIFIED",
          f"monitor cost: {mon.m.get('run_ms')} ms elapsed, {mon.m.get('cpu_ms')} ms CPU", ""]

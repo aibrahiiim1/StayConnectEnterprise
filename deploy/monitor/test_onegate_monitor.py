@@ -150,6 +150,35 @@ class Thresholds(unittest.TestCase):
         self.assertEqual(by_key(run(f, "deep"))["parity:binaries"].status, om.NV)
 
 
+class ReviewFindings(unittest.TestCase):
+    def test_a_service_error_burst_clears_when_its_journal_is_clean(self):
+        f = FakeSys()
+        burst = "".join(json.dumps({"_SYSTEMD_UNIT": "stayconnect-pmsd.service", "MESSAGE": '{"level":"ERROR","msg":"x"}'}) + "\n" for _ in range(25))
+        f.cmds.append((["journalctl", "-u", "stayconnect-*"], 0, burst))
+        state = {}
+        mon = run(f, state=state)
+        om.Incidents(state, NOW).apply(mon.results)
+        self.assertEqual(by_key(mon)["errors:stayconnect-pmsd"].status, om.WARN)
+        f.cmds[0] = (["journalctl", "-u", "stayconnect-*"], 0, "")
+        mon = run(f, state=state)
+        self.assertEqual(by_key(mon)["errors:stayconnect-pmsd"].status, om.PASS)
+        _, rec = om.Incidents(state, NOW).apply(mon.results)
+        self.assertEqual([k for k, _ in rec], ["errors:stayconnect-pmsd"])
+
+    def test_unreadable_leases_are_not_empty_pools(self):
+        f = FakeSys()
+        f.files["/etc/kea/kea-dhcp4.conf"] = json.dumps({"Dhcp4": {"subnet4": [
+            {"interface": "br-g95", "authoritative": True, "pools": [{"pool": "10.0.0.1 - 10.0.0.100"}]}]}})
+        self.assertEqual(by_key(run(f))["dhcp:pools"].status, om.NV)
+
+    def test_the_headline_is_not_pass_while_evidence_is_missing(self):
+        mon = run(FakeSys())
+        nv = sum(1 for r in mon.results if r.status == om.NV)
+        self.assertIn("status=NOT_VERIFIED", om.summary_line(mon, [], nv))
+        self.assertIn("OVERALL: NOT_VERIFIED", om.render_report(mon, [], [], {}))
+        self.assertEqual(om.overall([], 0), om.PASS)
+
+
 class UnitParity(unittest.TestCase):
     def setup(self, installed):
         f = FakeSys()
