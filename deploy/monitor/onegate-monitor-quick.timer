@@ -1,0 +1,11 @@
+[Unit]
+Description=OneGate monitor: quick sweep every 5 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+RandomizedDelaySec=30s
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target
