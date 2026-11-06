@@ -168,7 +168,7 @@ export function TwoStepEnable({ onDone, onCancel, onEnabled }: {
       ) : (
         <form onSubmit={start} className="space-y-4">
           <ErrorBanner err={err} className="mb-0" />
-          <Field label="Your password" required hint="Confirms it is you before an authenticator is added." className="max-w-sm">
+          <Field label="Your password" required className="max-w-sm">
             <Input
               // eslint-disable-next-line jsx-a11y/no-autofocus
               autoFocus

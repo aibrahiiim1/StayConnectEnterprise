@@ -711,7 +711,7 @@ export default function GuestAccountsPage() {
       <Dialog open={showNew} onOpenChange={(v) => !v && requestCloseForm()}>
         <DialogContent size="lg">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-1">Add a client account<Explain>The client signs in with this username and password. The password is shown once, after you save.</Explain></DialogTitle>
+            <DialogTitle className="flex items-center gap-1">Add a client account</DialogTitle>
             <DialogDescription className="sr-only">The client signs in with this username and password. The password is shown once, after you save.</DialogDescription>
           </DialogHeader>
           <DialogBody>
@@ -872,10 +872,10 @@ function AccountForm({ account, onSubmit, busy, withPassword, onCancel, error, o
   return (
     <form onSubmit={onSubmit} noValidate onInput={onEdited} onChange={onEdited} className="space-y-4">
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Username" required hint="What the client types. Short is fine — even a single character.">
+        <Field label="Username" required>
           <Input name="username" aria-required maxLength={64} defaultValue={account?.username} placeholder="alex.morgan" />
         </Field>
-        <Field label="Name" hint="For your own reference; the client never sees it.">
+        <Field label="Name">
           <Input name="display_name" maxLength={ACCOUNT_NAME_MAX} defaultValue={account?.display_name ?? ""} placeholder="Visitor pass" />
         </Field>
       </div>

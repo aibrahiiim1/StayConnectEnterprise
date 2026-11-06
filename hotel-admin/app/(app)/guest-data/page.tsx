@@ -258,7 +258,7 @@ export default function GuestDataPage() {
         )}
       </SectionCard>
 
-      <SectionCard flush title="Erasures" description="Every erasure on this site. They hold no guest data.">
+      <SectionCard flush title="Erasures">
         {erasuresCut && (
           <div className="px-4 pt-3"><Callout tone="neutral">Only the 200 most recent erasures are shown. Older ones are kept.</Callout></div>
         )}

@@ -393,7 +393,7 @@ export default function ClientGroupsPage() {
                   <EmptyState
                     icon={<AlertTriangle />}
                     title="Client groups could not be loaded"
-                    hint="The appliance did not return its client groups. Nothing has been changed."
+                    hint="Nothing has been changed."
                     action={
                       <Button variant="secondary" disabled={loading} onClick={() => void load()}>
                         <RefreshCw className={cn(loading && "animate-spin motion-reduce:animate-none")} /> Try again
@@ -477,7 +477,7 @@ export default function ClientGroupsPage() {
                 <EmptyState
                   icon={<AlertTriangle />}
                   title="The history could not be loaded"
-                  hint="The appliance did not return the change log. Nothing has been changed."
+                  hint="Nothing has been changed."
                   action={
                     <Button variant="secondary" disabled={changesLoading} onClick={() => void loadChanges()}>
                       <RefreshCw className={cn(changesLoading && "animate-spin motion-reduce:animate-none")} /> Try again
@@ -486,7 +486,7 @@ export default function ClientGroupsPage() {
                 />
               ) : <SkeletonRows rows={3} cols={4} />
             ) : changes.length === 0 ? (
-              <EmptyState size="sm" title="No changes recorded" hint="Every creation, edit and deletion of a group is recorded here, with who made it and the reason given." />
+              <EmptyState size="sm" title="No changes recorded" hint="Changes to groups appear here." />
             ) : (
               <HistoryList
                 label="Client group history"
@@ -576,7 +576,7 @@ export default function ClientGroupsPage() {
       >
         <QuietHints>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Name" required hint="As it appears when a package chooses its audience." error={errors.name}>
+          <Field label="Name" required error={errors.name}>
             <Input value={f.name} onChange={(e) => { set("name", e.target.value); setErrors((x) => ({ ...x, name: undefined })); }}
               placeholder="Employees" required />
           </Field>
@@ -588,7 +588,7 @@ export default function ClientGroupsPage() {
             <Input type="number" min={PRIORITY_MIN} max={PRIORITY_MAX} step={1} value={f.priority}
               onChange={(e) => { set("priority", e.target.value); setErrors((x) => ({ ...x, priority: undefined })); }} />
           </Field>
-          <Field label="Description" hint="For the next operator. Clients never see it." className="sm:col-span-2">
+          <Field label="Description" className="sm:col-span-2">
             <Input value={f.description} onChange={(e) => set("description", e.target.value)} placeholder="Optional" />
           </Field>
         </div>
@@ -597,7 +597,7 @@ export default function ClientGroupsPage() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1">
               <span className="text-label">Membership rules</span>
-              <InfoHint>Any one rule matching puts the client in the group.</InfoHint>
+              
             </div>
             <Button type="button" variant="ghost" size="sm"
               onClick={() => { set("rules", [...f.rules, { type: "EMAIL_DOMAIN", list: "", include_subdomains: false }]); setEmptyOk(false); setErrors((x) => ({ ...x, empty: undefined })); }}>
@@ -673,7 +673,7 @@ export default function ClientGroupsPage() {
           <Switch checked={f.enabled} onCheckedChange={(v) => set("enabled", v)} label="Group is on" />
         </div>
 
-        <Field label="Reason for this change" hint="Optional. Recorded in the group's history and the activity log.">
+        <Field label="Reason for this change">
           <Input value={f.reason} onChange={(e) => set("reason", e.target.value)} placeholder="Partner pricing agreed with Acme" />
         </Field>
         </QuietHints>

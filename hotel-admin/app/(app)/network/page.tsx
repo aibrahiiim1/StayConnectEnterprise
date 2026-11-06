@@ -369,7 +369,7 @@ export default function NetworkPage() {
       )}
 
       {!pending && hasResults && (
-        <SectionCard className={FADE} title="Validation & health" description="The result of the last Validate or Apply on this screen.">
+        <SectionCard className={FADE} title="Validation & health">
           <ApplyResults validation={validation} health={health} />
         </SectionCard>
       )}

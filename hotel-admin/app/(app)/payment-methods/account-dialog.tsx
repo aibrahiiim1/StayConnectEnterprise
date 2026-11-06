@@ -176,7 +176,7 @@ export function AccountDialog({
         <Field label="Merchant account reference" required hint="The account or merchant identifier the provider gave you.">
           <Input value={d.merchant_account_ref} maxLength={200} autoComplete="off" onChange={(e) => set("merchant_account_ref", e.target.value)} />
         </Field>
-        <Field label="Display name" required hint="How this account is named in the console.">
+        <Field label="Display name" required>
           <Input value={d.display_name} maxLength={200} onChange={(e) => set("display_name", e.target.value)} />
         </Field>
         <Field label="Currency" required hint="Three letters, as in USD or EGP.">

@@ -39,28 +39,6 @@ import { useOperatorRoles } from "@/lib/whoami-context";
 
 const pageHelp = (hospitality: boolean) => (
   <>
-    <HelpSection title="How this page works">
-      <p>
-        Design the Wi-Fi sign-in page: choose a layout, brand it, and check it in the live preview. The preview is
-        the real sign-in page with your unsaved changes. Clients see your changes as soon as you save.
-      </p>
-      <p>
-        The preview shows the sign-in methods your clients actually see. Which methods those are is decided in
-        Sign-in methods, not on this page.
-      </p>
-    </HelpSection>
-    <HelpSection title="The sections">
-      <HelpList
-        items={[
-          <><strong>Template</strong>: each card is your own sign-in page in that layout. Every sign-in method works the same in all of them; only the arrangement changes. Only the options the chosen layout uses are shown.</>,
-          <><strong>Brand</strong>: logo, background photograph, colours and type. Images are stored on this appliance and served from it, so they load for a client who has no internet yet.</>,
-          <><strong>Content</strong>: your own words, shown to every client in every language.</>,
-          <><strong>Sign-in page text</strong> and <strong>Languages</strong>: the wording clients read, and which languages they are offered.</>,
-          <><strong>Advanced HTML &amp; CSS</strong>: your own styling and markup, checked before it is accepted.</>,
-          <><strong>History</strong>: the most recent saves of this page; restoring one makes it what clients see again.</>,
-        ]}
-      />
-    </HelpSection>
     <HelpSection title="Fonts and links">
       <p>
         Only fonts already on the client&apos;s device are used. A client reaching the portal has no internet yet,
@@ -304,7 +282,7 @@ export default function PortalSettingsPage() {
           <EmptyState
             icon={<AlertTriangle />}
             title="Portal settings could not be loaded"
-            hint="The appliance did not return the sign-in page design. Nothing has been changed."
+            hint="Nothing has been changed."
             action={
               <Button variant="secondary" disabled={loading} onClick={() => void load()}>
                 <RefreshCw className={cn(loading && "animate-spin motion-reduce:animate-none")} /> Try again

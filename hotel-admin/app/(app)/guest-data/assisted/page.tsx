@@ -118,7 +118,7 @@ export default function AssistedGuestDataPage() {
           <SectionCard
             flush
             title="Requests"
-            description="Closed requests keep who, when, how it was verified and how many records — no device address and no notes."
+
           >
             {listErr && <div className="px-4 pt-3"><ErrorBanner err={listErr} className="mb-0" /></div>}
             {list !== null && list.length === 0 && !listErr && <EmptyState size="sm" title="No assisted request yet" />}
@@ -233,7 +233,7 @@ function NewRequest({ onCancel, onOpened }: { onCancel: () => void; onOpened: (i
   return (
     <SectionCard
       title="New assisted request"
-      description="Nothing is handed over or changed by opening a request. You review the records first."
+
     >
         <form className="space-y-6" onSubmit={submit}>
           <fieldset className="space-y-2">

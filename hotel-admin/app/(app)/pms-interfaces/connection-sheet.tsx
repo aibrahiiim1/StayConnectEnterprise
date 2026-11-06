@@ -305,14 +305,10 @@ function OverviewTab({
 
       <Disclosure title="Troubleshooting">
         <ul className="grid gap-2 text-sm sm:grid-cols-2">
-          <li className="flex items-center gap-1"><Link href="/stay-events" className="font-medium underline underline-offset-2">PMS activity</Link>
-            <InfoHint>Every check-in, move and check-out received.</InfoHint></li>
-          <li className="flex items-center gap-1"><Link href="/roster-reconciliation" className="font-medium underline underline-offset-2">Roster reconciliation</Link>
-            <InfoHint>How the guest list is kept identical to the PMS&rsquo;s.</InfoHint></li>
-          <li className="flex items-center gap-1"><Link href="/pms-reconciliation" className="font-medium underline underline-offset-2">Unresolved departures</Link>
-            <InfoHint>Messages that could not be matched to a stay.</InfoHint></li>
-          <li className="flex items-center gap-1"><Link href="/pms-source-conflicts" className="font-medium underline underline-offset-2">Duplicate sources</Link>
-            <InfoHint>Two connections that may be the same PMS.</InfoHint></li>
+          <li className="flex items-center gap-1"><Link href="/stay-events" className="font-medium underline underline-offset-2">PMS activity</Link></li>
+          <li className="flex items-center gap-1"><Link href="/roster-reconciliation" className="font-medium underline underline-offset-2">Roster reconciliation</Link></li>
+          <li className="flex items-center gap-1"><Link href="/pms-reconciliation" className="font-medium underline underline-offset-2">Unresolved departures</Link></li>
+          <li className="flex items-center gap-1"><Link href="/pms-source-conflicts" className="font-medium underline underline-offset-2">Duplicate sources</Link></li>
         </ul>
       </Disclosure>
 
@@ -416,7 +412,7 @@ function PublishDialog({
           {ackErr && <p key={ackErr} role="alert" className={cn("mt-1 text-sm text-destructive", FADE)}>{ackErr}</p>}
         </Callout>
       )}
-      <Field label="Reason" hint="Recorded with the change.">
+      <Field label="Reason">
         <Select value={reason} onChange={(e) => setReason(e.target.value)}>
           {PUBLISH_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
         </Select>
@@ -479,7 +475,7 @@ function ConfigurationTab({
       </SheetSection>
 
       {drafts.length > 0 && (
-        <SheetSection title="Drafts" description="Saved but not live. Nothing changes for guests until one is put live.">
+        <SheetSection title="Drafts" description="Nothing changes for guests until one is put live.">
           <div className="space-y-3">
             {drafts.map((d) => (
               <div key={d.id} className="space-y-3 rounded-lg border border-dashed border-border p-4">
@@ -864,7 +860,7 @@ function CredentialsTab({
     <>
       <SheetSection
         title="Credential"
-        description="What the appliance presents to the PMS provider. It is stored encrypted and is never shown, not here and not to any other operator."
+ description="Stored encrypted and never shown."
         actions={writable && (
           <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>
             {stored ? "Replace credential" : "Store credential"}
@@ -986,7 +982,7 @@ function HistoryTab({
   return (
     <SheetSection
       title="Configuration history"
-      description="Every saved version, newest first. Versions are kept permanently and cannot be edited."
+
     >
       <div className="overflow-hidden rounded-lg border border-border">
         <HistoryList
@@ -1129,7 +1125,7 @@ function ActionsTab({
 
       {!retired && writable && (
         <SheetSection title="Remove this connection"
-          description="Deletes a connection that was never used, or retires one that was and keeps its history. You are told which before anything happens.">
+>
           <Button variant="secondary" onClick={() => setRemoving(true)}>Remove connection…</Button>
           <RemoveConnectionDialog open={removing} onOpenChange={setRemoving} connection={iface} onDone={onChanged} />
         </SheetSection>
@@ -1191,7 +1187,7 @@ function ActionsTab({
           } catch (e) { setErr(e); } finally { setBusy(false); }
         }}
       >
-        <Field label="Reason" hint="Recorded with the change.">
+        <Field label="Reason">
           <Select value={reason} onChange={(e) => setReason(e.target.value)}>
             {LIFECYCLE_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
           </Select>

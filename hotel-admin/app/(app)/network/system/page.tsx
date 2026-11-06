@@ -305,13 +305,6 @@ export default function NetworkSettingsPage() {
       )}
       help={
         <>
-          <HelpSection title="What this page covers">
-            <p>
-              Only the appliance&rsquo;s WAN / management uplink and the legacy base bridge. Client Wi-Fi is configured
-              under <strong>Client networks</strong> (VLAN, gateway, sign-in page) and <strong>DHCP &amp; leases</strong>{" "}
-              (address pools, lease times, reservations).
-            </p>
-          </HelpSection>
           <HelpSection title="How a change is applied">
             <HelpList
               items={[
@@ -413,7 +406,7 @@ export default function NetworkSettingsPage() {
 
       <SectionCard
         title="WAN / management"
-        description="The uplink to the internet, and the address you reach this admin on."
+
         actions={<LinkBadge up={state.wan.link_up} />}
         bodyClassName="space-y-4"
       >
@@ -583,7 +576,7 @@ export default function NetworkSettingsPage() {
       <div className="grid gap-5 lg:grid-cols-2">
         <SectionCard
           title="Diagnostics"
-          description="A read-only snapshot of addresses, routes and reachability."
+
           actions={
             <>
               <Button variant="secondary" size="sm" onClick={loadDiag} disabled={diagBusy}>
@@ -603,7 +596,7 @@ export default function NetworkSettingsPage() {
           ))}
         </SectionCard>
 
-        <SectionCard flush title="Change history" description="Every apply, keep and roll back of these settings.">
+        <SectionCard flush title="Change history">
           {history === null ? (
             <div className="px-5 py-4"><Skeleton className="h-20 w-full" /></div>
           ) : (

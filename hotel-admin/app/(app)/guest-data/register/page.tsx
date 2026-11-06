@@ -159,7 +159,7 @@ export default function RequestRegisterPage() {
         </Callout>
       )}
 
-      <SectionCard flush title="Requests" description="Open ones first, soonest due on top.">
+      <SectionCard flush title="Requests">
         {rows === null ? null : rows.length === 0 ? (
           <EmptyState size="sm" title="No request recorded" />
         ) : (

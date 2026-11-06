@@ -180,7 +180,7 @@ export function LedgerCard({ writable }: { writable: boolean }) {
   return (
     <SectionCard
       title="Erasure ledger"
-      description="Every erasure is recorded in two places, so a restored backup can never bring an erased guest back."
+
       actions={
         <Button size="sm" variant="secondary" disabled={refreshing} onClick={async () => { setRefreshing(true); await load(true); setRefreshing(false); }}>
           <RefreshCw aria-hidden /> Check and retry now

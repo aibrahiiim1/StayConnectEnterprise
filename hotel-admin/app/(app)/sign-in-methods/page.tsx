@@ -16,7 +16,6 @@ import { Card, CardBody, CardDescription, CardHeader, CardTitle, SectionCard } f
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, QuietHints, Select } from "@/components/ui/input";
-import { InfoHint } from "@/components/ui/quiet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Callout } from "@/components/ui/error-banner";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -91,7 +90,6 @@ export default function SignInMethodsPage() {
   const smsMod = moduleLicensed(caps, "sms_otp");
   const whatsappMod = moduleLicensed(caps, "whatsapp_otp");
   const socialMod = moduleLicensed(caps, "social_login");
-  const cardMod = moduleLicensed(caps, "card_payment");
 
   const [cfg, setCfg] = useState<AuthMethods | null>(null);
   const [loadErr, setLoadErr] = useState<unknown>(null);
@@ -198,14 +196,6 @@ export default function SignInMethodsPage() {
       description="How clients sign in, for the whole site. A network can narrow these: see By network."
       help={
         <>
-          <HelpSection title="What this page sets">
-            <p>
-              How clients prove who they are on the portal, for the whole site. Each switch applies immediately — the next
-              client to open the sign-in page sees it, on every network that has not switched that method off for itself.
-              Turning a method off does not disconnect clients already online. <em>What each client network offers</em>
-              shows the result per network.
-            </p>
-          </HelpSection>
           <HelpSection title="The methods">
             <HelpList
               items={[
@@ -251,7 +241,7 @@ export default function SignInMethodsPage() {
           <EmptyState
             icon={<AlertTriangle />}
             title="Sign-in methods could not be loaded"
-            hint="The appliance did not return its sign-in settings, so none are shown rather than showing every method as off. Nothing has been changed."
+            hint="Nothing has been changed."
             action={
               <Button variant="secondary" disabled={loading} onClick={() => void load()}>
                 <RefreshCw className={cn(loading && "animate-spin motion-reduce:animate-none")} /> Try again
@@ -378,12 +368,11 @@ export default function SignInMethodsPage() {
         </TabsList>
 
         <TabsContent value="methods" className="mt-5 space-y-5">
-          <SectionCard title="Methods" description="Each switch applies immediately; clients already online stay connected. Methods of modules this site is not licensed for are not shown." flush>
+          <SectionCard title="Methods" description="Each switch applies immediately." flush>
             <ul className="divide-y divide-border">
               <MethodRow
                 icon={<Ticket />}
                 title="Voucher code"
-                description="The client types a code from a printed or emailed voucher."
                 enabled={!!cfg.voucher?.enabled}
                 busy={busy === "Voucher"}
                 locked={locked}
@@ -396,7 +385,6 @@ export default function SignInMethodsPage() {
               <MethodRow
                 icon={<KeyRound />}
                 title="Client account"
-                description="A username and password issued to the client."
                 enabled={!!cfg.guest_account?.enabled}
                 busy={busy === "Client account"}
                 locked={locked}
@@ -409,9 +397,6 @@ export default function SignInMethodsPage() {
               <MethodRow
                 icon={<PackageOpen />}
                 title="Choose a package without signing in"
-                description={cardMod
-                  ? "The client picks a Free package, or pays by card, with no credential. A recovery code resumes it later."
-                  : "The client picks a Free package with no credential. A recovery code resumes it later."}
                 enabled={!!cfg.open?.enabled}
                 busy={busy === "Open package selection"}
                 locked={locked}
@@ -425,7 +410,6 @@ export default function SignInMethodsPage() {
                 <MethodRow
                   icon={<Hotel />}
                   title="Room sign-in"
-                  description="Room number and one detail from the reservation, checked against the PMS."
                   enabled={!!pms.enabled}
                   busy={busy === "Room sign-in"}
                   locked={locked}
@@ -445,7 +429,6 @@ export default function SignInMethodsPage() {
                 <MethodRow
                   icon={<Mail />}
                   title="Email accounts"
-                  description="The client registers with their email address and a password, then signs in with them."
                   enabled={!!cfg.email_account?.enabled}
                   busy={busy === "Email accounts"}
                   locked={locked}
@@ -462,7 +445,6 @@ export default function SignInMethodsPage() {
                 <MethodRow
                   icon={<MessageSquare />}
                   title="SMS code"
-                  description="The client receives a one-time code by text message."
                   enabled={!!cfg.sms?.enabled}
                   busy={busy === "SMS code"}
                   locked={locked}
@@ -480,7 +462,6 @@ export default function SignInMethodsPage() {
                 <MethodRow
                   icon={<Smartphone />}
                   title="WhatsApp code"
-                  description="The client receives a one-time code on WhatsApp for their phone number."
                   enabled={!!cfg.whatsapp?.enabled}
                   busy={busy === "WhatsApp code"}
                   locked={locked}
@@ -500,7 +481,6 @@ export default function SignInMethodsPage() {
                   <div className="min-w-0 flex-1 space-y-2">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                       <span className="text-emphasis">Identity providers</span>
-                      <InfoHint>The client signs in with an existing account such as Google. Each provider is offered on its own.</InfoHint>
                       {socialListed.length > 0 && (
                         <Link href="/social-providers" className="inline-flex items-center gap-0.5 text-xs font-medium text-primary underline-offset-4 hover:underline">
                           Identity providers <ArrowUpRight className="size-3.5" aria-hidden />
@@ -741,9 +721,9 @@ function MethodIcon({ icon }: { icon: React.ReactNode }) {
 }
 
 function MethodRow({
-  icon, title, description, enabled, busy, locked, error, writable, onToggle, ready = true, notReadyReason, warning, manageHref, manageLabel,
+  icon, title, enabled, busy, locked, error, writable, onToggle, ready = true, notReadyReason, warning, manageHref, manageLabel,
 }: {
-  icon: React.ReactNode; title: string; description: string;
+  icon: React.ReactNode; title: string;
   enabled: boolean; busy: boolean; locked: boolean; error?: string; writable: boolean; onToggle: (v: boolean) => void;
   ready?: boolean; notReadyReason?: string;
   warning?: string;
@@ -755,7 +735,6 @@ function MethodRow({
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span className="text-emphasis">{title}</span>
-          <InfoHint>{description}</InfoHint>
           <StatusBadge tone={enabled ? "ok" : "default"}>{enabled ? "On" : "Off"}</StatusBadge>
           {!ready && <Badge tone="warn">Not available</Badge>}
           {manageHref && (

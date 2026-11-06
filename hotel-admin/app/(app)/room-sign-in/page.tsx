@@ -151,7 +151,7 @@ export default function RoomSignInPage() {
             <EmptyState
               icon={<AlertTriangle />}
               title="Room sign-in could not be loaded"
-              hint="The appliance did not return the room sign-in settings, so nothing is shown and nothing can be changed. Nothing has been changed."
+              hint="Nothing has been changed."
               action={
                 <Button variant="secondary" disabled={loading} onClick={() => void load()}>
                   <RefreshCw className={cn(loading && "animate-spin motion-reduce:animate-none")} /> Try again
@@ -210,7 +210,7 @@ export default function RoomSignInPage() {
 
       <SectionCard
         title="What the guest types"
-        description="The room number, plus one detail from their reservation. Which PMS checks it is set per network in PMS routing."
+
         className={FADE}
       >
         <fieldset className="space-y-3">

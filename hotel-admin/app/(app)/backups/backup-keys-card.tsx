@@ -204,7 +204,7 @@ function AddHolderDialog({ onClose, onDone }: { onClose: () => void; onDone: (la
         description="The appliance creates a key for this person or place and shows it once. Every new backup is encrypted to it."
         submitLabel="Create key" busy={busy} error={err}
         disabled={label.trim() === "" || !ack || password === ""} onSubmit={create}>
-        <Field label="Key holder" required hint="Who or where keeps it, for example “IT manager”, “General manager” or “Office safe”.">
+        <Field label="Key holder" required>
           <Input value={label} maxLength={80} onChange={(e) => setLabel(e.target.value)} />
         </Field>
         <label className="flex items-start gap-2 text-sm">

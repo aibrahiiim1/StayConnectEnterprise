@@ -349,7 +349,7 @@ export default function HealthPage() {
         </StatGrid>
       )}
 
-      <SectionCard flush title="Services" description="Select a service for its details, logs and recovery history.">
+      <SectionCard flush title="Services">
         <div className={cn(refreshing && sum && refreshingClass)}>
           {failedFirst ? (
             <div role="alert" className={FADE}>
@@ -515,7 +515,7 @@ export default function HealthPage() {
             {writable && (
               <DetailsSection
                 title="Recent logs"
-                description="Sanitised: secrets and client details are removed by the appliance."
+
                 actions={
                   <Button
                     size="xs"
@@ -583,11 +583,7 @@ export default function HealthPage() {
         reasonPlaceholder="Health check failing since 02:10"
         requirePassword
         onConfirm={restart}
-      >
-        <Callout tone="warning">
-          This is recorded in the activity log against your account.
-        </Callout>
-      </ConfirmDialog>
+      />
     </PageShell>
   );
 }

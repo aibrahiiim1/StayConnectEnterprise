@@ -402,7 +402,7 @@ export default function PMSInterfacesPage() {
 
 function AdvancedDiagnostics({ reviewEvents }: { reviewEvents: number }) {
   return (
-    <SectionCard title="Advanced diagnostics" description="For investigating the PMS integration.">
+    <SectionCard title="Advanced diagnostics">
       {reviewEvents > 0 && (
         <Callout tone="warning" title={`${reviewEvents.toLocaleString()} PMS message${reviewEvents === 1 ? " needs" : "s need"} a decision`} className="mb-3">
           {reviewEvents === 1 ? "It" : "They"} could not be matched to a stay. Sign-in continues from the guest list

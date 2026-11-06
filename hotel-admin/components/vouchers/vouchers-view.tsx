@@ -19,7 +19,7 @@ import { LiveStatus, ReadOnlyNotice, refreshingClass } from "@/components/ui/pat
 import { usePoll } from "@/lib/use-poll";
 import { cn } from "@/lib/utils";
 import { PageHeader, PageShell, StatCard, StatGrid } from "@/components/ui/page";
-import { HelpList, HelpSection } from "@/components/help";
+import { HelpSection } from "@/components/help";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -226,14 +226,6 @@ export function VouchersView(props: {
         )}
         help={
           <>
-            <HelpSection title="Four jobs">
-              <HelpList items={[
-                <><strong>Issue</strong> prints a batch. The codes appear once, in the issue dialog.</>,
-                <><strong>Show code</strong> recovers one code for a card already in circulation.</>,
-                <><strong>Export</strong> recovers a whole batch, with one record naming the size of the selection.</>,
-                <><strong>Cancel</strong> ends an unused card that has not expired. A used card cannot be cancelled: that client already has access.</>,
-              ]} />
-            </HelpSection>
             <HelpSection title="Showing and exporting codes">
               <p>
                 A voucher code is encrypted, not hashed, so it can be read again. Showing or exporting a code needs

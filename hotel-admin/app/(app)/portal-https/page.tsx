@@ -351,7 +351,7 @@ export default function PortalHTTPSPage() {
 
             <SectionCard
               title="Portal address"
-              description="A private address inside the appliance, answered on client networks only."
+
               actions={writable && (
                 <Button size="sm" variant="secondary" disabled={busy !== null}
                   onClick={() => { setAddressInput(doc.settings.portal_ip); setAddressErr(null); setAddressIssues([]); setEditingAddress(true); }}>
@@ -375,7 +375,7 @@ export default function PortalHTTPSPage() {
             </SectionCard>
           </div>
 
-          <SectionCard flush title="Certificates" description="Renewed automatically, each time with a new key.">
+          <SectionCard flush title="Certificates">
             {doc.certificates.length === 0 ? (
               <EmptyState size="sm" icon={<ShieldCheck />} title="No certificate yet" hint="One is requested as soon as this appliance has a host name." />
             ) : (
@@ -487,7 +487,7 @@ export default function PortalHTTPSPage() {
             )}
           </SectionCard>
 
-          <SectionCard flush title="Change history" description="Portal address and domain changes, newest first.">
+          <SectionCard flush title="Change history">
             <HistoryList
               label="Portal HTTPS change history"
               emptyLabel="No changes yet."

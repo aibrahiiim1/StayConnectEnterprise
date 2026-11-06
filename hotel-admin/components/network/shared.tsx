@@ -250,7 +250,7 @@ export function AddReservationDialog({
       <Field label="Reserved IP address" required hint="Must be inside the client network's subnet.">
         <Input value={f.reserved_ip} onChange={(e) => setF({ ...f, reserved_ip: e.target.value })} placeholder="10.20.0.50" className="font-mono" autoComplete="off" />
       </Field>
-      <Field label="Hostname" optional hint="A name that helps you recognise the device.">
+      <Field label="Hostname" optional>
         <Input value={f.hostname} onChange={(e) => setF({ ...f, hostname: e.target.value })} placeholder="office-printer" />
       </Field>
       <SwitchRow label="Enabled" checked={f.enabled} onChange={(v) => setF({ ...f, enabled: v })} />

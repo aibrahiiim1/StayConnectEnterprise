@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { HelpTip } from "@/components/help";
-import { QuietDescription } from "@/components/ui/quiet";
 
 // The scrolling layout owns the page gutter; this shell controls the measure and the vertical rhythm only.
 
@@ -24,11 +23,6 @@ export function PageShell({
   return <div className={cn("mx-auto w-full space-y-5", WIDTHS[width], className)}>{children}</div>;
 }
 
-/**
- * Title, the help trigger (detailed guidance lives in `help`, shown in the HelpTip side sheet), an info icon carrying the
- * one-sentence description (no line of text under the title: it was noise on every page), and the page's actions on the
- * right. The top-bar breadcrumb provides orientation.
- */
 export function PageHeader({
   title,
   description,
@@ -61,10 +55,9 @@ export function PageHeader({
         <div className="min-w-[min(100%,16rem)] flex-1">
           <div className="flex min-h-9 flex-wrap items-center gap-x-2 gap-y-1">
             <h1 className="text-subtitle sm:text-title">{title}</h1>
-            {help && (
-              <HelpTip title={helpTitle ?? (typeof title === "string" ? title : "This page")}>{help}</HelpTip>
+            {(help ?? description) && (
+              <HelpTip title={helpTitle ?? (typeof title === "string" ? title : "This page")}>{help ?? <p>{description}</p>}</HelpTip>
             )}
-            <QuietDescription>{description}</QuietDescription>
             {meta && <div className="flex items-center gap-2">{meta}</div>}
           </div>
         </div>

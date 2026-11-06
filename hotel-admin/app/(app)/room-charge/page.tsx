@@ -138,12 +138,6 @@ export default function RoomChargePage() {
               Only a site administrator, and only for a FIAS interface. Everyone else sees the approval and its state.
             </p>
           </HelpSection>
-          <HelpSection title="Where clients see it">
-            <p>
-              Room charge is one of the payment methods under Internet offering → Payment methods. Once an interface is
-              approved and posting is authorised on this appliance, a guest who signs in with their room can choose it.
-            </p>
-          </HelpSection>
         </>
       }
     />
@@ -182,7 +176,7 @@ export default function RoomChargePage() {
           <EmptyState
             icon={<AlertTriangle />}
             title="Room charge could not be loaded"
-            hint="The appliance did not return the PMS connections and their room charge approval, so they are not known. Nothing has been changed."
+            hint="Nothing has been changed."
             action={tryAgain}
           />
         </Card>
@@ -797,7 +791,7 @@ function MirrorAgeDialog({ iface, onClose, onSaved }: { iface: OnboardingInterfa
         error={hoursOk ? undefined : "Enter a whole number of hours between 1 and 24."}>
         <InputGroup suffix="hours" className="w-40"><Input type="number" inputMode="numeric" min={1} max={24} step={1} value={hours} onChange={(e) => setHours(e.target.value)} aria-label="Maximum age in hours" /></InputGroup>
       </Field>
-      <Field label="Reason" required hint="Recorded in the activity log.">
+      <Field label="Reason" required>
         <Input value={reason} maxLength={REASON_MAX} onChange={(e) => setReason(e.target.value)} />
       </Field>
       <Field label="Confirm your password" required>

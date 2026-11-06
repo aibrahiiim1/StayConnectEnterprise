@@ -425,7 +425,7 @@ export default function ServicePlansPage() {
           <EmptyState
             icon={<Gauge />}
             title="The internet offering is not switched on for this appliance"
-            hint="Service plans and internet packages become available once this capability is enabled for the site. Contact your Semantics administrator." />
+            hint="Ask your Semantics administrator to enable it for this site." />
         </Card>
       ) : (
         <Card className="overflow-hidden">
@@ -459,7 +459,7 @@ export default function ServicePlansPage() {
               size="sm"
               icon={<Gauge />}
               title="No service plans yet"
-              hint="A service plan defines the speed, devices and allowances a client receives. Create one, then attach it to an internet package."
+              hint="Create one, then attach it to an internet package."
               action={writable ? <Button onClick={() => startNew()}><Plus /> Add the first plan</Button> : undefined} />
           ) : shown.length === 0 ? (
             <EmptyState size="sm" icon={<Gauge />} title="No plan matches" hint="Clear the search or choose another filter." />
@@ -686,7 +686,7 @@ export default function ServicePlansPage() {
             <form id="service-plan-form" key={prefill?.plan_id ?? "new"} onSubmit={onPublish} noValidate
               onInput={() => setFormDirty(true)} onChange={() => setFormDirty(true)}
               className="grid gap-x-4 gap-y-4 sm:grid-cols-2">
-              <Field label="Name" required className="sm:col-span-2" hint="What operators see in lists and on packages.">
+              <Field label="Name" required className="sm:col-span-2">
                 <Input id="plan-name" name="name" aria-required defaultValue={prefill?.name || prefill?.code || ""} placeholder="Premium Wi-Fi" />
               </Field>
 

@@ -138,7 +138,7 @@ export function DataRetentionCard({ writable }: { writable: boolean }) {
             <Field label="Reason" required>
               <Input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} />
             </Field>
-            <Field label="Your password" required hint="Confirms the change.">
+            <Field label="Your password" required>
               <Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
             </Field>
             <p className="text-caption text-muted-foreground sm:col-span-2">

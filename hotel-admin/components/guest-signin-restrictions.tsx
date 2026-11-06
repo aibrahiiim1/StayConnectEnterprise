@@ -115,7 +115,7 @@ export function ActiveRestrictions({
               <EmptyState
                 icon={<AlertTriangle />}
                 title="Active restrictions could not be loaded"
-                hint="The appliance did not return the devices being asked to wait, so whether any device is waiting is not known. Nothing has been changed."
+                hint="Nothing has been changed."
                 action={
                   <Button variant="secondary" disabled={refreshing} onClick={() => void load()}>
                     <RefreshCw className={cn(refreshing && "animate-spin motion-reduce:animate-none")} /> Try again

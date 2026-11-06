@@ -230,7 +230,7 @@ function ResolveDialog({ acting, onClose, onDone, onStale }: {
         } finally { setBusy(false); }
       }}
     >
-      <Field label="Reason" required hint="Recorded on the case and in the audit log. At most 500 characters.">
+      <Field label="Reason" required hint="At most 500 characters.">
         <Input value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} aria-label="Reason" />
       </Field>
       <Field label="Confirm your password" required>

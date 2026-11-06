@@ -349,7 +349,7 @@ export default function NotificationsPage() {
               <EmptyState
                 icon={<AlertTriangle />}
                 title="Senders could not be loaded"
-                hint="The appliance did not return its senders. Nothing has been changed."
+                hint="Nothing has been changed."
                 action={
                   <Button variant="secondary" disabled={loading} onClick={() => void load()}>
                     <RefreshCw className={cn(loading && "animate-spin motion-reduce:animate-none")} /> Try again
@@ -522,7 +522,7 @@ export default function NotificationsPage() {
               </div>
             </Field>
           )}
-          <Field label="Name" hint="How this sender is labelled in this admin.">
+          <Field label="Name">
             <Input value={f.display_name} onChange={(e) => set("display_name", e.target.value)} placeholder="Optional" />
           </Field>
         </div>
@@ -531,7 +531,7 @@ export default function NotificationsPage() {
         <div className="grid gap-4 sm:grid-cols-2">
           {f.kind === "smtp" && (
             <>
-              <Field label="Mail server" required hint="The SMTP host name or address." error={fieldErr.host}>
+              <Field label="Mail server" required error={fieldErr.host}>
                 <Input value={f.host} onChange={(e) => set("host", e.target.value)} placeholder="smtp.example.com" dir="ltr" required />
               </Field>
               <Field label="Security" hint="STARTTLS upgrades a plain connection; TLS connects encrypted from the start. 'None' sends in the clear, so it is accepted only for a mail server at a private address on your own network.">

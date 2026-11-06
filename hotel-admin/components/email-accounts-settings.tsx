@@ -340,7 +340,7 @@ export function EmailAccountsSettingsCard({ canEdit }: { canEdit: boolean }) {
 
             {canEdit && !data.awaiting_assignment && dirty && (
               <div className="grid gap-4 md:grid-cols-2">
-                <Field label="Reason for the change" error={reasonErr ?? undefined} hint="Recorded in the history below." required>
+                <Field label="Reason for the change" error={reasonErr ?? undefined} required>
                   <Input value={reason} maxLength={500} disabled={busy} onChange={(e) => setReason(e.target.value)}
                     aria-label="Reason for the change" placeholder="Guests at the conference need longer" />
                 </Field>

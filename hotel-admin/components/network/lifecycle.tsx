@@ -134,7 +134,7 @@ export function StagedChangesList({ writable, reloadKey, onCancelled, onLoaded }
   }
 
   return (
-    <SectionCard className={FADE} title="Staged changes" description="Waiting to be applied. Nothing here is live yet: the networks stay as they are until you press Apply changes and keep the change.">
+    <SectionCard className={FADE} title="Staged changes" description="Nothing here is live until you apply and keep the change.">
       <ErrorBanner err={err} className="mb-3" />
       <ul className="space-y-2">
         {groups.map((g) => (
@@ -264,7 +264,7 @@ export function PortModeCard({ writable, reloadKey, onStaged, onLoaded }: { writ
   }
 
   return (
-    <SectionCard title="Client ports" description="What each physical port carries. A port is a wire; each network on it is its own client network with its own purpose, addresses and sign-in.">
+    <SectionCard title="Client ports">
       <ul className="space-y-4">
         {ports.map((p) => (
           <li key={p.name} className="flex flex-wrap items-start justify-between gap-3">

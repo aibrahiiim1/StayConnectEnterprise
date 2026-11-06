@@ -82,7 +82,7 @@ export function DiagnosticsPanel({ networkId }: { networkId: string }) {
   return (
     <SectionCard
       title="Diagnostics"
-      description="What this appliance observes about the network right now. Nothing here changes anything."
+
       actions={
         <>
           <Button variant="secondary" size="sm" disabled={busy !== null} onClick={() => void run(0)}>

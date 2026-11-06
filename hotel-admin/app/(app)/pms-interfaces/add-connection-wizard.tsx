@@ -261,12 +261,12 @@ export function AddConnectionWizard({
                     </Callout>
                   )}
                   <FieldGrid cols={2}>
-                    <Field label="Name" required hint="How this connection appears throughout the admin."
+                    <Field label="Name" required
                       error={showErrors ? nameError : undefined}>
                       <Input value={name} maxLength={120} placeholder="Front office PMS"
                         onChange={(e) => { setTouched(true); setName(e.target.value); }} />
                     </Field>
-                    <Field label="PMS time zone" required hint="Time zone name, for example Europe/Berlin. Starts as the appliance's own time zone. Arrivals and departures are read in it."
+                    <Field label="PMS time zone" required hint="For example Europe/Berlin. Arrivals and departures are read in it."
                       error={showErrors ? tzError : undefined}>
                       <Input value={timezone} placeholder="Africa/Cairo" spellCheck={false}
                         onChange={(e) => { setTouched(true); tzEdited.current = true; setTimezone(e.target.value); }} />
@@ -295,10 +295,7 @@ export function AddConnectionWizard({
 
               {withCreds && step === 2 && provider && (
                 <div className="space-y-4">
-                  <Callout tone="neutral">
-                    Stored encrypted on the appliance and never shown again, not here and not to any other operator.
-                    You can replace it later; you cannot read it back.
-                  </Callout>
+                  <Callout tone="neutral">Stored encrypted. It can be replaced later but never read back.</Callout>
                   <FieldGrid cols={2}>
                     {(provider.credential?.fields ?? []).map((f) => (
                       <Field key={f.key} label={f.label} required={f.required} hint={f.help}

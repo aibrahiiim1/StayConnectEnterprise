@@ -374,7 +374,7 @@ export default function GuestSignInAttemptsPage() {
                   size="sm"
                   icon={<AlertTriangle />}
                   title="Sign-in attempts could not be loaded"
-                  hint="The appliance did not return the attempts, so the list and the counts above are not known. Nothing has been changed."
+                  hint="Nothing has been changed."
                   action={
                     <Button variant="secondary" disabled={refreshing} onClick={() => void list.reload()}>
                       <RefreshCw className={cn(refreshing && "animate-spin motion-reduce:animate-none")} /> Try again

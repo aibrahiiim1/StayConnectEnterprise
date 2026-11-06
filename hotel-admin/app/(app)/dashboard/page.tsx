@@ -10,7 +10,7 @@ import {
   type OverviewRange, type OverviewSnapshot, OVERVIEW_RANGES, fetchOverview, fmtInt, normalizeOverview, reasonText,
 } from "@/lib/api/dashboard";
 import { PageShell, PageHeader, StatCard, StatGrid } from "@/components/ui/page";
-import { HelpList, HelpSection } from "@/components/help";
+import { HelpSection } from "@/components/help";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { QuietDescription } from "@/components/ui/quiet";
 import { Badge, StatusDot } from "@/components/ui/badge";
@@ -139,16 +139,6 @@ export default function DashboardPage() {
         description={`Clients, traffic, sign-ins and appliance health over ${rangeLong}${snap?.timezone ? ` (${snap.timezone})` : ""}.`}
         help={
           <>
-            <HelpSection title="Reading the overview">
-              <p>The page answers, top to bottom, the questions a shift asks:</p>
-              <HelpList items={[
-                <><strong>Does anything need me?</strong> A &ldquo;Needs attention&rdquo; list appears only when something does; otherwise one calm line.</>,
-                <><strong>How busy, how much?</strong> Clients online, sign-ins and data used{hotel ? " and room sign-in readiness" : ""}, each with its trend over the range.</>,
-                <><strong>The shape of the range.</strong> Traffic and devices connected at once.</>,
-                <><strong>Is anyone failing to get in?</strong> Sign-in outcomes, and when clients sign in.</>,
-                <><strong>Packages{hotel ? " and the PMS" : ""}</strong>, the client networks, and the appliance itself.</>,
-              ]} />
-            </HelpSection>
             <HelpSection title="Clients and devices">
               <p>
                 A client is one {hotel ? "room, account or voucher" : "account, voucher or sign-in"} &mdash; whatever the internet was granted to. One client with
@@ -161,9 +151,6 @@ export default function DashboardPage() {
                 nothing substitutes a zero for &ldquo;unknown&rdquo;, and what is not recorded on this appliance is
                 named as not recorded.
               </p>
-            </HelpSection>
-            <HelpSection title="Range and refresh">
-              <p>Choose 24 hours, 7 days or 30 days. The page refreshes itself every 30 seconds.</p>
             </HelpSection>
           </>
         }

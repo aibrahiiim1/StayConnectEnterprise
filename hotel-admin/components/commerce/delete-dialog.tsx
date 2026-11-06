@@ -92,13 +92,12 @@ export function DeleteDialog({
             {answer && deletable && (
               <>
                 <Callout tone="warning" title="This cannot be undone">
-                  The {noun} and all of its saved versions are removed. No client, purchase, voucher or report
-                  refers to it, so no history is lost.
+                  The {noun} and all of its saved versions are removed.
                 </Callout>
                 {onDelete ? (
                   <>
                     <Field label="Why are you deleting it?" htmlFor={reasonId} required
-                      hint="At least 4 characters. Kept in the audit log.">
+ hint="At least 4 characters.">
                       <Input id={reasonId} value={reason} onChange={(e) => setReason(e.target.value)}
                         placeholder="Created by mistake" maxLength={500} required />
                     </Field>

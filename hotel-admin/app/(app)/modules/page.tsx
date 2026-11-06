@@ -253,7 +253,7 @@ export default function ModulesPage() {
 
       <SectionCard
         title="Recent changes"
-        description="Who switched a module on or off here, when and why."
+
         actions={<Link href="/audit" className={LINK}>Activity <ArrowUpRight className="size-3.5" aria-hidden /></Link>}
       >
         {changesErr ? (

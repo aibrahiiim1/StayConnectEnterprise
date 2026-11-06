@@ -274,7 +274,7 @@ export default function BackupsPage() {
           <SectionCard
             flush
             title="Available backups"
-            description="Only a verified backup can be restored. Select one for its details."
+ description="Only a verified backup can be restored."
           >
             {artifacts === null ? (
               err ? null : <SkeletonRows rows={3} cols={4} />
@@ -672,7 +672,7 @@ function StorageAndRetention({ writable }: { writable: boolean }) {
   return (
     <SectionCard
       title="Storage & retention"
-      description="Disk used, the nightly sweep, and how long things are kept."
+
       bodyClassName="space-y-5"
     >
       <StatGrid cols={3}>
@@ -742,7 +742,7 @@ function StorageAndRetention({ writable }: { writable: boolean }) {
             <div className="space-y-3 rounded-md border border-border bg-surface p-4">
               <ErrorBanner err={saveErr} className="mb-0" />
               <Field label="Confirm your password" className="max-w-sm"
-                hint="Changing what is kept, and when, is recorded against your account.">
+>
                 <Input type="password" autoComplete="current-password" value={settingsPw}
                   onChange={(e) => setSettingsPw(e.target.value)} />
               </Field>

@@ -274,7 +274,7 @@ export default function CertificatePage() {
       </SectionCard>
 
       {st && st.available !== false && (
-        <SectionCard title="Renewal" description="Checked daily and renewed automatically.">
+        <SectionCard title="Renewal" description="Renewed automatically.">
           <DescriptionList
             layout="stacked"
             columns={3}
