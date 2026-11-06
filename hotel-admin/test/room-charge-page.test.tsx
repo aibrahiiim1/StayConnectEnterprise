@@ -146,7 +146,7 @@ describe("Hotel → Room charge", () => {
     render(<RoomChargePage />);
     const dialog = await openApproval();
     fireEvent.click(within(dialog).getByRole("button", { name: "Yes, approve" }));
-    expect(await screen.findByText(/changed since the page was loaded/i)).toBeInTheDocument();
+    expect(await screen.findByText(/changed while the form was open/i)).toBeInTheDocument();
     await waitFor(() => expect(g.mock.calls.filter((c) => c[0] === "/pms-financial-onboarding")).toHaveLength(2));
   });
 
@@ -164,7 +164,7 @@ describe("Hotel → Room charge", () => {
     expect(within(rows[3]).getByText(/never retried automatically/i)).toBeInTheDocument();
     expect(within(rows[3]).getByText("Confirmed")).toBeInTheDocument();
     expect(within(rows[3]).getByText(/ticket 48213/)).toBeInTheDocument();
-    expect(within(rows[0]).getByText(/not confirmed — unknown/i)).toBeInTheDocument();
+    expect(within(rows[0]).getByText(/not confirmed, treated as unknown/i)).toBeInTheDocument();
     expect(screen.getByText(/UR always, is treated as\s+unknown/i)).toBeInTheDocument();
     expect(screen.getByText(/recording these does not switch posting on or off/i)).toBeInTheDocument();
     expect(within(rows[0]).getByRole("button", { name: "Confirm NP on Protel main" })).toBeInTheDocument();
@@ -262,7 +262,7 @@ describe("Hotel → Room charge: guest list proof (D48)", () => {
     mirrorRoutes();
     render(<RoomChargePage />);
     const card = await screen.findByTestId("guest-list-proof");
-    expect(within(card).getByText("40 min ago")).toBeInTheDocument();
+    expect(within(card).getByText("40 minutes ago")).toBeInTheDocument();
     expect(within(card).getByText("Within the limit")).toBeInTheDocument();
     expect(within(card).getByText(/4 hours/)).toBeInTheDocument();
     expect(within(card).getByText("(default)")).toBeInTheDocument();

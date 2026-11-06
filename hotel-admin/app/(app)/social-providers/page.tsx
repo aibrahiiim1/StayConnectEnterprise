@@ -1,8 +1,6 @@
 "use client";
 
-// A blank secret on Edit is omitted, never sent empty: that would erase it.
-
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api, ListResp, SocialOAuthProvider, SocialSetupStep } from "@/lib/api";
 import { PROVIDER_CONSOLE_HELP, PROVIDER_LABELS, PortalCallbackURL, keepAvailable, offeredWords } from "@/lib/portal-https";
@@ -10,10 +8,12 @@ import { DEFAULT_SCOPES, extraScopes } from "@/lib/social-scopes";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { Card } from "@/components/ui/card";
+import { DescriptionList } from "@/components/ui/data";
+import { DetailsDrawer, DetailsSection } from "@/components/ui/details-drawer";
 import { RowActions } from "@/components/ui/row-actions";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Input, Field, Select, QuietHints } from "@/components/ui/input";
+import { Input, Field, Select, Textarea, QuietHints } from "@/components/ui/input";
 import { Disclosure, InfoHint } from "@/components/ui/quiet";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -21,13 +21,15 @@ import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { DialogForm, ConfirmDialog } from "@/components/ui/dialog";
 import { Switch, SkeletonRows } from "@/components/ui/misc";
 import { CopyButton, ReadOnlyNotice } from "@/components/ui/patterns";
-import { Plus, KeyRound } from "lucide-react";
+import { Plus, KeyRound, AlertTriangle, RefreshCw, FileKey, Pencil } from "lucide-react";
 import { canWrite } from "@/lib/roles";
 import { useToast } from "@/components/ui/toast";
-import { formatRelative } from "@/lib/utils";
+import { cn, formatRelative } from "@/lib/utils";
 import { useOperatorRoles } from "@/lib/whoami-context";
 
 const PROVIDERS = ["google", "apple", "facebook", "microsoft"] as const;
+const FADE = "animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none";
+const APPLE_ID_RE = /^[A-Z0-9]{10}$/;
 
 type SocialList = ListResp<SocialOAuthProvider> & {
   callback_urls?: PortalCallbackURL[];
@@ -87,7 +89,7 @@ function GoogleSetupChecklist({ steps }: { steps: SocialSetupStep[] }) {
           const st = STEP_STATE[s.state];
           return (
             <li key={s.id} className="flex gap-2 rounded-md border border-border px-3 py-2 text-sm">
-              <span className={`mt-0.5 w-4 shrink-0 text-center font-semibold ${st.className}`} aria-label={st.label} title={st.label}>{st.mark}</span>
+              <span role="img" className={`mt-0.5 w-4 shrink-0 text-center font-semibold ${st.className}`} aria-label={st.label} title={st.label}>{st.mark}</span>
               <div className="min-w-0">
                 <div className="font-medium">{s.title}</div>
                 {s.detail && <div className="break-words text-xs text-muted-foreground">{s.detail}</div>}
@@ -103,6 +105,11 @@ function GoogleSetupChecklist({ steps }: { steps: SocialSetupStep[] }) {
   );
 }
 
+function statusBadge(p: SocialOAuthProvider) {
+  if (p.offered) return <StatusBadge tone="ok">Offered</StatusBadge>;
+  return <StatusBadge tone={p.enabled ? "warn" : "default"}>{p.enabled ? "Not offered" : "Switched off"}</StatusBadge>;
+}
+
 export default function SocialProvidersPage() {
   const toast = useToast();
   const [rows, setRows] = useState<SocialOAuthProvider[] | null>(null);
@@ -110,40 +117,52 @@ export default function SocialProvidersPage() {
   const [httpsActive, setHttpsActive] = useState<boolean | null>(null);
   const roles = useOperatorRoles();
   const [err, setErr] = useState<unknown>(null);
+  const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
-  // Step-up password; never stored.
   const [pw, setPw] = useState("");
   const [formErr, setFormErr] = useState<unknown>(null);
+  const [fileErr, setFileErr] = useState<string | null>(null);
 
   const [mode, setMode] = useState<"closed" | "new" | "edit">("closed");
   const [editing, setEditing] = useState<SocialOAuthProvider | null>(null);
+  const [viewing, setViewing] = useState<SocialOAuthProvider | null>(null);
   const [f, setF] = useState<FormState>(EMPTY);
+  const [initial, setInitial] = useState<FormState>(EMPTY);
   const [deleting, setDeleting] = useState<SocialOAuthProvider | null>(null);
 
   const writable = roles !== null && canWrite("social-providers", roles);
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setF((p) => ({ ...p, [k]: v }));
+  const nameOf = (p: SocialOAuthProvider) => p.display_name || PROVIDER_LABELS[p.provider] || p.provider;
 
   async function load() {
+    setLoading(true);
     try {
       const r = await api.get<SocialList>("/social-providers");
-      setRows(r.data);
+      setRows(r.data ?? []);
       setCallbacks(r.callback_urls ?? []);
       setHttpsActive(typeof r.https_active === "boolean" ? r.https_active : null);
-    } catch (e) { setErr(e); }
+      setErr(null);
+    } catch (e) {
+      setErr(e);
+    } finally {
+      setLoading(false);
+    }
   }
   useEffect(() => {
-    load();
+    void load();
   }, []);
 
+  function begin(next: FormState) {
+    setF(next); setInitial(next); setFormErr(null); setFileErr(null); setPw("");
+  }
   function openNew() {
-    setF(EMPTY); setEditing(null); setFormErr(null); setPw(""); setMode("new");
+    begin(EMPTY); setEditing(null); setMode("new");
   }
   function openEdit(p: SocialOAuthProvider) {
-    setF({
+    begin({
       provider: p.provider,
       display_name: p.display_name ?? "",
       client_id: p.client_id,
-      // Blank on purpose: a placeholder would be sent on save.
       client_secret: "",
       callback_hosts: keepAvailable(p.callback_hosts ?? [], callbacks),
       scopes: p.scopes ?? "",
@@ -152,7 +171,13 @@ export default function SocialProvidersPage() {
       key_id: p.key_id ?? "",
       enabled: p.enabled,
     });
-    setEditing(p); setFormErr(null); setPw(""); setMode("edit");
+    setViewing(null);
+    setEditing(p); setMode("edit");
+  }
+
+  function changeProvider(provider: string) {
+    setF((p) => ({ ...EMPTY, provider, display_name: p.display_name, enabled: p.enabled }));
+    setFileErr(null);
   }
 
   function toggleHost(host: string, on: boolean) {
@@ -160,6 +185,18 @@ export default function SocialProvidersPage() {
       ...p,
       callback_hosts: on ? Array.from(new Set([...p.callback_hosts, host])) : p.callback_hosts.filter((h) => h !== host),
     }));
+  }
+
+  async function readKeyFile(file: File | undefined) {
+    setFileErr(null);
+    if (!file) return;
+    if (file.size > 64 * 1024) { setFileErr("That file is too large to be a .p8 key."); return; }
+    const text = (await file.text()).trim();
+    if (!text.includes("BEGIN") || !text.includes("PRIVATE KEY")) {
+      setFileErr("That file is not a .p8 private key. Choose the AuthKey_….p8 file Apple gave you.");
+      return;
+    }
+    set("client_secret", text);
   }
 
   async function onSubmit() {
@@ -187,7 +224,7 @@ export default function SocialProvidersPage() {
           enabled: f.enabled,
           password: pw,
         };
-        if (f.client_secret) body.client_secret = f.client_secret; // blank keeps the existing secret
+        if (f.client_secret) body.client_secret = f.client_secret;
         await api.patch(`/social-providers/${editing.id}`, body);
       }
       toast.success(mode === "new" ? "Provider added" : "Provider saved");
@@ -209,12 +246,33 @@ export default function SocialProvidersPage() {
     finally { setBusy(false); }
   }
 
-  const canSubmit =
-    pw !== "" && (mode === "new"
-      ? f.client_id.trim() !== "" && f.client_secret !== "" &&
-        (f.provider !== "apple" || (f.team_id.trim() !== "" && f.key_id.trim() !== ""))
-      : true);
+  const isApple = f.provider === "apple";
+  const teamErr = isApple && f.team_id.trim() !== "" && !APPLE_ID_RE.test(f.team_id.trim())
+    ? "The Team ID is 10 uppercase letters and digits, for example A1B2C3D4E5." : undefined;
+  const keyErr = isApple && f.key_id.trim() !== "" && !APPLE_ID_RE.test(f.key_id.trim())
+    ? "The Key ID is the 10 uppercase letters and digits shown next to the key in your Apple developer account." : undefined;
+  const secretLooksWrong = isApple && f.client_secret.trim() !== "" &&
+    !(f.client_secret.includes("BEGIN") && f.client_secret.includes("PRIVATE KEY"));
+
+  const missing = useMemo(() => {
+    const out: string[] = [];
+    const idLabel = ID_LABEL[f.provider] ?? "Client ID";
+    const secretLabel = SECRET_LABEL[f.provider] ?? "Client secret";
+    if (mode === "new" && f.client_id.trim() === "") out.push(`the ${idLabel}`);
+    if (mode === "new" && f.client_secret === "") out.push(`the ${secretLabel}`);
+    if (isApple && (mode === "new" || f.team_id.trim() !== "") && !APPLE_ID_RE.test(f.team_id.trim())) out.push("a valid Team ID");
+    if (isApple && (mode === "new" || f.key_id.trim() !== "") && !APPLE_ID_RE.test(f.key_id.trim())) out.push("a valid Key ID");
+    if (pw === "") out.push("your password");
+    return out;
+  }, [f, mode, pw, isApple]);
+  const canSubmit = missing.length === 0;
+  const disabledReason = missing.length
+    ? `Enter ${missing.length === 1 ? missing[0] : `${missing.slice(0, -1).join(", ")} and ${missing[missing.length - 1]}`} to save.`
+    : undefined;
+  const dirty = useMemo(() => JSON.stringify(f) !== JSON.stringify(initial), [f, initial]);
   const providerName = PROVIDER_LABELS[f.provider] ?? f.provider;
+  const loadFailed = rows === null && err !== null;
+  const extra = extraScopes(f.provider, f.scopes);
 
   return (
     <PageShell>
@@ -247,8 +305,8 @@ export default function SocialProvidersPage() {
         actions={writable && <Button onClick={openNew}><Plus /> Add provider</Button>}
       />
 
-      {roles !== null && !writable && <ReadOnlyNotice>Your role can see the social login providers but not change them.</ReadOnlyNotice>}
-      <ErrorBanner err={err} className="mb-0" />
+      {roles !== null && !writable && <ReadOnlyNotice>Your role can see the identity providers but not change them.</ReadOnlyNotice>}
+      {rows !== null && <ErrorBanner err={err} className="mb-0" />}
 
       {httpsActive === false && (
         <Callout tone="warning" title="Social sign-in is not offered right now">
@@ -259,13 +317,24 @@ export default function SocialProvidersPage() {
 
       <Card className="overflow-hidden">
           {rows === null ? (
-            <SkeletonRows rows={3} cols={5} />
+            loadFailed ? (
+              <EmptyState
+                icon={<AlertTriangle />}
+                title="Identity providers could not be loaded"
+                hint="The appliance did not return its identity providers. Nothing has been changed."
+                action={
+                  <Button variant="secondary" disabled={loading} onClick={() => void load()}>
+                    <RefreshCw className={cn(loading && "animate-spin motion-reduce:animate-none")} /> Try again
+                  </Button>
+                }
+              />
+            ) : <SkeletonRows rows={3} cols={5} />
           ) : rows.length === 0 ? (
             <EmptyState
               size="sm"
               icon={<KeyRound />}
               title="No identity provider is configured"
-              hint="Clients can still sign in with a room number, a voucher or an account."
+              hint="Clients can still sign in with the other methods switched on in Sign-in methods."
               action={writable ? <Button onClick={openNew}><Plus /> Add a provider</Button> : undefined}
             />
           ) : (
@@ -275,16 +344,14 @@ export default function SocialProvidersPage() {
               </THead>
               <TBody>
                 {rows.map((p) => {
-                  const name = p.display_name || PROVIDER_LABELS[p.provider] || p.provider;
+                  const name = nameOf(p);
                   return (
-                    <TR key={p.id} onClick={writable ? () => openEdit(p) : undefined}>
+                    <TR key={p.id} onClick={() => (writable ? openEdit(p) : setViewing(p))}>
                       <TD nowrap className="font-medium">{name}</TD>
                       <TD truncate title={p.client_id} className="hidden max-w-xs font-mono text-xs md:table-cell">{p.client_id}</TD>
                       <TD className="max-w-sm">
                         <div className="flex flex-col items-start gap-1">
-                          {p.offered
-                            ? <StatusBadge tone="ok">Offered</StatusBadge>
-                            : <StatusBadge tone={p.enabled ? "warn" : "default"}>{p.enabled ? "Not offered" : "Hidden"}</StatusBadge>}
+                          {statusBadge(p)}
                           {!p.offered && <span className="text-xs text-muted-foreground">{offeredWords(p.offered_reason, p.provider)}</span>}
                         </div>
                       </TD>
@@ -292,13 +359,16 @@ export default function SocialProvidersPage() {
                         {p.last_success_at ? formatRelative(p.last_success_at) : "Never"}
                       </TD>
                       <TD className="w-0">
-                        {writable && (
-                          <RowActions
-                            subject={name}
-                            primary={{ label: "Edit", onSelect: () => openEdit(p) }}
-                            items={[{ label: "Remove…", danger: true, onSelect: () => { setFormErr(null); setDeleting(p); } }]}
-                          />
-                        )}
+                        <RowActions
+                          subject={name}
+                          primary={writable
+                            ? { label: "Edit", onSelect: () => openEdit(p) }
+                            : { label: "Details", onSelect: () => setViewing(p) }}
+                          items={writable ? [
+                            { label: "Details", onSelect: () => setViewing(p) },
+                            { label: "Remove…", danger: true, onSelect: () => { setFormErr(null); setDeleting(p); } },
+                          ] : undefined}
+                        />
                       </TD>
                     </TR>
                   );
@@ -307,6 +377,53 @@ export default function SocialProvidersPage() {
             </Table>
           )}
       </Card>
+
+      <DetailsDrawer
+        open={viewing !== null}
+        onOpenChange={(v) => !v && setViewing(null)}
+        eyebrow="Identity provider"
+        title={viewing ? nameOf(viewing) : ""}
+        badges={viewing ? statusBadge(viewing) : undefined}
+        actions={writable && viewing ? <Button onClick={() => openEdit(viewing)}><Pencil /> Edit</Button> : undefined}
+      >
+        {viewing && (
+          <>
+            {!viewing.offered && (
+              <p className="text-sm text-muted-foreground">{offeredWords(viewing.offered_reason, viewing.provider)}</p>
+            )}
+            <DetailsSection title="Application">
+              <DescriptionList items={[
+                { label: "Provider", value: PROVIDER_LABELS[viewing.provider] ?? viewing.provider },
+                { label: ID_LABEL[viewing.provider] ?? "Client ID", value: <span className="break-all font-mono text-xs">{viewing.client_id}</span> },
+                { label: SECRET_LABEL[viewing.provider] ?? "Client secret", value: viewing.secret_set ? "Stored (never shown)" : "Not stored" },
+                ...(viewing.provider === "microsoft" ? [{ label: "Directory (tenant)", value: viewing.tenant || "common" }] : []),
+                ...(viewing.provider === "apple" ? [
+                  { label: "Team ID", value: <span className="font-mono text-xs">{viewing.team_id || "—"}</span> },
+                  { label: "Key ID", value: <span className="font-mono text-xs">{viewing.key_id || "—"}</span> },
+                ] : []),
+                { label: "Scopes", value: viewing.scopes || "Only what sign-in needs" },
+                { label: "Last used", value: viewing.last_success_at ? formatRelative(viewing.last_success_at) : "Never" },
+              ]} />
+            </DetailsSection>
+            <DetailsSection title="Callback URLs registered">
+              {(viewing.callback_hosts ?? []).length === 0 ? (
+                <p className="text-sm text-muted-foreground">None ticked, so clients are not offered this provider.</p>
+              ) : (
+                <ul className="space-y-1 font-mono text-xs" dir="ltr">
+                  {(viewing.callback_hosts ?? []).map((h) => (
+                    <li key={h} className="break-all">{callbacks.find((c) => c.hostname === h)?.url ?? h}</li>
+                  ))}
+                </ul>
+              )}
+            </DetailsSection>
+            {viewing.provider === "google" && viewing.setup && viewing.setup.length > 0 && (
+              <DetailsSection title="Setup">
+                <GoogleSetupChecklist steps={viewing.setup} />
+              </DetailsSection>
+            )}
+          </>
+        )}
+      </DetailsDrawer>
 
       <DialogForm
         open={mode !== "closed"}
@@ -318,13 +435,15 @@ export default function SocialProvidersPage() {
         busy={busy}
         error={formErr}
         disabled={!canSubmit}
+        disabledReason={disabledReason}
+        dirty={dirty}
         onSubmit={onSubmit}
       >
         <QuietHints>
         <div className="grid gap-4 sm:grid-cols-2">
           {mode === "new" ? (
-            <Field label="Provider">
-              <Select value={f.provider} onChange={(e) => set("provider", e.target.value)}>
+            <Field label="Provider" hint="Changing it clears the values entered for the previous provider.">
+              <Select value={f.provider} onChange={(e) => changeProvider(e.target.value)}>
                 {PROVIDERS.map((p) => <option key={p} value={p}>{PROVIDER_LABELS[p]}</option>)}
               </Select>
             </Field>
@@ -339,32 +458,65 @@ export default function SocialProvidersPage() {
           <Field label={ID_LABEL[f.provider] ?? "Client ID"} required>
             <Input value={f.client_id} onChange={(e) => set("client_id", e.target.value)} required />
           </Field>
-          <Field
-            label={SECRET_LABEL[f.provider] ?? "Client secret"}
-            required={mode === "new"}
-            hint={mode === "edit" ? "Leave blank to keep the secret already stored." : "Stored write-only — it is never shown again."}
-          >
-            <Input
-              type="password"
-              autoComplete="off"
-              value={f.client_secret}
-              onChange={(e) => set("client_secret", e.target.value)}
+          {isApple ? (
+            <div className="space-y-1.5 sm:col-span-2">
+              <Field
+                label={SECRET_LABEL.apple}
+                required={mode === "new"}
+                error={secretLooksWrong ? "Paste the whole .p8 file, including the BEGIN and END lines." : fileErr ?? undefined}
+                hint={mode === "edit" ? "Leave blank to keep the key already stored." : "Paste the whole file or choose it below. Stored write-only — it is never shown again."}
+              >
+                <Textarea
+                  value={f.client_secret}
+                  onChange={(e) => set("client_secret", e.target.value)}
+                  required={mode === "new"}
+                  rows={5}
+                  dir="ltr"
+                  spellCheck={false}
+                  autoComplete="off"
+                  className="font-mono text-xs"
+                  placeholder={mode === "edit" ? "Unchanged" : "-----BEGIN PRIVATE KEY-----"}
+                />
+              </Field>
+              <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs font-medium text-primary underline-offset-4 hover:underline">
+                <FileKey className="size-3.5" aria-hidden />
+                Choose .p8 file
+                <input
+                  type="file"
+                  accept=".p8,application/pkcs8,text/plain"
+                  className="sr-only"
+                  onChange={(e) => { void readKeyFile(e.target.files?.[0]); e.target.value = ""; }}
+                />
+              </label>
+            </div>
+          ) : (
+            <Field
+              label={SECRET_LABEL[f.provider] ?? "Client secret"}
               required={mode === "new"}
-              placeholder={mode === "edit" ? "Unchanged" : ""}
-            />
-          </Field>
+              hint={mode === "edit" ? "Leave blank to keep the secret already stored." : "Stored write-only — it is never shown again."}
+            >
+              <Input
+                type="password"
+                autoComplete="off"
+                value={f.client_secret}
+                onChange={(e) => set("client_secret", e.target.value)}
+                required={mode === "new"}
+                placeholder={mode === "edit" ? "Unchanged" : ""}
+              />
+            </Field>
+          )}
           {f.provider === "microsoft" && (
             <Field label="Directory (tenant)" hint="Leave empty for common (any Microsoft account).">
               <Input value={f.tenant} onChange={(e) => set("tenant", e.target.value)} placeholder="common" />
             </Field>
           )}
-          {f.provider === "apple" && (
+          {isApple && (
             <>
-              <Field label="Team ID" required hint="10 characters, from the Apple Developer account.">
-                <Input value={f.team_id} onChange={(e) => set("team_id", e.target.value)} />
+              <Field label="Team ID" required hint="10 characters, from the Apple Developer account." error={teamErr}>
+                <Input value={f.team_id} onChange={(e) => set("team_id", e.target.value.toUpperCase())} dir="ltr" maxLength={10} />
               </Field>
-              <Field label="Key ID" required hint="The ID of the Sign in with Apple key.">
-                <Input value={f.key_id} onChange={(e) => set("key_id", e.target.value)} />
+              <Field label="Key ID" required hint="The ID of the Sign in with Apple key." error={keyErr}>
+                <Input value={f.key_id} onChange={(e) => set("key_id", e.target.value.toUpperCase())} dir="ltr" maxLength={10} />
               </Field>
             </>
           )}
@@ -386,34 +538,43 @@ export default function SocialProvidersPage() {
               <Link className="underline" href="/portal-https">Portal HTTPS</Link>.
             </Callout>
           ) : (
-            <ul className="space-y-2">
-              {callbacks.map((c) => {
-                const id = `cb-${c.hostname}`;
-                const googleOnOneGate = f.provider === "google" && (c.kind === "ONEGATE" || c.kind === "SHARED");
-                return (
-                  <li key={c.hostname} className="rounded-md border border-border px-3 py-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="break-all font-mono text-xs">{c.url}</span>
-                      <CopyButton value={c.url} variant="ghost" />
-                      {c.canonical && <Badge tone="ok">Current portal address</Badge>}
-                    </div>
-                    <label htmlFor={id} className="mt-1 flex items-center gap-2 text-sm">
-                      <input
-                        id={id}
-                        type="checkbox"
-                        className="size-4 accent-primary"
-                        checked={f.callback_hosts.includes(c.hostname)}
-                        onChange={(e) => toggleHost(c.hostname, e.target.checked)}
-                      />
-                      I registered this callback URL in my {providerName} app
-                    </label>
-                    {googleOnOneGate && (
-                      <p className="mt-1 text-xs text-warning-subtle-foreground">Google does not accept this host name; use your portal domain.</p>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
+            <>
+              <ul className="space-y-2">
+                {callbacks.map((c) => {
+                  const id = `cb-${c.hostname}`;
+                  const googleOnOneGate = f.provider === "google" && (c.kind === "ONEGATE" || c.kind === "SHARED");
+                  const checked = f.callback_hosts.includes(c.hostname);
+                  return (
+                    <li key={c.hostname} className="rounded-md border border-border px-3 py-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="break-all font-mono text-xs">{c.url}</span>
+                        <CopyButton value={c.url} variant="ghost" />
+                        {c.canonical && <Badge tone="ok">Current portal address</Badge>}
+                      </div>
+                      <label htmlFor={id} className={cn("mt-1 flex items-center gap-2 text-sm", googleOnOneGate && !checked && "text-muted-foreground")}>
+                        <input
+                          id={id}
+                          type="checkbox"
+                          className="size-4 accent-primary"
+                          checked={checked}
+                          disabled={googleOnOneGate && !checked}
+                          onChange={(e) => toggleHost(c.hostname, e.target.checked)}
+                        />
+                        I registered this callback URL in my {providerName} app
+                      </label>
+                      {googleOnOneGate && (
+                        <p className="mt-1 text-xs text-warning-subtle-foreground">Google does not accept this host name; use your portal domain.</p>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+              {f.callback_hosts.length === 0 && (
+                <p className={cn("text-xs text-warning-subtle-foreground", FADE)} role="status">
+                  No callback URL is ticked, so clients will not be offered this provider. You can still save and tick one later.
+                </p>
+              )}
+            </>
           )}
         </fieldset>
 
@@ -430,9 +591,9 @@ export default function SocialProvidersPage() {
             <Input value={f.scopes} onChange={(e) => set("scopes", e.target.value)} placeholder={DEFAULT_SCOPES[f.provider] ?? ""} />
           </Field>
         </Disclosure>
-        {extraScopes(f.provider, f.scopes).length > 0 && (
-          <Callout tone="warning" title="This asks guests for more than sign-in needs">
-            Guests will be asked to share {extraScopes(f.provider, f.scopes).map((x) => `"${x}"`).join(", ")} as
+        {extra.length > 0 && (
+          <Callout tone="warning" title="This asks guests for more than sign-in needs" className={FADE}>
+            Guests will be asked to share {extra.map((x) => `"${x}"`).join(", ")} as
             well as their email. Sign-in keeps only the email and the account id, so this data is not used. Under
             data-protection law you must have a reason to collect it and tell clients in your privacy notice.
             You can still save.
@@ -450,7 +611,7 @@ export default function SocialProvidersPage() {
         title="Remove this identity provider?"
         description={
           deleting
-            ? `Clients will no longer be offered ${deleting.display_name || PROVIDER_LABELS[deleting.provider] || deleting.provider} on the sign-in page. The stored client secret is deleted with it, so re-adding means registering it again.`
+            ? `Clients will no longer be offered ${nameOf(deleting)} on the sign-in page. The stored client secret is deleted with it, so re-adding means registering it again.`
             : undefined
         }
         confirmLabel="Remove"

@@ -1,65 +1,99 @@
 "use client";
 
-// This diagnostic omits guest and transaction identifiers; details stay behind audited Manual review.
-
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, ArrowUpRight, CircleCheck, RefreshCw } from "lucide-react";
-import { api, FinancialHealth, surfaceUnavailableMessage } from "@/lib/api";
+import { api, ApiError, FinancialHealth, surfaceUnavailableMessage } from "@/lib/api";
 import { Card, CardBody, SectionCard } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DescriptionList, MetricStrip } from "@/components/ui/data";
+import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader, PageShell, StatGrid } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { Skeleton } from "@/components/ui/misc";
 import { LiveStatus, refreshingClass } from "@/components/ui/patterns";
-import { cn } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 
-const STATUS_TONE: Record<FinancialHealth["status"], "ok" | "info" | "warn" | "err"> = {
+const FADE = "animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none";
+
+const STATUS_TONE: Record<string, "ok" | "info" | "warn" | "err"> = {
   OK: "ok",
   DEGRADED: "warn",
   ATTENTION_REQUIRED: "err",
   HELD: "err",
 };
 
-const STATUS_LABEL: Record<FinancialHealth["status"], string> = {
-  OK: "OK",
+const STATUS_LABEL: Record<string, string> = {
+  OK: "Normal",
   DEGRADED: "Degraded",
   ATTENTION_REQUIRED: "Attention required",
   HELD: "Held",
 };
 
-const STATUS_SUMMARY: Record<FinancialHealth["status"], string> = {
+const STATUS_SUMMARY: Record<string, string> = {
   OK: "Room charges and online payments are moving normally.",
   DEGRADED: "Money is moving, but something is slower or less certain than it should be.",
   ATTENTION_REQUIRED: "Something needs a person to look at it before money can move normally.",
   HELD: "Money movement is held on purpose until the items below are dealt with.",
 };
 
-// Map fixed backend codes locally so alerting never carries guest prose.
-const REASON_TEXT: Record<string, string> = {
-  FINANCIAL_RECOVERY_MODE:
-    "This site is in financial recovery. Money movement is deliberately held until every item in flight has been reconciled.",
-  UNKNOWN_OUTCOMES_AWAITING_REVIEW:
-    "One or more postings or payments ended UNKNOWN. Nobody knows yet whether the money moved, so nothing is retried automatically.",
-  SETTLEMENTS_AWAITING_REVIEW: "Some package payments are waiting on a Manual review decision.",
-  MANUAL_REVIEW_BACKLOG: "The manual review queue is longer or older than it should be.",
-  POSTING_OUTBOX_STALLED: "Postings have been queued longer than expected. The PMS interface may be unreachable.",
-  PAYMENTS_STUCK_PENDING: "Payments have been PENDING longer than a provider call should take.",
-  NO_ACTIVE_PAYMENT_ACCOUNT:
-    "No active default payment account is configured for this site, so online payment cannot be attempted.",
+const REASON_TEXT: Record<string, { text: string; href: string; link: string }> = {
+  FINANCIAL_RECOVERY_MODE: {
+    text: "This site is in financial recovery. Money movement is deliberately held until every item in flight has been reconciled.",
+    href: "/financial-recovery",
+    link: "Recovery",
+  },
+  UNKNOWN_OUTCOMES_AWAITING_REVIEW: {
+    text: "One or more postings or payments ended with an unknown outcome. Nobody knows yet whether the money moved, so nothing is retried automatically.",
+    href: "/financial-review",
+    link: "Manual review",
+  },
+  SETTLEMENTS_AWAITING_REVIEW: {
+    text: "Some package payments are waiting on a Manual review decision.",
+    href: "/financial-settlements",
+    link: "Package payments",
+  },
+  MANUAL_REVIEW_BACKLOG: {
+    text: "The manual review queue is longer or older than it should be.",
+    href: "/financial-review",
+    link: "Manual review",
+  },
+  POSTING_OUTBOX_STALLED: {
+    text: "Postings have been queued longer than expected. The PMS connection may be unreachable.",
+    href: "/pms-interfaces",
+    link: "PMS connection",
+  },
+  PAYMENTS_STUCK_PENDING: {
+    text: "Payments have been pending longer than a provider call should take.",
+    href: "/financial-settlements",
+    link: "Package payments",
+  },
+  NO_ACTIVE_PAYMENT_ACCOUNT: {
+    text: "No active default payment account is configured for this site, so online payment cannot be attempted.",
+    href: "/payment-methods",
+    link: "Payment methods",
+  },
 };
 
-function ageText(seconds: number): string {
-  if (seconds <= 0) return "—";
-  if (seconds < 60) return `${seconds}s`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
-  return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+const LINK = "inline-flex items-center gap-0.5 font-medium text-primary hover:underline";
+
+function plural(n: number, word: string) {
+  return `${n.toLocaleString()} ${word}${n === 1 ? "" : "s"}`;
+}
+
+function ageText(seconds: number, none: string): string {
+  if (seconds <= 0) return none;
+  if (seconds < 60) return plural(seconds, "second");
+  if (seconds < 3600) return plural(Math.floor(seconds / 60), "minute");
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return m === 0 ? plural(h, "hour") : `${plural(h, "hour")} ${plural(m, "minute")}`;
 }
 
 const flag = (n: number, tone: "warn" | "err") => (n > 0 ? tone : "default");
+const count = (n: number) => n.toLocaleString();
 
 export function FinancialHealthView() {
   const [health, setHealth] = useState<FinancialHealth | null>(null);
@@ -74,8 +108,12 @@ export function FinancialHealthView() {
       setHealth(r.health);
       setErr(null);
       setUpdatedAt(Date.now());
-    } catch (e: any) {
-      setErr(surfaceUnavailableMessage(e, "The financial subsystem"));
+    } catch (e) {
+      setErr(
+        e instanceof ApiError && e.status === 404
+          ? surfaceUnavailableMessage(e, "The financial subsystem")
+          : "Charge health could not be loaded. Nothing has been changed.",
+      );
     } finally {
       setLoading(false);
     }
@@ -84,6 +122,9 @@ export function FinancialHealthView() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const stale = health !== null && err !== null;
+  const status = health?.status ?? "";
 
   return (
     <PageShell>
@@ -123,16 +164,9 @@ export function FinancialHealthView() {
           </>
         }
         actions={
-          <>
-            {health && <LiveStatus updatedAt={updatedAt} refreshing={loading} error={!!err} />}
-            <Button variant="secondary" size="sm" onClick={() => void load()} disabled={loading} aria-label="Refresh financial health">
-              <RefreshCw /> Refresh
-            </Button>
-          </>
+          health ? <LiveStatus updatedAt={updatedAt} refreshing={loading} error={stale} onRefresh={() => void load()} /> : undefined
         }
       />
-
-      <ErrorBanner err={err} className="mb-0" />
 
       {!health && loading && (
         <div className="space-y-5" aria-busy="true">
@@ -144,16 +178,39 @@ export function FinancialHealthView() {
         </div>
       )}
 
+      {!health && !loading && err && (
+        <Card role="alert" className={FADE}>
+          <EmptyState
+            icon={<AlertTriangle />}
+            title="Charge health could not be loaded"
+            hint={err}
+            action={
+              <Button variant="secondary" disabled={loading} onClick={() => void load()}>
+                <RefreshCw className={cn(loading && "animate-spin motion-reduce:animate-none")} /> Try again
+              </Button>
+            }
+          />
+        </Card>
+      )}
+
       {health && (
-        <div className={cn("space-y-5", loading && refreshingClass)}>
+        <div className={cn("space-y-5", (loading || stale) && refreshingClass)}>
+          {stale && <ErrorBanner err="Charge health could not be refreshed. Nothing has been changed." className="mb-0" />}
           <Card>
-            <CardBody className="flex flex-col gap-4 sm:flex-row sm:items-start sm:gap-6">
+            <CardBody key={`${status}:${health.reasons.join(",")}`} className={cn("flex flex-col gap-4 sm:flex-row sm:items-start sm:gap-6", FADE)}>
               <div className="shrink-0 space-y-1.5">
                 <div className="text-xs text-muted-foreground">Charges status</div>
-                <StatusBadge tone={STATUS_TONE[health.status]}>{STATUS_LABEL[health.status]}</StatusBadge>
+                <StatusBadge tone={STATUS_TONE[status] ?? "info"}>{STATUS_LABEL[status] ?? "Status not recognised"}</StatusBadge>
               </div>
               <div className="min-w-0 space-y-2">
-                <p className="text-emphasis">{STATUS_SUMMARY[health.status]}</p>
+                <p className="text-emphasis">
+                  {STATUS_SUMMARY[status] ?? "The appliance reported a status this console does not recognise."}
+                </p>
+                {stale && updatedAt !== null && (
+                  <p className={cn("text-xs text-muted-foreground", FADE)}>
+                    These figures are from {formatDate(new Date(updatedAt).toISOString())} and may be out of date.
+                  </p>
+                )}
                 <ul className="space-y-1.5 text-sm text-foreground">
                   {health.reasons.length === 0 ? (
                     <li className="flex items-start gap-2">
@@ -161,12 +218,27 @@ export function FinancialHealthView() {
                       Nothing needs attention.
                     </li>
                   ) : (
-                    health.reasons.map((r) => (
-                      <li key={r} className="flex items-start gap-2">
-                        <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning-subtle-foreground" aria-hidden />
-                        <span>{REASON_TEXT[r] ?? r}</span>
-                      </li>
-                    ))
+                    health.reasons.map((r) => {
+                      const words = REASON_TEXT[r];
+                      return (
+                        <li key={r} className="flex items-start gap-2">
+                          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning-subtle-foreground" aria-hidden />
+                          {words ? (
+                            <span>
+                              {words.text}{" "}
+                              <Link href={words.href} className={LINK}>
+                                {words.link} <ArrowUpRight className="size-3.5" aria-hidden />
+                              </Link>
+                            </span>
+                          ) : (
+                            <span>
+                              A reason this console does not recognise.{" "}
+                              <span className="text-xs text-muted-foreground">For support: <span className="font-mono">{r}</span></span>
+                            </span>
+                          )}
+                        </li>
+                      );
+                    })
                   )}
                 </ul>
               </div>
@@ -178,13 +250,13 @@ export function FinancialHealthView() {
             description="Internet charges posted to a guest's room bill in the PMS. Unknown outcomes are never retried automatically."
             link={{ href: "/financial-review", label: "Manual review" }}
             items={[
-              { label: "Queued", value: health.outbox_queued },
-              { label: "In flight", value: health.outbox_in_flight },
-              { label: "Held (recovery)", value: health.outbox_held_recovery, tone: flag(health.outbox_held_recovery, "warn") },
-              { label: "Oldest waiting", value: ageText(health.outbox_oldest_age_seconds) },
-              { label: "Unknown outcomes", value: health.postings_unknown, tone: flag(health.postings_unknown, "err") },
-              { label: "Review queue", value: health.review_queue_open, tone: flag(health.review_queue_open, "warn") },
-              { label: "Oldest unreviewed", value: ageText(health.review_oldest_age_seconds) },
+              { label: "Queued", value: count(health.outbox_queued) },
+              { label: "Being sent", value: count(health.outbox_in_flight) },
+              { label: "Held during recovery", value: count(health.outbox_held_recovery), tone: flag(health.outbox_held_recovery, "warn") },
+              { label: "Oldest waiting", value: ageText(health.outbox_oldest_age_seconds, "Nothing waiting") },
+              { label: "Unknown outcomes", value: count(health.postings_unknown), tone: flag(health.postings_unknown, "err") },
+              { label: "Review queue", value: count(health.review_queue_open), tone: flag(health.review_queue_open, "warn") },
+              { label: "Oldest unreviewed", value: ageText(health.review_oldest_age_seconds, "Nothing to review") },
             ]}
           />
 
@@ -193,14 +265,14 @@ export function FinancialHealthView() {
             description="Payments a guest makes on the portal, and how each one settled. Unknown outcomes are never retried automatically."
             link={{ href: "/financial-settlements", label: "Package payments" }}
             items={[
-              { label: "Created", value: health.payments_created },
-              { label: "Pending", value: health.payments_pending },
-              { label: "Unknown outcomes", value: health.payments_unknown, tone: flag(health.payments_unknown, "err") },
-              { label: "Oldest in flight", value: ageText(health.payments_oldest_age_seconds) },
-              { label: "Payments waiting", value: health.settlements_required },
-              { label: "Payments in progress", value: health.settlements_in_progress },
-              { label: "Payments to review", value: health.settlements_manual_review, tone: flag(health.settlements_manual_review, "warn") },
-              { label: "Payments failed", value: health.settlements_failed, tone: flag(health.settlements_failed, "err") },
+              { label: "Started", value: count(health.payments_created) },
+              { label: "Pending", value: count(health.payments_pending) },
+              { label: "Unknown outcomes", value: count(health.payments_unknown), tone: flag(health.payments_unknown, "err") },
+              { label: "Oldest still open", value: ageText(health.payments_oldest_age_seconds, "None open") },
+              { label: "Payments waiting", value: count(health.settlements_required) },
+              { label: "Payments in progress", value: count(health.settlements_in_progress) },
+              { label: "Payments to review", value: count(health.settlements_manual_review), tone: flag(health.settlements_manual_review, "warn") },
+              { label: "Payments failed", value: count(health.settlements_failed), tone: flag(health.settlements_failed, "err") },
             ]}
           />
           <SectionCard title="Configuration">
@@ -209,15 +281,24 @@ export function FinancialHealthView() {
                 {
                   label: "Payment account",
                   value: (
-                    <StatusBadge tone={health.payment_account_configured ? "ok" : "warn"}>
-                      {health.payment_account_configured ? "Configured" : "Not configured"}
-                    </StatusBadge>
+                    <span className="inline-flex flex-wrap items-center gap-2">
+                      <StatusBadge tone={health.payment_account_configured ? "ok" : "warn"}>
+                        {health.payment_account_configured ? "Configured" : "Not configured"}
+                      </StatusBadge>
+                      {!health.payment_account_configured && (
+                        <Link href="/payment-methods" className={cn(LINK, "text-xs")}>
+                          Payment methods <ArrowUpRight className="size-3.5" aria-hidden />
+                        </Link>
+                      )}
+                    </span>
                   ),
                 },
                 {
-                  label: "Provider egress",
-                  value: <StatusBadge tone="default">{health.provider_egress_enabled ? "Enabled" : "Disabled"}</StatusBadge>,
-                  hint: "No payment provider has been integrated or verified. No provider is contacted while egress is disabled.",
+                  label: "Contacting the payment provider",
+                  value: <StatusBadge tone="default">{health.provider_egress_enabled ? "Allowed" : "Not allowed"}</StatusBadge>,
+                  hint: health.provider_egress_enabled
+                    ? "This appliance may contact the configured payment provider."
+                    : "This appliance does not contact any payment provider, so online payment cannot complete.",
                 },
               ]}
             />

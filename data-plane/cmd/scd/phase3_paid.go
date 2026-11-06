@@ -134,6 +134,7 @@ func (p *phase3Auth) paidPurchase(w http.ResponseWriter, r *http.Request, tx pgx
 	consumed, err := authctx.NewStore(p.srv.db).ConsumeTx(ctx, tx, acID, authctx.Presenter{
 		Tenant: p.srv.tenID, Site: p.srv.siteID, Device: dev.DeviceID, GuestNetwork: dev.GuestNetwork})
 	if err != nil {
+		noteRetry(ctx, err)
 		notVerified(w, signinattempt.ServiceUnavailable, "paid: consume: "+err.Error())
 		return signinattempt.ServiceUnavailable, false
 	}
@@ -191,6 +192,7 @@ func (p *phase3Auth) paidPurchase(w http.ResponseWriter, r *http.Request, tx pgx
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb, now()+interval '5 minutes', now()) RETURNING id::text`,
 		p.srv.tenID, p.srv.siteID, acID, pkgRev, consumed.Interface, mapping, d.PriceMinor, d.Currency,
 		d.CurrencyExponent, string(snap.Canonical())).Scan(&quoteID); err != nil {
+		noteRetry(ctx, err)
 		notVerified(w, signinattempt.ServiceUnavailable, "paid: quote: "+err.Error())
 		return signinattempt.ServiceUnavailable, false
 	}
@@ -205,11 +207,13 @@ func (p *phase3Auth) paidPurchase(w http.ResponseWriter, r *http.Request, tx pgx
 			notVerified(w, signinattempt.StayNotEligible, "paid: already purchased for this stay")
 			return signinattempt.StayNotEligible, false
 		}
+		noteRetry(ctx, err)
 		notVerified(w, signinattempt.ServiceUnavailable, "paid: purchase: "+err.Error())
 		return signinattempt.ServiceUnavailable, false
 	}
 	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.settlements (tenant_id, site_id, purchase_id, method, status)
 		VALUES ($1,$2,$3,$4,'REQUIRED') RETURNING id::text`, p.srv.tenID, p.srv.siteID, purchaseID, req.Method).Scan(&settlementID); err != nil {
+		noteRetry(ctx, err)
 		notVerified(w, signinattempt.ServiceUnavailable, "paid: settlement: "+err.Error())
 		return signinattempt.ServiceUnavailable, false
 	}
@@ -218,11 +222,13 @@ func (p *phase3Auth) paidPurchase(w http.ResponseWriter, r *http.Request, tx pgx
 		if err := tx.QueryRow(ctx, `SELECT iam_v2.p4_create_room_charge_posting($1,$2,$3)::text`,
 			p.srv.tenID, p.srv.siteID, settlementID).Scan(&posting); err != nil {
 			// The insert gates refused: nothing is committed.
+			noteRetry(ctx, err)
 			notVerified(w, signinattempt.VerifiedNoEligiblePackage, "paid: posting refused: "+err.Error())
 			return signinattempt.VerifiedNoEligiblePackage, false
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
+		noteRetry(ctx, err)
 		notVerified(w, signinattempt.ServiceUnavailable, "paid: commit")
 		return signinattempt.ServiceUnavailable, false
 	}

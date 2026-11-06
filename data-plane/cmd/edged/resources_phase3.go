@@ -571,7 +571,7 @@ func (s *server) listStayEvents(w http.ResponseWriter, r *http.Request) {
 	var statusArg any
 	if v := r.URL.Query().Get("processing_status"); v != "" {
 		switch v {
-		case "PENDING", "APPLIED", "SKIPPED_DUPLICATE", "MANUAL_REVIEW", "REJECTED":
+		case "PENDING", "APPLIED", "SKIPPED_DUPLICATE", "MANUAL_REVIEW", "REJECTED", "FAILED":
 			statusArg = v
 		default:
 			jsonErr(w, http.StatusBadRequest, "bad_request", "unknown processing status")

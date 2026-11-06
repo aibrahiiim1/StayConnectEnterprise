@@ -84,6 +84,9 @@ func RenderKeaDhcp4(nets []GuestNetwork, topo Topology, leaseCSVPath, ctrlSocket
 			"min-valid-lifetime": n.LeaseMin,
 			"max-valid-lifetime": n.LeaseMax,
 			"reservations":       reservations,
+			// Only appliance-served client networks reach this list, so Kea answers a stale address with a NAK instead of
+			// silence; the device then asks for a fresh one rather than keeping an address leased to another guest.
+			"authoritative": true,
 			// user-context carries our network id so lease queries map back to a guest network.
 			"user-context": map[string]any{
 				"guest_network_id": n.ID,
