@@ -1,13 +1,13 @@
 "use client";
 
-// The code step, for an account that turned two-step sign-in on (D68). Turning it on happens on the account page.
-
 import { useEffect, useId, useRef, useState } from "react";
 import { ArrowLeft, Smartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { api, ApiError } from "@/lib/api";
+
+const FADE = "animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none";
 
 type CodeResult = { must_change_password?: boolean; recovery_codes_left?: number };
 
@@ -24,9 +24,13 @@ export function SigninSecondStep({ onDone, onRestart }: {
   const hintId = useId();
 
   const heading = useRef<HTMLHeadingElement | null>(null);
+  const codeRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (lowOnCodes !== null) heading.current?.focus();
   }, [lowOnCodes]);
+  useEffect(() => {
+    codeRef.current?.focus();
+  }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -68,8 +72,8 @@ export function SigninSecondStep({ onDone, onRestart }: {
   const why = busy || codeErr ? null : code.trim() === "" ? "Enter your code to continue." : null;
   return (
     <form onSubmit={submit} className="space-y-4" noValidate>
-      <ErrorBanner err={err} className="mb-0" />
-      {locked && <Callout tone="warning" title="Too many wrong codes">{locked}</Callout>}
+      {err ? <div className={FADE}><ErrorBanner err={err} className="mb-0" /></div> : null}
+      {locked && <Callout tone="warning" title="Too many wrong codes" className={FADE}>{locked}</Callout>}
       <div className="flex items-start gap-3">
         <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg bg-accent text-muted-foreground" aria-hidden>
           <Smartphone className="size-4" />
@@ -83,9 +87,7 @@ export function SigninSecondStep({ onDone, onRestart }: {
       </div>
       <Field label="Code" error={codeErr ?? undefined}>
         <Input
-          // Focus the code field once it replaces the password form.
-          // eslint-disable-next-line jsx-a11y/no-autofocus
-          autoFocus
+          ref={codeRef}
           required
           inputMode="text"
           autoComplete="one-time-code"

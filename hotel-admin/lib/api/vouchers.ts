@@ -232,7 +232,7 @@ export function batchLabel(b: { batch_id: string; created_at?: string | null; no
   const name = batchName(b);
   if (name) return name;
   const d = b.created_at ? shortDate(b.created_at) : "";
-  return d ? `${d} · ${b.batch_id.slice(0, 8)}` : b.batch_id.slice(0, 8);
+  return d ? `Batch of ${d}` : "Unnamed batch";
 }
 
 /**

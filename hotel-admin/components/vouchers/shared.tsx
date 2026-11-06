@@ -13,14 +13,14 @@ import {
   type EffectiveStatus,
 } from "@/lib/api/vouchers";
 
-export function When({ iso, prefix, className }: { iso: string | null | undefined; prefix?: string; className?: string }) {
+export function When({ iso, prefix, className, focusable = true }: { iso: string | null | undefined; prefix?: string; className?: string; focusable?: boolean }) {
   if (!iso) return <span className="text-muted-foreground">—</span>;
   const abs = absoluteTime(iso);
   return (
     <Tooltip content={abs}>
       {/* Keep tooltip details reachable by keyboard. */}
       {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex */}
-      <time dateTime={iso} title={abs} tabIndex={0} className={className}>
+      <time dateTime={iso} title={abs} tabIndex={focusable ? 0 : undefined} className={className}>
         {prefix ? `${prefix} ` : ""}
         {relativeTime(iso)}
       </time>
@@ -28,7 +28,7 @@ export function When({ iso, prefix, className }: { iso: string | null | undefine
   );
 }
 
-export function StatusBadge({ status, plain = false }: { status: EffectiveStatus; plain?: boolean }) {
+export function StatusBadge({ status, plain = false, focusable = true }: { status: EffectiveStatus; plain?: boolean; focusable?: boolean }) {
   // Plain badges avoid an initial-focus tooltip that would swallow Escape.
   if (plain)
     return (
@@ -40,7 +40,7 @@ export function StatusBadge({ status, plain = false }: { status: EffectiveStatus
     <Tooltip content={STATUS_EXPLAIN[status]}>
       {/* Keep tooltip details reachable by keyboard. */}
       {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex */}
-      <span tabIndex={0} className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50">
+      <span tabIndex={focusable ? 0 : undefined} className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50">
         <Badge tone={STATUS_TONE[status]} dot>
           {STATUS_WORDS[status]}
         </Badge>

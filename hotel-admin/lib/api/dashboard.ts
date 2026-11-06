@@ -411,6 +411,8 @@ const RESULTS: Record<string, string> = {
   LICENSE_CAPACITY_REACHED: "Licensed client capacity full",
   DEVICE_LIMIT_REACHED: "Package device limit reached",
   AFTER_CHECKOUT_NEW_DEVICE_REJECTED: "New device refused after check-out",
+  ADDRESS_CONFLICT: "Old network address: Wi-Fi reconnect needed",
+  VERIFIED_NO_PACKAGE_TAKEN: "Verified, no package taken",
 };
 export const resultLabel = (r: string) => RESULTS[r] ?? r.replace(/_/g, " ").toLowerCase();
 
