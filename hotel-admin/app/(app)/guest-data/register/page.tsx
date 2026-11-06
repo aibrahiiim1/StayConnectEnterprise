@@ -1,29 +1,27 @@
 "use client";
 
-// Requests are answered within one month (two more if complex) and a refusal must say why. Who asked is kept only
-// while the request is open.
-
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { SectionCard } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
-import { Button } from "@/components/ui/button";
+import { Button, LinkButton } from "@/components/ui/button";
 import { Input, Select, Field, FieldGrid } from "@/components/ui/input";
 import { StatusBadge } from "@/components/ui/badge";
 import { DialogForm } from "@/components/ui/dialog";
 import { RowActions } from "@/components/ui/row-actions";
 import { HelpSection } from "@/components/help";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { Callout } from "@/components/ui/error-banner";
 import { useToast } from "@/components/ui/toast";
-import { errMsg } from "@/lib/utils";
-import { Plus } from "lucide-react";
+import { ArrowLeft, Plus } from "lucide-react";
 import { METHOD_OPTIONS } from "@/lib/guest-data-assisted-words";
 import {
   OUTCOME_OPTIONS, REGISTER_KIND_WORDS, REGISTER_STATUS_LABEL, REGISTER_STATUS_OPTIONS, REGISTER_STATUS_TONE, dueWords,
 } from "@/lib/guest-data-register-words";
+import { formatDay, guestDataError } from "@/lib/guest-data-errors";
+import { FADE, LoadFailure, StaleNotice } from "@/app/(app)/backups/load-failure";
 
 type Row = {
   id: string; ref: string; kind: "ACCESS" | "ERASURE" | "OTHER"; received_at: string; due_at: string; extended: boolean;
@@ -37,6 +35,8 @@ const today = () => new Date().toISOString().slice(0, 10);
 export default function RequestRegisterPage() {
   const toast = useToast();
   const [rows, setRows] = useState<Row[] | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -57,15 +57,21 @@ export default function RequestRegisterPage() {
   const [file, setFile] = useState<Record<string, unknown> | null>(null);
 
   const load = useCallback(async () => {
+    setLoading(true);
     try {
       const r = await api.get<{ requests: Row[] }>("/guest-data-rights/register");
       setRows(r.requests ?? []);
-    } catch (e) { setErr(errMsg(e)); setRows([]); }
+      setLoadFailed(false);
+    } catch {
+      setLoadFailed(true);
+    } finally {
+      setLoading(false);
+    }
   }, []);
   useEffect(() => { void load(); }, [load]);
 
   function resetAnswer() {
-    setAnswering(null); setNote(""); setErasureRef(""); setAssistedRef(""); setStatus("ANSWERED"); setOutcome("NONE");
+    setAnswering(null); setNote(""); setErasureRef(""); setAssistedRef(""); setStatus("ANSWERED"); setOutcome("NONE"); setErr(null);
   }
 
   async function open() {
@@ -77,7 +83,9 @@ export default function RequestRegisterPage() {
       setRecording(false);
       toast.success("Request recorded", "It is due one month after the day it was received.");
       await load();
-    } catch (e2) { setErr(errMsg(e2)); } finally { setBusy(false); }
+    } catch (e2) {
+      setErr(guestDataError(e2, "The request could not be recorded. Try again in a moment."));
+    } finally { setBusy(false); }
   }
 
   async function extend() {
@@ -85,10 +93,12 @@ export default function RequestRegisterPage() {
     setBusy(true); setErr(null);
     try {
       await api.post(`/guest-data-rights/register/${extending.id}/extend`, { reason: extReason.trim() });
-      toast.success("Extended", "Tell the person within the first month, and why.");
+      toast.success("Request extended", "Tell the person within the first month, and why.");
       setExtending(null); setExtReason("");
       await load();
-    } catch (e2) { setErr(errMsg(e2)); } finally { setBusy(false); }
+    } catch (e2) {
+      setErr(guestDataError(e2, "The request could not be extended. Try again in a moment."));
+    } finally { setBusy(false); }
   }
 
   async function answer() {
@@ -101,15 +111,18 @@ export default function RequestRegisterPage() {
       setFile(r);
       resetAnswer();
       await load();
-    } catch (e2) { setErr(errMsg(e2)); } finally { setBusy(false); }
+    } catch (e2) {
+      setErr(guestDataError(e2, "The request could not be closed. Try again in a moment."));
+    } finally { setBusy(false); }
   }
 
   const refusal = status === "PARTLY_REFUSED" || status === "REFUSED";
 
-  const dialogOpen = recording || extending !== null || answering !== null;
-
   return (
     <PageShell>
+      <LinkButton href="/guest-data" variant="ghost" size="sm" className="-ms-2.5 self-start">
+        <ArrowLeft className="rtl:rotate-180" /> Guest data requests
+      </LinkButton>
       <PageHeader
         title="Request register"
         description="Each data request, when it is due and how it was answered."
@@ -148,80 +161,90 @@ export default function RequestRegisterPage() {
         or <Link className="underline" href="/guest-data/assisted">Assisted requests</Link>.
       </Callout>
 
-      {!dialogOpen && <ErrorBanner err={err} className="mb-0" />}
-
       {file && (
-        <Callout tone="success" title={`Request ${String(file.reference)} closed`}>
-          The site&rsquo;s file of this request (shown once, then removed from the register): {REGISTER_KIND_WORDS[String(file.kind)] ?? String(file.kind)},
-          from <strong>{String(file.requester)}</strong>, received {String(file.received_at)}, due {String(file.due_at)},
-          {file.answered_in_time ? " answered in time" : " answered late"}.{" "}
-          <Button size="xs" variant="secondary" onClick={() => setFile(null)}>Dismiss</Button>
-        </Callout>
+        <div className={FADE}>
+          <Callout tone="success" title={`Request ${String(file.reference)} closed`}>
+            The site&rsquo;s file of this request (shown once, then removed from the register): {REGISTER_KIND_WORDS[String(file.kind)] ?? "A data request"},
+            from <strong>{String(file.requester)}</strong>, received {formatDay(String(file.received_at))}, due {formatDay(String(file.due_at))},
+            {file.answered_in_time ? " answered in time" : " answered late"}.{" "}
+            <Button size="xs" variant="secondary" onClick={() => setFile(null)}>Dismiss</Button>
+          </Callout>
+        </div>
       )}
 
       <SectionCard flush title="Requests" description="Open ones first, soonest due on top.">
-        {rows === null ? null : rows.length === 0 ? (
-          <EmptyState size="sm" title="No request recorded" />
+        {loadFailed && rows !== null && <div className="px-4 pt-3"><StaleNotice what="The requests" /></div>}
+        {rows === null ? (
+          loadFailed ? (
+            <LoadFailure what="The requests" busy={loading} onRetry={() => void load()} />
+          ) : (
+            <p className="px-4 py-6 text-center text-sm text-muted-foreground">Loading the requests…</p>
+          )
+        ) : rows.length === 0 ? (
+          <div className={FADE}><EmptyState size="sm" title="No request recorded" /></div>
         ) : (
-          <Table label="Data requests">
-            <THead>
-              <TR>
-                <TH>Reference</TH>
-                <TH>Request</TH>
-                <TH className="hidden sm:table-cell">Received</TH>
-                <TH>Due</TH>
-                <TH>Status</TH>
-                <TH><span className="sr-only">Actions</span></TH>
-              </TR>
-            </THead>
-            <TBody>
-              {rows.map((r) => (
-                <TR key={r.id}>
-                  <TD nowrap className="font-mono text-xs">{r.ref}</TD>
-                  <TD>
-                    <div>{REGISTER_KIND_WORDS[r.kind]}</div>
-                    {r.status === "OPEN" && <div className="text-caption text-muted-foreground">{r.requester}</div>}
-                    {r.erasure_ref && <div className="font-mono text-caption">{r.erasure_ref}</div>}
-                    {r.assisted_ref && <div className="font-mono text-caption">{r.assisted_ref}</div>}
-                  </TD>
-                  <TD nowrap muted className="hidden sm:table-cell">{r.received_at}</TD>
-                  <TD nowrap>
-                    {r.due_at}{r.extended ? " (extended)" : ""}
-                    {r.status === "OPEN" && <div className={r.overdue ? "text-caption text-destructive" : "text-caption text-muted-foreground"}>{dueWords(r.days_left, r.overdue)}</div>}
-                  </TD>
-                  <TD nowrap><StatusBadge tone={REGISTER_STATUS_TONE[r.status] === "neutral" ? "default" : REGISTER_STATUS_TONE[r.status]}>{REGISTER_STATUS_LABEL[r.status]}</StatusBadge></TD>
-                  <TD className="w-0">
-                    <RowActions
-                      subject={r.ref}
-                      primary={{
-                        label: "Close",
-                        hidden: r.status !== "OPEN",
-                        onSelect: () => { setErr(null); setFile(null); setExtending(null); resetAnswer(); setAnswering(r); },
-                      }}
-                      items={[{
-                        label: "Extend…",
-                        hidden: r.status !== "OPEN" || r.extended || r.overdue,
-                        disabled: busy,
-                        onSelect: () => { setErr(null); setAnswering(null); setExtending(r); },
-                      }]}
-                    />
-                  </TD>
+          <div className={FADE}>
+            <Table label="Data requests">
+              <THead>
+                <TR>
+                  <TH>Reference</TH>
+                  <TH>Request</TH>
+                  <TH className="hidden sm:table-cell">Received</TH>
+                  <TH>Due</TH>
+                  <TH>Status</TH>
+                  <TH><span className="sr-only">Actions</span></TH>
                 </TR>
-              ))}
-            </TBody>
-          </Table>
+              </THead>
+              <TBody>
+                {rows.map((r) => (
+                  <TR key={r.id}>
+                    <TD nowrap className="font-mono text-xs">{r.ref}</TD>
+                    <TD>
+                      <div>{REGISTER_KIND_WORDS[r.kind]}</div>
+                      {r.status === "OPEN" && <div className="text-caption text-muted-foreground">{r.requester}</div>}
+                      {r.erasure_ref && <div className="font-mono text-caption">{r.erasure_ref}</div>}
+                      {r.assisted_ref && <div className="font-mono text-caption">{r.assisted_ref}</div>}
+                    </TD>
+                    <TD nowrap muted className="hidden sm:table-cell">{formatDay(r.received_at)}</TD>
+                    <TD nowrap>
+                      {formatDay(r.due_at)}{r.extended ? " (extended)" : ""}
+                      {r.status === "OPEN" && <div className={r.overdue ? "text-caption text-destructive" : "text-caption text-muted-foreground"}>{dueWords(r.days_left, r.overdue)}</div>}
+                    </TD>
+                    <TD nowrap><StatusBadge tone={REGISTER_STATUS_TONE[r.status] === "neutral" ? "default" : REGISTER_STATUS_TONE[r.status]}>{REGISTER_STATUS_LABEL[r.status]}</StatusBadge></TD>
+                    <TD className="w-0">
+                      <RowActions
+                        subject={r.ref}
+                        primary={{
+                          label: "Close request…",
+                          hidden: r.status !== "OPEN",
+                          onSelect: () => { setFile(null); setExtending(null); resetAnswer(); setAnswering(r); },
+                        }}
+                        items={[{
+                          label: "Extend…",
+                          hidden: r.status !== "OPEN" || r.extended || r.overdue,
+                          disabled: busy,
+                          onSelect: () => { setErr(null); setAnswering(null); setExtending(r); },
+                        }]}
+                      />
+                    </TD>
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
+          </div>
         )}
       </SectionCard>
 
       <DialogForm
         open={recording}
-        onOpenChange={(v) => { if (!v) setRecording(false); }}
+        onOpenChange={(v) => { if (!v) { setRecording(false); setErr(null); } }}
         title="Record a request"
         description="Use the day it was received, not today, if it came earlier."
         submitLabel="Record request"
         busy={busy}
         error={recording ? err : null}
         disabled={requester.trim().length < 2}
+        disabledReason="Say who is asking (at least 2 characters)."
         onSubmit={open}
       >
         <FieldGrid cols={2}>
@@ -244,13 +267,14 @@ export default function RequestRegisterPage() {
 
       <DialogForm
         open={extending !== null}
-        onOpenChange={(v) => { if (!v) { setExtending(null); setExtReason(""); } }}
+        onOpenChange={(v) => { if (!v) { setExtending(null); setExtReason(""); setErr(null); } }}
         title={`Extend request ${extending?.ref ?? ""}`}
         description="Two more months, once, for a complex or numerous request. Tell the person within the first month."
         submitLabel="Extend"
         busy={busy}
         error={extending ? err : null}
         disabled={extReason.trim().length < 4}
+        disabledReason="Say why it needs longer (at least 4 characters)."
         onSubmit={extend}
       >
         <Field label="Why it needs longer" hint="Do not name the guest or give an address or number.">

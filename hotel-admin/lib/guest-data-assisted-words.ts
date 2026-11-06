@@ -1,8 +1,3 @@
-/**
- * Words for assisted guest-data classes, reasons and refusals; kept in step with the database by
- * test/guest-data-assisted-words.
- */
-
 import { formatBytes } from "./utils";
 
 export type RecordClass = "ATTRIBUTABLE" | "CLAIMABLE" | "SHARED" | "CONFLICTING" | "UNVERIFIABLE";
@@ -19,17 +14,17 @@ export const CLASS_WORDS: Record<RecordClass, { label: string; tone: "ok" | "inf
     help: "The access of the reservation or account the requester named, on an address nobody else has used, and you made the three statements. It can be selected.",
   },
   SHARED: {
-    label: "Shared — cannot be attributed",
+    label: "Shared: cannot be attributed",
     tone: "warn",
     help: "A voucher or open access, or a statement is missing. It is never selected here.",
   },
   CONFLICTING: {
-    label: "Conflict — left alone",
+    label: "Conflict: left alone",
     tone: "err",
     help: "The same address was used under another reservation, account or person. It is never selected here.",
   },
   UNVERIFIABLE: {
-    label: "Cannot be verified — left alone",
+    label: "Cannot be verified: left alone",
     tone: "neutral",
     help: "Not fully inside the range, or nothing says whose it is. It is never selected here.",
   },
@@ -86,7 +81,7 @@ export const METHOD_OPTIONS: { value: string; label: string }[] = [
   { value: "ID_CHECKED_IN_PERSON", label: "Identity document checked in person" },
   { value: "ACCOUNT_CONTROL_SHOWN", label: "Requester showed control of the account" },
   { value: "CALLBACK_TO_KNOWN_CONTACT", label: "Called back on a contact the site already holds" },
-  { value: "OTHER_DOCUMENTED", label: "Other — described in the evidence note" },
+  { value: "OTHER_DOCUMENTED", label: "Other, described in the evidence note" },
 ];
 
 export const PURPOSE_WORDS: Record<string, string> = {
@@ -110,13 +105,11 @@ export function parseAddresses(text: string): { ok: string[]; bad: string[] } {
   return { ok, bad };
 }
 
-/** A private (randomised, locally administered) address: the second hex digit of the first byte is 2, 6, a or e. */
 export function isPrivateAddress(mac: string): boolean {
   const d = mac.replace(/[^0-9a-f]/gi, "").toLowerCase()[1];
   return d === "2" || d === "6" || d === "a" || d === "e";
 }
 
-/** Group multicast addresses (low bit of the first byte) name no single device. */
 export function isGroupAddress(mac: string): boolean {
   const d = mac.replace(/[^0-9a-f]/gi, "").toLowerCase()[1];
   return d !== undefined && parseInt(d, 16) % 2 === 1;
