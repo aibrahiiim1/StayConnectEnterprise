@@ -129,7 +129,7 @@ describe("creating a group", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Add group/ }));
     const dialog = await screen.findByRole("dialog");
     fireEvent.change(within(dialog).getByLabelText(/^Name/), { target: { value: "X" } });
-    fireEvent.change(screen.getByTestId("group-rule-list-0"), { target: { value: "not a domain" } });
+    fireEvent.change(screen.getByTestId("group-rule-list-0"), { target: { value: "company.com" } });
     fireEvent.click(within(dialog).getByRole("button", { name: /Create group/ }));
     expect(await within(dialog).findByText(/rule 1: "not a domain" is not a domain name/)).toBeInTheDocument();
     expect((within(dialog).getByLabelText(/^Name/) as HTMLInputElement).value).toBe("X");
@@ -145,6 +145,46 @@ describe("creating a group", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: /Create group/ }));
     expect(await within(dialog).findByText(/Rule 1: enter at least one domain/)).toBeInTheDocument();
     expect(post).not.toHaveBeenCalled();
+  });
+});
+
+describe("checking the rules before the server", () => {
+  it("names an entry that is not a domain, beside its rule, and sends nothing", async () => {
+    routes([]);
+    render(<ClientGroupsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /Add group/ }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText(/^Name/), { target: { value: "X" } });
+    fireEvent.change(screen.getByTestId("group-rule-list-0"), { target: { value: "company.com\n@partner.com" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: /Create group/ }));
+    expect(await within(dialog).findByText(/Rule 1: "@partner\.com" is not a domain/)).toBeInTheDocument();
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("refuses a tenant ID that is not a GUID", async () => {
+    routes([]);
+    render(<ClientGroupsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /Add group/ }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText(/^Name/), { target: { value: "X" } });
+    fireEvent.change(screen.getByTestId("group-rule-type-0"), { target: { value: "IDP_TENANT" } });
+    fireEvent.change(screen.getByTestId("group-rule-list-0"), { target: { value: "contoso" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: /Create group/ }));
+    expect(await within(dialog).findByText(/Rule 1: "contoso" is not a tenant ID/)).toBeInTheDocument();
+    expect(post).not.toHaveBeenCalled();
+  });
+});
+
+describe("a group that cannot be read", () => {
+  it("says so with Try again instead of loading forever", async () => {
+    get.mockImplementation((path: string) => {
+      if (path === "/auth/whoami") return Promise.resolve({ roles: ["site_admin"] });
+      return Promise.reject(new Error("query failed"));
+    });
+    render(<ClientGroupsPage />);
+    expect(await screen.findByText("Client groups could not be loaded")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Try again/ })).toBeInTheDocument();
+    expect(screen.queryByText("query failed")).toBeNull();
   });
 });
 

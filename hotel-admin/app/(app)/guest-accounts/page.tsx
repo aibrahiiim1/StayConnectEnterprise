@@ -21,7 +21,6 @@ import { Input, Field, QuietHints } from "@/components/ui/input";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
-import { PackageControls } from "@/components/package-controls";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogBody,
   ConfirmDialog,
@@ -30,9 +29,11 @@ import { Pagination, ResultsCount, SearchInput } from "@/components/ui/data";
 import { Select } from "@/components/ui/input";
 import { Switch, SkeletonRows } from "@/components/ui/misc";
 import { PasswordFormatCard } from "@/components/guest-accounts/password-format";
-import { OneTimeReveal, ReadOnlyNotice } from "@/components/ui/patterns";
+import { LiveStatus, OneTimeReveal, ReadOnlyNotice, refreshingClass } from "@/components/ui/patterns";
+import { usePoll } from "@/lib/use-poll";
+import { cn } from "@/lib/utils";
 import { useToast } from "@/components/ui/toast";
-import { Plus, KeyRound, Eye, EyeOff, Pencil, Power, Users, Send, LogIn, Monitor, Settings2 } from "lucide-react";
+import { AlertTriangle, Plus, KeyRound, Eye, EyeOff, Pencil, Power, RefreshCw, Users, Send, LogIn, Monitor, Settings2 } from "lucide-react";
 import { formatRelative } from "@/lib/utils";
 import { REASON_HINT, REASON_MAX_CHARS, reasonOk } from "@/lib/reason";
 import { isRemovedAccount, verificationStatus } from "@/lib/account-verification";
@@ -60,6 +61,47 @@ function weakPassword(pw: string): boolean {
   return pw.length > 0 && pw.length < 8;
 }
 
+const browserTimeZone = (): string => {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "this computer's time zone"; }
+  catch { return "this computer's time zone"; }
+};
+
+function localInput(s?: string | null): string {
+  if (!s) return "";
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return "";
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function FormError({ err }: { err: string | null }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (err) ref.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+  }, [err]);
+  return (
+    <div ref={ref}>
+      {err && (
+        <div className="animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none">
+          <ErrorBanner err={err} className="mb-0" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DiscardPrompt({ onKeep, onDiscard }: { onKeep: () => void; onDiscard: () => void }) {
+  const keepRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => { keepRef.current?.focus(); }, []);
+  return (
+    <>
+      <p role="status" className="me-auto text-caption text-foreground">Discard the changes you made?</p>
+      <Button ref={keepRef} type="button" variant="secondary" onClick={onKeep}>Keep editing</Button>
+      <Button type="button" variant="danger" onClick={onDiscard}>Discard changes</Button>
+    </>
+  );
+}
+
 // The one-time password reveal is a modal so the only copy cannot scroll off-screen; the password is never
 // retrievable afterwards.
 
@@ -67,7 +109,14 @@ export default function GuestAccountsPage() {
   const toast = useToast();
   const hospitality = moduleLicensed(useCapabilities(), "hospitality");
   const [rows, setRows] = useState<GuestAccount[] | null>(null);
-  const [portalOn, setPortalOn] = useState<boolean>(false);
+  const [portalOn, setPortalOn] = useState<boolean | null>(null);
+  const [portalLoadErr, setPortalLoadErr] = useState<string | null>(null);
+  const [portalBusy, setPortalBusy] = useState(false);
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  const [formDirty, setFormDirty] = useState(false);
+  const [askDiscard, setAskDiscard] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   // Form errors show inside the dialog; one on the page behind a modal goes unread.
   const [formErr, setFormErr] = useState<string | null>(null);
@@ -110,10 +159,12 @@ export default function GuestAccountsPage() {
   // Paged and searched on the server; the search text goes in a header (a username or name; edged logs request
   // lines). Responses can return in any order, so only the latest request may apply its answer.
   const latest = useRef(0);
+  const hasRows = useRef(false);
   const load = useCallback(async () => {
     const mine = ++latest.current;
     setErr(null);
     setLoadFailed(false);
+    setRefreshing(true);
     try {
       const params = new URLSearchParams();
       if (status) params.set("status", status);
@@ -125,36 +176,56 @@ export default function GuestAccountsPage() {
         // Percent-encoded: a browser refuses non-Latin-1 text (an Arabic or Cyrillic name) in a header.
         needle ? { "X-Account-Search": encodeURIComponent(needle) } : undefined,
       );
-      if (mine !== latest.current) return; // superseded
+      if (mine !== latest.current) return;
       setResp(ga);
       setRows(Array.isArray(ga?.data) ? ga.data : []);
+      setUpdatedAt(Date.now());
+      setRefreshFailed(false);
+      hasRows.current = true;
     } catch (e: any) {
-      if (mine !== latest.current) return; // superseded
-      setErr(e?.message ?? "Failed to load");
-      setLoadFailed(true);
+      if (mine !== latest.current) return;
+      if (hasRows.current) setRefreshFailed(true);
+      else {
+        setErr(e?.message ?? "The appliance did not answer.");
+        setLoadFailed(true);
+      }
+    } finally {
+      if (mine === latest.current) setRefreshing(false);
     }
   }, [q, status, offset, pageSize]);
   useEffect(() => { void load(); }, [load]);
 
-  useEffect(() => {
+  const loadPortal = useCallback(() => {
+    setPortalLoadErr(null);
     api.get<{ enabled: boolean }>("/guest-accounts/portal")
       .then((pv) => setPortalOn(!!pv?.enabled))
-      .catch(() => setPortalOn(false));
+      .catch((e: any) => { setPortalOn(null); setPortalLoadErr(e?.message ?? "The appliance did not answer."); });
   }, []);
+  useEffect(() => { loadPortal(); }, [loadPortal]);
 
   const filtered = rows ?? [];
 
   // Its failure is shown inside Account settings, where the switch is (Codex P2 on PR #295).
   async function onTogglePortal() {
+    if (portalOn === null || portalBusy) return;
     setPortalErr(null);
+    setPortalBusy(true);
     try {
       await api.post("/guest-accounts/portal", { enabled: !portalOn });
-      setPortalOn((v) => !v);
+      setPortalOn(!portalOn);
       toast.success(`Username & Password sign-in ${!portalOn ? "shown on" : "hidden from"} the captive portal.`);
-    } catch (e: any) { setPortalErr(e?.message ?? "Toggle failed"); }
+    } catch (e: any) { setPortalErr(e?.message ?? "The change was not saved."); }
+    finally { setPortalBusy(false); }
   }
 
-  function openNew() { setFormErr(null); setShowNew(true); setEditing(null); setPwFor(null); }
+  function resetForm() { setFormErr(null); setFormDirty(false); setAskDiscard(false); }
+  function openNew() { resetForm(); setShowNew(true); setEditing(null); setPwFor(null); }
+  function closeForms() { setShowNew(false); setEditing(null); resetForm(); }
+  function requestCloseForm() {
+    if (busy) return;
+    if (formDirty) { setAskDiscard(true); return; }
+    closeForms();
+  }
 
   async function onCreate(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -162,6 +233,8 @@ export default function GuestAccountsPage() {
     const form = new FormData(e.currentTarget);
     const generate = form.get("generate") === "on";
     const password = (form.get("password") as string) || "";
+    if (!((form.get("username") as string) || "").trim()) { setFormErr("Enter a username."); setBusy(false); return; }
+    if (!generate && !password) { setFormErr("Enter a password, or tick Generate a strong password instead."); setBusy(false); return; }
     const win = validityWindow(form);
     if (win.error) { setFormErr(win.error); setBusy(false); return; }
     try {
@@ -174,7 +247,7 @@ export default function GuestAccountsPage() {
         valid_from: (form.get("valid_from") as string) ? new Date(form.get("valid_from") as string).toISOString() : undefined,
         valid_until: (form.get("valid_until") as string) ? new Date(form.get("valid_until") as string).toISOString() : undefined,
       });
-      setShowNew(false);
+      closeForms();
       (e.target as HTMLFormElement).reset();
       const shown = resp.generated_password ?? password;
       if (shown) setReveal({ username: resp.account.username, password: shown });
@@ -193,10 +266,11 @@ export default function GuestAccountsPage() {
     setBusy(true); setFormErr(null);
     const form = new FormData(e.currentTarget);
     try {
+      if (editing.self_registered !== true && !((form.get("username") as string) || "").trim()) { setFormErr("Enter a username."); return; }
       const win = validityWindow(form);
       if (win.error) { setFormErr(win.error); return; }
       await api.patch(`/guest-accounts/${editing.id}`, accountEditBody(form, editing.self_registered === true));
-      setEditing(null);
+      closeForms();
       toast.success("Account updated.");
       load();
     } catch (e: any) {
@@ -214,6 +288,11 @@ export default function GuestAccountsPage() {
     const password = (form.get("password") as string) || "";
     const disconnect = form.get("disconnect_sessions") === "on";
     const reason = ((form.get("reason") as string) || "").trim();
+    if (!generate && !password) {
+      setFormErr("Enter a new password, or tick Generate a strong password instead.");
+      setBusy(false);
+      return;
+    }
     if (!reasonOk(reason)) {
       setFormErr("Say why the password is being replaced (4 to 500 characters). Do not write the password in it.");
       setBusy(false);
@@ -251,7 +330,9 @@ export default function GuestAccountsPage() {
   // Disable ends the account's sessions and pauses its package, so it is confirmed first.
   const [disabling, setDisabling] = useState<GuestAccount | null>(null);
   async function onToggle(a: GuestAccount) {
+    if (busy) return;
     setActionErr(null);
+    setBusy(true);
     try {
       const r = await api.patch<GuestAccountToggleResp>(`/guest-accounts/${a.id}`, { enabled: !a.enabled });
       if (a.enabled) {
@@ -273,8 +354,9 @@ export default function GuestAccountsPage() {
     }
     catch (e: any) {
       if (a.enabled) setActionErr(e);
-      else setErr(e?.message ?? "Update failed");
+      else toast.error(`"${a.username}" could not be enabled.`, e instanceof ApiError ? (e.body?.message ?? e.message) : e?.message);
     }
+    finally { setBusy(false); }
   }
 
   async function onDisconnect() {
@@ -348,7 +430,9 @@ export default function GuestAccountsPage() {
       online: sm?.devices_online ?? list.reduce((n, a) => n + (a.active_devices ?? 0), 0),
     };
   }, [resp, rows]);
-  const searching = q.trim() !== "" || status !== "";
+  const searching = q.trim() !== "" || (status !== "" && status !== "enabled");
+  const onlyUsable = !searching && status === "enabled";
+  usePoll(() => load(), 60_000, { enabled: !loadFailed && !showNew && editing === null && pwFor === null });
 
   return (
     <QuietHints>
@@ -382,6 +466,9 @@ export default function GuestAccountsPage() {
             </HelpSection>
           </>
         }
+        meta={rows !== null ? (
+          <LiveStatus updatedAt={updatedAt} refreshing={refreshing} error={refreshFailed} onRefresh={() => void load()} intervalSeconds={60} />
+        ) : undefined}
         actions={
           <>
             {roles !== null && (
@@ -399,10 +486,9 @@ export default function GuestAccountsPage() {
       />
 
       {roles !== null && !mayWrite && <ReadOnlyNotice />}
-      <ErrorBanner err={err} />
 
       <StatGrid cols={3}>
-        <StatCard label="Accounts" value={rows ? totals.all.toLocaleString() : "—"} icon={<Users />} />
+        <StatCard label={status === "" && q.trim() === "" ? "Accounts" : "Matching accounts"} value={rows ? totals.all.toLocaleString() : "—"} icon={<Users />} />
         <StatCard icon={<LogIn />} label="Able to sign in" value={rows ? totals.enabled.toLocaleString() : "—"} />
         <StatCard icon={<Monitor />}
           label="Devices online"
@@ -419,10 +505,16 @@ export default function GuestAccountsPage() {
           </DialogHeader>
           <DialogBody className="space-y-5">
             <ErrorBanner err={portalErr} />
+            {portalOn === null && portalLoadErr && (
+              <div className="flex flex-wrap items-center gap-2">
+                <ErrorBanner err={`Whether this is shown on the Client Portal could not be read. ${portalLoadErr}`} className="mb-0 flex-1" />
+                <Button size="sm" variant="secondary" onClick={loadPortal}><RefreshCw /> Try again</Button>
+              </div>
+            )}
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <label htmlFor="portal-offer" className="text-emphasis">Show on the Client Portal</label>
-                <StatusBadge tone={portalOn ? "ok" : "default"}>{portalOn ? "Shown" : "Hidden"}</StatusBadge>
+                {portalOn !== null && <StatusBadge tone={portalOn ? "ok" : "default"}>{portalOn ? "Shown" : "Hidden"}</StatusBadge>}
                 <InfoHint>
                   {portalOn
                     ? "Clients can sign in with the accounts staff created here, on every network that has not switched this method off."
@@ -432,9 +524,9 @@ export default function GuestAccountsPage() {
               </div>
               <Switch
                 id="portal-offer"
-                checked={portalOn}
+                checked={portalOn === true}
                 onCheckedChange={onTogglePortal}
-                disabled={!mayOfferOnPortal}
+                disabled={!mayOfferOnPortal || portalOn === null || portalBusy}
                 label="Offer username-and-password sign-in"
               />
             </div>
@@ -470,7 +562,7 @@ export default function GuestAccountsPage() {
               label="Search client accounts"
             />
           }
-          actions={<ResultsCount count={rows === null ? null : filtered.length} noun="client account" />}
+          actions={<ResultsCount count={rows === null ? null : resp?.summary?.total ?? filtered.length} noun="client account" />}
         >
           <Select
             aria-label="Filter by status"
@@ -491,9 +583,10 @@ export default function GuestAccountsPage() {
         </FilterBar>
         {loadFailed ? (
           <EmptyState
-            title="Could not load client accounts"
-            hint="The appliance did not answer. Nothing has been changed."
-            action={<Button onClick={() => void load()}>Try again</Button>}
+            icon={<AlertTriangle />}
+            title="The client accounts could not be loaded"
+            hint={err ?? undefined}
+            action={<Button variant="secondary" disabled={refreshing} onClick={() => void load()}><RefreshCw /> Try again</Button>}
           />
         ) : rows === null ? (
           <SkeletonRows rows={5} cols={6} />
@@ -501,14 +594,23 @@ export default function GuestAccountsPage() {
           <EmptyState
             size="sm"
             icon={<KeyRound />}
-            title={searching ? "No account matches that search" : "No client accounts"}
-            hint={searching ? undefined : mayWrite ? "Create one to let a client sign in with a username and password." : undefined}
+            title={searching ? "No account matches that search" : onlyUsable ? "No account can sign in" : "No client accounts"}
+            hint={searching ? undefined
+              : onlyUsable ? "Disabled and removed accounts are listed under All accounts."
+                : mayWrite ? "Create one to let a client sign in with a username and password." : undefined}
             action={
               searching ? <Button variant="secondary" onClick={() => { setQ(""); setStatus(""); }}>Clear search</Button>
+                : onlyUsable ? (
+                  <div className="flex flex-wrap justify-center gap-2">
+                    <Button variant="secondary" onClick={() => setStatus("")}>Show all accounts</Button>
+                    {mayWrite && <Button onClick={openNew}><Plus /> Add account</Button>}
+                  </div>
+                )
                 : mayWrite ? <Button onClick={openNew}><Plus /> Add the first account</Button> : undefined
             }
           />
         ) : (
+          <div className={cn(refreshing && refreshingClass)}>
           <Table label="Client accounts">
             <THead>
               <TR>
@@ -517,7 +619,7 @@ export default function GuestAccountsPage() {
                 <TH>Status</TH>
                 <TH className="hidden md:table-cell">Valid until</TH>
                 <TH className="hidden lg:table-cell">Last sign-in</TH>
-                {mayWrite && <TH><span className="sr-only">Actions</span></TH>}
+                {roles !== null && <TH><span className="sr-only">Actions</span></TH>}
               </TR>
             </THead>
             <TBody>
@@ -565,17 +667,15 @@ export default function GuestAccountsPage() {
                         </div>
                       )}
                     </TD>
-                    {mayWrite && (
+                    {roles !== null && (
                       <TD className="w-0">
-                        {/* A self-service account's password is the client's, recovered only by reset email;
-                            staff cannot set or show it. */}
                         <RowActions
                           subject={a.username}
                           primary={{ label: "Manage", onSelect: () => setManaging(a) }}
-                          items={isRemovedAccount(a) ? [] : [
-                            { label: "Edit", icon: <Pencil />, onSelect: () => { setFormErr(null); setEditing(a); setPwFor(null); setShowNew(false); } },
+                          items={!mayWrite || isRemovedAccount(a) ? [] : [
+                            { label: "Edit", icon: <Pencil />, onSelect: () => { resetForm(); setEditing(a); setPwFor(null); setShowNew(false); } },
                             { label: "Set password", icon: <KeyRound />, hidden: a.self_registered,
-                              onSelect: () => { setFormErr(null); setPwFor(a); setEditing(null); setShowNew(false); } },
+                              onSelect: () => { resetForm(); setPwFor(a); setEditing(null); setShowNew(false); } },
                             { label: resending === a.id ? "Sending…" : "Resend verification email", icon: <Send />,
                               hidden: !(a.self_registered && !a.email_verified), disabled: resending === a.id,
                               onSelect: () => void onResend(a) },
@@ -593,6 +693,7 @@ export default function GuestAccountsPage() {
               })}
             </TBody>
           </Table>
+          </div>
         )}
         {!loadFailed && filtered.length > 0 && (
           <CardFooter>
@@ -607,35 +708,29 @@ export default function GuestAccountsPage() {
         )}
       </Card>
 
-      <Dialog open={showNew} onOpenChange={(v) => !v && !busy && setShowNew(false)}>
+      <Dialog open={showNew} onOpenChange={(v) => !v && requestCloseForm()}>
         <DialogContent size="lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-1">Add a client account<Explain>The client signs in with this username and password. The password is shown once, after you save.</Explain></DialogTitle>
             <DialogDescription className="sr-only">The client signs in with this username and password. The password is shown once, after you save.</DialogDescription>
           </DialogHeader>
           <DialogBody>
-            <ErrorBanner err={formErr} />
-            <AccountForm onSubmit={onCreate} busy={busy} withPassword onCancel={() => setShowNew(false)} />
+            <AccountForm onSubmit={onCreate} busy={busy} withPassword onCancel={closeForms} error={formErr}
+              onEdited={() => setFormDirty(true)} asking={askDiscard} onKeep={() => setAskDiscard(false)} onDiscard={closeForms} />
           </DialogBody>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={editing !== null} onOpenChange={(v) => !v && !busy && setEditing(null)}>
+      <Dialog open={editing !== null} onOpenChange={(v) => !v && requestCloseForm()}>
         <DialogContent size="lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-1">Edit {editing?.username}<Explain>Changing the username does not disconnect anyone who is already online.</Explain></DialogTitle>
             <DialogDescription className="sr-only">Changing the username does not disconnect anyone who is already online.</DialogDescription>
           </DialogHeader>
           <DialogBody>
-            <ErrorBanner err={formErr} />
             {editing && (
-              <AccountForm account={editing} onSubmit={onSaveEdit} busy={busy} onCancel={() => setEditing(null)} />
-            )}
-            {editing && (
-              <section className="mt-4 space-y-2 border-t border-border pt-4">
-                <h3 className="text-sm font-semibold">Packages of this account</h3>
-                <PackageControls subject={{ kind: "account", id: editing.id }} />
-              </section>
+              <AccountForm account={editing} onSubmit={onSaveEdit} busy={busy} onCancel={closeForms} error={formErr}
+                onEdited={() => setFormDirty(true)} asking={askDiscard} onKeep={() => setAskDiscard(false)} onDiscard={closeForms} />
             )}
           </DialogBody>
         </DialogContent>
@@ -648,8 +743,7 @@ export default function GuestAccountsPage() {
             <DialogDescription className="sr-only">The new password is shown once, after you save. The old one stops working immediately.</DialogDescription>
           </DialogHeader>
           <DialogBody>
-            <ErrorBanner err={formErr} />
-            <PasswordForm onSubmit={onSavePassword} busy={busy} onCancel={() => setPwFor(null)} />
+            <PasswordForm onSubmit={onSavePassword} busy={busy} onCancel={() => setPwFor(null)} error={formErr} />
           </DialogBody>
         </DialogContent>
       </Dialog>
@@ -672,7 +766,7 @@ export default function GuestAccountsPage() {
 
       <ConfirmDialog
         open={disabling !== null}
-        onOpenChange={(v) => !v && setDisabling(null)}
+        onOpenChange={(v) => !v && !busy && setDisabling(null)}
         title="Disable this client account?"
         description={disabling ? `"${disabling.username}" will not be able to sign in until it is enabled again.` : undefined}
         consequences={disabling ? [
@@ -734,20 +828,52 @@ export default function GuestAccountsPage() {
   );
 }
 
-function AccountForm({ account, onSubmit, busy, withPassword, onCancel }: {
+function PasswordBox({ value, onChange, shown, onToggle, generate, ...aria }: {
+  value: string; onChange: (v: string) => void; shown: boolean; onToggle: () => void; generate: boolean;
+  id?: string; "aria-describedby"?: string; "aria-invalid"?: boolean;
+}) {
+  return (
+    <div className="flex gap-1.5">
+      <Input
+        {...aria}
+        name="password"
+        type={shown ? "text" : "password"}
+        autoComplete="new-password"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={generate}
+        aria-required={!generate}
+        maxLength={128}
+        placeholder={generate ? "Generated when you save" : ""}
+      />
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        aria-label={shown ? "Hide the password" : "Show the password"}
+        onClick={onToggle}
+      >
+        {shown ? <EyeOff /> : <Eye />}
+      </Button>
+    </div>
+  );
+}
+
+function AccountForm({ account, onSubmit, busy, withPassword, onCancel, error, onEdited, asking, onKeep, onDiscard }: {
   account?: GuestAccount;
   onSubmit: (e: React.FormEvent<HTMLFormElement>) => void; busy: boolean; withPassword?: boolean; onCancel?: () => void;
+  error: string | null; onEdited: () => void; asking: boolean; onKeep: () => void; onDiscard: () => void;
 }) {
   const [generate, setGenerate] = useState(false);
   const [pw, setPw] = useState("");
   const [showPw, setShowPw] = useState(false);
-  const dt = (s?: string | null) => (s ? new Date(s).toISOString().slice(0, 16) : "");
+  const tz = browserTimeZone();
 
   return (
-    <form onSubmit={onSubmit} className="space-y-4">
+    <form onSubmit={onSubmit} noValidate onInput={onEdited} onChange={onEdited} className="space-y-4">
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Username" required hint="What the client types. Short is fine — even a single character.">
-          <Input name="username" required minLength={1} maxLength={64} defaultValue={account?.username} placeholder="alex.morgan" />
+          <Input name="username" aria-required maxLength={64} defaultValue={account?.username} placeholder="alex.morgan" />
         </Field>
         <Field label="Name" hint="For your own reference; the client never sees it.">
           <Input name="display_name" maxLength={ACCOUNT_NAME_MAX} defaultValue={account?.display_name ?? ""} placeholder="Visitor pass" />
@@ -761,29 +887,13 @@ function AccountForm({ account, onSubmit, busy, withPassword, onCancel }: {
             required={!generate}
             error={!generate && weakPassword(pw) ? "Short passwords are easy to guess. You can still save it." : undefined}
           >
-            <div className="flex gap-1.5">
-              <Input
-                name="password"
-                type={showPw ? "text" : "password"}
-                autoComplete="new-password"
-                value={pw}
-                onChange={(e) => setPw(e.target.value)}
-                disabled={generate}
-                required={!generate}
-                minLength={1}
-                maxLength={128}
-                placeholder={generate ? "Generated when you save" : ""}
-              />
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                aria-label={showPw ? "Hide the password" : "Show the password"}
-                onClick={() => setShowPw((s) => !s)}
-              >
-                {showPw ? <EyeOff /> : <Eye />}
-              </Button>
-            </div>
+            <PasswordBox
+              value={pw}
+              onChange={setPw}
+              shown={showPw}
+              onToggle={() => setShowPw((v) => !v)}
+              generate={generate}
+            />
           </Field>
           <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
             <input
@@ -799,11 +909,11 @@ function AccountForm({ account, onSubmit, busy, withPassword, onCancel }: {
       )}
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Valid from" hint="Leave empty to work immediately.">
-          <Input name="valid_from" type="datetime-local" defaultValue={dt(account?.valid_from)} />
+        <Field label="Valid from" hint={`Leave empty to work immediately. In ${tz}.`}>
+          <Input name="valid_from" type="datetime-local" defaultValue={localInput(account?.valid_from)} />
         </Field>
-        <Field label="Valid until" hint="Leave empty for no end date. Must be later than Valid from.">
-          <Input name="valid_until" type="datetime-local" defaultValue={dt(account?.valid_until)} />
+        <Field label="Valid until" hint={`Leave empty for no end date. Must be later than Valid from. In ${tz}.`}>
+          <Input name="valid_until" type="datetime-local" defaultValue={localInput(account?.valid_until)} />
         </Field>
       </div>
 
@@ -815,50 +925,41 @@ function AccountForm({ account, onSubmit, busy, withPassword, onCancel }: {
         Packages
         <InfoHint>What this client can take is decided by the eligibility rules on each internet package.</InfoHint>
       </p>
-      <div className="flex justify-end gap-2 border-t border-border pt-4">
-        {onCancel && <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>}
-        <Button type="submit" disabled={busy}>
-          {busy ? "Saving…" : account ? "Save changes" : "Create account"}
-        </Button>
+      <FormError err={error} />
+      <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border pt-4">
+        {asking ? (
+          <DiscardPrompt onKeep={onKeep} onDiscard={onDiscard} />
+        ) : (
+          <>
+            {onCancel && <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>}
+            <Button type="submit" disabled={busy}>
+              {busy ? "Saving…" : account ? "Save changes" : "Create account"}
+            </Button>
+          </>
+        )}
       </div>
     </form>
   );
 }
 
-function PasswordForm({ onSubmit, busy, onCancel }: { onSubmit: (e: React.FormEvent<HTMLFormElement>) => void; busy: boolean; onCancel: () => void }) {
+function PasswordForm({ onSubmit, busy, onCancel, error }: { onSubmit: (e: React.FormEvent<HTMLFormElement>) => void; busy: boolean; onCancel: () => void; error: string | null }) {
   const [generate, setGenerate] = useState(false);
   const [pw, setPw] = useState("");
   const [showPw, setShowPw] = useState(false);
   return (
-    <form onSubmit={onSubmit} className="space-y-4">
+    <form onSubmit={onSubmit} noValidate className="space-y-4">
       <Field
         label="New password"
         required={!generate}
         error={!generate && weakPassword(pw) ? "Short passwords are easy to guess. You can still save it." : undefined}
       >
-        <div className="flex gap-1.5">
-          <Input
-            name="password"
-            type={showPw ? "text" : "password"}
-            autoComplete="new-password"
-            value={pw}
-            onChange={(e) => setPw(e.target.value)}
-            disabled={generate}
-            required={!generate}
-            minLength={1}
-            maxLength={128}
-            placeholder={generate ? "Generated when you save" : ""}
-          />
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            aria-label={showPw ? "Hide the password" : "Show the password"}
-            onClick={() => setShowPw((s) => !s)}
-          >
-            {showPw ? <EyeOff /> : <Eye />}
-          </Button>
-        </div>
+        <PasswordBox
+          value={pw}
+          onChange={setPw}
+          shown={showPw}
+          onToggle={() => setShowPw((v) => !v)}
+          generate={generate}
+        />
       </Field>
       <label className="flex items-center gap-2 text-xs text-muted-foreground">
         <input
@@ -872,7 +973,7 @@ function PasswordForm({ onSubmit, busy, onCancel }: { onSubmit: (e: React.FormEv
       </label>
 
       <Field label="Reason" required hint={REASON_HINT}>
-        <Input name="reason" required maxLength={REASON_MAX_CHARS} placeholder="For example: the client forgot it at the desk" />
+        <Input name="reason" aria-required maxLength={REASON_MAX_CHARS} placeholder="For example: the client forgot it at the desk" />
       </Field>
 
       <label className="flex items-start gap-2 rounded-md border border-border bg-surface/50 px-3.5 py-2.5 text-sm">
@@ -887,6 +988,7 @@ function PasswordForm({ onSubmit, busy, onCancel }: { onSubmit: (e: React.FormEv
         </span>
       </label>
 
+      <FormError err={error} />
       <div className="flex justify-end gap-2 border-t border-border pt-4">
         <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>
         <Button type="submit" disabled={busy}>{busy ? "Saving…" : "Set password"}</Button>

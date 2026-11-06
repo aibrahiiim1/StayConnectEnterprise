@@ -116,7 +116,6 @@ function VoucherDetail({
       });
       setCode(out.code);
       setAction(null);
-      toast.success("Code shown", "This reveal was recorded with your name and reason.");
       onChanged();
     } catch (e) {
       setErr(stepUpError(e, "The code was not revealed."));
@@ -225,6 +224,7 @@ function VoucherDetail({
       />
       <SheetBody>
         {code && (
+          <div className="animate-in fade-in-0 zoom-in-95 duration-base ease-onegate motion-reduce:animate-none">
           <Callout tone="warning" title="Full code">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <span className="font-mono text-2xl font-semibold tracking-[0.25em]" data-testid="revealed-code">
@@ -236,6 +236,7 @@ function VoucherDetail({
             </div>
             <p className="mt-1 text-xs">Recorded with your name and reason. It disappears when you close this panel.</p>
           </Callout>
+          </div>
         )}
         <SheetSection title="Details">
           <KeyValueGrid
@@ -290,12 +291,17 @@ function VoucherDetail({
       </SheetBody>
       {(canRevealCodes || canIssue) && (
         <SheetFooter>
+          {canIssue && !canCancel(status) && (
+            <p id="voucher-cancel-why" className="me-auto text-caption text-muted-foreground">
+              Only an unused card that has not expired can be cancelled.
+            </p>
+          )}
           {canIssue && (
             <Button
               variant="danger"
               size="sm"
               disabled={!canCancel(status)}
-              title={canCancel(status) ? undefined : "Only an unused card that has not expired can be cancelled."}
+              aria-describedby={canCancel(status) ? undefined : "voucher-cancel-why"}
               onClick={() => {
                 setErr(null);
                 setAction("cancel");
@@ -321,7 +327,7 @@ function VoucherDetail({
 
       <ConfirmDialog
         open={action === "reveal"}
-        onOpenChange={(v) => !v && setAction(null)}
+        onOpenChange={(v) => !v && !busy && setAction(null)}
         title={`Show the full code of ${maskedCode(current.code_last4)}`}
         description="Showing a code is recorded permanently with your name and your reason."
         confirmLabel="Show code"
@@ -344,7 +350,7 @@ function VoucherDetail({
 
       <ConfirmDialog
         open={action === "cancel"}
-        onOpenChange={(v) => !v && setAction(null)}
+        onOpenChange={(v) => !v && !busy && setAction(null)}
         title={`Cancel card ${maskedCode(current.code_last4)}`}
         description="The card stops working immediately and cannot be reinstated."
         confirmLabel="Cancel the card"
