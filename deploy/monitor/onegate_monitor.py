@@ -1147,10 +1147,16 @@ def main(argv=None):
             print("no report yet; the deep run writes it every 30 minutes")
         return 0
     lock = open(os.path.join(sd, ".lock"), "w")
-    try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        return 0
+    # A quick run skips while another run holds the lock; a deep run waits up to a minute so its report is not lost.
+    deadline = time.monotonic() + (60 if args.mode == "deep" else 0)
+    while True:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except OSError:
+            if time.monotonic() >= deadline:
+                return 0
+            time.sleep(1)
     path = os.path.join(sd, "state.json")
     try:
         state = json.load(open(path))

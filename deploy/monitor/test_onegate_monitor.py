@@ -397,6 +397,35 @@ class Output(unittest.TestCase):
         self.assertIn("NOT VERIFIED", text)
 
 
+class Locking(unittest.TestCase):
+    def test_a_deep_run_waits_for_a_running_quick_run_and_a_quick_run_skips(self):
+        import fcntl
+        import tempfile
+        import threading
+        import time as _t
+        with tempfile.TemporaryDirectory() as d:
+            old = dict(om.CFG)
+            om.CFG.update(state=d, log=os.path.join(d, "log"))
+            calls = []
+            orig = om.Monitor.run
+            om.Monitor.run = lambda self, state: calls.append(self.mode) or set()
+            try:
+                held = open(os.path.join(d, ".lock"), "w")
+                fcntl.flock(held, fcntl.LOCK_EX)
+                om.main(["quick", "--stdout"])
+                self.assertEqual(calls, [], "a quick run did not skip a held lock")
+                threading.Timer(1.5, lambda: fcntl.flock(held, fcntl.LOCK_UN)).start()
+                t0 = _t.monotonic()
+                om.main(["deep", "--stdout"])
+                self.assertEqual(calls, ["deep"])
+                self.assertGreaterEqual(_t.monotonic() - t0, 1.0)
+            finally:
+                held.close()
+                om.Monitor.run = orig
+                om.CFG.clear()
+                om.CFG.update(old)
+
+
 @unittest.skipUnless(os.environ.get("OG_TEST_PSQL"), "OG_TEST_PSQL not set")
 class EveryQueryRunsOnTheCurrentSchema(unittest.TestCase):
     def test_all_queries(self):

@@ -8,7 +8,8 @@ PMS, licence or service state. It needs no Admin Console account.
 | `quick` | every 5 min | services, resources, database, enforcement, DHCP, network, portal, Admin Console, PMS, posting, licence, Central, certificates, sign-in health, session integrity, errors | about 3.6 s elapsed, under 1 s CPU |
 | `deep` | every 30 min | quick, plus backups, install parity, client activity, per-device diagnostics, trends and the report | about 9 s elapsed, about 2.2 s CPU |
 
-Both run at low CPU and I/O priority under `CPUQuota=25%`. A run that finds the previous one still going skips itself.
+Both run at low CPU and I/O priority under `CPUQuota=25%`. A quick run that finds another run still going skips itself;
+a deep run waits up to a minute for it, so the report is not skipped.
 
 ## Output
 
