@@ -1,0 +1,34 @@
+{
+  "transition_id": "T0315",
+  "seq": 315,
+  "timestamp": "2026-11-06T15:25:50+02:00",
+  "timestamp_derivation": "Read from the workstation clock (UTC+02:00) by the script that wrote this receipt, immediately before the commit that introduces it.",
+  "record_type": "TEST_APPLIANCE_UPGRADE",
+  "authorisation": "The Product Owner's remediation mission of 2026-11-06 (D97): deployment to the test appliance 172.21.96.97 only.",
+  "delivery": "The test appliance was upgraded with appliance-install.sh --upgrade to master 5d09ab7396a1 (the merge of PR #380, carrying #378-#380) at 12:58 UTC: no migration (schema ledger head 0210), the Gate-P reconcile (GATEP_RECONCILE = OK), every service binary and the Admin Console replaced, the release's Caddy unit installed without a Caddy restart (description only), the unused stayconnect-redis container removed (no key, no other client, no Central on the host; volume kept), log_lock_waits set by ALTER SYSTEM with a reload, and the monitor installed from the release.",
+  "verification": "Every binary (scd, edged, pmsd, portald, netd, acctd, keybootstrap, svc-run) matched the release by SHA-256; the release reads back vcs.revision 5d09ab7396a1, -tags=stayconnect_production, vcs.modified=false; APPLIANCE_UNITS = PASS; nine services active; 474 sessions online after the restart and the only session ended in the window a normal lease expiry. Before and 25 minutes after: devices created since the upgrade carry first_seen (20 of 20) while the 1,113 earlier NULL values are unchanged; Redis absent; Caddy unit current; log_lock_waits on with log_error_verbosity terse and log_min_error_statement panic; monitor d642f928715e4413 on its timers. Live: portald asked scd for reconnection about six times a minute behind the HTTPS portal (about once a minute before), and an Android device's /generate_204 probe reconnected it to its own package as a REJOIN session at 13:13:53; 13 of the 14 devices the monitor still counts as waiting sent no probe after the upgrade. NOT VERIFIED: the reconnection rate over a full day, iOS and Windows probes behind HTTPS on real devices, and a deadlock trace (none occurred in the window).",
+  "deployment": {
+    "test_appliance": "onegate-appliance-5d09ab7396a1; rollback tree /opt/stayconnect/.previous/20261106T125804Z and bin/*.bak-20261106T125804Z (scripts/binary-rollback.sh) back to 4808ce661c55; Redis restorable with docker compose --profile central-dev -f /opt/stayconnect/deploy/compose/infra.yml up -d redis; lock-wait logging off with ALTER SYSTEM RESET log_lock_waits and a reload; monitor rollback deploy/monitor/install-monitor.sh --rollback.",
+    "central": "Not changed."
+  },
+  "not_touched": "Schema (no migration), public.pms_providers columns, database log privacy (C5), DHCP lease durations, networking, PMS configuration and postings, financial behaviour, licences, the production Central.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "5d09ab7396a15202a01a45e7a6b7fc33c5e71802",
+  "previous_delivery": "T0314",
+  "decision": "D97",
+  "go_live": "NOT authorised."
+}

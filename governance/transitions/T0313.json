@@ -1,0 +1,35 @@
+{
+  "transition_id": "T0313",
+  "seq": 313,
+  "timestamp": "2026-11-06T15:00:00+02:00",
+  "timestamp_derivation": "Read from the workstation clock (UTC+02:00) by the script that wrote this receipt, immediately before the commit that introduces it.",
+  "record_type": "APPLIANCE_MONITORING_AND_RELIABILITY_AUDIT",
+  "authorisation": "The Product Owner's reliability-audit mission of 2026-11-06 (D97): read-only installation, DHCP/session and deadlock investigations; monitoring implementation, tests, protected merge and verified deployment to the test appliance 172.21.96.97 only.",
+  "delivery": "PR #378 (merged 160d30fc) and PR #379 (merged 11254cbc): deploy/monitor/onegate_monitor.py (Python 3 standard library) with quick (5 min) and deep (30 min) systemd timers, install-monitor.sh (install, --rollback to the earlier ogcheck timer, --remove), README with every threshold. Services and crash restarts, resources, database, enforcement, DHCP/Kea, network, portal, Admin Console, PMS and posting, licence and capacity, Central validation, certificates, sign-in health, session integrity and errors; deep adds install parity, client activity (devices, sessions and attempts counted separately over 15 min/1 h/24 h/7 d against the previous period), per-network, hourly and daily trends and per-device diagnostics. Same summary and ISSUE lines in /var/log/ogcheck.log; private report under /var/lib/onegate-monitor; MAC addresses masked.",
+  "findings": "Read-only audit of the test appliance: schema identical to a fresh install apart from the retired PMS secret columns 0170 kept (and the comparison's own superuser and the erasure ledger's rows); the Caddy unit is never refreshed by an upgrade; devices.first_seen is NULL for nearly every device; the 78 to 101 rise in address-loss session ends is the 1 h to 8 h lease change of the 2026-11-04 network replace (all 101 sessions idle at least 4 h, none with traffic in their last 30 min); 97 deadlocks in 10 days, 75 of them the package-expiry pass, which recovers on its next tick, none in posting or payment; behind the HTTPS portal the OS probes are redirected before automatic reconnection runs (fixed in T0314).",
+  "verification": "Monitor: unit tests on Python 3.10 and every query against schema 0210; Codex review clean after ten rounds; read-only dry runs on the test appliance (deep 8.3 s elapsed / 2.4 s CPU, quick 4.1 s / 0.9 s); installed and verified under its systemd hardening, rollback to the ogcheck timer and reinstall tested live.",
+  "deployment": {
+    "test_appliance": "The monitor was installed with install-monitor.sh from master 11254cbc (onegate_monitor.py 93d69ec1ca5516fe); it is now part of the release installed in T0315.",
+    "central": "Not changed."
+  },
+  "not_touched": "Product code, configuration, networking, schema, PMS, financial behaviour, licences, PKI and trust, the production Central.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "11254cbc4dcff110e5f0b5b858175530ea02b9cf",
+  "previous_delivery": "T0312",
+  "decision": "D97",
+  "go_live": "NOT authorised."
+}
