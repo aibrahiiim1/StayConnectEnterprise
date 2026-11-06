@@ -218,7 +218,7 @@ function LoginInner() {
           </p>
         </div>
 
-        <BySemantics className="relative text-white/60" />
+        <BySemantics tone="onDark" className="relative text-white/60" />
       </aside>
 
       <div className="flex min-h-screen flex-col">
