@@ -508,25 +508,21 @@ func (h *handler) status(w http.ResponseWriter, r *http.Request) {
 func (h *handler) appleProbe(w http.ResponseWriter, r *http.Request) {
 	// The iOS/macOS "Success" page is served only to a device just reconnected to its own package; anyone else gets the captive UI.
 	if h.tryRejoin(r) {
-		writeOnline(w, "text/html", appleOnlinePage, http.StatusOK)
+		writeProbeOnline(w, r.URL.Path)
 		return
 	}
 	h.landing(w, r, "")
 }
 func (h *handler) googleProbe(w http.ResponseWriter, r *http.Request) {
 	if h.tryRejoin(r) {
-		writeOnline(w, "", "", http.StatusNoContent)
+		writeProbeOnline(w, r.URL.Path)
 		return
 	}
 	http.Redirect(w, r, h.probeTarget(r), http.StatusFound)
 }
 func (h *handler) windowsProbe(w http.ResponseWriter, r *http.Request) {
 	if h.tryRejoin(r) {
-		body := "Microsoft Connect Test"
-		if strings.HasSuffix(r.URL.Path, "ncsi.txt") {
-			body = "Microsoft NCSI"
-		}
-		writeOnline(w, "text/plain", body, http.StatusOK)
+		writeProbeOnline(w, r.URL.Path)
 		return
 	}
 	http.Redirect(w, r, h.probeTarget(r), http.StatusFound)

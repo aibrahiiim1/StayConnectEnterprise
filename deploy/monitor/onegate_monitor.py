@@ -38,6 +38,8 @@ REJOIN_FAILURES = ("device:", "begin", "candidate:", "capacity:", "session:", "c
 STAY_REJOINABLE = """(st.status IN ('IN_HOUSE','POST_STAY_ACTIVE') OR (st.status = 'CHECKED_OUT' AND EXISTS (
     SELECT 1 FROM iam_v2.entitlements g WHERE g.tenant_id = st.tenant_id AND g.site_id = st.site_id AND g.stay_id = st.id
       AND g.status = 'ACTIVE' AND g.end_mode = 'GRACE_AFTER_CHECKOUT' AND (g.window_ends_at IS NULL OR g.window_ends_at > now()))))"""
+# Units an appliance runs only once commissioned; disabled they are not a fault, enabled and down they are.
+OPTIONAL_UNITS = {"stayconnect-pmsd": "no PMS commissioned", "kea-dhcp4-server": "no client network served yet"}
 UNITS = ["stayconnect-edged", "stayconnect-scd", "stayconnect-portald", "stayconnect-netd", "stayconnect-acctd",
          "stayconnect-pmsd", "stayconnect-caddy", "stayconnect-hotel-admin", "kea-dhcp4-server", "unbound", "docker"]
 
@@ -79,9 +81,11 @@ class Sys:
     def now(self):
         return dt.datetime.now(dt.timezone.utc)
 
-    def sh(self, args, timeout=20):
+    def sh(self, args, timeout=20, stderr=False):
+        """stderr=True returns both streams: a container's log (PostgreSQL logs to stderr) is split across them by docker."""
         try:
-            p = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+            p = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT if stderr else subprocess.PIPE,
+                               text=True, timeout=timeout)
         except (OSError, subprocess.TimeoutExpired) as e:
             raise Unavailable(f"{args[0]}: {e.__class__.__name__}")
         return p.returncode, p.stdout
@@ -232,7 +236,7 @@ class Monitor:
 
     # ---- quick checks ------------------------------------------------------------------------------------------------
     def check_services(self, state):
-        rc, out = self.s.sh(["systemctl", "show", "-p", "Id,ActiveState,SubState,NRestarts", *[u + ".service" for u in UNITS]])
+        rc, out = self.s.sh(["systemctl", "show", "-p", "Id,ActiveState,SubState,NRestarts,UnitFileState", *[u + ".service" for u in UNITS]])
         if rc != 0 and not out:
             raise Unavailable("systemctl unavailable")
         prev = state.get("restarts", {})
@@ -241,10 +245,13 @@ class Monitor:
             kv = dict(l.split("=", 1) for l in block.splitlines() if "=" in l)
             unit = kv.get("Id", "?").removesuffix(".service")
             cur[unit] = n(kv.get("NRestarts"))
-            if kv.get("ActiveState") != "active":
-                self.add(f"svc:{unit}", "services", CRIT, f"{unit} is {kv.get('ActiveState', 'unknown')}/{kv.get('SubState', '?')}")
-            else:
+            if kv.get("ActiveState") == "active":
                 self.add(f"svc:{unit}", "services", PASS, f"{unit} active")
+            elif unit in OPTIONAL_UNITS and kv.get("UnitFileState") in ("disabled", "masked"):
+                self.add(f"svc:{unit}", "services", PASS, f"{unit} not enabled on this appliance ({OPTIONAL_UNITS[unit]})")
+            else:
+                self.add(f"svc:{unit}", "services", CRIT, f"{unit} is {kv.get('ActiveState', 'unknown')}/{kv.get('SubState', '?')}"
+                         + (f", {kv.get('UnitFileState')}" if kv.get("UnitFileState") not in (None, "enabled", "static") else ""))
             if unit in prev and cur[unit] > prev[unit]:
                 self.add(f"svc-restart:{unit}", "services", WARN, f"{unit} crashed and was restarted by systemd {cur[unit] - prev[unit]} time(s) since the last run")
             else:
@@ -253,15 +260,20 @@ class Monitor:
         rc, out = self.s.sh(["systemctl", "--failed", "--no-legend", "--plain"])
         failed = [l.split()[0] for l in out.splitlines() if l.strip()]
         self.add("svc:failed-units", "services", WARN if failed else PASS, "failed units: " + " ".join(failed) if failed else "no failed units")
-        rc, out = self.s.sh(["docker", "inspect", "-f", "{{.Name}} {{.State.Running}} {{.RestartCount}}", "stayconnect-pg", "stayconnect-redis"])
-        seen = {}
-        for l in out.splitlines():
-            p = l.split()
-            if len(p) >= 2:
-                seen[p[0].lstrip("/")] = p[1] == "true"
-        for c in ("stayconnect-pg", "stayconnect-redis"):
-            ok = seen.get(c)
-            self.add(f"container:{c}", "services", PASS if ok else CRIT, f"container {c} " + ("running" if ok else "not running"))
+
+    def check_containers(self, state):
+        rc, out = self.s.sh(["docker", "ps", "-a", "--format", "{{.Names}} {{.State}}"])
+        if rc != 0:
+            self.add("container:stayconnect-pg", "services", NV, "docker unreadable")
+            return
+        seen = {p[0]: p[1] for p in (l.split() for l in out.splitlines()) if len(p) >= 2}
+        ok = seen.get("stayconnect-pg") == "running"
+        self.add("container:stayconnect-pg", "services", PASS if ok else CRIT, "database container " + ("running" if ok else seen.get("stayconnect-pg", "missing")))
+        # Nothing on an appliance uses Redis (AD-63); an old one is retired by appliance-install.sh --upgrade.
+        r = seen.get("stayconnect-redis")
+        self.add("container:stayconnect-redis", "installation", WARN if r == "running" else PASS,
+                 "an unused Redis container runs (nothing on an appliance uses it, AD-63; the next upgrade retires it)" if r == "running"
+                 else "no Redis container, as on a fresh install")
 
     def check_resources(self, state):
         def cpu_times():
@@ -316,6 +328,50 @@ class Monitor:
         self.m["deadlocks_1h"] = last_hour
         self.add("db:deadlocks", "database", WARN if last_hour > 5 else PASS,
                  f"{last_hour} deadlock(s) in the last hour ({deadlocks} since the database started)")
+        s = dict(self.s.sql("""SELECT name, setting FROM pg_settings
+                                WHERE name IN ('log_lock_waits', 'log_error_verbosity', 'log_min_error_statement')"""))
+        self.add("db:lock-wait-logging", "database", PASS if s.get("log_lock_waits") == "on" else WARN,
+                 "lock waits over deadlock_timeout are logged" if s.get("log_lock_waits") == "on" else
+                 "log_lock_waits is off: a deadlock's tables cannot be traced (the installer sets it)")
+        private = s.get("log_error_verbosity") == "terse" and s.get("log_min_error_statement") == "panic"
+        self.add("db:log-privacy", "database", PASS if private else WARN,
+                 "the database log keeps no statements or detail lines (GDPR audit C5)" if private else
+                 f"the database log may carry guest data: log_error_verbosity={s.get('log_error_verbosity')}, "
+                 f"log_min_error_statement={s.get('log_min_error_statement')} (C5 requires terse and panic)")
+        self.lock_waits(state)
+
+    def lock_waits(self, state):
+        """Lock waits the database logged since the previous run, by the table they waited on (relation ids resolved to names).
+        Each run reads only what is new, so the daily totals count every wait once."""
+        since = state.get("lock_waits_until") or (self.now - dt.timedelta(minutes=15)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        until = self.now.strftime("%Y-%m-%dT%H:%M:%SZ")
+        try:
+            rc, out = self.s.sh(["docker", "logs", "--since", since, "--until", until, "stayconnect-pg"], timeout=30, stderr=True)
+        except Unavailable:
+            rc, out = 1, ""
+        if rc != 0:
+            self.add("db:lock-waits-logged", "database", NV, "database log unreadable")
+            return
+        state["lock_waits_until"] = until
+        waits = [l for l in out.splitlines() if "still waiting for" in l]
+        rels = {}
+        for l in waits:
+            m = re.search(r"of relation (\d+)", l)
+            k = m.group(1) if m else ("transaction" if "on transaction" in l else "other")
+            rels[k] = rels.get(k, 0) + 1
+        oids = [k for k in rels if k.isdigit()]
+        names = dict(self.s.sql(f"SELECT oid::text, relname FROM pg_class WHERE oid IN ({','.join(oids)})")) if oids else {}
+        named = {names.get(k, k): v for k, v in rels.items()}
+        day = self.now.strftime("%Y-%m-%d")
+        hist = state.setdefault("lock_waits", {})
+        hist.setdefault(day, {})
+        for k, v in named.items():
+            hist[day][k] = hist[day].get(k, 0) + v
+        for d in sorted(hist)[:-8]:
+            del hist[d]
+        top = ", ".join(f"{k}={v}" for k, v in sorted(named.items(), key=lambda x: -x[1])[:4]) or "none"
+        self.add("db:lock-waits-logged", "database", WARN if len(waits) > 30 else PASS,
+                 f"{len(waits)} lock wait(s) over 1 s since {since[11:16]}Z (by what they waited on: {top})")
 
     def check_enforcement(self, state):
         try:
@@ -326,7 +382,15 @@ class Monitor:
         passes = [l for l in lines if '"msg":"phase3: pass"' in l]
         recent = [l for l in passes if self._log_time(l) and self._log_time(l) >= self.now - dt.timedelta(minutes=3)]
         if not recent:
-            self.add("enf:pass", "enforcement", CRIT, "netd has not completed an enforcement pass in 3 minutes")
+            try:
+                nets = n(self.s.sql("SELECT count(*) FROM public.guest_networks WHERE enabled")[0][0])
+            except Unavailable as e:
+                self.add("enf:pass", "enforcement", NV, f"no enforcement pass in 3 minutes, and client networks unreadable: {e}")
+                return
+            if nets == 0:
+                self.add("enf:pass", "enforcement", PASS, "no client network is enabled, so there is nothing to enforce")
+            else:
+                self.add("enf:pass", "enforcement", CRIT, "netd has not completed an enforcement pass in 3 minutes")
             return
         last = recent[-1]
         sessions, failed, pms = (n(self._json_field(last, k)) for k in ("sessions", "failed", "pass_ms"))
@@ -949,7 +1013,7 @@ class Monitor:
             return None
 
     # ---- run -----------------------------------------------------------------------------------------------------------
-    QUICK = ["check_services", "check_resources", "check_database", "check_enforcement", "check_acctd", "check_http",
+    QUICK = ["check_services", "check_containers", "check_resources", "check_database", "check_enforcement", "check_acctd", "check_http",
              "check_network", "check_dhcp", "check_pms", "check_licence", "check_certs", "check_signin", "check_integrity", "check_errors"]
     DEEP = ["check_backup", "check_parity"]
 
@@ -1120,6 +1184,11 @@ def render_report(mon, active, recovered, state):
         for (t1, v1), (t2, v2) in zip(dl, dl[1:]):
             daily[t2[:10]] = daily.get(t2[:10], 0) + max(0, v2 - v1)
         L.append("  " + ", ".join(f"{d}={c}" for d, c in sorted(daily.items())[-8:]))
+    lw = state.get("lock_waits", {})
+    if lw:
+        L += ["", "LOCK WAITS OVER 1 S, BY WHAT THEY WAITED ON (database log, log_lock_waits)"]
+        for d in sorted(lw)[-8:]:
+            L.append(f"  {d}: " + (", ".join(f"{k}={v}" for k, v in sorted(lw[d].items(), key=lambda x: -x[1])) or "none"))
     if state.get("resolved"):
         L += ["", "RECENTLY RESOLVED"] + [f"  {h['first'][:16]} to {h['cleared'][:16]}  {h.get('text')}" for h in state["resolved"][-10:]]
     return "\n".join(L) + "\n"

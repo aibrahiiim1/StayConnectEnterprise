@@ -25,8 +25,9 @@ services:
     # (log_parameter_max_length applies to statements logged for any reason, log_parameter_max_length_on_error to
     # statements logged because they failed; 0 logs no parameter at all). Memory, pool and timeout values wait for the
     # reference-VM measurement: docs/runbooks/DB_BUDGET_MEASUREMENT_PLAN.md.
+    # log_lock_waits names the lock and the processes of a wait over deadlock_timeout, never a value, so deadlocks can be traced.
     command: ["postgres", "-c", "log_min_error_statement=panic", "-c", "log_error_verbosity=terse",
-              "-c", "log_parameter_max_length=0", "-c", "log_parameter_max_length_on_error=0"]
+              "-c", "log_parameter_max_length=0", "-c", "log_parameter_max_length_on_error=0", "-c", "log_lock_waits=on"]
     ports:
       - "127.0.0.1:5432:5432"
     volumes:

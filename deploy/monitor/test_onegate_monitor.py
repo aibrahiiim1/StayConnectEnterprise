@@ -25,7 +25,7 @@ class FakeSys:
     def now(self):
         return NOW
 
-    def sh(self, args, timeout=20):
+    def sh(self, args, timeout=20, stderr=False):
         for prefix, rc, out in self.cmds:
             if list(args[:len(prefix)]) == list(prefix):
                 return rc, out
@@ -80,10 +80,34 @@ class NoEvidenceIsNeverPass(unittest.TestCase):
         mon = run(f)
         self.assertEqual(by_key(mon)["enf:pass"].status, om.NV)
 
-    def test_a_readable_journal_without_a_pass_is_critical(self):
+    def test_a_readable_journal_without_a_pass_is_critical_when_a_network_needs_enforcing(self):
         f = FakeSys()
         f.cmds.append((["journalctl", "-u", "stayconnect-netd"], 0, '{"time":"2026-11-06T11:40:00Z","msg":"other"}\n'))
+        f.sqls.append((r"FROM public.guest_networks WHERE enabled\"?$|guest_networks WHERE enabled$", [["2"]]))
         self.assertEqual(by_key(run(f))["enf:pass"].status, om.CRIT)
+        f.sqls[0] = (r"FROM public.guest_networks WHERE enabled\"?$|guest_networks WHERE enabled$", [["0"]])
+        self.assertEqual(by_key(run(f))["enf:pass"].status, om.PASS)
+        f.sqls.clear()
+        self.assertEqual(by_key(run(f))["enf:pass"].status, om.NV)
+
+    def test_an_optional_unit_switched_off_is_not_a_fault_but_one_switched_on_and_down_is(self):
+        def svc(unit, active, filestate):
+            f = FakeSys()
+            f.cmds.append((["systemctl", "show"], 0, f"Id={unit}.service\nActiveState={active}\nSubState=dead\nNRestarts=0\nUnitFileState={filestate}\n"))
+            return by_key(run(f))[f"svc:{unit}"].status
+        self.assertEqual(svc("stayconnect-pmsd", "inactive", "disabled"), om.PASS)
+        self.assertEqual(svc("kea-dhcp4-server", "inactive", "disabled"), om.PASS)
+        self.assertEqual(svc("stayconnect-pmsd", "inactive", "enabled"), om.CRIT)
+        self.assertEqual(svc("stayconnect-scd", "inactive", "disabled"), om.CRIT)
+
+    def test_an_unused_redis_container_is_a_parity_warning_and_the_database_is_required(self):
+        f = FakeSys()
+        f.cmds.append((["docker", "ps"], 0, "stayconnect-pg running\nstayconnect-redis running\n"))
+        r = by_key(run(f))
+        self.assertEqual((r["container:stayconnect-pg"].status, r["container:stayconnect-redis"].status), (om.PASS, om.WARN))
+        f.cmds[0] = (["docker", "ps"], 0, "stayconnect-pg exited\n")
+        r = by_key(run(f))
+        self.assertEqual((r["container:stayconnect-pg"].status, r["container:stayconnect-redis"].status), (om.CRIT, om.PASS))
 
 
 class Thresholds(unittest.TestCase):
@@ -310,6 +334,7 @@ class ReviewFindings(unittest.TestCase):
     def test_an_enforcement_outage_does_not_resolve_other_enforcement_incidents(self):
         f = FakeSys()
         f.cmds.append((["journalctl", "-u", "stayconnect-netd"], 0, '{"time":"2026-11-06T11:00:00Z","msg":"other"}\n'))
+        f.sqls.append((r"guest_networks WHERE enabled$", [["1"]]))
         state = {"incidents": {"enf:consistency": {"first": NOW.isoformat(), "last": NOW.isoformat(), "count": 2, "streak": 2,
                                                    "raised": True, "status": om.WARN, "text": "gap", "area": "enforcement"}}}
         mon = run(f, state=state)
@@ -323,6 +348,46 @@ class ReviewFindings(unittest.TestCase):
         self.assertIn("status=NOT_VERIFIED", om.summary_line(mon, [], nv))
         self.assertIn("OVERALL: NOT_VERIFIED", om.render_report(mon, [], [], {}))
         self.assertEqual(om.overall([], 0), om.PASS)
+
+
+class DatabaseDiagnostics(unittest.TestCase):
+    def mon(self, settings, log):
+        f = FakeSys()
+        f.sqls += [(r"FROM pg_stat_activity\),", [["10", "100", "0", "0", "3"]]),
+                   (r"FROM pg_settings", [[k, v] for k, v in settings.items()]),
+                   (r"FROM pg_class WHERE oid IN", [["16420", "entitlements"], ["16500", "sessions"]])]
+        f.cmds.append((["docker", "logs"], 0, log))
+        state = {}
+        mon = om.Monitor(f, "quick")
+        mon.check_database(state)
+        return by_key(mon), state
+
+    def test_lock_waits_are_counted_once_by_table_and_logging_privacy_is_guarded(self):
+        log = "\n".join([
+            "2026-11-06 11:00:01.000 UTC [101] LOG:  process 101 still waiting for RowExclusiveLock on tuple (3,5) of relation 16420 of database 5 after 1000.1 ms",
+            "2026-11-06 11:00:02.000 UTC [102] LOG:  process 102 still waiting for ShareLock on transaction 9911 after 1000.2 ms",
+            "2026-11-06 11:00:03.000 UTC [103] LOG:  process 103 still waiting for RowExclusiveLock on tuple (1,1) of relation 16420 of database 5 after 1001.0 ms",
+            "2026-11-06 11:00:04.000 UTC [101] LOG:  process 101 acquired RowExclusiveLock on tuple (3,5) of relation 16420 of database 5 after 1500.0 ms"])
+        r, state = self.mon({"log_lock_waits": "on", "log_error_verbosity": "terse", "log_min_error_statement": "panic"}, log)
+        self.assertEqual(r["db:lock-wait-logging"].status, om.PASS)
+        self.assertEqual(r["db:log-privacy"].status, om.PASS)
+        self.assertIn("3 lock wait(s)", r["db:lock-waits-logged"].text)
+        self.assertEqual(state["lock_waits"]["2026-11-06"], {"entitlements": 2, "transaction": 1})
+        self.assertEqual(state["lock_waits_until"], "2026-11-06T12:00:00Z")
+        r, _ = self.mon({"log_lock_waits": "off", "log_error_verbosity": "default", "log_min_error_statement": "error"}, "")
+        self.assertEqual((r["db:lock-wait-logging"].status, r["db:log-privacy"].status), (om.WARN, om.WARN))
+
+
+class RealSubprocess(unittest.TestCase):
+    def test_a_log_written_to_stderr_is_read_when_asked(self):
+        s = om.Sys(om.CFG)
+        script = ["sh", "-c", "echo out; echo 'LOG:  process 1 still waiting for ShareLock on transaction 2' >&2"]
+        rc, out = s.sh(script, stderr=True)
+        self.assertEqual(rc, 0)
+        self.assertIn("still waiting for", out)
+        self.assertIn("out", out)
+        rc, out = s.sh(script)
+        self.assertNotIn("still waiting for", out)
 
 
 class UnitParity(unittest.TestCase):
@@ -432,7 +497,7 @@ class EveryQueryRunsOnTheCurrentSchema(unittest.TestCase):
         cfg = dict(om.CFG, psql=os.environ["OG_TEST_PSQL"])
 
         class DbOnly(om.Sys):
-            def sh(self, args, timeout=20):
+            def sh(self, args, timeout=20, stderr=False):
                 raise om.Unavailable("not on an appliance")
 
             def read(self, path, tail=None):

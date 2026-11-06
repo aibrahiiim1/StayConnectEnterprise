@@ -51,6 +51,9 @@ clears. A check that did not run (deep-only checks during a quick run) keeps its
 | database | transaction open > 5 min | any, 2 runs | |
 | database | lock waits | ≥ 5, 2 runs | |
 | database | deadlocks (database counter) | > 5 in the last hour | |
+| database | lock waits over 1 s logged since the last run (`log_lock_waits`), counted once and named by table | > 30 | |
+| database | `log_lock_waits` off | any | |
+| database | the database log could carry guest data (`log_error_verbosity` not `terse` or `log_min_error_statement` not `panic`, GDPR audit C5) | any | |
 | enforcement | netd pass | > 15 s for 2 runs | no pass in 3 min |
 | enforcement | DB online vs netd enforced | gap > max(10, 5 %) for 2 runs | |
 | enforcement | authorizations withdrawn (address moved) | > 20 in 15 min | |
@@ -109,7 +112,9 @@ bash deploy/monitor/install-monitor.sh --rollback  # stop the new timers, re-ena
 bash deploy/monitor/install-monitor.sh --remove    # remove the new monitor
 ```
 
-The monitor is an operational add-on: the appliance installer does not install it.
+`deploy/scripts/appliance-install.sh` installs it on every fresh install and every upgrade (step 7c), from the release's own
+`/opt/stayconnect/deploy/monitor`; a monitoring failure warns and never fails the install. Run the script above by hand only to roll back
+or remove it.
 
 ## Tests
 
