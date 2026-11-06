@@ -147,10 +147,14 @@ export function SemanticsWordmark({ className, tone = "auto" }: { className?: st
   );
 }
 
-export function BySemantics({ className, tone = "auto" }: { className?: string; tone?: "auto" | "onDark" }) {
+export function BySemantics({ className, tone = "auto", lead = "OneGate by" }: {
+  className?: string;
+  tone?: "auto" | "onDark";
+  lead?: string;
+}) {
   return (
     <span className={cn("inline-flex items-baseline gap-[0.3em] text-caption", className)}>
-      <span>OneGate by</span>
+      <span>{lead}</span>
       <SemanticsWordmark tone={tone} />
     </span>
   );

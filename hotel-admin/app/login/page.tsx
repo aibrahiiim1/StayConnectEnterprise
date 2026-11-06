@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Eye, EyeOff } from "lucide-react";
-import { BySemantics, OneGateLockup, OneGateWordmark } from "@/components/brand";
+import { BySemantics, OneGateWordmark } from "@/components/brand";
 import { Button } from "@/components/ui/button";
 import { Input, Field } from "@/components/ui/input";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
@@ -207,7 +207,10 @@ function LoginInner() {
           ))}
         </svg>
 
-        <OneGateWordmark animated className="relative h-8 [--og-gate:#FFFFFF] [--og-one:#4ADE80]" />
+        <div className="relative flex flex-col items-start gap-1.5">
+          <OneGateWordmark animated className="h-8 [--og-gate:#FFFFFF] [--og-one:#4ADE80]" />
+          <BySemantics lead="by" tone="onDark" className="text-white/60" />
+        </div>
 
         <div className="relative max-w-md space-y-4">
           <h2 className="text-4xl font-semibold leading-tight tracking-tight text-balance">
@@ -218,12 +221,15 @@ function LoginInner() {
           </p>
         </div>
 
-        <BySemantics tone="onDark" className="relative text-white/60" />
+        <div aria-hidden />
       </aside>
 
       <div className="flex min-h-screen flex-col">
         <header className="flex items-center justify-between gap-3 px-4 py-4 sm:px-6 lg:justify-end">
-          <OneGateLockup animated className="lg:hidden" />
+          <div className="flex flex-col items-start gap-1 lg:hidden">
+            <OneGateWordmark animated className="h-[1.375rem]" />
+            <BySemantics lead="by" className="text-muted-foreground" />
+          </div>
           <ThemeToggle />
         </header>
 
@@ -298,9 +304,6 @@ function LoginInner() {
           </div>
         </main>
 
-        <footer className="px-4 pb-6 text-center text-muted-foreground sm:px-6 lg:hidden">
-          <BySemantics />
-        </footer>
       </div>
     </div>
   );
