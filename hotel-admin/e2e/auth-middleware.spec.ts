@@ -15,7 +15,7 @@ test.describe("the authentication gate", () => {
       const url = new URL(page.url());
       expect(url.pathname).toBe("/login");
       expect(url.searchParams.get("next")).toBe(route);
-      await expect(page.getByRole("heading", { name: "OneGate Admin Console" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
       await expect(page.getByLabel("Email or username")).toBeVisible();
       await expect(page.getByLabel("Password")).toBeVisible();
     }
@@ -27,7 +27,7 @@ test.describe("the authentication gate", () => {
     await page.context().clearCookies();
     const resp = await page.goto("/financial-review");
     expect(resp?.status()).toBe(200); // the LOGIN page, having been redirected there
-    await expect(page.getByRole("heading", { name: "OneGate Admin Console" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
     await expect(page.getByRole("heading", { name: /manual review/i })).toHaveCount(0);
   });
 

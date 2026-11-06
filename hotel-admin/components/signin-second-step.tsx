@@ -9,6 +9,8 @@ import { api, ApiError } from "@/lib/api";
 
 const FADE = "animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none";
 
+const cleanCode = (v: string) => v.replace(/[\s-]/g, "");
+
 type CodeResult = { must_change_password?: boolean; recovery_codes_left?: number };
 
 export function SigninSecondStep({ onDone, onRestart }: {
@@ -25,6 +27,8 @@ export function SigninSecondStep({ onDone, onRestart }: {
 
   const heading = useRef<HTMLHeadingElement | null>(null);
   const codeRef = useRef<HTMLInputElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const autoSent = useRef("");
   useEffect(() => {
     if (lowOnCodes !== null) heading.current?.focus();
   }, [lowOnCodes]);
@@ -34,10 +38,11 @@ export function SigninSecondStep({ onDone, onRestart }: {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (busy) return;
     setErr(null); setCodeErr(null); setLocked(null);
     setBusy(true);
     try {
-      const r = await api.post<CodeResult>("/auth/login/code", { code: code.trim() });
+      const r = await api.post<CodeResult>("/auth/login/code", { code: cleanCode(code) });
       if (typeof r.recovery_codes_left === "number" && r.recovery_codes_left <= 3) {
         setLowOnCodes(r.recovery_codes_left);
         return;
@@ -52,6 +57,7 @@ export function SigninSecondStep({ onDone, onRestart }: {
       else if (e instanceof ApiError && (e.status === 429 || e.code === "too_many_attempts")) setLocked(e.message);
       else setErr(e);
       setCode("");
+      autoSent.current = "";
     } finally {
       setBusy(false);
     }
@@ -69,9 +75,19 @@ export function SigninSecondStep({ onDone, onRestart }: {
     );
   }
 
-  const why = busy || codeErr ? null : code.trim() === "" ? "Enter your code to continue." : null;
+  function onCode(v: string) {
+    setCode(v);
+    setCodeErr(null);
+    const c = cleanCode(v);
+    if (/^\d{6}$/.test(c) && autoSent.current !== c && !busy) {
+      autoSent.current = c;
+      requestAnimationFrame(() => formRef.current?.requestSubmit());
+    }
+  }
+
+  const why = busy || codeErr ? null : cleanCode(code) === "" ? "Enter your code to continue." : null;
   return (
-    <form onSubmit={submit} className="space-y-4" noValidate>
+    <form ref={formRef} onSubmit={submit} className="space-y-4" noValidate>
       {err ? <div className={FADE}><ErrorBanner err={err} className="mb-0" /></div> : null}
       {locked && <Callout tone="warning" title="Too many wrong codes" className={FADE}>{locked}</Callout>}
       <div className="flex items-start gap-3">
@@ -81,7 +97,8 @@ export function SigninSecondStep({ onDone, onRestart }: {
         <div className="min-w-0 space-y-0.5">
           <h2 className="text-emphasis">Enter your code</h2>
           <p className="text-caption text-muted-foreground">
-            The 6-digit code your authenticator app shows now, or one of your recovery codes.
+            The 6-digit code your authenticator app shows now, or one of your recovery codes. It signs in as soon as
+            6 digits are in.
           </p>
         </div>
       </div>
@@ -94,14 +111,14 @@ export function SigninSecondStep({ onDone, onRestart }: {
           spellCheck={false}
           maxLength={32}
           value={code}
-          onChange={(e) => { setCode(e.target.value); setCodeErr(null); }}
+          onChange={(e) => onCode(e.target.value)}
           className="h-11 text-center font-mono text-lg tracking-[0.2em]"
         />
       </Field>
       <Button
         type="submit"
         loading={busy}
-        disabled={code.trim() === ""}
+        disabled={cleanCode(code) === ""}
         aria-describedby={why ? hintId : undefined}
         className="w-full"
         size="lg"

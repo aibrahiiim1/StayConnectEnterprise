@@ -20,15 +20,35 @@ function signinWords(e: unknown): unknown {
     if (e.code === "unauthenticated") {
       return new Error("The email, username or password is not right. Check them and try again.");
     }
-    if (e.code === "forbidden" && /no roles/i.test(e.message)) {
+    if (e.code === "no_roles" || (e.code === "forbidden" && /no roles/i.test(e.message))) {
       return new Error("This account has no role yet. Ask an administrator to give it one.");
     }
   }
   return e;
 }
 
+function lockoutSeconds(e: unknown): number | null {
+  if (!(e instanceof ApiError) || (e.status !== 429 && e.code !== "too_many_attempts")) return null;
+  const s = Number(e.body?.retry_after_seconds);
+  return Number.isFinite(s) && s > 0 ? Math.ceil(s) : 0;
+}
+
+function busyWords(e: unknown): string | null {
+  if (!(e instanceof ApiError)) return null;
+  if (e.code === "signin_unavailable" || e.code === "signin_busy") return e.message;
+  if (e.status === 502 || e.status === 503 || e.status === 504) return "Sign-in is unavailable right now. Try again shortly.";
+  return null;
+}
+
+function clockWords(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const r = sec % 60;
+  return `${m}:${String(r).padStart(2, "0")}`;
+}
+
 type PasswordBoxProps = {
   id?: string;
+  readOnly?: boolean;
   "aria-describedby"?: string;
   "aria-invalid"?: boolean;
   value: string;
@@ -37,7 +57,7 @@ type PasswordBoxProps = {
   inputRef: React.RefObject<HTMLInputElement>;
 };
 
-function PasswordBox({ id, value, onChange, onCapsLock, inputRef, ...aria }: PasswordBoxProps) {
+function PasswordBox({ id, readOnly, value, onChange, onCapsLock, inputRef, ...aria }: PasswordBoxProps) {
   const [shown, setShown] = useState(false);
   const caps = (e: React.KeyboardEvent<HTMLInputElement>) => onCapsLock(e.getModifierState?.("CapsLock") ?? false);
   return (
@@ -47,6 +67,7 @@ function PasswordBox({ id, value, onChange, onCapsLock, inputRef, ...aria }: Pas
         id={id}
         aria-describedby={aria["aria-describedby"]}
         aria-invalid={aria["aria-invalid"]}
+        readOnly={readOnly}
         type={shown ? "text" : "password"}
         autoComplete="current-password"
         autoCapitalize="none"
@@ -93,12 +114,32 @@ function LoginInner() {
   const [capsOn, setCapsOn] = useState(false);
   const [loading, setLoading] = useState(false);
   const [codeStep, setCodeStep] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [lockedUntil, setLockedUntil] = useState<number | null>(null);
+  const [lockText, setLockText] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const emailRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!codeStep) emailRef.current?.focus();
   }, [codeStep]);
+
+  useEffect(() => {
+    if (lockedUntil === null) return;
+    const t = window.setInterval(() => {
+      const n = Date.now();
+      setNow(n);
+      if (n >= lockedUntil) {
+        setLockedUntil(null);
+        setLockText(null);
+        passwordRef.current?.focus();
+      }
+    }, 1000);
+    return () => window.clearInterval(t);
+  }, [lockedUntil]);
+
+  const lockLeft = lockedUntil === null ? 0 : Math.max(0, Math.ceil((lockedUntil - now) / 1000));
 
   const finish = useCallback(() => {
     router.replace(next);
@@ -111,7 +152,10 @@ function LoginInner() {
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (loading || lockedUntil !== null) return;
     setErr(null);
+    setBusy(null);
+    setLockText(null);
     const noEmail = email.trim() === "";
     const noPassword = password === "";
     setEmailErr(noEmail ? "Enter your email or username." : null);
@@ -125,7 +169,18 @@ function LoginInner() {
       if (r.second_step === "none") finish();
       else setCodeStep(true);
     } catch (e) {
-      setErr(signinWords(e));
+      const wait = lockoutSeconds(e);
+      const busyText = busyWords(e);
+      if (wait !== null) {
+        const t = Date.now();
+        setNow(t);
+        if (wait > 0) setLockedUntil(t + wait * 1000);
+        setLockText(e instanceof Error && e.message ? e.message : "Too many failed sign-in attempts. Wait a few minutes and try again.");
+      } else if (busyText) {
+        setBusy(busyText);
+      } else {
+        setErr(signinWords(e));
+      }
       setPassword("");
       requestAnimationFrame(() => passwordRef.current?.focus());
     } finally {
@@ -136,7 +191,7 @@ function LoginInner() {
   return (
     <div className="flex min-h-screen flex-col bg-background">
       <header className="flex items-center justify-between gap-3 px-4 py-4 sm:px-6">
-        <OneGateLockup product="Admin Console" animated />
+        <OneGateLockup animated />
         <ThemeToggle />
       </header>
 
@@ -144,11 +199,9 @@ function LoginInner() {
         <div className="w-full max-w-[24rem] space-y-4">
           <div className="rounded-xl border border-border bg-card p-6 text-card-foreground shadow-card sm:p-7">
             <div className="mb-6 space-y-1">
-              <h1 className="text-title">
-                <span className="sr-only">OneGate </span>Admin Console
-              </h1>
+              <h1 className="text-title">Sign in</h1>
               <p className="text-sm text-muted-foreground">
-                {codeStep ? "One more step to finish signing in." : "Sign in with your account for this site."}
+                {codeStep ? "One more step to finish signing in." : "Use your account for this site."}
               </p>
             </div>
 
@@ -172,6 +225,7 @@ function LoginInner() {
                     ref={emailRef}
                     type="text"
                     autoComplete="username"
+                    readOnly={loading}
                     autoCapitalize="none"
                     spellCheck={false}
                     value={email}
@@ -185,27 +239,34 @@ function LoginInner() {
                 >
                   <PasswordBox
                     inputRef={passwordRef}
+                    readOnly={loading}
                     value={password}
                     onChange={(v) => { setPassword(v); setPasswordErr(null); }}
                     onCapsLock={setCapsOn}
                   />
                 </Field>
+                {lockText ? (
+                  <Callout tone="warning" title="Sign-in paused" className={FADE}>
+                    {lockText}
+                  </Callout>
+                ) : null}
+                {busy ? (
+                  <Callout tone="neutral" title="Sign-in is busy" className={FADE}>
+                    {busy}
+                  </Callout>
+                ) : null}
                 {err ? (
                   <div key={String((err as { message?: string })?.message ?? err)} className={FADE}>
                     <ErrorBanner err={err} className="mb-0" />
                   </div>
                 ) : null}
-                <Button type="submit" loading={loading} className="w-full" size="lg">
-                  Sign in
+                <Button type="submit" loading={loading} disabled={lockedUntil !== null} className="w-full" size="lg">
+                  {lockedUntil !== null ? `Try again in ${clockWords(lockLeft)}` : "Sign in"}
                 </Button>
               </form>
             )}
           </div>
 
-          <p className="px-1 text-center text-caption text-muted-foreground">
-            A local account for this appliance only. It is not a OneGate cloud account and does not work at any other
-            site.
-          </p>
         </div>
       </main>
 

@@ -44,12 +44,24 @@ describe("signing in", () => {
       ? Promise.resolve({ second_step: "code" })
       : Promise.resolve({ operator_id: "op", roles: ["site_admin"] }));
     await passwordStep();
-    await userEvent.type(await screen.findByLabelText(/^Code/), "123456");
+    await userEvent.type(await screen.findByLabelText(/^Code/), "12345");
     expect(replace).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await userEvent.type(screen.getByLabelText(/^Code/), "6");
     await waitFor(() => expect(replace).toHaveBeenCalledWith("/dashboard"));
     expect(post).toHaveBeenCalledWith("/auth/login/code", { code: "123456" });
+    expect(post).toHaveBeenCalledTimes(2);
     expect(post).not.toHaveBeenCalledWith("/auth/login/enrol", expect.anything());
+  });
+
+  it("a code pasted with a space or dash is sent as its 6 digits", async () => {
+    post.mockImplementation((path: string) => path === "/auth/login"
+      ? Promise.resolve({ second_step: "code" })
+      : Promise.resolve({ operator_id: "op", roles: ["site_admin"] }));
+    await passwordStep();
+    await userEvent.click(await screen.findByLabelText(/^Code/));
+    await userEvent.paste("123 456");
+    await waitFor(() => expect(replace).toHaveBeenCalledWith("/dashboard"));
+    expect(post).toHaveBeenCalledWith("/auth/login/code", { code: "123456" });
   });
 
   it("a recovery code sign-in with few codes left says so before opening the console", async () => {
@@ -60,6 +72,7 @@ describe("signing in", () => {
     await userEvent.type(await screen.findByLabelText(/^Code/), "ABCDE-FGHJK");
     await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
     expect(await screen.findByText(/You have 2 left/)).toBeTruthy();
+    expect(post).toHaveBeenCalledWith("/auth/login/code", { code: "ABCDEFGHJK" });
     expect(replace).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole("button", { name: "Continue" }));
     await waitFor(() => expect(replace).toHaveBeenCalledWith("/dashboard"));
@@ -72,7 +85,6 @@ describe("signing in", () => {
       : Promise.reject(new ApiError(401, { error: "wrong_code", message: "That code is not right." })));
     await passwordStep();
     await userEvent.type(await screen.findByLabelText(/^Code/), "000000");
-    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
     expect(await screen.findByText(/That code is not right/)).toBeTruthy();
     expect(screen.getByLabelText(/^Code/)).toBeTruthy();
     expect(replace).not.toHaveBeenCalled();
@@ -85,9 +97,46 @@ describe("signing in", () => {
       : Promise.reject(new ApiError(401, { error: "signin_expired", message: "Sign in again: the code step took longer than five minutes." })));
     await passwordStep();
     await userEvent.type(await screen.findByLabelText(/^Code/), "123456");
-    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
     expect(await screen.findByText(/took longer than five minutes/)).toBeTruthy();
     expect(screen.getByLabelText(/^Password/)).toBeTruthy();
+  });
+
+  it("too many failed passwords pause sign-in with a countdown on the button", async () => {
+    const { ApiError } = await import("@/lib/api");
+    post.mockRejectedValue(new ApiError(429, {
+      error: "too_many_attempts",
+      message: "Too many failed sign-in attempts. Wait 2 minutes and try again.",
+      retry_after_seconds: 90,
+    }));
+    await passwordStep();
+    expect(await screen.findByText("Sign-in paused")).toBeTruthy();
+    expect(screen.getByText(/Wait 2 minutes and try again/)).toBeTruthy();
+    const button = screen.getByRole("button", { name: /Try again in 1:(30|29)/ });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("a busy sign-in service is shown as busy, not as a wrong password", async () => {
+    const { ApiError } = await import("@/lib/api");
+    post.mockRejectedValue(new ApiError(503, { error: "signin_busy", message: "Sign-in is busy. Try again in a moment." }));
+    await passwordStep();
+    expect(await screen.findByText("Sign-in is busy")).toBeTruthy();
+    expect(screen.queryByText(/is not right/)).toBeNull();
+  });
+
+  it("an account without a role is told so in plain words", async () => {
+    const { ApiError } = await import("@/lib/api");
+    post.mockRejectedValue(new ApiError(403, { error: "no_roles", message: "This account has no role yet. Ask an administrator to give it one." }));
+    await passwordStep();
+    expect(await screen.findByText(/has no role yet/)).toBeTruthy();
+  });
+
+  it("the page names neither the Admin Console nor the local-account note", async () => {
+    const Page = (await import("@/app/login/page")).default;
+    render(<Page />);
+    expect(screen.getByRole("heading", { name: "Sign in" })).toBeTruthy();
+    expect(screen.queryByText(/Admin Console/)).toBeNull();
+    expect(screen.queryByText(/local account for this appliance/)).toBeNull();
   });
 });
 
