@@ -44,6 +44,7 @@
       "/social-providers",
       "/stay-events",
       "/stays",
+      "/system-health",
       "/usage",
       "/vouchers",
       "/walled-garden"
@@ -171,6 +172,11 @@
         "label": "Portal HTTPS",
         "route": "/portal-https",
         "surface": "portal-https"
+      },
+      {
+        "label": "System health",
+        "route": "/system-health",
+        "surface": "diagnostics"
       },
       {
         "label": "Diagnostics",

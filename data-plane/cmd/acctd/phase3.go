@@ -50,6 +50,9 @@ type phase3 struct {
 	smu          sync.Mutex
 	lastSubmitOK time.Time
 
+	// wmu serialises the expiry sweep with ingest and session limits: ingest locks a session then its entitlement, the sweep the reverse (40P01).
+	wmu sync.Mutex
+
 	// lastRollup and maintaining belong to accountingMaintenance (AD-48): the usage rollup and the purge run off the
 	// accounting tick, one at a time.
 	lastRollup  time.Time
@@ -114,7 +117,9 @@ func (p *phase3) enforceExpiries(ctx context.Context) int {
 	if p == nil {
 		return 0
 	}
+	p.wmu.Lock()
 	due, err := p.enf.EnforceExpiries(ctx, p.tenant, p.site)
+	p.wmu.Unlock()
 	// Audit P4 M3: an entitlement skipped by several sweeps in a row is surfaced on health, not only logged.
 	p.setExpiryDegraded("")
 	if p.enf.StuckExpiries() > 0 {
@@ -140,7 +145,9 @@ func (p *phase3) enforceSessionLimits(ctx context.Context, now time.Time) {
 		return
 	}
 	judgeIdle := p.acctDegraded == "" && p.lastPassOK.Equal(now)
+	p.wmu.Lock()
 	ended, err := p.enf.EnforceSessionLimits(ctx, p.tenant, p.site, now, judgeIdle)
+	p.wmu.Unlock()
 	if err != nil {
 		slog.Error("phase3: plan session limits could not be enforced", "err", err)
 		return

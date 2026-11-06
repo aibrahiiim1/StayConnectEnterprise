@@ -462,6 +462,40 @@ class Output(unittest.TestCase):
         self.assertIn("NOT VERIFIED", text)
 
 
+class ConsoleSnapshot(unittest.TestCase):
+    def test_the_console_gets_no_address_and_a_quick_run_carries_the_last_deep_sections(self):
+        deep = run(FakeSys(), "deep")
+        deep.report["devices"] = [dict(device="ab12cd34", mac="…:ee:ff", ip="10.3.4.5", network="br-guest", issue="IP conflict", cause="c",
+                                       confidence="confirmed", severity="MEDIUM", first="11-06 10:00", last="11-06 11:00", count=2,
+                                       status="ONGOING", action="a", seen_since="11-06 10:00")]
+        active = [(om.Result("svc:x", "services", om.WARN, "x down"), {"first": NOW.isoformat(), "last": NOW.isoformat(), "count": 3})]
+        snap = om.console_snapshot(deep, active, {"resolved": [{"key": "k", "text": "t", "first": "a", "cleared": "b", "status": om.WARN}]}, {})
+        self.assertEqual(snap["overall"], om.WARN)
+        self.assertEqual(snap["incidents"][0]["count"], 3)
+        self.assertNotIn("ip", snap["deep"]["devices"][0])
+        self.assertNotIn("10.3.4.5", json.dumps(snap))
+        self.assertEqual(snap["deep"]["devices"][0]["mac"], "…:ee:ff")
+        quick = om.console_snapshot(run(FakeSys()), [], {}, json.loads(json.dumps(snap)))
+        self.assertEqual(quick["mode"], "quick")
+        self.assertEqual(quick["deep"]["at"], snap["deep"]["at"])
+        self.assertEqual(quick["incidents"], [])
+
+    def test_the_snapshot_is_group_readable_and_never_world_readable(self):
+        import grp
+        import stat
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            old = dict(om.CFG)
+            om.CFG.update(snapshot=os.path.join(d, "console", "health.json"), snapshot_group=grp.getgrgid(os.getgid()).gr_name)
+            try:
+                om.write_console_snapshot(run(FakeSys()), [], {})
+                mode = stat.S_IMODE(os.stat(om.CFG["snapshot"]).st_mode)
+            finally:
+                om.CFG.clear()
+                om.CFG.update(old)
+            self.assertEqual(mode, 0o640)
+
+
 class Locking(unittest.TestCase):
     def test_a_deep_run_waits_for_a_running_quick_run_and_a_quick_run_skips(self):
         import fcntl
