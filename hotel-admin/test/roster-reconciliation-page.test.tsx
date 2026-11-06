@@ -108,7 +108,7 @@ describe("roster reconciliation offers no state-changing action", () => {
 
   it("shows the historical exception as an exception, and says guests are unaffected", async () => {
     await renderPage();
-    await waitFor(() => expect(screen.getByText(/departure for unknown stay/i)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/a departure for a stay this appliance never received/i)).toBeTruthy());
     expect(screen.getByText(/guests not affected/i)).toBeTruthy();
     expect(screen.getAllByText(/HISTORICAL EXCEPTION/i).length).toBeGreaterThan(0);
   });
@@ -118,7 +118,7 @@ describe("roster reconciliation offers no state-changing action", () => {
     await renderPage();
     await waitFor(() => expect(screen.getAllByText(/HISTORICAL EXCEPTION/i).length).toBeGreaterThan(0));
     expect(screen.queryByText(/these clear themselves/i)).toBeNull();
-    expect(screen.getByText(/historical exception — for information/i)).toBeTruthy();
+    expect(screen.getByText(/historical exception, for information/i)).toBeTruthy();
   });
 
   it("says the page needs no manual action, and what it is for", async () => {
@@ -160,6 +160,64 @@ describe("roster reconciliation offers no state-changing action", () => {
     await waitFor(() => expect(put).toHaveBeenCalledWith("/pms-roster-reconciliation/settings", expect.objectContaining({
       expected_config_version: 0, roster_trust_min: 40, reason: "smaller property", password: "pw",
     })));
+  });
+
+  it("never claims nothing was recorded when the appliance cannot be read", async () => {
+    const { ApiError } = await import("@/lib/api");
+    get.mockImplementation((path: string) =>
+      path === "/auth/whoami" ? Promise.resolve({ roles })
+        : Promise.reject(new ApiError(500, { error: "internal", message: "x" })));
+    await renderPage();
+    expect(await screen.findByText("The reconciliation state could not be loaded")).toBeTruthy();
+    expect(screen.getByText("The run history could not be loaded")).toBeTruthy();
+    expect(screen.queryByText(/No run has been recorded/)).toBeNull();
+    expect(screen.queryByText(/None outstanding/)).toBeNull();
+    expect(screen.queryByText("No runs yet")).toBeNull();
+    expect(screen.queryByText(/Incomplete: the run will refuse/)).toBeNull();
+  });
+
+  it("says PMS administration is off instead of showing a 404", async () => {
+    const { ApiError } = await import("@/lib/api");
+    get.mockImplementation((path: string) =>
+      path === "/auth/whoami" ? Promise.resolve({ roles })
+        : Promise.reject(new ApiError(404, { error: "not_found", message: "HTTP 404" })));
+    await renderPage();
+    expect(await screen.findByText("PMS administration is not turned on for this appliance")).toBeTruthy();
+    expect(screen.queryByText(/HTTP 404/)).toBeNull();
+  });
+
+  it("puts a refused run and its outcome in words", async () => {
+    get.mockImplementation((path: string) =>
+      path === "/auth/whoami" ? Promise.resolve({ roles })
+        : path.endsWith("/runs") ? Promise.resolve({ runs: [] })
+          : Promise.resolve({ ...STATE, last_run: { ...STATE.last_run, outcome: "REFUSED_ROSTER_INCOMPLETE", rooms_enumerated: 500 } }));
+    await renderPage();
+    expect(await screen.findByText("Refused: the roster did not cover the site")).toBeTruthy();
+    expect(screen.queryByText(/refused: roster incomplete/)).toBeNull();
+  });
+
+  it("stamps a dry run with its time and can go back to the last run", async () => {
+    roles = ["hotel_it_manager"];
+    post.mockResolvedValue({ ...STATE.last_run, absent_from_roster: 3 });
+    await renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /run dry run/i }));
+    expect(await screen.findByText(/dry run at \d/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Show the last run" }));
+    expect(await screen.findByText(/what the last run decided/i)).toBeTruthy();
+  });
+
+  it("says why the settings cannot be saved yet, and offers a reload after a version conflict", async () => {
+    roles = ["hotel_it_manager"];
+    const { ApiError } = await import("@/lib/api");
+    put.mockRejectedValue(new ApiError(409, { error: "version_conflict", message: "the settings changed since you opened them; reload and try again" }));
+    await renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Change" }));
+    expect(screen.getByText("Give a reason of at least 3 characters.")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText(/^reason/i), { target: { value: "smaller property" } });
+    fireEvent.change(screen.getByLabelText(/confirm your password/i), { target: { value: "pw" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText(/The settings changed since you opened them\. Reload them and try again\./)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Reload the settings/ })).toBeTruthy();
   });
 
   it("a read-only role sees the settings and cannot change them", async () => {
