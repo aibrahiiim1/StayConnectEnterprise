@@ -30,6 +30,12 @@ GUEST_ERRORS = ("CREDENTIAL_MISMATCH", "ROOM_NOT_IN_MIRROR", "RATE_LIMITED", "AM
                 "MALFORMED_SUBMISSION", "SPENT_REQUEST_ID")
 POLICY_REFUSALS = ("DEVICE_LIMIT_REACHED", "STAY_NOT_ELIGIBLE", "VERIFIED_NO_ELIGIBLE_PACKAGE",
                    "AFTER_CHECKOUT_NEW_DEVICE_REJECTED")
+# scd's rejoin refusals that are server failures, not ineligibility (data-plane/cmd/scd/phase3_rejoin.go).
+REJOIN_FAILURES = ("device:", "begin", "candidate:", "capacity:", "session:", "commit", "enforcement_not_confirmed")
+# The stay arm of scd's candidate query, with authctx.AfterCheckoutLive inlined.
+STAY_REJOINABLE = """(st.status IN ('IN_HOUSE','POST_STAY_ACTIVE') OR (st.status = 'CHECKED_OUT' AND EXISTS (
+    SELECT 1 FROM iam_v2.entitlements g WHERE g.tenant_id = st.tenant_id AND g.site_id = st.site_id AND g.stay_id = st.id
+      AND g.status = 'ACTIVE' AND g.end_mode = 'GRACE_AFTER_CHECKOUT' AND (g.window_ends_at IS NULL OR g.window_ends_at > now()))))"""
 UNITS = ["stayconnect-edged", "stayconnect-scd", "stayconnect-portald", "stayconnect-netd", "stayconnect-acctd",
          "stayconnect-pmsd", "stayconnect-caddy", "stayconnect-hotel-admin", "kea-dhcp4-server", "unbound", "docker"]
 
@@ -558,8 +564,13 @@ class Monitor:
                  f"no device stuck for a system reason ({len(stuck)} stuck on wrong details or policy)")
         try:
             lines = self.journal("stayconnect-scd", 15)
-            errs = sum(1 for l in lines if "phase3 rejoin" in l and "ERROR" in l)
-            self.add("auth:rejoin-errors", "authentication", WARN if errs else PASS, f"{errs} automatic reconnection(s) failed on a server error in 15 min")
+            reasons = [self._json_field(l, "reason") for l in lines if '"msg":"phase3 rejoin: not eligible"' in l]
+            fails = [r for r in reasons if r.startswith(REJOIN_FAILURES)]
+            done = sum(1 for l in lines if "phase3 rejoin: device reconnected" in l)
+            self.m["rejoin_refused"] = len(reasons) - len(fails)
+            self.add("auth:rejoin-errors", "automatic reconnection", WARN if len(fails) >= 2 else PASS,
+                     f"{len(fails)} automatic reconnection(s) failed on a server error in 15 min"
+                     + (f" (latest: {fails[-1][:100]})" if fails else "") + f"; {done} reconnected, {len(reasons) - len(fails)} not eligible")
         except Unavailable as e:
             self.add("auth:rejoin-errors", "authentication", NV, str(e))
         e = self.s.sql("""SELECT COALESCE(end_reason, '-'), count(*) FROM iam_v2.sessions WHERE ended > now() - interval '15 minutes' GROUP BY 1""")
@@ -824,16 +835,25 @@ class Monitor:
                  "previous session on the same network ended on an address change with the package still valid", "confirmed", "MEDIUM",
                  first, last, cnt, now_or_past(dev), "check whether the device's captive probe reached automatic reconnection")
         missed = 0
-        for dev, mac, ip, net, ended, ended_epoch in [] if leases_by_mac is None else self.s.sql("""SELECT s.device_id::text, lower(s.mac::text), host(s.ip), s.ingress_interface,
+        import ipaddress
+        subnets = {}
+        for bridge, cidr in ([] if leases_by_mac is None else self.s.sql("SELECT bridge_name, subnet_cidr::text FROM public.guest_networks WHERE enabled")):
+            try:
+                subnets[bridge] = ipaddress.ip_network(cidr, strict=False)
+            except ValueError:
+                pass
+        for dev, mac, ip, net, ended, ended_epoch in [] if leases_by_mac is None else self.s.sql(f"""SELECT s.device_id::text, lower(s.mac::text), host(s.ip), s.ingress_interface,
                   to_char(s.ended, 'MM-DD HH24:MI'), extract(epoch FROM s.ended)::bigint
                 FROM iam_v2.sessions s JOIN iam_v2.entitlements e ON e.id = s.entitlement_id
+                JOIN iam_v2.stays st ON st.id = e.stay_id
                 JOIN iam_v2.entitlement_devices d ON d.entitlement_id = e.id AND d.device_id = s.device_id AND d.status = 'AUTHORIZED'
                 WHERE s.ended > now() - interval '24 hours' AND s.ended < now() - interval '10 minutes'
                   AND s.end_reason IN ('ADDRESS_NO_LONGER_OWNED','ADDRESS_CHANGED','SUPERSEDED_ON_DEVICE_MOVE','SUPERSEDED_ON_ADDRESS')
-                  AND e.status = 'ACTIVE' AND (e.window_ends_at IS NULL OR e.window_ends_at > now())
+                  AND e.status = 'ACTIVE' AND (e.window_ends_at IS NULL OR e.window_ends_at > now()) AND {STAY_REJOINABLE}
                   AND NOT EXISTS (SELECT 1 FROM iam_v2.sessions x WHERE x.device_id = s.device_id AND x.started > s.started)"""):
             lease = leases_by_mac.get(mac)
-            if lease and n(ended_epoch) < lease[1] <= self.now.timestamp() - 600:
+            same_network = lease is not None and net in subnets and ipaddress.ip_address(lease[0]) in subnets[net]
+            if same_network and n(ended_epoch) < lease[1] <= self.now.timestamp() - 600:
                 missed += 1
                 back = dt.datetime.fromtimestamp(lease[1], dt.timezone.utc).strftime("%m-%d %H:%M")
                 item(dev, mac, lease[0], net, "back on the network but not reconnected",

@@ -188,17 +188,39 @@ class ReviewFindings(unittest.TestCase):
         _, rec = om.Incidents(state, NOW).apply(mon.results)
         self.assertEqual([k for k, _ in rec], ["net:bridge:br-old"])
 
-    def test_a_device_that_just_returned_is_not_yet_a_missed_reconnection(self):
+    def missed(self, returned_seconds_ago, lease_ip="10.0.0.9"):
         f = FakeSys()
-        exp = int(NOW.timestamp()) + 28800 - 120
-        f.files["/var/lib/kea/kea-leases4.csv"] = f"address,hwaddr\n10.0.0.9,aa:bb:cc:dd:ee:09,,28800,{exp},1,0,0,h,0,\n"
+        exp = int(NOW.timestamp()) + 28800 - returned_seconds_ago
+        f.files["/var/lib/kea/kea-leases4.csv"] = f"address,hwaddr\n{lease_ip},aa:bb:cc:dd:ee:09,,28800,{exp},1,0,0,h,0,\n"
         f.sqls += [(r"SELECT DISTINCT device_id::text FROM iam_v2.sessions WHERE ended IS NULL", []),
+                   (r"subnet_cidr", [["br-g95", "10.0.0.0/24"], ["br-g90", "10.90.0.0/24"]]),
                    (r"extract\(epoch FROM s.ended\)", [["dev-1", "aa:bb:cc:dd:ee:09", "10.0.0.9", "br-g95", "11-06 10:00", str(int(NOW.timestamp()) - 7200)]]),
                    (r".", [])]
         mon = om.Monitor(f, "deep")
-        items = mon.devices({})
-        self.assertEqual([i for i in items if i["issue"].startswith("back on the network")], [])
-        self.assertEqual(by_key(mon)["reconnect:missed"].status, om.PASS)
+        items = [i for i in mon.devices({}) if i["issue"].startswith("back on the network")]
+        return items, by_key(mon)["reconnect:missed"].status
+
+    def test_a_device_back_for_over_ten_minutes_on_its_network_is_a_missed_reconnection(self):
+        items, st = self.missed(1800)
+        self.assertEqual((len(items), st), (1, om.WARN))
+
+    def test_a_device_that_just_returned_is_not_yet_a_missed_reconnection(self):
+        self.assertEqual(self.missed(120), ([], om.PASS))
+
+    def test_a_device_back_on_another_network_is_not_a_missed_reconnection(self):
+        self.assertEqual(self.missed(1800, lease_ip="10.90.0.9"), ([], om.PASS))
+
+    def test_reconnection_server_failures_are_told_from_ineligibility(self):
+        f = FakeSys()
+        line = lambda reason: '{"time":"2026-11-06T11:55:00Z","level":"INFO","msg":"phase3 rejoin: not eligible","reason":"%s"}' % reason
+        out = "\n".join([line("no_rejoinable_entitlement")] * 5 + [line("candidate: ERROR: permission denied (SQLSTATE 42501)"), line("enforcement_not_confirmed")])
+        f.cmds.append((["journalctl", "-u", "stayconnect-scd"], 0, out))
+        f.sqls.append((r".", []))
+        r = by_key(run(f))["auth:rejoin-errors"]
+        self.assertEqual(r.status, om.WARN)
+        self.assertIn("2 automatic reconnection(s) failed", r.text)
+        f.cmds[0] = (["journalctl", "-u", "stayconnect-scd"], 0, "\n".join([line("no_rejoinable_entitlement")] * 9))
+        self.assertEqual(by_key(run(f))["auth:rejoin-errors"].status, om.PASS)
 
     def test_the_headline_is_not_pass_while_evidence_is_missing(self):
         mon = run(FakeSys())
