@@ -79,9 +79,11 @@ class Sys:
     def now(self):
         return dt.datetime.now(dt.timezone.utc)
 
-    def sh(self, args, timeout=20):
+    def sh(self, args, timeout=20, stderr=False):
+        """stderr=True returns both streams: a container's log (PostgreSQL logs to stderr) is split across them by docker."""
         try:
-            p = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+            p = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT if stderr else subprocess.PIPE,
+                               text=True, timeout=timeout)
         except (OSError, subprocess.TimeoutExpired) as e:
             raise Unavailable(f"{args[0]}: {e.__class__.__name__}")
         return p.returncode, p.stdout
@@ -334,7 +336,7 @@ class Monitor:
         since = state.get("lock_waits_until") or (self.now - dt.timedelta(minutes=15)).strftime("%Y-%m-%dT%H:%M:%SZ")
         until = self.now.strftime("%Y-%m-%dT%H:%M:%SZ")
         try:
-            rc, out = self.s.sh(["docker", "logs", "--since", since, "--until", until, "stayconnect-pg"], timeout=30)
+            rc, out = self.s.sh(["docker", "logs", "--since", since, "--until", until, "stayconnect-pg"], timeout=30, stderr=True)
         except Unavailable:
             rc, out = 1, ""
         if rc != 0:

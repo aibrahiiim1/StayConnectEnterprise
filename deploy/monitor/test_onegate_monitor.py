@@ -25,7 +25,7 @@ class FakeSys:
     def now(self):
         return NOW
 
-    def sh(self, args, timeout=20):
+    def sh(self, args, timeout=20, stderr=False):
         for prefix, rc, out in self.cmds:
             if list(args[:len(prefix)]) == list(prefix):
                 return rc, out
@@ -351,6 +351,18 @@ class DatabaseDiagnostics(unittest.TestCase):
         self.assertEqual(state["lock_waits_until"], "2026-11-06T12:00:00Z")
         r, _ = self.mon({"log_lock_waits": "off", "log_error_verbosity": "default", "log_min_error_statement": "error"}, "")
         self.assertEqual((r["db:lock-wait-logging"].status, r["db:log-privacy"].status), (om.WARN, om.WARN))
+
+
+class RealSubprocess(unittest.TestCase):
+    def test_a_log_written_to_stderr_is_read_when_asked(self):
+        s = om.Sys(om.CFG)
+        script = ["sh", "-c", "echo out; echo 'LOG:  process 1 still waiting for ShareLock on transaction 2' >&2"]
+        rc, out = s.sh(script, stderr=True)
+        self.assertEqual(rc, 0)
+        self.assertIn("still waiting for", out)
+        self.assertIn("out", out)
+        rc, out = s.sh(script)
+        self.assertNotIn("still waiting for", out)
 
 
 class UnitParity(unittest.TestCase):
