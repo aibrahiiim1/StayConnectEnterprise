@@ -171,6 +171,35 @@ class ReviewFindings(unittest.TestCase):
             {"interface": "br-g95", "authoritative": True, "pools": [{"pool": "10.0.0.1 - 10.0.0.100"}]}]}})
         self.assertEqual(by_key(run(f))["dhcp:pools"].status, om.NV)
 
+    def test_only_rotated_lease_copies_are_not_current_evidence(self):
+        f = FakeSys()
+        f.files["/etc/kea/kea-dhcp4.conf"] = json.dumps({"Dhcp4": {"subnet4": [
+            {"interface": "br-g95", "authoritative": True, "pools": [{"pool": "10.0.0.1 - 10.0.0.100"}]}]}})
+        f.files["/var/lib/kea/kea-leases4.csv.1"] = "address,hwaddr\n"
+        self.assertEqual(by_key(run(f))["dhcp:pools"].status, om.NV)
+
+    def test_a_removed_network_retires_its_bridge_incident(self):
+        f = FakeSys()
+        f.cmds += [(["ip", "-j", "link"], 0, "[]"), (["ip", "-j", "route"], 0, "[]")]
+        f.sqls.append((r"FROM public.guest_networks WHERE enabled", [["br-g90"]]))
+        state = {"incidents": {"net:bridge:br-old": {"first": NOW.isoformat(), "last": NOW.isoformat(), "count": 3, "streak": 3,
+                                                     "raised": True, "status": om.CRIT, "text": "client network br-old missing", "area": "network"}}}
+        mon = run(f, state=state)
+        _, rec = om.Incidents(state, NOW).apply(mon.results)
+        self.assertEqual([k for k, _ in rec], ["net:bridge:br-old"])
+
+    def test_a_device_that_just_returned_is_not_yet_a_missed_reconnection(self):
+        f = FakeSys()
+        exp = int(NOW.timestamp()) + 28800 - 120
+        f.files["/var/lib/kea/kea-leases4.csv"] = f"address,hwaddr\n10.0.0.9,aa:bb:cc:dd:ee:09,,28800,{exp},1,0,0,h,0,\n"
+        f.sqls += [(r"SELECT DISTINCT device_id::text FROM iam_v2.sessions WHERE ended IS NULL", []),
+                   (r"extract\(epoch FROM s.ended\)", [["dev-1", "aa:bb:cc:dd:ee:09", "10.0.0.9", "br-g95", "11-06 10:00", str(int(NOW.timestamp()) - 7200)]]),
+                   (r".", [])]
+        mon = om.Monitor(f, "deep")
+        items = mon.devices({})
+        self.assertEqual([i for i in items if i["issue"].startswith("back on the network")], [])
+        self.assertEqual(by_key(mon)["reconnect:missed"].status, om.PASS)
+
     def test_the_headline_is_not_pass_while_evidence_is_missing(self):
         mon = run(FakeSys())
         nv = sum(1 for r in mon.results if r.status == om.NV)

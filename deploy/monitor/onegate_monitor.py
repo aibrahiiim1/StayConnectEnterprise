@@ -204,20 +204,20 @@ class Monitor:
         if "leases" not in self.m:
             live = {}
             now = self.now.timestamp()
-            read = 0
+            current = False
             for f in (self.cfg["kea_leases"] + ".2", self.cfg["kea_leases"] + ".1", self.cfg["kea_leases"]):
                 try:
                     text = self.s.read(f)
-                    read += 1
+                    current = current or f == self.cfg["kea_leases"]
                 except Unavailable:
                     continue
                 for line in text.splitlines():
                     r = line.split(",")
                     if len(r) > 9 and r[0][:1].isdigit():
                         live[r[0]] = (r[1].lower(), n(r[4]), n(r[3]), r[9] == "0")
-            if not read:
+            if not current:
                 self.m["leases"] = Unavailable
-                raise Unavailable("Kea lease files unreadable")
+                raise Unavailable("Kea's current lease file is unreadable")
             self.m["leases"] = {ip: (mac, exp, exp - valid) for ip, (mac, exp, valid, ok) in live.items() if ok and exp > now}
         return self.m["leases"]
 
@@ -389,6 +389,8 @@ class Monitor:
                      f"client network {b} up on {' '.join(members)}" if ok else
                      f"client network {b} " + (f"{st or 'missing'}" if not up else "has no uplink" if not members else "uplink down: " + " ".join(down)))
         self.m["bridges"] = want
+        for key in [k for k in state.get("incidents", {}) if k.startswith("net:bridge:") and k[len("net:bridge:"):] not in want]:
+            self.add(key, "network", PASS, f"client network {key[len('net:bridge:'):]} is no longer configured")
         rc, out = self.s.sh(["unbound-control", "status"])
         self.add("net:dns", "network", PASS if rc == 0 else CRIT, "client DNS (unbound) running" if rc == 0 else "unbound-control status failed")
         try:
@@ -831,7 +833,7 @@ class Monitor:
                   AND e.status = 'ACTIVE' AND (e.window_ends_at IS NULL OR e.window_ends_at > now())
                   AND NOT EXISTS (SELECT 1 FROM iam_v2.sessions x WHERE x.device_id = s.device_id AND x.started > s.started)"""):
             lease = leases_by_mac.get(mac)
-            if lease and lease[1] > n(ended_epoch):
+            if lease and n(ended_epoch) < lease[1] <= self.now.timestamp() - 600:
                 missed += 1
                 back = dt.datetime.fromtimestamp(lease[1], dt.timezone.utc).strftime("%m-%d %H:%M")
                 item(dev, mac, lease[0], net, "back on the network but not reconnected",
