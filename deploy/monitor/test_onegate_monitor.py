@@ -290,9 +290,18 @@ class ReviewFindings(unittest.TestCase):
                                                    "raised": True, "status": om.WARN, "text": "gap", "area": "enforcement"}}}
         mon = run(f, state=state)
         self.assertEqual(by_key(mon)["enf:consistency"].status, om.NV)
-        self.assertNotIn("enf", mon.complete)
         active, rec = om.Incidents(state, NOW).apply(mon.results, mon.complete)
         self.assertEqual(rec, [])
+
+    def test_an_enforcement_outage_does_not_resolve_other_enforcement_incidents(self):
+        f = FakeSys()
+        f.cmds.append((["journalctl", "-u", "stayconnect-netd"], 0, '{"time":"2026-11-06T11:00:00Z","msg":"other"}\n'))
+        state = {"incidents": {"enf:consistency": {"first": NOW.isoformat(), "last": NOW.isoformat(), "count": 2, "streak": 2,
+                                                   "raised": True, "status": om.WARN, "text": "gap", "area": "enforcement"}}}
+        mon = run(f, state=state)
+        active, rec = om.Incidents(state, NOW).apply(mon.results, mon.complete)
+        self.assertEqual(rec, [])
+        self.assertEqual(sorted(r.key for r, _ in active if r.key.startswith("enf:")), ["enf:consistency", "enf:pass"])
 
     def test_the_headline_is_not_pass_while_evidence_is_missing(self):
         mon = run(FakeSys())

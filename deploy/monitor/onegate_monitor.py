@@ -30,6 +30,8 @@ GUEST_ERRORS = ("CREDENTIAL_MISMATCH", "ROOM_NOT_IN_MIRROR", "RATE_LIMITED", "AM
                 "MALFORMED_SUBMISSION", "SPENT_REQUEST_ID")
 POLICY_REFUSALS = ("DEVICE_LIMIT_REACHED", "STAY_NOT_ELIGIBLE", "VERIFIED_NO_ELIGIBLE_PACKAGE",
                    "AFTER_CHECKOUT_NEW_DEVICE_REJECTED")
+# Result keys that name one entity of a list the check reads in full; an entity missing from a complete read no longer exists.
+ENTITY_LISTS = ("svc:", "svc-restart:", "container:", "res:disk:", "net:bridge:", "pms:link:", "pms:sync:", "cert:", "errors:")
 # scd's rejoin refusals that are server failures, not ineligibility (data-plane/cmd/scd/phase3_rejoin.go).
 REJOIN_FAILURES = ("device:", "begin", "candidate:", "capacity:", "session:", "commit", "enforcement_not_confirmed")
 # The stay arm of scd's candidate query, with authctx.AfterCheckoutLive inlined.
@@ -956,7 +958,7 @@ class Monitor:
                 ran.add(name)
                 mine = self.results[start:]
                 if mine and all(r.status != NV for r in mine):
-                    self.complete |= {r.key.split(":", 1)[0] for r in mine}
+                    self.complete |= {f for f in ENTITY_LISTS if any(r.key.startswith(f) for r in mine)}
             except Unavailable as e:
                 self.add(f"{name}:evidence", name.replace("check_", ""), NV, str(e))
             except Exception as e:
@@ -968,8 +970,6 @@ class Monitor:
                 except Unavailable as e:
                     self.report[part] = None
                     self.add(f"report:{part}", "reporting", NV, f"{part}: {e}")
-            if self.report.get("devices") is not None and all(r.status != NV for r in self.results if r.key.startswith("reconnect:")):
-                self.complete.add("reconnect")
         self.m["run_ms"] = round((time.monotonic() - t0) * 1000)
         ru = resource.getrusage(resource.RUSAGE_CHILDREN)
         me = resource.getrusage(resource.RUSAGE_SELF)
@@ -987,11 +987,11 @@ class Incidents:
         self.now = now
 
     def apply(self, results, complete=()):
-        """complete: key families whose check read all its evidence this run; their incidents it no longer reports are over
-        (a removed network, a decommissioned PMS connection)."""
+        """complete: entity lists a check read in full this run; an entity it no longer lists is gone (a removed network,
+        a decommissioned PMS connection), so its incident is over. Every other incident waits for its own evaluation."""
         active, recovered = [], []
         failing = {r.key: r for r in results if r.status in (WARN, CRIT)}
-        evaluated = {r.key for r in results if r.status != NV} | {k for k in self.st if k.split(":", 1)[0] in complete}
+        evaluated = {r.key for r in results if r.status != NV} | {k for k in self.st if any(k.startswith(f) for f in complete)}
         for key, r in failing.items():
             inc = self.st.get(key) or {"first": self.now.isoformat(), "count": 0, "streak": 0, "raised": False}
             inc["streak"] += 1
