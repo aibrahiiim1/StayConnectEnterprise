@@ -214,7 +214,7 @@ function LoginInner() {
 
         <div className="relative max-w-md space-y-4">
           <h2 className="text-4xl font-semibold leading-tight tracking-tight text-balance">
-            Guest internet for your site, in one place.
+            Internet access for your site, in one place.
           </h2>
           <p className="text-base leading-relaxed text-white/70 text-pretty">
             Sign-in, access, devices and networking for this site, run from this appliance.
