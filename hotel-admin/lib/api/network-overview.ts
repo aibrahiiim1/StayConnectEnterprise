@@ -63,8 +63,8 @@ export const STATUS_LABEL: Record<NetworkStatusValue, string> = {
   not_activated: "Not activated",
   activating: "Activating",
   active: "Active",
-  active_degraded: "Active – needs attention",
-  disabled: "Disabled",
+  active_degraded: "Active, needs attention",
+  disabled: "Switched off",
   change_pending: "Change not applied",
   failed: "Last change failed",
 };

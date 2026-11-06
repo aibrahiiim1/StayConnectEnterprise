@@ -73,7 +73,7 @@ describe("Diagnostics", () => {
     post.mockResolvedValue({});
     const Page = (await import("@/app/(app)/health/page")).default;
     render(<Page />);
-    await openRowMenu("scd");
+    await openRowMenu("Session control (scd)");
     fireEvent.click(await screen.findByRole("menuitem", { name: "Restart…" }));
 
     const dialog = await screen.findByRole("dialog");
@@ -93,7 +93,7 @@ describe("Diagnostics", () => {
     const Page = (await import("@/app/(app)/health/page")).default;
     render(<Page />);
     await screen.findByText(/can view diagnostics, but not read service logs/i);
-    expect(screen.queryByRole("button", { name: "Actions for scd" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Actions for Session control (scd)" })).toBeNull();
     expect(screen.queryByRole("button", { name: /Recheck/ })).toBeNull();
   });
 
@@ -101,8 +101,37 @@ describe("Diagnostics", () => {
     routes({ "/diagnostics/services": SUMMARY }, ["hotel_it_manager"]);
     const Page = (await import("@/app/(app)/health/page")).default;
     render(<Page />);
-    const menu = await openRowMenu("scd");
+    const menu = await openRowMenu("Session control (scd)");
     expect(within(menu).getByRole("menuitem", { name: "Logs" })).toBeTruthy();
+  });
+
+  it("does not call a restart of the admin service failed when it drops this console's own connection", async () => {
+    routes({ "/diagnostics/services": { ...SUMMARY, services: [{ ...SERVICE, service: "edged" }] } }, ["site_admin"]);
+    post.mockRejectedValue(new TypeError("Failed to fetch"));
+    const Page = (await import("@/app/(app)/health/page")).default;
+    render(<Page />);
+    await openRowMenu("Admin service (edged)");
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Restart\u2026" }));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.type(within(dialog).getByLabelText(/Why are you restarting it/), "stuck");
+    await userEvent.type(within(dialog).getByLabelText(/Confirm your password/), "pw-123");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Restart now" }));
+    expect(await within(dialog).findByText(/The restart was most likely carried out/)).toBeTruthy();
+    expect(within(dialog).queryByText(/Failed to fetch|restart failed/i)).toBeNull();
+  });
+
+  it("says when a service's details could not be loaded instead of loading forever", async () => {
+    routes({ "/diagnostics/services": SUMMARY }, ["site_admin"]);
+    get.mockImplementation((path: string) => {
+      if (path === "/auth/whoami") return Promise.resolve({ roles: ["site_admin"], operator_id: "me" });
+      if (path === "/diagnostics/services") return Promise.resolve(SUMMARY);
+      return Promise.reject(new Error("boom"));
+    });
+    const Page = (await import("@/app/(app)/health/page")).default;
+    render(<Page />);
+    fireEvent.click(await screen.findByText("Session control (scd)"));
+    expect(await screen.findByText("The details could not be loaded")).toBeTruthy();
+    expect(screen.queryByText("boom")).toBeNull();
   });
 });
 
@@ -143,6 +172,57 @@ describe("Activity", () => {
     expect(within(drawer).getByText("backup.downloaded")).toBeTruthy();
     const disclosure = within(drawer).getByText("Raw payload");
     expect(disclosure.closest("details")).toBeTruthy();
+  });
+
+  it("names who signed in, words every recorded action and filters by person", async () => {
+    const MONA = "11111111-2222-3333-4444-555555555555";
+    routes({
+      "/audit": fakeAudit([
+        { ts: "2026-09-20T10:00:00Z", actor_type: "operator", action: "operator.login", target_type: "operator", target_id: MONA },
+        { ts: "2026-09-20T09:00:00Z", actor_type: "operator", actor_id: MONA, action: "voucher.code_revealed", target_type: "voucher", target_id: "v-1" },
+      ]),
+      "/operators": { data: [{ id: MONA, display_name: "Mona" }] },
+    }, ["site_admin"]);
+    const Page = (await import("@/app/(app)/audit/page")).default;
+    render(<Page />);
+    await screen.findByText("Signed in to Admin Console");
+    const table = screen.getByRole("table", { name: "Activity" });
+    await waitFor(() => expect(within(table).getAllByText("Mona")).toHaveLength(2));
+    expect(within(table).getByText("Showed a voucher code")).toBeTruthy();
+    expect(screen.queryByText("voucher.code_revealed")).toBeNull();
+    expect(screen.queryByText(/A removed operator/)).toBeNull();
+    expect(within(table).getByText("· Voucher", { exact: false })).toBeTruthy();
+
+    const chips = screen.getByRole("radiogroup", { name: "Show" });
+    expect(within(chips).getByRole("radio", { name: /Vouchers & codes/ })).toBeTruthy();
+    expect(within(chips).queryByRole("radio", { name: /^Other/ })).toBeNull();
+
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Who" }), "Mona");
+    await waitFor(() => expect(get.mock.calls.some(([path]) => String(path).includes(`actor=${MONA}`))).toBe(true));
+  });
+
+  it("says An operator rather than a removed operator when the staff list cannot be read", async () => {
+    routes({
+      "/audit": fakeAudit([
+        { ts: "2026-09-20T10:00:00Z", actor_type: "operator", actor_id: "11111111-2222-3333-4444-555555555555", action: "role.updated" },
+      ]),
+    }, ["front_desk"]);
+    const Page = (await import("@/app/(app)/audit/page")).default;
+    render(<Page />);
+    await screen.findByText("Changed a role");
+    expect(screen.getAllByText("An operator").length).toBeGreaterThan(0);
+    expect(screen.queryByText("A removed operator")).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Who" })).toBeNull();
+  });
+
+  it("offers Try again when the trail cannot be loaded", async () => {
+    routes({ "/audit": () => Promise.reject(new Error("offline")) }, ["site_admin"]);
+    const Page = (await import("@/app/(app)/audit/page")).default;
+    render(<Page />);
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).getByText("The activity trail could not be loaded")).toBeTruthy();
+    expect(within(alert).getByRole("button", { name: /Try again/ })).toBeTruthy();
+    expect(screen.queryByText("offline")).toBeNull();
   });
 });
 

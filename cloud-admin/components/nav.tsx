@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
-  BadgeCheck, Building2, GlobeLock, HardDrive, KeyRound, LayoutDashboard, LogOut, Smartphone, PanelLeftClose, PanelLeftOpen,
+  BadgeCheck, BellRing, Building2, GlobeLock, HardDrive, KeyRound, LayoutDashboard, LogOut, Smartphone, PanelLeftClose, PanelLeftOpen,
   ScrollText, Server, Settings2, ShieldAlert, Users,
 } from "lucide-react";
 import { BySemantics, OneGateLockup } from "@/components/brand";
@@ -35,6 +35,7 @@ export const SYSTEM_PAGES: { href: string; label: string; icon: React.ComponentT
   { href: "/system/audit", label: "Audit log", icon: ScrollText },
   { href: "/system/team", label: "Team", icon: Users },
   { href: "/system/backup-health", label: "Backup health", icon: HardDrive },
+  { href: "/system/notifications", label: "Notifications", icon: BellRing },
 ];
 
 export function activeNavHref(path: string): string | null {

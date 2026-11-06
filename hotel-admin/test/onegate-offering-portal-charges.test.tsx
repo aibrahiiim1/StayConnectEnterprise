@@ -136,6 +136,8 @@ describe("a read-only role is offered no write control", () => {
     const voucher = await screen.findByRole("switch", { name: "Voucher code" });
     expect(voucher).toHaveAttribute("aria-checked", "true");
     fireEvent.click(voucher);
+    expect(put).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("button", { name: "Switch off" }));
     await waitFor(() => expect(put).toHaveBeenCalledWith("/auth-methods", { voucher: { enabled: false } }));
     expect(screen.getByRole("switch", { name: "SMS code" })).toBeDisabled();
     expect(screen.getAllByText(/not available until/i).length).toBeGreaterThanOrEqual(1);
@@ -175,7 +177,7 @@ describe("every Hotel charge screen has its menu label as its title", () => {
   ])("%s", async (title, el) => {
     routes([], {
       "/financial-ops/health": { health: HEALTH },
-      "/financial-review/queue": { queue: [] },
+      "/financial-review/queue": { items: [] },
       "/financial-review/actions": { actions: [] },
       "/financial-ops/settlements": fakeSettlements([]),
       "/financial-ops/recovery": { recovery: { Epoch: 1, Reason: "INITIAL", Active: false, HeldTotal: 0, HeldOpen: 0, EnteredAt: "", ReleasedAt: "" } },

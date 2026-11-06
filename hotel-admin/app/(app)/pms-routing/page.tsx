@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { api, PmsInterface, Whoami } from "@/lib/api";
+import { AlertTriangle, RefreshCw, Router } from "lucide-react";
+import { api, PmsInterface } from "@/lib/api";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { SectionCard } from "@/components/ui/card";
 import { RowActions } from "@/components/ui/row-actions";
@@ -10,57 +11,79 @@ import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { Callout } from "@/components/ui/error-banner";
 import { HelpList, HelpSection } from "@/components/help";
 import { SkeletonRows } from "@/components/ui/misc";
+import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { ClearRoutingDialog, RoutingEditor, type ChoosableInterface } from "@/components/pms/routing-editor";
 import { RoomSignInReadinessCallout, useRoomSignInReadiness } from "@/components/room-sign-in-readiness";
 import { canWrite } from "@/lib/roles";
+import { useOperatorRoles } from "@/lib/whoami-context";
+import { cn } from "@/lib/utils";
 import { POLICY_WORDS, STATE_WORDS, type RoutingState } from "@/lib/api/pms-routing";
-import { Router } from "lucide-react";
+
+const FADE = "animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none";
 
 export default function PMSRoutingPage() {
+  const roles = useOperatorRoles();
   const [policies, setPolicies] = useState<RoutingState[] | null>(null);
-  const [interfaces, setInterfaces] = useState<PmsInterface[]>([]);
-  const [roles, setRoles] = useState<string[]>([]);
-  const [err, setErr] = useState<unknown>(null);
+  const [policiesFailed, setPoliciesFailed] = useState(false);
+  const [interfaces, setInterfaces] = useState<PmsInterface[] | null>(null);
+  const [interfacesFailed, setInterfacesFailed] = useState(false);
+  const [loading, setLoading] = useState(false);
   const { readiness, assessment, reload: reloadReadiness } = useRoomSignInReadiness();
 
   const [editing, setEditing] = useState<{ id: string; name: string } | null>(null);
   const [clearing, setClearing] = useState<RoutingState | null>(null);
 
   const load = useCallback(async () => {
-    try {
-      const [r, i, me] = await Promise.all([
-        api.get<{ policies: RoutingState[] }>("/pms-routing"),
-        api.get<{ interfaces: PmsInterface[] }>("/pms-interfaces").catch(() => ({ interfaces: [] })),
-        api.get<Whoami>("/auth/whoami").catch(() => null),
-      ]);
-      setPolicies(r.policies ?? []);
-      setInterfaces(i.interfaces ?? []);
-      setRoles(me?.roles ?? []);
-      setErr(null);
-    } catch (e) {
-      setErr(e);
-      setPolicies([]);
+    setLoading(true);
+    const [r, i] = await Promise.allSettled([
+      api.get<{ policies: RoutingState[] }>("/pms-routing"),
+      api.get<{ interfaces: PmsInterface[] }>("/pms-interfaces"),
+    ]);
+    if (r.status === "fulfilled") {
+      setPolicies(r.value.policies ?? []);
+      setPoliciesFailed(false);
+    } else {
+      setPoliciesFailed(true);
     }
+    if (i.status === "fulfilled") {
+      setInterfaces(i.value.interfaces ?? []);
+      setInterfacesFailed(false);
+    } else {
+      setInterfacesFailed(true);
+    }
+    setLoading(false);
   }, []);
   useEffect(() => { void load(); }, [load]);
 
-  const writable = canWrite("pms-routing", roles);
+  const refresh = useCallback(async () => {
+    await Promise.all([load(), reloadReadiness()]);
+  }, [load, reloadReadiness]);
+
+  const writable = roles !== null && canWrite("pms-routing", roles);
   const choosable: ChoosableInterface[] = useMemo(
-    () => interfaces.filter((i) => i.lifecycle_state !== "DECOMMISSIONED").map((i) => ({
-      id: i.id, label: i.display_label || i.id, lifecycle: i.lifecycle_state, published: i.published,
+    () => (interfaces ?? []).filter((i) => i.lifecycle_state !== "DECOMMISSIONED").map((i) => ({
+      id: i.id, label: i.display_label || "Unnamed PMS connection", lifecycle: i.lifecycle_state, published: i.published,
     })),
     [interfaces],
   );
   const stateOf = useMemo(() => new Map((assessment?.networks ?? []).map((n) => [n.network_id, n])), [assessment]);
+  const readyCount = choosable.filter((c) => c.lifecycle === "ACTIVE" && c.published).length;
+  const loadFailed = policiesFailed && policies === null;
+  const spin = (on: boolean) => cn(on && "animate-spin motion-reduce:animate-none");
 
   return (
     <PageShell>
       <PageHeader
         title="PMS routing"
         description="How room sign-in works on each client network, and which PMS connections it checks."
+        actions={policies ? (
+          <Button size="sm" variant="secondary" onClick={() => void refresh()} disabled={loading}>
+            <RefreshCw className={spin(loading)} /> Refresh
+          </Button>
+        ) : undefined}
         help={
           <>
             <HelpSection title="What this page sets">
@@ -90,23 +113,62 @@ export default function PMSRoutingPage() {
         }
       />
 
-      <ErrorBanner err={err} />
-      <RoomSignInReadinessCallout readiness={readiness} />
-
-      {choosable.length > 0 && !choosable.some((c) => c.lifecycle === "ACTIVE" && c.published) && (
-        <Callout tone="warning" title="No PMS connection is ready to be used">
-          A network can only be routed to a PMS connection that is in service and has a published configuration. Finish configuring one
-          on <Link href="/pms-interfaces" className="underline underline-offset-2">PMS connection</Link> first.
-        </Callout>
+      {roles !== null && !writable && policies && (
+        <ReadOnlyNotice>Your role can see how room sign-in works on each network but not change it.</ReadOnlyNotice>
       )}
 
+      {policiesFailed && policies && (
+        <div className={FADE}>
+          <Callout tone="warning">The networks could not be refreshed. What is shown may be out of date.</Callout>
+        </div>
+      )}
+
+      <RoomSignInReadinessCallout readiness={readiness} />
+
+      {interfacesFailed ? (
+        <div className={FADE}>
+          <Callout tone="warning" title="The PMS connections could not be loaded">
+            Choosing a PMS for a network is not possible until they load. Refresh to try again.
+          </Callout>
+        </div>
+      ) : interfaces !== null && readyCount === 0 ? (
+        <div className={FADE}>
+          <Callout tone="warning" title={choosable.length === 0 ? "There is no PMS connection yet" : "No PMS connection is ready to be used"}>
+            {choosable.length === 0
+              ? "Room sign-in needs a PMS connection. Add one"
+              : "A network can only be routed to a PMS connection that is in service and has a published configuration. Finish configuring one"}{" "}
+            on <Link href="/pms-interfaces" className="underline underline-offset-2">PMS connection</Link> first.
+          </Callout>
+        </div>
+      ) : null}
+
       <SectionCard flush title="Client networks" description="Archived networks are not listed. Choose Change to decide how room sign-in works on a network.">
-        {policies === null ? (
+        {loadFailed ? (
+          <div role="alert" className={FADE}>
+            <EmptyState
+              size="sm"
+              icon={<AlertTriangle />}
+              title="The client networks could not be loaded"
+              hint="Check the appliance is reachable, then try again. Nothing has been changed."
+              action={
+                <Button size="sm" variant="secondary" onClick={() => void refresh()} disabled={loading}>
+                  <RefreshCw className={spin(loading)} /> Try again
+                </Button>
+              }
+            />
+          </div>
+        ) : policies === null ? (
           <SkeletonRows rows={3} cols={4} />
         ) : policies.length === 0 ? (
-          <EmptyState size="sm" icon={<Router />} title="No client network" hint="Create a client network first." />
+          <EmptyState
+            size="sm"
+            icon={<Router />}
+            title="No client network"
+            hint="Room sign-in is chosen per client network. Create one first."
+            action={<Link href="/network" className="text-sm text-primary underline-offset-4 hover:underline">Go to Client networks</Link>}
+          />
         ) : (
-          <Table label="Client networks and their room sign-in">
+          <Table label="Client networks and their room sign-in" aria-label="Client networks and their room sign-in">
             <THead>
               <TR>
                 <TH>Client network</TH>
@@ -129,21 +191,27 @@ export default function PMSRoutingPage() {
                         {!p.enabled && <Badge tone="neutral" size="sm">Off</Badge>}
                       </div>
                     </TD>
-                    <TD nowrap>{POLICY_WORDS[p.mode] ?? p.mode}</TD>
+                    <TD nowrap>{POLICY_WORDS[p.mode] ?? "Not recognised"}</TD>
                     <TD>
                       {p.interfaces.length === 0
-                        ? <span className="text-muted-foreground">{p.mode === "NONE" ? "Nothing" : "—"}</span>
-                        : <span>{p.interfaces.map((i) => i.label).join(", ")}</span>}
+                        ? <span className="text-muted-foreground">{p.mode === "NONE" ? "Nothing" : "No PMS chosen"}</span>
+                        : <span>{p.interfaces.map((i) => i.label || "Unnamed PMS connection").join(", ")}</span>}
                     </TD>
                     <TD>
-                      {st ? <Badge tone={st.tone} size="sm" dot>{st.label}</Badge> : <span className="text-muted-foreground">—</span>}
-                      {a && <div className="mt-0.5 max-w-xs text-xs text-muted-foreground">{a.summary}</div>}
+                      {a ? (
+                        <>
+                          <Badge tone={st?.tone ?? "neutral"} size="sm" dot>{st?.label ?? "Not recognised"}</Badge>
+                          <div className="mt-0.5 max-w-xs text-xs text-muted-foreground">{a.summary}</div>
+                        </>
+                      ) : (
+                        <span className="text-muted-foreground">{assessment ? "Not checked" : "Not known"}</span>
+                      )}
                     </TD>
                     <TD className="w-0">
                       {writable && (
                         <RowActions
                           subject={p.name || "Unnamed network"}
-                          primary={{ label: p.mode === "" ? "Decide" : "Change", onSelect: () => setEditing({ id: p.network_id, name: p.name }) }}
+                          primary={{ label: p.mode === "" ? "Decide" : "Change", onSelect: () => setEditing({ id: p.network_id, name: p.name || "Unnamed network" }) }}
                           items={p.mode === "" ? [] : [{ label: "Back to not decided", danger: true, onSelect: () => setClearing(p) }]}
                         />
                       )}
@@ -161,14 +229,14 @@ export default function PMSRoutingPage() {
         network={editing}
         interfaces={choosable}
         onClose={() => setEditing(null)}
-        onDone={async () => { await Promise.all([load(), reloadReadiness()]); }}
+        onDone={refresh}
       />
 
       <ClearRoutingDialog
         open={clearing !== null}
         network={clearing ? { id: clearing.network_id, name: clearing.name || "this network" } : null}
         onClose={() => setClearing(null)}
-        onDone={async () => { await Promise.all([load(), reloadReadiness()]); }}
+        onDone={refresh}
       />
     </PageShell>
   );

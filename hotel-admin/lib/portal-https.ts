@@ -1,5 +1,3 @@
-// Shapes edged returns for /edge/v1/portal-https and the words they are shown with; unknown codes are shown verbatim.
-
 export type PortalDNSRecord = { type: string; name: string; value: string };
 
 export type PortalTLSState = {
@@ -17,7 +15,6 @@ export type PortalTLSState = {
   last_sync_at: string | null;
   last_sync_error: string;
   updated_at: string | null;
-  /** The shared Client Portal name while this appliance uses it; "" otherwise. */
   shared_hostname?: string;
 };
 
@@ -71,7 +68,7 @@ export const FALLBACK_WORDS: Record<string, string> = {
 
 export function fallbackWords(reason: string | null | undefined): string {
   if (!reason) return "The reason was not recorded.";
-  return FALLBACK_WORDS[reason] ?? reason.replace(/_/g, " ").toLowerCase();
+  return FALLBACK_WORDS[reason] ?? "The appliance gave a reason this console does not recognise.";
 }
 
 export const DOMAIN_STATUS: Record<string, { label: string; tone: "ok" | "warn" | "err" | "default" | "info" }> = {
@@ -83,7 +80,7 @@ export const DOMAIN_STATUS: Record<string, { label: string; tone: "ok" | "warn" 
 
 export function domainStatus(status: string | null | undefined) {
   if (!status) return { label: "Not registered yet", tone: "default" as const };
-  return DOMAIN_STATUS[status] ?? { label: status.toLowerCase(), tone: "default" as const };
+  return DOMAIN_STATUS[status] ?? { label: "Not recognised", tone: "default" as const };
 }
 
 export const DNS_STATE_WORDS: Record<string, string> = {
@@ -93,12 +90,16 @@ export const DNS_STATE_WORDS: Record<string, string> = {
   ERROR: "Error",
 };
 
+export function dnsWords(state: string): string {
+  return DNS_STATE_WORDS[state] ?? "Not recognised";
+}
+
 export function portalHeadline(doc: Pick<PortalHTTPSDoc, "state" | "health">): {
   tone: "success" | "warning" | "danger";
   title: string;
 } {
   if (doc.state.https_active) {
-    return { tone: "success", title: `HTTPS is active — clients reach the portal at ${doc.state.canonical_hostname}` };
+    return { tone: "success", title: `HTTPS is active. Clients reach the portal at ${doc.state.canonical_hostname}` };
   }
   if (doc.health?.level === "critical") {
     return { tone: "danger", title: "The Client Portal has fallen back to HTTP" };

@@ -11,6 +11,7 @@ import (
 type aggregateTimeRow struct {
 	EntitlementID string `json:"entitlement_id"`
 	Status        string `json:"status"`
+	Package       string `json:"package"`
 	// Remaining is computed here, not in the browser, so the desk and the guest cannot disagree.
 	BudgetSeconds    int64      `json:"budget_seconds"`
 	ConsumedSeconds  int64      `json:"consumed_seconds"`
@@ -27,6 +28,7 @@ func (s *server) listAggregateTime(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.db.Query(ctx, `
 		SELECT e.id::text,
 		       e.status,
+		       COALESCE(NULLIF(ipr.display->>'name', ''), ''),
 		       COALESCE(spr.time_quota_seconds, 0),
 		       COALESCE(e.consumed_online_seconds, 0),
 		       GREATEST(0, COALESCE(spr.time_quota_seconds, 0) - COALESCE(e.consumed_online_seconds, 0)),
@@ -36,6 +38,7 @@ func (s *server) listAggregateTime(w http.ResponseWriter, r *http.Request) {
 		         WHERE ed.entitlement_id = e.id AND ed.status = 'AUTHORIZED')
 		  FROM iam_v2.entitlements e
 		  LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id
+		  LEFT JOIN iam_v2.internet_package_revisions ipr ON ipr.id = e.package_revision_id
 		  LEFT JOIN LATERAL (
 		      SELECT cause_detail FROM iam_v2.entitlement_termination_evidence t
 		       WHERE t.entitlement_id = e.id ORDER BY t.recorded_at DESC LIMIT 1) ev ON true
@@ -52,7 +55,7 @@ func (s *server) listAggregateTime(w http.ResponseWriter, r *http.Request) {
 	out := []aggregateTimeRow{}
 	for rows.Next() {
 		var a aggregateTimeRow
-		if err := rows.Scan(&a.EntitlementID, &a.Status, &a.BudgetSeconds, &a.ConsumedSeconds,
+		if err := rows.Scan(&a.EntitlementID, &a.Status, &a.Package, &a.BudgetSeconds, &a.ConsumedSeconds,
 			&a.RemainingSeconds, &a.HardExpiry, &a.TerminalCause, &a.LiveDevices); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "internal", "scan failed")
 			return

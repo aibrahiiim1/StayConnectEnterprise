@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { api, type PmsInterfaceHealth, type Whoami } from "@/lib/api";
+import { api, type PmsInterfaceHealth } from "@/lib/api";
 import { PageHeader, PageShell, StatCard, StatGrid } from "@/components/ui/page";
 import { Card, CardBody, SectionCard } from "@/components/ui/card";
 import { FilterBar } from "@/components/ui/toolbar";
@@ -12,9 +12,10 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, Notice, ErrorBanner } from "@/components/ui/error-banner";
 import { FilterChips } from "@/components/ui/data";
 import { Skeleton } from "@/components/ui/misc";
-import { LiveStatus } from "@/components/ui/patterns";
+import { LiveStatus, ReadOnlyNotice } from "@/components/ui/patterns";
 import { canWrite } from "@/lib/roles";
-import { formatDate, formatRelative } from "@/lib/utils";
+import { cn, formatDate, formatRelative } from "@/lib/utils";
+import { useOperatorRoles } from "@/lib/whoami-context";
 import { useRoomSignInReadiness } from "@/components/room-sign-in-readiness";
 import { onlyUndecided, type RoomSignInReadiness } from "@/lib/pms-availability";
 import type { AssessmentInterfaceSummary } from "@/lib/api/pms-routing";
@@ -33,17 +34,18 @@ import { RemoveConnectionDialog } from "@/components/pms/remove-connection-dialo
 
 type Filter = "all" | "attention" | "working";
 
+const FADE = "animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none";
+
 export default function PMSInterfacesPage() {
   const [rows, setRows] = useState<PmsConnection[] | null>(null);
   const [health, setHealth] = useState<Record<string, PmsInterfaceHealth>>({});
-  // Until health loads, never announce "not working".
   const [healthLoaded, setHealthLoaded] = useState(false);
   const { readiness: signIn, assessment, reload: reloadReadiness } = useRoomSignInReadiness();
   const [err, setErr] = useState<unknown>(null);
 
   const [providers, setProviders] = useState<PmsProvider[]>([PROTEL_FALLBACK]);
   const [catalogueAvailable, setCatalogueAvailable] = useState(false);
-  const [roles, setRoles] = useState<string[]>([]);
+  const roles = useOperatorRoles();
 
   const [selected, setSelected] = useState<string | null>(null);
   const [tab, setTab] = useState<SheetTab>("overview");
@@ -93,14 +95,13 @@ export default function PMSInterfacesPage() {
 
   useEffect(() => {
     void loadProviderCatalogue().then((c) => { setProviders(c.providers); setCatalogueAvailable(c.available); });
-    void api.get<Whoami>("/auth/whoami").then((me) => setRoles(me?.roles ?? [])).catch(() => setRoles([]));
   }, []);
 
   const anySyncing = Object.values(health).some(isSyncing);
   const pollMs = anySyncing ? 4000 : selected ? 10000 : 20000;
   usePoll(() => load(), pollMs, { enabled: !cardPolling });
 
-  const writable = canWrite("pms-interfaces", roles);
+  const writable = roles !== null && canWrite("pms-interfaces", roles);
   const list = rows ?? [];
   const live = list.filter((i) => !isNeverConfigured(i) && i.lifecycle_state !== "DECOMMISSIONED");
   const inactive = list.filter((i) => isNeverConfigured(i) || i.lifecycle_state === "DECOMMISSIONED");
@@ -151,12 +152,12 @@ export default function PMSInterfacesPage() {
             <HelpSection title="Advanced diagnostics">
               <p>
                 The links at the bottom are for investigating the PMS integration. Normal operation needs none of
-                them — the cards already say whether guests can sign in and whether anything needs attention.
+                them: the cards already say whether guests can sign in and whether anything needs attention.
               </p>
               <HelpList
                 items={[
-                  <><strong>Roster reconciliation</strong> — how the guest list is kept identical to the PMS&rsquo;s: what the last comparison found, why a comparison was refused, and every run that has happened.</>,
-                  <><strong>Unresolved departures</strong> — individual PMS messages that could not be matched to a stay, with the evidence each one is waiting for.</>,
+                  <><strong>Roster reconciliation</strong>: how the guest list is kept identical to the PMS&rsquo;s: what the last comparison found, why a comparison was refused, and every run that has happened.</>,
+                  <><strong>Unresolved departures</strong>: individual PMS messages that could not be matched to a stay, with the evidence each one is waiting for.</>,
                 ]}
               />
             </HelpSection>
@@ -178,6 +179,10 @@ export default function PMSInterfacesPage() {
         error={!!err && rows !== null}
         onRefresh={() => void load()}
       />
+
+      {roles !== null && !writable && (
+        <ReadOnlyNotice>Your role can see the PMS connections but not change them.</ReadOnlyNotice>
+      )}
 
       <ErrorBanner err={pmsErrorText(err)} />
 
@@ -222,7 +227,11 @@ export default function PMSInterfacesPage() {
               icon={<Hotel />}
               title="The PMS connections could not be loaded"
               hint="Whether any connection exists is not known until they load."
-              action={<Button variant="secondary" onClick={() => void load()}><RefreshCw /> Try again</Button>}
+              action={
+                <Button variant="secondary" disabled={refreshing} onClick={() => void load()}>
+                  <RefreshCw className={cn(refreshing && "animate-spin motion-reduce:animate-none")} /> Try again
+                </Button>
+              }
             />
           </CardBody>
         </Card>
@@ -292,6 +301,8 @@ export default function PMSInterfacesPage() {
                   iface={i}
                   health={health[i.id]}
                   healthLoaded={healthLoaded}
+                  routingKnown={assessment !== null}
+                  writable={writable}
                   provider={providerFor(i.connector_kind, providers)}
                   routing={routingFor(i)}
                   onOpen={() => open(i.id)}
@@ -318,7 +329,7 @@ export default function PMSInterfacesPage() {
                 </span>
               </button>
               {showInactive && (
-                <ul className="divide-y divide-border border-t border-border">
+                <ul className={cn("divide-y divide-border border-t border-border", FADE)}>
                   {inactive.map((i) => {
                     const retired = i.lifecycle_state === "DECOMMISSIONED";
                     const p = providerFor(i.connector_kind, providers);
@@ -329,7 +340,7 @@ export default function PMSInterfacesPage() {
                           <div className="truncate text-sm font-medium">{i.display_label || "Unnamed connection"}</div>
                           <div className="text-xs text-muted-foreground">
                             {providerLabel(i, p)} ·{" "}
-                            {retired ? "Retired — no longer used" : "Never configured — not connected to any PMS"}
+                            {retired ? "Retired, no longer used" : "Never configured, so not connected to any PMS"}
                           </div>
                         </div>
                         <Button size="sm" variant={retired || !writable ? "ghost" : "secondary"}
@@ -393,10 +404,10 @@ function AdvancedDiagnostics({ reviewEvents }: { reviewEvents: number }) {
   return (
     <SectionCard title="Advanced diagnostics" description="For investigating the PMS integration.">
       {reviewEvents > 0 && (
-        <Callout tone="warning" title="Reconciliation needs investigation" className="mb-3">
-          {reviewEvents.toLocaleString()} PMS message{reviewEvents === 1 ? "" : "s"} could not be matched to a
-          stay. Sign-in continues from the guest list already in use.{" "}
-          <Link href="/pms-reconciliation" className="font-medium underline underline-offset-2">Open the diagnostic</Link>
+        <Callout tone="warning" title={`${reviewEvents.toLocaleString()} PMS message${reviewEvents === 1 ? " needs" : "s need"} a decision`} className="mb-3">
+          {reviewEvents === 1 ? "It" : "They"} could not be matched to a stay. Sign-in continues from the guest list
+          already in use.{" "}
+          <Link href="/stay-events" className="font-medium underline underline-offset-2">Decide in PMS activity</Link>
         </Callout>
       )}
       <ul className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
