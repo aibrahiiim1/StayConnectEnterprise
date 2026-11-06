@@ -88,6 +88,65 @@ describe("the Roles page", () => {
     expect(post.mock.calls[0]).toEqual(["/roles", { name: "Night desk 2", description: "", permissions: { sessions: "write", operators: "read" }, password: "pw" }]);
   });
 
+  it("offers Try again when the roles cannot be read, and recovers", async () => {
+    let fail = true;
+    get.mockImplementation((path: string) => {
+      if (path === "/roles") return fail ? Promise.reject(Object.assign(new Error("x"), { status: 500 })) : Promise.resolve(ROLES);
+      return Promise.resolve({ roles: ["site_admin"] });
+    });
+    render(<RolesPage />);
+    expect(await screen.findByText("The roles could not be loaded")).toBeInTheDocument();
+    fail = false;
+    fireEvent.click(screen.getByRole("button", { name: /Try again/ }));
+    expect(await screen.findByText("Night desk")).toBeInTheDocument();
+  });
+
+  it("counts the features a role manages", async () => {
+    routes();
+    render(<RolesPage />);
+    expect(await screen.findByText("1 (1 manage)")).toBeInTheDocument();
+  });
+
+  it("does not ask for a password to remove a role staff still hold, and says why", async () => {
+    routes();
+    render(<RolesPage />);
+    await screen.findByText("Night desk");
+    fireEvent.keyDown(screen.getByRole("button", { name: /^Actions for Night desk/ }), { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^Remove/ }));
+    const dialog = await screen.findByRole("dialog", { name: /Night desk is still in use/ });
+    expect(within(dialog).getByText(/2 staff accounts still hold it/)).toBeInTheDocument();
+    expect(within(dialog).queryByLabelText(/password/i)).toBeNull();
+    expect(del).not.toHaveBeenCalled();
+  });
+
+  it("says why Create role is disabled, and asks before discarding changes", async () => {
+    routes();
+    render(<RolesPage />);
+    fireEvent.click((await screen.findAllByRole("button", { name: /New role/ }))[0]);
+    const sheet = await screen.findByRole("dialog");
+    expect(within(sheet).getByText("Give the role a name of at least 2 characters.")).toBeInTheDocument();
+    fireEvent.change(within(sheet).getByLabelText(/^Name/), { target: { value: "Pool desk" } });
+    expect(within(sheet).getByText("Choose at least one feature.")).toBeInTheDocument();
+    fireEvent.click(within(sheet).getByRole("button", { name: "Cancel" }));
+    expect(await screen.findByRole("dialog", { name: /Discard your changes\?/ })).toBeInTheDocument();
+  });
+
+  it("puts a refused password in plain words", async () => {
+    routes();
+    const { ApiError } = await import("@/lib/api");
+    post.mockRejectedValue(new ApiError(401, { error: "reauth_required", message: "password confirmation required" }));
+    render(<RolesPage />);
+    fireEvent.click((await screen.findAllByRole("button", { name: /New role/ }))[0]);
+    const sheet = await screen.findByRole("dialog");
+    fireEvent.change(within(sheet).getByLabelText(/^Name/), { target: { value: "Pool desk" } });
+    fireEvent.click(within(within(sheet).getByRole("radiogroup", { name: "Active sessions and devices" })).getByRole("radio", { name: "View" }));
+    fireEvent.click(within(sheet).getByRole("button", { name: /^Create role$/ }));
+    const confirm = await screen.findByRole("dialog", { name: /Create this role\?/ });
+    fireEvent.change(within(confirm).getByLabelText(/password/i), { target: { value: "wrong" } });
+    fireEvent.click(within(confirm).getByRole("button", { name: /^Create role$/ }));
+    expect(await within(confirm).findByText("Your password was not accepted. Nothing was changed.")).toBeInTheDocument();
+  });
+
   it("is read-only for anyone but a Site admin", async () => {
     routes(["hotel_it_manager"]);
     render(<RolesPage />);
