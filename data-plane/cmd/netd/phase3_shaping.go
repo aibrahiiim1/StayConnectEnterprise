@@ -71,6 +71,8 @@ type phase3Shaping struct {
 	legacy      legacySet
 	enforcement enforcementRecorder
 	owner       addressOwner
+	// liveOwner always reads Kea itself; owner is swapped for a pass's one lease list while a pass runs.
+	liveOwner addressOwner
 	// retired, once per pass, names the bridges of removed client networks (applier.retiredBridgeCheck); passRetired is that pass's answer.
 	retired     func(ctx context.Context) func(bridge string) bool
 	passRetired func(bridge string) bool

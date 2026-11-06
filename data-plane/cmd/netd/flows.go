@@ -75,7 +75,12 @@ func (s *server) addressOwnerQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	state := "unknown"
 	if p := s.phase3; p != nil {
-		switch p.owner.Evidence(r.Context(), ip, mac.String()).State {
+		ev := p.owner.Evidence(r.Context(), ip, mac.String())
+		// During a pass the owner reads the lease list fetched when the pass began, which misses a lease Kea issued since: ask Kea itself.
+		if ev.State != addressOwned && p.liveOwner.src != nil {
+			ev = p.liveOwner.Evidence(r.Context(), ip, mac.String())
+		}
+		switch ev.State {
 		case addressOwned:
 			state = "owned"
 		case addressForeign:
