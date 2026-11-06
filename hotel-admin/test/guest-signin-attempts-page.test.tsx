@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 // Screen behaviour: an operator without the credential permission never sees a value and is told why; one with it sees
@@ -99,7 +99,7 @@ describe("guest sign-in attempts", () => {
 
     expect(await screen.findByText("412")).toBeTruthy();
     expect(screen.getByText("Guest WiFi")).toBeTruthy();
-    expect(screen.getByText("Room found, submitted value did not match")).toBeTruthy();
+    expect(within(screen.getByRole("table")).getByText("Details did not match")).toBeTruthy();
     expect(screen.getByText("Refused")).toBeTruthy();
     expect(screen.getByText("10.77.1.25")).toBeTruthy();
   });

@@ -68,7 +68,7 @@ for (const vp of [{ width: 1280, height: 800 }, { width: 390, height: 800 }]) {
     await install(page, calls);
     await page.goto("/network");
     await page.getByRole("button", { name: /Convert to Trunk…/ }).click();
-    await page.getByLabel("VLAN id 1").fill("60");
+    await page.getByLabel("VLAN ID 1").fill("60");
     await page.getByRole("button", { name: "Preview" }).click();
     await expect(page.getByText("Check outside the appliance")).toBeVisible();
     await noHorizontalScroll(page);

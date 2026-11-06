@@ -177,7 +177,7 @@ describe("every Hotel charge screen has its menu label as its title", () => {
   ])("%s", async (title, el) => {
     routes([], {
       "/financial-ops/health": { health: HEALTH },
-      "/financial-review/queue": { queue: [] },
+      "/financial-review/queue": { items: [] },
       "/financial-review/actions": { actions: [] },
       "/financial-ops/settlements": fakeSettlements([]),
       "/financial-ops/recovery": { recovery: { Epoch: 1, Reason: "INITIAL", Active: false, HeldTotal: 0, HeldOpen: 0, EnteredAt: "", ReleasedAt: "" } },

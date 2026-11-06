@@ -1,9 +1,5 @@
 "use client";
 
-// The trail is append-only; each row leads with a sentence, a person and a time, with the exact record one
-// click away. Severity is assigned per action in lib/audit-words.ts and unrecognised actions show their code.
-// Period, category, security filter and search run server-side in edged, a page at a time.
-
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { canRead } from "@/lib/roles";
@@ -14,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
-import { ErrorBanner } from "@/components/ui/error-banner";
+import { Callout } from "@/components/ui/error-banner";
 import { SkeletonRows } from "@/components/ui/misc";
 import { DescriptionList, FilterChips, Pagination, ResultsCount, SearchInput } from "@/components/ui/data";
 import { FilterBar } from "@/components/ui/toolbar";
@@ -24,11 +20,16 @@ import { useServerPage, type PagedFields } from "@/lib/use-server-page";
 import { refreshingClass } from "@/components/ui/patterns";
 import { cn, formatDate } from "@/lib/utils";
 import {
-  auditWords, auditActor, AUDIT_CATEGORIES, MODULE_CATEGORIES, auditCategoriesFor, type AuditCategory,
+  auditWords, auditActor, auditTarget, AUDIT_CATEGORIES, MODULE_CATEGORIES, OCCASIONAL_CATEGORIES, auditCategoriesFor,
+  type AuditCategory,
 } from "@/lib/audit-words";
-import { ScrollText, ShieldAlert, RefreshCw } from "lucide-react";
+import { AlertTriangle, ScrollText, ShieldAlert, RefreshCw } from "lucide-react";
 import { HelpList, HelpSection } from "@/components/help";
 import { moduleHasHistory, useCapabilities } from "@/lib/capabilities";
+
+const FADE = "animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none";
+const NOT_RECORDED = "Not recorded";
+const NO_ROWS: Row[] = [];
 
 type Row = {
   ts: string;
@@ -42,7 +43,6 @@ type Row = {
 };
 type AuditResp = PagedFields & {
   data?: Row[];
-  /** Entries per action code for the period; never narrowed by the category or search. */
   actions?: { action: string; count: number }[];
 };
 
@@ -50,22 +50,23 @@ const RANGES = [
   { label: "Last 24 hours", hours: 24 },
   { label: "Last 7 days", hours: 24 * 7 },
   { label: "Last 30 days", hours: 24 * 30 },
-  { label: "Everything", hours: 0 },
+  { label: "All time", hours: 0 },
 ];
 
 type Chip = "all" | "security" | AuditCategory;
 
+const mono = (v: string) => <span className="break-all font-mono text-xs">{v}</span>;
+
 export default function ActivityPage() {
   const [range, setRange] = useState(RANGES[2]);
-  // Fixed until the period changes or the operator refreshes, so paging walks a stable window.
   const [anchor, setAnchor] = useState(() => Date.now());
   const [chip, setChip] = useState<Chip>("all");
   const [text, setText] = useState("");
+  const [actor, setActor] = useState("");
   const [open, setOpen] = useState<Row | null>(null);
-  const [names, setNames] = useState<Map<string, string>>(new Map());
+  const [names, setNames] = useState<Map<string, string> | null>(null);
 
-  const period = `${range.label}|${anchor}`;
-  // The server's per-action counts turn a category, the security filter or a title search into the action codes it filters by.
+  const period = `${range.label}|${anchor}|${actor}`;
   const [counts, setCounts] = useState<{ period: string; byAction: Map<string, number> } | null>(null);
   const countsReady = counts?.period === period;
   const q = text.trim().toLowerCase();
@@ -81,19 +82,17 @@ export default function ActivityPage() {
     () => (q && counts ? [...counts.byAction.keys()].filter((a) => auditWords(a).title.toLowerCase().includes(q)) : []),
     [q, counts],
   );
-  // Until the counts arrive, the unfiltered rows are not shown as the filtered answer.
   const needsCounts = chip !== "all" || q !== "";
   const filterReady = !needsCounts || countsReady;
 
   const path = useMemo(() => {
     const p = new URLSearchParams();
     if (range.hours) p.set("from", new Date(anchor - range.hours * 3600_000).toISOString());
-    // "Everything" is asked for explicitly: the server's default is the last 30 days (audit AD-56).
     else p.set("window", "all");
+    if (actor) p.set("actor", actor);
     if (filterReady && codes) p.set("action", codes.join(","));
     return `/audit?${p.toString()}`;
-  }, [range, anchor, filterReady, codes]);
-  // The search text travels in headers, never the URL.
+  }, [range, anchor, actor, filterReady, codes]);
   const headers = useMemo(
     () => (q ? {
       "X-Audit-Search": encodeURIComponent(text.trim()),
@@ -105,16 +104,24 @@ export default function ActivityPage() {
   const list = useServerPage<AuditResp>({ path, headers });
   const { resp, current, err, loading } = list;
 
-  // Keep each answer's counts against the period they describe.
   useEffect(() => {
     if (!current || !resp?.actions) return;
     setCounts({ period, byAction: new Map(resp.actions.map((a) => [a.action, a.count])) });
   }, [current, resp, period]);
 
-  const rows = current && filterReady && resp ? resp.data ?? [] : null;
+  const fresh = current && filterReady && resp ? resp.data ?? NO_ROWS : null;
 
-  // Operator names for the summary line; failure is silent so the trail still renders with ids. Only roles
-  // that may read the directory ask, since others would get a 403 on every visit.
+  const view = `${range.label}|${actor}|${chip}|${q}|${list.offset}`;
+  const [lastGood, setLastGood] = useState<{ view: string; rows: Row[]; total: number | null } | null>(null);
+  useEffect(() => {
+    if (fresh) setLastGood({ view, rows: fresh, total: list.total });
+  }, [fresh, view, list.total]);
+  const kept = lastGood && lastGood.view === view ? lastGood : null;
+  const rows = fresh ?? kept?.rows ?? null;
+  const total = fresh ? list.total : kept?.total ?? null;
+  const stale = !!err && fresh === null && rows !== null;
+  const failed = !!err && rows === null;
+
   const roles = useOperatorRoles();
   const mayReadOperators = roles !== null && canRead("operators", roles);
   useEffect(() => {
@@ -123,8 +130,11 @@ export default function ActivityPage() {
       .then((r) => setNames(new Map((r.data ?? []).map((o) => [o.id, o.display_name || o.email || o.id]))))
       .catch(() => {});
   }, [mayReadOperators]);
+  const people = useMemo(
+    () => (names ? [...names.entries()].sort((a, b) => a[1].localeCompare(b[1])) : []),
+    [names],
+  );
 
-  // Counts cover the whole period, read from the current answer so they arrive with the rows.
   const shownCounts = useMemo(
     () => (current && resp?.actions
       ? new Map(resp.actions.map((a) => [a.action, a.count]))
@@ -142,11 +152,12 @@ export default function ActivityPage() {
     return out;
   }, [shownCounts]);
 
-  // The Hotel filter shows where hospitality has history or a Hotel entry is in the period; rows are never filtered by module.
   const caps = useCapabilities();
+  const present = (c: AuditCategory) => (chipCounts.byCategory.get(c) ?? 0) > 0 || chip === c;
   const categories = auditCategoriesFor((m) =>
     moduleHasHistory(caps, m)
-    || AUDIT_CATEGORIES.some((c) => MODULE_CATEGORIES[c] === m && ((chipCounts.byCategory.get(c) ?? 0) > 0 || chip === c)));
+    || AUDIT_CATEGORIES.some((c) => MODULE_CATEGORIES[c] === m && present(c)))
+    .filter((c) => !OCCASIONAL_CATEGORIES.includes(c) || present(c));
 
   const chipOptions: { value: Chip; label: React.ReactNode; count?: number; tone?: "warn" }[] = [
     { value: "all", label: "Everything", count: shownCounts ? chipCounts.all : undefined },
@@ -163,16 +174,17 @@ export default function ActivityPage() {
     })),
   ];
 
-  const filtered = chip !== "all" || text.trim() !== "";
-  const clearFilters = () => { setChip("all"); setText(""); };
+  const filtered = chip !== "all" || text.trim() !== "" || actor !== "";
+  const clearFilters = () => { setChip("all"); setText(""); setActor(""); };
   const refresh = () => setAnchor(Date.now());
-  const total = list.total;
+  const who = (r: Row) => auditActor(r.actor_type, r.actor_id, names, { type: r.target_type, id: r.target_id });
+  const openWords = open ? auditWords(open.action) : null;
 
   return (
     <PageShell width="wide">
       <PageHeader
         title="Activity"
-        description="Every change made to this appliance, by staff and by the system itself."
+        description="What staff and the appliance itself did here: changes, sign-ins, views of client data and refused attempts."
         help={
           <>
             <HelpSection title="What this record is">
@@ -184,15 +196,16 @@ export default function ActivityPage() {
             <HelpSection title="Finding an entry">
               <HelpList
                 items={[
-                  "Search matches what happened, who, a source address or an id.",
-                  <>The <strong>Security</strong> filter shows events such as a client&rsquo;s typed credentials being viewed, a backup leaving the appliance, or a refused unlicensed-mode attempt.</>,
+                  "Search matches what happened, a source address or an ID.",
+                  "To see one person's entries, choose them under Who.",
+                  <>The <strong>Security</strong> filter shows events such as staff accounts and roles changing, a client&rsquo;s typed credentials or a voucher code being shown, a backup leaving the appliance, or a refused unlicensed-mode attempt.</>,
                   "The whole period is searched and counted, newest first, a page at a time.",
                 ]}
               />
             </HelpSection>
             <HelpSection title="The exact record">
               <p>
-                Select a line to see the precise record: the recorded time, action code, actor and target ids, source
+                Select a line to see the precise record: the recorded time, action code, actor and target IDs, source
                 address and raw payload.
               </p>
             </HelpSection>
@@ -201,12 +214,16 @@ export default function ActivityPage() {
         actions={
           <Button variant="secondary" onClick={refresh} disabled={loading}>
             <RefreshCw className={cn(loading && "animate-spin motion-reduce:animate-none")} />
-            {loading ? "Reading…" : "Refresh"}
+            {loading ? "Refreshing…" : "Refresh"}
           </Button>
         }
       />
 
-      <ErrorBanner err={err} className="mb-0" />
+      {stale && (
+        <div className={FADE}>
+          <Callout tone="warning">The activity trail could not be refreshed. What is shown may be out of date.</Callout>
+        </div>
+      )}
 
       <Card className="overflow-hidden">
         <FilterBar
@@ -216,22 +233,35 @@ export default function ActivityPage() {
               value={text}
               onChange={setText}
               label="Search the activity trail"
-              placeholder="What happened, who, an address or an ID"
+              placeholder="What happened, an address or an ID"
               delay={300}
             />
           }
           filters={
-            <Select
-              aria-label="Period"
-              className="h-9 w-full sm:w-44"
-              value={range.label}
-              onChange={(e) => {
-                setRange(RANGES.find((x) => x.label === e.target.value) ?? RANGES[2]);
-                setAnchor(Date.now());
-              }}
-            >
-              {RANGES.map((r) => <option key={r.label}>{r.label}</option>)}
-            </Select>
+            <>
+              {people.length > 0 && (
+                <Select
+                  aria-label="Who"
+                  className="h-9 w-full sm:w-48"
+                  value={actor}
+                  onChange={(e) => setActor(e.target.value)}
+                >
+                  <option value="">Anyone</option>
+                  {people.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+                </Select>
+              )}
+              <Select
+                aria-label="Period"
+                className="h-9 w-full sm:w-44"
+                value={range.label}
+                onChange={(e) => {
+                  setRange(RANGES.find((x) => x.label === e.target.value) ?? RANGES[2]);
+                  setAnchor(Date.now());
+                }}
+              >
+                {RANGES.map((r) => <option key={r.label}>{r.label}</option>)}
+              </Select>
+            </>
           }
           actions={
             rows !== null && total !== null
@@ -242,25 +272,41 @@ export default function ActivityPage() {
         <div className="border-b border-border px-4 py-2.5">
           <FilterChips<Chip> label="Show" value={chip} onChange={setChip} options={chipOptions} />
         </div>
-        <ResultsCount count={rows?.length} noun="entry" plural="entries" />
+        <ResultsCount
+          count={rows === null ? null : total ?? rows.length}
+          more={total === null && list.hasMore}
+          noun="entry"
+          plural="entries"
+        />
 
         <div className={cn(loading && rows && refreshingClass)}>
           {rows === null ? (
-            err ? (
-              <EmptyState size="sm" icon={<ScrollText />} title="The activity trail could not be read"
-                hint="It appears here once the appliance answers." />
+            failed ? (
+              <div role="alert" className={FADE}>
+                <EmptyState
+                  size="sm"
+                  icon={<AlertTriangle />}
+                  title="The activity trail could not be loaded"
+                  hint="Check the appliance is reachable, then try again. Nothing has been changed."
+                  action={
+                    <Button size="sm" variant="secondary" onClick={refresh} disabled={loading}>
+                      <RefreshCw className={cn(loading && "animate-spin motion-reduce:animate-none")} /> Try again
+                    </Button>
+                  }
+                />
+              </div>
             ) : <SkeletonRows rows={6} cols={3} />
           ) : rows.length === 0 ? (
             filtered ? (
               <EmptyState size="sm" icon={<ScrollText />} title="Nothing matches"
-                hint="Widen the period or clear the search."
+                hint="Widen the period or clear the filters."
                 action={<Button variant="secondary" size="sm" onClick={clearFilters}>Clear filters</Button>} />
             ) : (
               <EmptyState size="sm" icon={<ScrollText />} title="No activity in this period"
                 hint="Choose a longer period to look further back." />
             )
           ) : (
-            <Table label="Activity">
+            <Table label="Activity" aria-label="Activity">
               <THead>
                 <TR>
                   <TH>What happened</TH>
@@ -272,7 +318,8 @@ export default function ActivityPage() {
               <TBody>
                 {rows.map((r, i) => {
                   const w = auditWords(r.action);
-                  const who = auditActor(r.actor_type, r.actor_id, names);
+                  const person = who(r);
+                  const target = auditTarget(r.target_type);
                   return (
                     <TR key={`${r.ts}-${i}`} onClick={() => setOpen(r)} selected={open === r}>
                       <TD className="min-w-56">
@@ -284,13 +331,15 @@ export default function ActivityPage() {
                         </div>
                         <div className="mt-0.5 text-xs text-muted-foreground">
                           {w.category}
-                          <span className="md:hidden"> · {who}</span>
-                          {r.target_type ? <span className="hidden sm:inline"> · {r.target_type}</span> : null}
+                          <span className="md:hidden"> · {person}</span>
+                          {target ? <span className="hidden sm:inline"> · {target}</span> : null}
                         </div>
                       </TD>
-                      <TD truncate className="hidden md:table-cell" title={typeof who === "string" ? who : undefined}>{who}</TD>
+                      <TD truncate className="hidden md:table-cell" title={person}>{person}</TD>
                       <TD nowrap muted className="tabular">{formatDate(r.ts)}</TD>
-                      <TD nowrap muted className="hidden font-mono text-xs lg:table-cell">{r.ip ? r.ip.replace(/\/\d+$/, "") : "—"}</TD>
+                      <TD nowrap muted className="hidden font-mono text-xs lg:table-cell">
+                        {r.ip ? r.ip.replace(/\/\d+$/, "") : <span className="font-sans">{NOT_RECORDED}</span>}
+                      </TD>
                     </TR>
                   );
                 })}
@@ -316,25 +365,35 @@ export default function ActivityPage() {
         open={open !== null}
         onOpenChange={(v) => !v && setOpen(null)}
         eyebrow="Activity entry"
-        title={open ? auditWords(open.action).title : ""}
-        description={open ? `${auditActor(open.actor_type, open.actor_id, names)} · ${formatDate(open.ts)}` : undefined}
-        badges={open && (
+        title={openWords ? openWords.title : ""}
+        description={open ? `${who(open)} · ${formatDate(open.ts)}` : undefined}
+        badges={open && openWords && (
           <>
-            {auditWords(open.action).severity === "security" && <Badge tone="warn"><ShieldAlert className="size-3" aria-hidden /> Security</Badge>}
-            <Badge tone="default">{auditWords(open.action).category}</Badge>
+            {openWords.severity === "security" && <Badge tone="warn"><ShieldAlert className="size-3" aria-hidden /> Security</Badge>}
+            <Badge tone="default">{openWords.category}</Badge>
           </>
         )}
       >
-        {open && (
+        {open && openWords && (
           <div className="space-y-5">
-            {auditWords(open.action).note && <p className="text-sm text-muted-foreground">{auditWords(open.action).note}</p>}
+            {openWords.note && <p className="text-sm text-muted-foreground">{openWords.note}</p>}
             <DescriptionList
               items={[
-                { label: "Recorded", value: <span className="break-all font-mono text-xs">{new Date(open.ts).toISOString()}</span> },
-                { label: "Action code", value: <span className="break-all font-mono text-xs">{open.action}</span> },
-                { label: "Actor", value: <span className="break-all font-mono text-xs">{open.actor_id || `(${open.actor_type ?? "system"})`}</span> },
-                { label: "Target", value: <span className="break-all font-mono text-xs">{open.target_id ? `${open.target_type ?? ""} ${open.target_id}`.trim() : "—"}</span> },
-                { label: "Source address", value: <span className="break-all font-mono text-xs">{open.ip || "—"}</span> },
+                { label: "Recorded", value: mono(new Date(open.ts).toISOString()) },
+                { label: "Action code", value: mono(open.action) },
+                {
+                  label: "Actor",
+                  value: open.actor_id
+                    ? mono(open.actor_id)
+                    : <span className="text-sm">{open.actor_type === "system" || !open.actor_type ? "The appliance" : NOT_RECORDED}</span>,
+                },
+                {
+                  label: "Target",
+                  value: open.target_id
+                    ? <span className="text-sm">{auditTarget(open.target_type) ?? "Target"} {mono(open.target_id)}</span>
+                    : <span className="text-sm">{NOT_RECORDED}</span>,
+                },
+                { label: "Source address", value: open.ip ? mono(open.ip) : <span className="text-sm">{NOT_RECORDED}</span> },
               ]}
             />
             {open.payload !== null && open.payload !== undefined && (

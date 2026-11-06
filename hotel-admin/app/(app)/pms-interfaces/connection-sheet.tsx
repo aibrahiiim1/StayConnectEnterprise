@@ -291,7 +291,9 @@ function OverviewTab({
             {health.review_events.toLocaleString()} recorded PMS message{health.review_events === 1 ? "" : "s"} could
             not be matched to a stay. Sign-in continues from the guest list already in use; what these messages
             would have changed has not been applied.{" "}
-            <Link href="/stay-events" className="font-medium underline underline-offset-2">Decide in PMS activity</Link>
+            <Link href="/stay-events?show=undecided" className="font-medium underline underline-offset-2">Decide in PMS activity</Link>
+            {" · "}
+            <Link href="/pms-reconciliation" className="font-medium underline underline-offset-2">Unresolved departures</Link>
           </Callout>
         ) : (
           <p className="flex items-center gap-1 text-xs text-muted-foreground">

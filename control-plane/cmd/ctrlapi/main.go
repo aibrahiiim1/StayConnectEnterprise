@@ -312,7 +312,7 @@ func housekeepingPass(ctx context.Context, tb *api.Base, lastPrune *time.Time) {
 	defer recoverAndLog("housekeeping")
 	step := func(name string, fn func(context.Context)) {
 		limit := housekeepingStepTimeout
-		if name == "retention" {
+		if name == "retention" || name == "notifications" {
 			limit = retentionStepTimeout
 		}
 		sctx, cancel := context.WithTimeout(ctx, limit)
@@ -332,6 +332,11 @@ func housekeepingPass(ctx context.Context, tb *api.Base, lastPrune *time.Time) {
 			slog.Warn("replacement window reconcile failed", "err", err)
 		} else if n > 0 {
 			slog.Warn("replacement window elapsed (operator decision required)", "count", n)
+		}
+	})
+	step("notifications", func(ctx context.Context) {
+		if err := api.NotificationPass(ctx, tb, time.Now()); err != nil {
+			slog.Warn("staff notification pass failed; it is retried by the next housekeeping pass", "err", err)
 		}
 	})
 	if time.Since(*lastPrune) < time.Hour {
