@@ -1,8 +1,5 @@
 "use client";
 
-// Protel FIAS sends no record total before the end of a sync, so never show a progress bar, percentage or
-// "X of Y": only the real count received so far.
-
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { api, type PmsInterfaceHealth } from "@/lib/api";
 import { connectionEndWords } from "@/lib/api/pms-connections";
@@ -10,14 +7,16 @@ import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, Field } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { Callout } from "@/components/ui/error-banner";
 import { HelpSection, HelpTip } from "@/components/help";
 import { Separator } from "@/components/ui/misc";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { RefreshCw } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+const FADE = "animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none";
 import { usePoll } from "@/lib/use-poll";
 
-// The server sends the token; the staff wording lives here and an unrecognised token falls back rather than rendering raw.
 const STAGE_WORDS: Record<string, string> = {
   REQUESTING_FULL_SYNC: "Requesting the full list",
   WAITING_FOR_PMS: "Waiting for the PMS to start sending",
@@ -31,8 +30,6 @@ const STAGE_WORDS: Record<string, string> = {
 
 const ACTIVE_STAGES = new Set(["REQUESTING_FULL_SYNC", "WAITING_FOR_PMS", "RECEIVING", "PUBLISHING", "APPLYING"]);
 
-// sync_stage=COMPLETE means published, not usable: the applier writes the Stay tables afterwards and room
-// sign-in stays closed until then, so the card derives APPLYING for that gap.
 function effectiveStage(stage: string, ready: boolean | undefined): string {
   if (stage === "COMPLETE" && ready === false) return "APPLYING";
   return stage;
@@ -45,7 +42,7 @@ const REASONS: { value: string; label: string }[] = [
   { value: "SUPPORT_REQUEST", label: "Asked to by support" },
 ];
 
-const when = (t?: string | null) => (t ? new Date(t).toLocaleString() : "—");
+const when = (t?: string | null) => (t ? new Date(t).toLocaleString() : "Not yet");
 
 export const SyncPollingContext = createContext<(on: boolean) => void>(() => {});
 
@@ -67,9 +64,6 @@ export function SynchronizationCard({
   const stage = effectiveStage(health?.sync_stage ?? "", health?.materialization_ready);
   const active = ACTIVE_STAGES.has(stage);
 
-  // Poll whenever mounted (slowly when idle, quickly during a sync): the connection coming up and the automatic
-  // sync starting happen before any stage is active. One interval whose delay changes, never two effects.
-  // onRefreshed is held in a ref because in the dependency array the parent's re-render on every poll would reset the timer before it fires.
   const refreshRef = useRef(onRefreshed);
   refreshRef.current = onRefreshed;
   const delay = active ? 3000 : 10000;
@@ -120,7 +114,7 @@ export function SynchronizationCard({
               <HelpSection>
                 <p>
                   The first successful connection loads the full guest list automatically. Refresh it again if the
-                  list here looks out of date — after PMS maintenance, for example.
+                  list here looks out of date, after PMS maintenance for example.
                 </p>
                 <p>
                   A refresh asks the PMS to send every in-house guest again. The current list stays in use until the
@@ -140,9 +134,10 @@ export function SynchronizationCard({
       </CardHeader>
 
       <CardBody className="space-y-4">
+        <div key={stage} className={cn("empty:hidden", FADE)}>
         {stage === "RECEIVING" && (
           <Callout tone="info" title="Receiving the guest list">
-            The PMS does not say how many records it will send, so there is no percentage to show — any such
+            The PMS does not say how many records it will send, so there is no percentage to show: any such
             number would be invented. <strong>{(health?.sync_records_received ?? 0).toLocaleString()}</strong>{" "}
             records received so far, waiting for the end-of-list signal.
           </Callout>
@@ -150,18 +145,18 @@ export function SynchronizationCard({
         {(stage === "REQUESTING_FULL_SYNC" || stage === "WAITING_FOR_PMS") && (
           <Callout tone="info" title="Waiting for the PMS to start sending">
             A full refresh has been requested. This also happens automatically the first time the connection
-            succeeds — you do not need to do anything.
+            succeeds, so you do not need to do anything.
           </Callout>
         )}
         {stage === "APPLYING" && (
           <Callout tone="info" title="Applying the guest list">
             The list has arrived and is being written in. Room sign-in resumes automatically the moment it
-            finishes — usually a few seconds.
+            finishes, usually within a few seconds.
           </Callout>
         )}
         {stage === "INTERRUPTED" && (
           <Callout tone="warning" title="The refresh did not finish">
-            The previous guest list is still in use — nothing was lost or partly replaced. You can request
+            The previous guest list is still in use. Nothing was lost or partly replaced. You can request
             another one.
           </Callout>
         )}
@@ -171,6 +166,7 @@ export function SynchronizationCard({
             {health?.sync_failure_code ? ` Reason reported: ${connectionEndWords(health.sync_failure_code)}.` : ""}
           </Callout>
         )}
+        </div>
 
         <dl className="grid gap-x-8 gap-y-1 text-sm sm:grid-cols-2">
           <Row label="Stage" value={stage ? STAGE_WORDS[stage] ?? "In progress" : "Nothing running"} />
@@ -210,8 +206,7 @@ export function SynchronizationCard({
           )}
         </div>
 
-        {note && <Callout tone="success">{note}</Callout>}
-        <ErrorBanner err={err} />
+        {note && <Callout tone="success" className={FADE}>{note}</Callout>}
       </CardBody>
 
       <ConfirmDialog

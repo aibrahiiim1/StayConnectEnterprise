@@ -54,7 +54,7 @@ describe("PMS activity decisions (H-15)", () => {
     post.mockResolvedValue({ decision: "ACKNOWLEDGE" });
     const { default: Page } = await import("@/app/(app)/stay-events/page");
     render(<Page />);
-    expect(await screen.findByText("1 message need a decision")).toBeTruthy();
+    expect(await screen.findByText("1 message needs a decision")).toBeTruthy();
     expect(screen.queryByText("13,717")).toBeNull();
     expect(await screen.findByText(/automatic expiry of waiting messages/i)).toBeTruthy();
 
