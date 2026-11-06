@@ -1,7 +1,5 @@
 "use client";
 
-// Releasing a device or pause only permits another attempt; it never signs anyone in.
-
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { ConfirmDialog } from "@/components/ui/dialog";
@@ -184,7 +182,7 @@ export function NetworkPausesNotice({ canAct }: { canAct: boolean }) {
     try {
       const r = await api.get<{ pauses?: NetworkPause[] }>("/guest-signin-restrictions/network-pauses");
       setPauses(Array.isArray(r?.pauses) ? r.pauses : []);
-    } catch { /* Advisory pause status must not break an unrelated screen. */ }
+    } catch { return; }
   }, []);
   useEffect(() => { void load(); }, [load]);
   usePoll(() => load(), 30_000);
@@ -275,7 +273,7 @@ export function NetworkPausesNotice({ canAct }: { canAct: boolean }) {
                 <input type="radio" name="paused-device" value={d.device_mac} checked={picked === d.device_mac}
                   disabled={d.confirmed} onChange={() => setPicked(d.device_mac)} className="mt-1" />
                 <span className="min-w-0">
-                  <span className="font-medium">Room typed: {d.last_submitted_room_unverified || "—"}</span>
+                  <span className="font-medium">Room typed: {d.last_submitted_room_unverified || "Not given"}</span>
                   <span className="text-muted-foreground"> (as typed, not checked) · {d.attempts} tr{d.attempts === 1 ? "y" : "ies"} · last {at(d.last_attempt_at)}</span>
                   <span className="block font-mono text-xs text-muted-foreground">{d.device_mac}</span>
                   {d.confirmed && <Badge tone="ok">Already let through</Badge>}
