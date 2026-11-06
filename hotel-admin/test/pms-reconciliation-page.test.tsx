@@ -55,7 +55,7 @@ describe("Unresolved departures", () => {
     expect(await screen.findByText("The unresolved departures could not be loaded")).toBeTruthy();
     expect(screen.queryByText("No unresolved departures")).toBeNull();
     expect(screen.queryByText(/showing the last answer/)).toBeNull();
-    expect(screen.getByText("1")).toBeTruthy();
+    expect(screen.getByText("3")).toBeTruthy();
   });
 
   it("says PMS administration is off instead of showing a 404", async () => {
@@ -67,7 +67,7 @@ describe("Unresolved departures", () => {
 
   it("says no departure is in the chosen state, not that every departure matched", async () => {
     await renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: /Room has more than one stay/ }));
+    fireEvent.click(await screen.findByRole("radio", { name: /Room has more than one stay/ }));
     expect(await screen.findByText("No departure is in this state")).toBeTruthy();
     expect(screen.queryByText(/Every departure the PMS has sent was matched/)).toBeNull();
   });
