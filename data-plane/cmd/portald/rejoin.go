@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 )
@@ -32,6 +33,7 @@ func (h *handler) tryRejoin(r *http.Request) bool {
 	defer cancel()
 	mac, ok := h.deviceMAC(ctx, ip)
 	if !ok {
+		slog.Info("rejoin: not attempted", "stage", "mac_unresolved", "from", key)
 		h.rejoinQuiet.remember(key)
 		return false
 	}
@@ -43,6 +45,7 @@ func (h *handler) tryRejoin(r *http.Request) bool {
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := h.scd.Do(req)
 	if err != nil {
+		slog.Info("rejoin: not attempted", "stage", "scd_unreachable", "from", key)
 		h.rejoinQuiet.remember(key)
 		return false
 	}

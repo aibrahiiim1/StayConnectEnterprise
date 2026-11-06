@@ -82,14 +82,14 @@ const rejoinCandidateSQL = `
 func (p *phase3Auth) rejoinHandler(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<16))
 	if err != nil {
-		p.rejoinRefused(w, "malformed_request")
+		p.rejoinRefused(w, "malformed_request", "")
 		return
 	}
 	runRetried(w, r, func(w http.ResponseWriter, r *http.Request) { p.rejoinOnce(w, r, body) })
 }
 
-func (p *phase3Auth) rejoinRefused(w http.ResponseWriter, why string) {
-	slog.Info("phase3 rejoin: not eligible", "reason", why)
+func (p *phase3Auth) rejoinRefused(w http.ResponseWriter, why, from string) {
+	slog.Info("phase3 rejoin: not eligible", "reason", why, "from", from)
 	writeJSONScd(w, http.StatusOK, rejoinResp{Outcome: rejoinOutcomeNotEligible})
 }
 
@@ -98,44 +98,44 @@ func (p *phase3Auth) rejoinOnce(w http.ResponseWriter, r *http.Request, body []b
 	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
-		p.rejoinRefused(w, "malformed_request")
+		p.rejoinRefused(w, "malformed_request", req.Device.IP)
 		return
 	}
 	ctx := r.Context()
 	if _, refused := p.pmsLicenseRefusal(); refused {
-		p.rejoinRefused(w, "license")
+		p.rejoinRefused(w, "license", req.Device.IP)
 		return
 	}
 	methods, ok := p.srv.guestMethodSwitches(ctx)
 	if !ok || !methodSwitchOn(methods, guestMethodPMS) {
-		p.rejoinRefused(w, "room_sign_in_off")
+		p.rejoinRefused(w, "room_sign_in_off", req.Device.IP)
 		return
 	}
 	dev, err := p.device(ctx, req.Device)
 	if err != nil {
-		p.rejoinRefused(w, "device: "+err.Error())
+		p.rejoinRefused(w, "device: "+err.Error(), req.Device.IP)
 		return
 	}
 	if !p.srv.networkOffers(ctx, dev.GuestNetwork, keyPMS) {
-		p.rejoinRefused(w, "room_sign_in_not_offered_on_network")
+		p.rejoinRefused(w, "room_sign_in_not_offered_on_network", req.Device.IP)
 		return
 	}
 	// Ownership is required, not merely "not foreign": a reconnection is never made on doubt.
 	if st := p.srv.addressState(ctx, dev.IP, dev.MAC); st != addressOwned {
-		p.rejoinRefused(w, "address_not_owned: "+st)
+		p.rejoinRefused(w, "address_not_owned: "+st, req.Device.IP)
 		return
 	}
 	var live bool
 	if err := p.srv.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM iam_v2.sessions
 		WHERE tenant_id=$1 AND site_id=$2 AND device_id=$3 AND ended IS NULL AND state IN ('active','PENDING_ENFORCEMENT'))`,
 		p.srv.tenID, p.srv.siteID, dev.DeviceID).Scan(&live); err != nil || live {
-		p.rejoinRefused(w, "live_session_or_unreadable")
+		p.rejoinRefused(w, "live_session_or_unreadable", req.Device.IP)
 		return
 	}
 
 	tx, err := p.srv.db.Begin(ctx)
 	if err != nil {
-		p.rejoinRefused(w, "begin")
+		p.rejoinRefused(w, "begin", req.Device.IP)
 		return
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
@@ -144,9 +144,9 @@ func (p *phase3Auth) rejoinOnce(w http.ResponseWriter, r *http.Request, body []b
 	if err != nil {
 		noteRetry(ctx, err)
 		if errors.Is(err, pgx.ErrNoRows) {
-			p.rejoinRefused(w, "no_rejoinable_entitlement")
+			p.rejoinRefused(w, "no_rejoinable_entitlement", req.Device.IP)
 		} else {
-			p.rejoinRefused(w, "candidate: "+err.Error())
+			p.rejoinRefused(w, "candidate: "+err.Error(), req.Device.IP)
 		}
 		return
 	}
@@ -155,7 +155,7 @@ func (p *phase3Auth) rejoinOnce(w http.ResponseWriter, r *http.Request, body []b
 		WHERE tenant_id=$1 AND site_id=$2 AND device_id=$3 AND ended IS NULL AND state IN ('active','PENDING_ENFORCEMENT'))`,
 		p.srv.tenID, p.srv.siteID, dev.DeviceID).Scan(&live); err != nil || live {
 		noteRetry(ctx, err)
-		p.rejoinRefused(w, "live_session_under_lock")
+		p.rejoinRefused(w, "live_session_under_lock", req.Device.IP)
 		return
 	}
 	// The authorization must still be open now, under the lock: a staff release racing this probe closes it without touching the
@@ -167,30 +167,30 @@ func (p *phase3Auth) rejoinOnce(w http.ResponseWriter, r *http.Request, body []b
 		WHERE tenant_id=$1 AND entitlement_id=$2::uuid AND device_id=$3::uuid AND status = 'AUTHORIZED')`,
 		p.srv.tenID, ent, dev.DeviceID).Scan(&authorized); err != nil || !authorized {
 		noteRetry(ctx, err)
-		p.rejoinRefused(w, "authorization_closed")
+		p.rejoinRefused(w, "authorization_closed", req.Device.IP)
 		return
 	}
 	if err := reserveLicensedSlot(ctx, tx, p.srv.applID, p.srv.lic.MaxConcurrentOnlineGuests()); err != nil {
 		noteRetry(ctx, err)
-		p.rejoinRefused(w, "capacity: "+err.Error())
+		p.rejoinRefused(w, "capacity: "+err.Error(), req.Device.IP)
 		return
 	}
 	sessionID, err := p.openSessionWithMethodTx(ctx, tx, ent, dev, rejoinMethod)
 	if err != nil {
 		noteRetry(ctx, err)
-		p.rejoinRefused(w, "session: "+err.Error())
+		p.rejoinRefused(w, "session: "+err.Error(), req.Device.IP)
 		return
 	}
 	if err := tx.Commit(ctx); err != nil {
 		noteRetry(ctx, err)
-		p.rejoinRefused(w, "commit")
+		p.rejoinRefused(w, "commit", req.Device.IP)
 		return
 	}
 	if enforced, werr := p.awaitEnforced(ctx, sessionID); werr != nil || !enforced {
 		// Committed: netd admits or ends it on its own; the portal shows the sign-in form meanwhile.
-		p.rejoinRefused(w, "enforcement_not_confirmed")
+		p.rejoinRefused(w, "enforcement_not_confirmed", req.Device.IP)
 		return
 	}
-	slog.Info("phase3 rejoin: device reconnected to its entitlement", "entitlement", ent, "session", sessionID)
+	slog.Info("phase3 rejoin: device reconnected to its entitlement", "entitlement", ent, "session", sessionID, "from", req.Device.IP)
 	writeJSONScd(w, http.StatusOK, rejoinResp{Outcome: rejoinOutcomeRejoined, SessionID: sessionID})
 }
