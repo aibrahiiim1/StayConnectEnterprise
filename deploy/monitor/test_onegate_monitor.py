@@ -266,6 +266,22 @@ class ReviewFindings(unittest.TestCase):
         f.sqls.append((r".", []))
         self.assertEqual(by_key(run(f))["auth:rejoin-errors"].status, om.PASS)
 
+    def test_a_decommissioned_pms_connection_retires_its_incidents_but_missing_evidence_does_not(self):
+        inc = lambda: {"pms:link:OLD": {"first": NOW.isoformat(), "last": NOW.isoformat(), "count": 4, "streak": 4, "raised": True,
+                                        "status": om.CRIT, "text": "PMS OLD DISCONNECTED", "area": "pms"}}
+        f = FakeSys()
+        f.sqls += [(r"pms_interface_runtime", [["CHR", "CONNECTED", "-1", "60"]]), (r"posting_outbox", [["0", "0", "0"]])]
+        state = {"incidents": inc()}
+        mon = run(f, state=state)
+        _, rec = om.Incidents(state, NOW).apply(mon.results, mon.complete)
+        self.assertEqual([k for k, _ in rec], ["pms:link:OLD"])
+        g = FakeSys()
+        state = {"incidents": inc()}
+        mon = run(g, state=state)
+        active, rec = om.Incidents(state, NOW).apply(mon.results, mon.complete)
+        self.assertEqual(rec, [])
+        self.assertIn("pms:link:OLD", [r.key for r, _ in active])
+
     def test_the_headline_is_not_pass_while_evidence_is_missing(self):
         mon = run(FakeSys())
         nv = sum(1 for r in mon.results if r.status == om.NV)

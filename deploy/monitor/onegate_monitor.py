@@ -190,6 +190,7 @@ class Monitor:
         self.results, self.m, self.report = [], {}, {}
         self.now = system.now()
         self._journal = {}
+        self.complete = set()
 
     # ---- helpers -------------------------------------------------------------------------------------------------
     def add(self, key, area, status, text, persist=1):
@@ -828,7 +829,8 @@ class Monitor:
             self.add("reconnect:missed", "automatic reconnection", NV, f"returning devices unknown: {e}")
         live = {r[0] for r in self.s.sql("SELECT DISTINCT device_id::text FROM iam_v2.sessions WHERE ended IS NULL")}
         now_or_past = lambda dev: "RESOLVED" if dev in live else "ONGOING"
-        for mac, mode, cnt, first, last, ip, net, dev, online in self.s.sql("""SELECT a.device_mac::text, mode() WITHIN GROUP (ORDER BY a.result), count(*),
+        for mac, mode, cnt, first, last, ip, net, dev, online in self.s.sql("""SELECT a.device_mac::text,
+                  mode() WITHIN GROUP (ORDER BY a.result) FILTER (WHERE a.result <> 'VERIFIED'), count(*) FILTER (WHERE a.result <> 'VERIFIED'),
                   to_char(min(a.occurred_at), 'MM-DD HH24:MI'), to_char(max(a.occurred_at), 'MM-DD HH24:MI'), host(max(a.device_ip)), max(a.guest_network_name),
                   (SELECT d.id::text FROM iam_v2.devices d WHERE d.mac = a.device_mac LIMIT 1),
                   EXISTS (SELECT 1 FROM iam_v2.sessions s JOIN iam_v2.devices d ON d.id = s.device_id WHERE d.mac = a.device_mac AND s.ended IS NULL)
@@ -940,10 +942,15 @@ class Monitor:
         t0 = time.monotonic()
         names = self.QUICK + (self.DEEP if self.mode == "deep" else [])
         ran = set()
+        self.complete = set()
         for name in names:
+            start = len(self.results)
             try:
                 getattr(self, name)(state)
                 ran.add(name)
+                mine = self.results[start:]
+                if mine and all(r.status != NV for r in mine):
+                    self.complete |= {r.key.split(":", 1)[0] for r in mine}
             except Unavailable as e:
                 self.add(f"{name}:evidence", name.replace("check_", ""), NV, str(e))
             except Exception as e:
@@ -955,6 +962,8 @@ class Monitor:
                 except Unavailable as e:
                     self.report[part] = None
                     self.add(f"report:{part}", "reporting", NV, f"{part}: {e}")
+            if self.report.get("devices") is not None and all(r.status != NV for r in self.results if r.key.startswith("reconnect:")):
+                self.complete.add("reconnect")
         self.m["run_ms"] = round((time.monotonic() - t0) * 1000)
         ru = resource.getrusage(resource.RUSAGE_CHILDREN)
         me = resource.getrusage(resource.RUSAGE_SELF)
@@ -971,10 +980,12 @@ class Incidents:
         self.hist = state.setdefault("resolved", [])
         self.now = now
 
-    def apply(self, results):
+    def apply(self, results, complete=()):
+        """complete: key families whose check read all its evidence this run; their incidents it no longer reports are over
+        (a removed network, a decommissioned PMS connection)."""
         active, recovered = [], []
         failing = {r.key: r for r in results if r.status in (WARN, CRIT)}
-        evaluated = {r.key for r in results if r.status != NV}
+        evaluated = {r.key for r in results if r.status != NV} | {k for k in self.st if k.split(":", 1)[0] in complete}
         for key, r in failing.items():
             inc = self.st.get(key) or {"first": self.now.isoformat(), "count": 0, "streak": 0, "raised": False}
             inc["streak"] += 1
@@ -1134,7 +1145,7 @@ def main(argv=None):
         state = {}
     mon = Monitor(Sys(CFG), args.mode)
     mon.run(state)
-    active, recovered = Incidents(state, mon.now).apply(mon.results)
+    active, recovered = Incidents(state, mon.now).apply(mon.results, mon.complete)
     nv = sum(1 for r in mon.results if r.status == NV)
     lines = [summary_line(mon, active, nv)] + issue_lines(active, recovered, mon.now)
     if args.stdout:
