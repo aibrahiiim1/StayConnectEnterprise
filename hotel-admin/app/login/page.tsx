@@ -190,10 +190,10 @@ function LoginInner() {
 
   return (
     <div className="grid min-h-screen bg-background lg:grid-cols-2">
-      <aside className="relative hidden overflow-hidden bg-[#08130D] text-white lg:flex lg:flex-col lg:justify-between lg:p-12">
+      <aside className="relative hidden overflow-hidden bg-brand-panel text-white lg:flex lg:flex-col lg:justify-between lg:p-12">
         <div
           aria-hidden
-          className="pointer-events-none absolute inset-0 bg-[radial-gradient(60rem_40rem_at_0%_0%,rgba(21,128,61,0.45),transparent_60%),radial-gradient(40rem_30rem_at_100%_100%,rgba(74,222,128,0.14),transparent_60%)]"
+          className="pointer-events-none absolute inset-0 bg-[radial-gradient(60rem_40rem_at_0%_0%,hsl(0_0%_100%/0.07),transparent_60%)]"
         />
         <svg
           aria-hidden
@@ -207,8 +207,8 @@ function LoginInner() {
           ))}
         </svg>
 
-        <div className="relative flex flex-col items-start gap-1.5">
-          <OneGateWordmark animated className="h-8 [--og-gate:#FFFFFF] [--og-one:#4ADE80]" />
+        <div className="dark relative flex flex-col items-start gap-1.5">
+          <OneGateWordmark animated className="h-8" />
           <BySemantics lead="by" tone="onDark" className="text-white/60" />
         </div>
 
