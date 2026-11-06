@@ -83,9 +83,11 @@ export function OneGateLockup({
   collapsed = false,
   inverse = false,
   animated = false,
+  byline = false,
   className,
 }: {
   product?: string;
+  byline?: boolean;
   collapsed?: boolean;
   inverse?: boolean;
   animated?: boolean;
@@ -106,6 +108,9 @@ export function OneGateLockup({
         >
           {product}
         </div>
+      ) : null}
+      {byline ? (
+        <BySemantics lead="by" className={inverse ? "text-sidebar-muted" : "text-muted-foreground"} />
       ) : null}
     </div>
   );
