@@ -9,7 +9,7 @@ import { Button, LinkButton } from "@/components/ui/button";
 import { Input, Field, Select } from "@/components/ui/input";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
-import { ErrorBanner } from "@/components/ui/error-banner";
+import { Callout } from "@/components/ui/error-banner";
 import { DialogForm, ConfirmDialog } from "@/components/ui/dialog";
 import { SkeletonRows } from "@/components/ui/misc";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
@@ -20,6 +20,8 @@ import { DescriptionList } from "@/components/ui/data";
 import { Plus, Smartphone, UserCog, UserMinus, Users, X } from "lucide-react";
 import { canRead, canWrite, roleLabel, SITE_ROLES, ROLE_LABELS, SiteRole } from "@/lib/roles";
 import { formatRelative } from "@/lib/utils";
+import { operatorError } from "@/lib/operator-errors";
+import { FADE, LoadFailure, StaleNotice } from "@/app/(app)/backups/load-failure";
 import { HelpList, HelpSection } from "@/components/help";
 import { OperatorSigninProtection } from "@/components/operator-signin-protection";
 import { OperatorSessionLimits } from "@/components/operator-session-limits";
@@ -32,17 +34,17 @@ export default function OperatorsPage() {
   const toast = useToast();
   const [rows, setRows] = useState<EdgeOperator[] | null>(null);
   const [me, setMe] = useState<Whoami | null>(null);
-  const [err, setErr] = useState<unknown>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [meFailed, setMeFailed] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [formErr, setFormErr] = useState<unknown>(null);
+  const [formErr, setFormErr] = useState<string | null>(null);
 
   const [showNew, setShowNew] = useState(false);
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<string>("site_viewer");
-  // The administrator knows a password they chose, so by default the operator replaces it at first sign-in
-  // (edged must_change_password).
   const [requireChangeNew, setRequireChangeNew] = useState(true);
 
   const [pwFor, setPwFor] = useState<EdgeOperator | null>(null);
@@ -56,11 +58,9 @@ export default function OperatorsPage() {
   const [mfaReason, setMfaReason] = useState("");
   const [mfaPassword, setMfaPassword] = useState("");
   const [removingRole, setRemovingRole] = useState<{ op: EdgeOperator; role: string } | null>(null);
-  // The acting administrator's password; cleared when a dialog opens or the change succeeds.
   const [yourPw, setYourPw] = useState("");
 
   const writable = canWrite("operators", me?.roles ?? []);
-  // Custom roles a Site admin defined (Roles), offered beside the built-in ones.
   const [customRoles, setCustomRoles] = useState<{ key: string; name: string }[]>([]);
   useEffect(() => {
     if (!me || !canRead("roles", me.roles)) return;
@@ -72,12 +72,22 @@ export default function OperatorsPage() {
   ];
 
   async function load() {
-    try { setRows((await api.get<ListResp<EdgeOperator>>("/operators")).data); }
-    catch (e) { setErr(e); }
+    setLoading(true);
+    try {
+      setRows((await api.get<ListResp<EdgeOperator>>("/operators")).data);
+      setLoadFailed(false);
+    } catch {
+      setLoadFailed(true);
+    } finally {
+      setLoading(false);
+    }
+  }
+  function loadMe() {
+    api.get<Whoami>("/auth/whoami").then((w) => { setMe(w); setMeFailed(false); }).catch(() => setMeFailed(true));
   }
   useEffect(() => {
-    load();
-    api.get<Whoami>("/auth/whoami").then(setMe).catch(() => {});
+    void load();
+    loadMe();
   }, []);
 
   function openNew() {
@@ -104,7 +114,7 @@ export default function OperatorsPage() {
       setPassword(""); setYourPw("");
       toast.success("Operator added", `${email.trim()} can now sign in as ${roleChoices.find((c) => c.key === role)?.name ?? roleLabel(role)}.`);
       await load();
-    } catch (e) { setFormErr(e); }
+    } catch (e) { setFormErr(operatorError(e, "The operator could not be added. Try again in a moment. Nothing was changed.")); }
     finally { setBusy(false); }
   }
 
@@ -123,7 +133,7 @@ export default function OperatorsPage() {
       await load();
       setPwFor(null);
       setNewPw(""); setConfirmPw(""); setYourPw("");
-    } catch (e) { setFormErr(e); }
+    } catch (e) { setFormErr(operatorError(e, "The password could not be reset. Try again in a moment. Nothing was changed.")); }
     finally { setBusy(false); }
   }
 
@@ -135,7 +145,7 @@ export default function OperatorsPage() {
       toast.success("Two-step sign-in reset", `${mfaFor.email} has been signed out and now signs in with the password alone until they turn two-step sign-in on again.`);
       setMfaFor(null); setMfaReason(""); setMfaPassword("");
       await load();
-    } catch (e) { setFormErr(e); }
+    } catch (e) { setFormErr(operatorError(e, "Two-step sign-in could not be reset. Try again in a moment. Nothing was changed.")); }
     finally { setBusy(false); }
   }
 
@@ -147,11 +157,10 @@ export default function OperatorsPage() {
       toast.success("Operator disabled", `${disabling.email} can no longer sign in.`);
       setDisabling(null);
       await load();
-    } catch (e) { setFormErr(e); }
+    } catch (e) { setFormErr(operatorError(e, "The operator could not be disabled. Try again in a moment. Nothing was changed.")); }
     finally { setBusy(false); }
   }
 
-  // Adding a role widens access, so it is confirmed first like removing one.
   const [addingRole, setAddingRole] = useState<{ op: EdgeOperator; role: string } | null>(null);
   async function onAddRole({ password }: { password: string }) {
     if (!addingRole) return;
@@ -162,19 +171,20 @@ export default function OperatorsPage() {
       toast.success("Role added", `${op.email} is now also ${roleChoices.find((c) => c.key === role)?.name ?? roleLabel(role)}.`);
       setAddingRole(null);
       await load();
-    } catch (e) { setFormErr(e); }
+    } catch (e) { setFormErr(operatorError(e, "The role could not be added. Try again in a moment. Nothing was changed.")); }
     finally { setBusy(false); }
   }
 
   async function onRemoveRole({ password }: { password: string }) {
     if (!removingRole) return;
+    const { op, role } = removingRole;
     setBusy(true); setFormErr(null);
     try {
-      await api.del(`/operators/${removingRole.op.id}/roles/${removingRole.role}`, { your_password: password });
-      toast.success("Role removed");
+      await api.del(`/operators/${op.id}/roles/${role}`, { your_password: password });
+      toast.success("Role removed", `${op.email} no longer has the ${roleName(role, op)} role.`);
       setRemovingRole(null);
       await load();
-    } catch (e) { setFormErr(e); }
+    } catch (e) { setFormErr(operatorError(e, "The role could not be removed. Try again in a moment. Nothing was changed.")); }
     finally { setBusy(false); }
   }
 
@@ -189,13 +199,24 @@ export default function OperatorsPage() {
     setFormErr(null); setMfaReason(""); setMfaPassword(""); setMfaFor(op);
   }
   function askRemoveRole(op: EdgeOperator, r: string) {
-    if (op.id === me?.operator_id && r === "site_admin") {
-      setErr("You cannot remove your own Site admin role.");
-      return;
-    }
     setFormErr(null);
     setRemovingRole({ op, role: r });
   }
+  const ownAdmin = (op: EdgeOperator, r: string) => op.id === me?.operator_id && r === "site_admin";
+
+  const createBlocked = !email.trim()
+    ? "Enter an email address or username."
+    : password.length < MIN_PASSWORD
+      ? `The password needs at least ${MIN_PASSWORD} characters.`
+      : yourPw === "" ? "Type your own password to confirm." : undefined;
+  const resetBlocked = newPw.length < MIN_PASSWORD
+    ? `The new password needs at least ${MIN_PASSWORD} characters.`
+    : newPw !== confirmPw
+      ? "Type the same password twice."
+      : yourPw === "" ? "Type your own password to confirm." : undefined;
+  const mfaBlocked = mfaReason.trim().length < 4
+    ? "Give a reason of at least 4 characters."
+    : mfaPassword === "" ? "Type your own password to confirm." : undefined;
 
   return (
     <PageShell>
@@ -227,7 +248,7 @@ export default function OperatorsPage() {
                   "A password you set for someone must, by default, be replaced by them at their next sign-in.",
                   "Your own password is changed with Change my password, which asks for your current one.",
                   "A disabled operator can no longer sign in, and is signed out at once.",
-                  "A disabled account is anonymised after the period set under Disabled accounts (24 months by default).",
+                  "A disabled account is anonymised after the period set under Disabled accounts (two years by default).",
                   "Adding, disabling or resetting an operator, or changing their roles, asks for your own password first.",
                 ]}
               />
@@ -248,14 +269,25 @@ export default function OperatorsPage() {
       />
 
       {me && !writable && <ReadOnlyNotice>Your role can see who can sign in, but not add or change operators.</ReadOnlyNotice>}
-      <ErrorBanner err={err} className="mb-0" />
+      {meFailed && !me && (
+        <div className={FADE}>
+          <Callout tone="warning" title="Your role could not be checked">
+            Adding and changing operators stays hidden until it is.{" "}
+            <Button size="xs" variant="secondary" onClick={loadMe}>Try again</Button>
+          </Callout>
+        </div>
+      )}
+      {loadFailed && rows !== null && <StaleNotice what="The operators" />}
 
       <Card className="overflow-hidden">
         {rows === null ? (
-          <SkeletonRows rows={4} cols={5} />
+          loadFailed
+            ? <LoadFailure what="The operators" busy={loading} onRetry={() => void load()} />
+            : <SkeletonRows rows={4} cols={5} />
         ) : rows.length === 0 ? (
           <EmptyState size="sm" icon={<Users />} title="No operators" hint="Nobody but you can sign in to this appliance." />
         ) : (
+          <div className={FADE}>
           <Table aria-label="Operators">
             <THead>
               <TR>
@@ -263,7 +295,7 @@ export default function OperatorsPage() {
                 <TH className="hidden sm:table-cell">Roles</TH>
                 <TH className="hidden md:table-cell">Two-step</TH>
                 <TH className="hidden sm:table-cell">Status</TH>
-                <TH className="hidden lg:table-cell">Added</TH>
+                <TH className="hidden xl:table-cell">Added</TH>
                 {writable && <TH className="w-0"><span className="sr-only">Actions</span></TH>}
               </TR>
             </THead>
@@ -296,19 +328,20 @@ export default function OperatorsPage() {
                       )}
                     </TD>
                     <TD nowrap className="hidden md:table-cell">
-                      {active && typeof op.two_step_enrolled === "boolean"
-                        ? <TwoStepBadge on={op.two_step_enrolled} />
-                        : <span className="text-muted-foreground">—</span>}
+                      {!active
+                        ? <span className="text-muted-foreground">Not applicable</span>
+                        : typeof op.two_step_enrolled === "boolean"
+                          ? <TwoStepBadge on={op.two_step_enrolled} />
+                          : <span className="text-muted-foreground">Not known</span>}
                     </TD>
                     <TD nowrap className="hidden sm:table-cell">
                       <StatusBadge tone={active ? "ok" : "default"}>{active ? "Can sign in" : "Disabled"}</StatusBadge>
                     </TD>
-                    <TD nowrap muted className="hidden lg:table-cell">{formatRelative(op.created_at)}</TD>
+                    <TD nowrap muted className="hidden xl:table-cell">{formatRelative(op.created_at)}</TD>
                     {writable && (
                       <TD nowrap className="w-0">
                         <RowActions
                           subject={op.email}
-                          // On a phone the inline action moves to the row's details, so the menu stays on screen.
                           className={INLINE_FROM_SM}
                           primary={isMe
                             ? { label: "Change my password", href: "/account/password" }
@@ -337,6 +370,7 @@ export default function OperatorsPage() {
               })}
             </TBody>
           </Table>
+          </div>
         )}
       </Card>
 
@@ -387,8 +421,10 @@ export default function OperatorsPage() {
                   { label: "Name", value: selected.display_name || undefined },
                   {
                     label: "Two-step sign-in",
-                    value: typeof selected.two_step_enrolled === "boolean"
-                      ? <TwoStepBadge on={selected.two_step_enrolled} /> : undefined,
+                    value: selected.status !== "active"
+                      ? "Not applicable"
+                      : typeof selected.two_step_enrolled === "boolean"
+                        ? <TwoStepBadge on={selected.two_step_enrolled} /> : undefined,
                   },
                   {
                     label: "Password",
@@ -410,7 +446,10 @@ export default function OperatorsPage() {
                   {selected.roles.map((r) => (
                     <li key={r} className="flex min-h-9 items-center justify-between gap-3 rounded-md border border-border px-3 py-1">
                       <span className="text-sm">{roleName(r, selected)}</span>
-                      {writable && (
+                      {writable && ownAdmin(selected, r) && (
+                        <span className="text-caption text-muted-foreground">You cannot remove your own</span>
+                      )}
+                      {writable && !ownAdmin(selected, r) && (
                         <Button
                           size="icon-xs"
                           variant="ghost"
@@ -449,14 +488,15 @@ export default function OperatorsPage() {
 
       <DialogForm
         open={mfaFor !== null}
-        onOpenChange={(v) => !v && setMfaFor(null)}
+        onOpenChange={(v) => { if (!v) { setMfaFor(null); setFormErr(null); } }}
         size="sm"
         title={mfaFor ? `Reset two-step sign-in for ${mfaFor.display_name || mfaFor.email}` : "Reset two-step sign-in"}
         description="Their authenticator app and recovery codes stop working and they are signed out everywhere. They then sign in with the password alone until they turn two-step sign-in on again."
         submitLabel="Reset two-step sign-in"
         busy={busy}
         error={formErr}
-        disabled={mfaReason.trim().length < 4 || mfaPassword === ""}
+        disabled={mfaBlocked !== undefined}
+        disabledReason={mfaBlocked}
         onSubmit={onResetMFA}
       >
         <Field label="Reason" required hint="Recorded with the reset, for example: lost their phone.">
@@ -469,13 +509,14 @@ export default function OperatorsPage() {
 
       <DialogForm
         open={showNew}
-        onOpenChange={(v) => !v && setShowNew(false)}
+        onOpenChange={(v) => { if (!v) { setShowNew(false); setFormErr(null); } }}
         title="Add an operator"
         description="They will be able to sign in to this appliance immediately with the role you choose."
         submitLabel="Create operator"
         busy={busy}
         error={formErr}
-        disabled={!email.trim() || password.length < MIN_PASSWORD || yourPw === ""}
+        disabled={createBlocked !== undefined}
+        disabledReason={createBlocked}
         onSubmit={onCreate}
       >
         <div className="grid gap-4 sm:grid-cols-2">
@@ -513,14 +554,15 @@ export default function OperatorsPage() {
 
       <DialogForm
         open={pwFor !== null}
-        onOpenChange={(v) => !v && setPwFor(null)}
+        onOpenChange={(v) => { if (!v) { setPwFor(null); setFormErr(null); } }}
         size="sm"
         title={pwFor ? `Reset the password for ${pwFor.display_name || pwFor.email}` : "Reset password"}
         description="They are signed out everywhere at once, and any sign-in lockout on their account ends."
         submitLabel="Reset password"
         busy={busy}
         error={formErr}
-        disabled={newPw.length < MIN_PASSWORD || newPw !== confirmPw || yourPw === ""}
+        disabled={resetBlocked !== undefined}
+        disabledReason={resetBlocked}
         onSubmit={onSetPassword}
       >
         <Field label="New password" required hint={`At least ${MIN_PASSWORD} characters.`}>
@@ -552,7 +594,7 @@ export default function OperatorsPage() {
 
       <ConfirmDialog
         open={disabling !== null}
-        onOpenChange={(v) => !v && setDisabling(null)}
+        onOpenChange={(v) => { if (!v) { setDisabling(null); setFormErr(null); } }}
         title="Stop this operator signing in?"
         description={
           disabling
@@ -570,7 +612,7 @@ export default function OperatorsPage() {
 
       <ConfirmDialog
         open={addingRole !== null}
-        onOpenChange={(v) => !v && setAddingRole(null)}
+        onOpenChange={(v) => { if (!v) { setAddingRole(null); setFormErr(null); } }}
         title="Give this role?"
         description={
           addingRole
@@ -587,7 +629,7 @@ export default function OperatorsPage() {
 
       <ConfirmDialog
         open={removingRole !== null}
-        onOpenChange={(v) => !v && setRemovingRole(null)}
+        onOpenChange={(v) => { if (!v) { setRemovingRole(null); setFormErr(null); } }}
         title="Remove this role?"
         description={
           removingRole

@@ -1,7 +1,5 @@
 "use client";
 
-// Session bounds come from the appliance; a change affects open sessions on their next request.
-
 import type { SessionPolicy } from "@/lib/api";
 import { OperatorPolicyPanel } from "@/components/operator-policy-panel";
 
