@@ -64,6 +64,39 @@ func TestResolve_GuestOut(t *testing.T) {
 	}
 }
 
+// Protel announces a room move as check-out plus check-in of the same reservation (FIAS 2.20 p. 46, either order). Only a
+// different room of the same reservation makes it a move; timing plays no part.
+func TestResolve_RoomMoveAnnouncedAsCheckoutAndCheckin(t *testing.T) {
+	outOld := InboxEvent{EventIdentity: "o", EventType: EvGuestOut, Reservation: "R1", Room: "101"}
+	inNew := InboxEvent{EventIdentity: "i", EventType: EvGuestIn, Reservation: "R1", Room: "202"}
+
+	// Check-in first: the stay is already in 202, so the old room's check-out ends nothing.
+	if d := Resolve(outOld, stay("IN_HOUSE", "202", 1)); d.Op != OpVacateOldRoom || d.NewStatus != "" {
+		t.Fatalf("GO of a room the reservation has left: got %+v, want VACATE_OLD_ROOM", d)
+	}
+	// Check-out first: a real checkout of 101, then the check-in to 202 reinstates as a move.
+	if d := Resolve(outOld, stay("IN_HOUSE", "101", 1)); d.Op != OpCheckout {
+		t.Fatalf("GO of the stay's own room must still check out, got %+v", d)
+	}
+	if d := Resolve(inNew, stay("CHECKED_OUT", "101", 1)); d.Op != OpReinstate || !d.Reinstate || !d.RoomMove {
+		t.Fatalf("GI into another room after the checkout: got %+v, want a reinstatement marked as a room move", d)
+	}
+	// The same room after a checkout is a reinstatement (contract 7.2), not a move.
+	if d := Resolve(InboxEvent{EventIdentity: "s", EventType: EvGuestIn, Reservation: "R1", Room: "101"}, stay("CHECKED_OUT", "101", 1)); d.RoomMove {
+		t.Fatalf("a same-room check-in after a checkout is not a room move: %+v", d)
+	}
+	// Without a known room on either side nothing is inferred.
+	if d := Resolve(InboxEvent{EventIdentity: "n", EventType: EvGuestOut, Reservation: "R1"}, stay("IN_HOUSE", "101", 1)); d.Op != OpCheckout {
+		t.Fatalf("a GO without a room must check out, got %+v", d)
+	}
+	if d := Resolve(outOld, stay("IN_HOUSE", "", 1)); d.Op != OpCheckout {
+		t.Fatalf("a stay with no recorded room must check out, got %+v", d)
+	}
+	if d := Resolve(inNew, stay("CHECKED_OUT", "", 1)); d.RoomMove {
+		t.Fatalf("a checked-out stay with no recorded room is not a move: %+v", d)
+	}
+}
+
 func TestResolve_Idempotent(t *testing.T) {
 	gi := InboxEvent{EventIdentity: "dup", EventType: EvGuestIn, Reservation: "R1", Room: "101"}
 	if d := Resolve(gi, stay("IN_HOUSE", "101", 1, "dup")); d.Op != OpSkipDuplicate {

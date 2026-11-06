@@ -518,6 +518,10 @@ func (s *server) publishCommercialPackage(w http.ResponseWriter, r *http.Request
 	if in.MaxPurchasesPerStay.Set {
 		spec.MaxPurchasesPerStay = in.MaxPurchasesPerStay.Value
 	}
+	if m := spec.MaxPurchasesPerStay; m != nil && (*m < 1 || *m > 1000) {
+		jsonErr(w, http.StatusBadRequest, "max_purchases_invalid", "The maximum purchases per stay is a whole number from 1 to 1000, or empty for no limit. Nothing was changed.")
+		return
+	}
 
 	// Revising an existing package needs explicit commercial terms, and a step-up when terms or plan change.
 	if !in.CreateOnly {

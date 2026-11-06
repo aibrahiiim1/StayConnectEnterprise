@@ -90,6 +90,10 @@ const (
 	GuestAfterCheckoutDevice GuestClass = "AFTER_CHECKOUT_DEVICE"
 	// GuestAddressConflict is a fact about the device's network address, decided before any room lookup.
 	GuestAddressConflict GuestClass = "ADDRESS_CONFLICT"
+	// GuestNoPackage and GuestRoomChargePaused follow a verified stay: nothing is offered to it, or room charge is withheld while the
+	// PMS link refreshes (no charge is ever taken on a stale mirror). They say nothing the guest did not just prove.
+	GuestNoPackage        GuestClass = "NO_PACKAGE"
+	GuestRoomChargePaused GuestClass = "ROOM_CHARGE_PAUSED"
 )
 
 // GuestClass maps a Result to the message class the guest may see. The split avoids an occupancy oracle:
@@ -104,9 +108,9 @@ const (
 //     SERVICE_UNAVAILABLE (TECHNICAL) if the drain outlasts the wait: wrong room, wrong name and a departed stay
 //     stay indistinguishable from each other, so the drain discloses nothing about any room.
 //   - SPENT_REQUEST_ID is a client fault, so TECHNICAL.
-//   - VERIFIED_NO_ELIGIBLE_PACKAGE is TECHNICAL: the one accepted narrow distinguishability. Calling a
-//     correct guest wrong would be useless, at the cost that while a property's package configuration is
-//     incomplete a correct room+name answers differently from an incorrect one.
+//   - VERIFIED_NO_ELIGIBLE_PACKAGE is NO_PACKAGE (or ROOM_CHARGE_PAUSED, chosen by scd): the one accepted narrow
+//     distinguishability, already distinct from CREDENTIAL when it was TECHNICAL. Telling a correct guest the stay could not be
+//     verified was untrue; the sentence now says what is (Product Owner, 2026-11-06).
 func (r Result) GuestClass() GuestClass {
 	switch r {
 	case Verified:
@@ -115,9 +119,10 @@ func (r Result) GuestClass() GuestClass {
 		return GuestRateLimited
 	case CredentialMismatch, RoomNotInMirror, StayNotEligible, AmbiguousRoomCandidates, MalformedSubmission:
 		return GuestCredential
-	case MirrorStaleOrMissingChange, RoutingOrInterfaceFailure, ServiceUnavailable, SpentRequestID,
-		VerifiedNoEligiblePackage:
+	case MirrorStaleOrMissingChange, RoutingOrInterfaceFailure, ServiceUnavailable, SpentRequestID:
 		return GuestTechnical
+	case VerifiedNoEligiblePackage:
+		return GuestNoPackage
 	case LicenseRefused:
 		return GuestLicense
 	case LicenseCapacityReached:

@@ -123,6 +123,9 @@ export type PackageFormInitial = {
   allocation?: AllocationForm;
   /** Price, currency, methods and room-charge mappings, handed back unchanged. */
   acquisition?: AcquisitionForm;
+  /** Room stays: may the package be bought again once it has ended, and how many times per stay (null = no limit). */
+  renewable?: boolean;
+  maxPurchasesPerStay?: number | null;
   /** Conditions of a type this form does not edit: shown read-only and republished as loaded. */
   preservedRules?: PreservedRule[];
   /** The edited name is merged into it so nothing else in it is dropped. */
@@ -217,6 +220,9 @@ export function PackageForm({
       ? String(Number(initial.duration.duration_seconds) / 3600)
       : "");
 
+  const [renewable, setRenewable] = useState(initial?.renewable ?? false);
+  const [maxPerStay, setMaxPerStay] = useState(initial?.maxPurchasesPerStay ? String(initial.maxPurchasesPerStay) : "");
+
   const [planID, setPlanID] = useState(initial?.planID ?? "");
   const [error, setError] = useState<string | null>(null);
   const errorRef = useRef<HTMLDivElement>(null);
@@ -265,6 +271,15 @@ export function PackageForm({
     const acqRes = buildAcquisition(acq);
     if (acqRes.error || !acqRes.fields) { setError(acqRes.error ?? "Please check the price section"); return; }
     Object.assign(res.payload, acqRes.fields);
+    if (hotel) {
+      const max = maxPerStay.trim();
+      if (renewable && max !== "" && !(Number.isInteger(Number(max)) && Number(max) >= 1 && Number(max) <= 1000)) {
+        setError("Enter the maximum purchases per stay as a whole number from 1 to 1000, or leave it empty for no limit.");
+        return;
+      }
+      res.payload.renewable = renewable;
+      res.payload.max_purchases_per_stay = renewable && max !== "" ? Number(max) : null;
+    }
     onSave({ payload: res.payload, selectedPlanID: planID });
   }
 
@@ -582,6 +597,26 @@ export function PackageForm({
               onCheckedChange={(v) => setFreeRule({ ...freeRule, also_by_device: v })}
               label="Device restricted"
             />
+          </div>
+        )}
+        {hotel && (
+          <div className="mt-2 space-y-3 rounded-md border border-border bg-surface/50 px-3.5 py-2.5" data-testid="renewal">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-1 text-sm font-medium">
+                Room stays can buy it again
+                <InfoHint>
+                  When the package ends, a room can buy it again during the same stay, for example another day. Each purchase
+                  is charged once. Off: a room gets this package once per stay.
+                </InfoHint>
+              </div>
+              <Switch checked={renewable} onCheckedChange={setRenewable} label="Room stays can buy it again" />
+            </div>
+            {renewable && (
+              <Field label="Maximum per stay" hint="Including the first purchase. Leave empty for no limit.">
+                <Input data-testid="max-per-stay" type="number" min={1} max={1000} step={1} inputMode="numeric"
+                  placeholder="No limit" value={maxPerStay} onChange={(e) => setMaxPerStay(e.target.value)} />
+              </Field>
+            )}
           </div>
         )}
       </div>

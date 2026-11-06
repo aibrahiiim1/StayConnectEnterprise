@@ -129,6 +129,13 @@ func notVerified(w http.ResponseWriter, result signinattempt.Result, detail stri
 	notVerifiedRetryAfter(w, result, detail, 0)
 }
 
+// notVerifiedClass answers with a class other than the result's own: a verified stay whose only obstacle is a room charge paused for a
+// PMS refresh is told to try again shortly. The attempt is still recorded under its result.
+func notVerifiedClass(w http.ResponseWriter, result signinattempt.Result, class signinattempt.GuestClass, detail string) {
+	slog.Info("phase3 auth: not verified", "result", string(result), "detail", detail)
+	writeJSONScd(w, http.StatusOK, phase3Response{Outcome: outcomeNotVerified, FailureClass: string(class)})
+}
+
 // notVerifiedRetryAfter adds the remaining restriction time. Kept separate: a retry hint on a wrong surname
 // would tell a guesser how long to wait between guesses.
 func notVerifiedRetryAfter(w http.ResponseWriter, result signinattempt.Result, detail string, retryAfter int) {
@@ -536,6 +543,10 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 		if len(decisions) == 0 {
 			// A configuration or eligibility outcome, not an identity one; kept distinct from wrong surnames.
 			at.Result = signinattempt.VerifiedNoEligiblePackage
+			if p.roomChargePaused(ctx, iface) {
+				notVerifiedClass(w, at.Result, signinattempt.GuestRoomChargePaused, "verified_room_charge_paused")
+				return
+			}
 			notVerified(w, at.Result, "verified_but_no_eligible_package")
 			return
 		}
