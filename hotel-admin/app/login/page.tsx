@@ -231,9 +231,7 @@ function LoginInner() {
           <div className="w-full max-w-[24rem]">
             <div className="mb-8 space-y-1.5">
               <h1 className="text-[1.75rem] font-semibold leading-9 tracking-tight">Sign in</h1>
-              <p className="text-sm text-muted-foreground">
-                {codeStep ? "One more step to finish signing in." : "Use your account for this site."}
-              </p>
+              {codeStep ? <p className="text-sm text-muted-foreground">One more step to finish signing in.</p> : null}
             </div>
 
             <div role="status" className={expired && !codeStep ? "mb-4" : "sr-only"}>
