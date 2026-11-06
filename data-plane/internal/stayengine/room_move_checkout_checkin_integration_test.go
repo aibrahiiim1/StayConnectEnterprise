@@ -191,6 +191,63 @@ func TestIntegration_TwoRoomMovesInARowKeepThePackage(t *testing.T) {
 	}
 }
 
+// With After Check-out Access off there is no grace to carry the devices; the continuation still gets the ones the checkout closed.
+func TestIntegration_RoomMoveWithoutAfterCheckoutAccessKeepsTheDevices(t *testing.T) {
+	p, s, pr, pkgRev := moveFixture(t)
+	ctx := context.Background()
+	var op string
+	if err := p.QueryRow(ctx, `INSERT INTO public.operators(tenant_id,email,display_name,password_hash,status)
+		VALUES ($1,$2,'Move Test','$argon2id$fixture','active') RETURNING id::text`, s.tenant, "mv-"+s.tenant[:8]+"@example.invalid").Scan(&op); err != nil {
+		t.Fatalf("operator: %v", err)
+	}
+	if _, err := p.Exec(ctx, `SELECT iam_v2.set_after_checkout_enabled($1,$2,false,
+		(SELECT config_version FROM iam_v2.site_checkout_grace_config WHERE tenant_id=$1 AND site_id=$2)::int,$3::uuid,'TEST_REASON')`,
+		s.tenant, s.site, op); err != nil {
+		t.Fatalf("switch After Check-out Access off: %v", err)
+	}
+	insertLive(t, p, s, "D-GI", "GI", pay("RM6", "400", "Nograce", "Fe", "F6", "260101", "260110"))
+	process(t, pr, s)
+	stayID := stayOf(t, p, s, "RM6")
+	boundary := time.Now().Add(-10 * time.Minute).Truncate(time.Microsecond)
+	ent := grantEntitlement(t, p, s, stayID, pkgRev, boundary.Add(-time.Hour))
+	dev := authorizeDevice(t, p, s, ent, boundary.Add(-30*time.Minute))
+	insertLiveAt(t, p, s, "D-GO", "GO", pay("RM6", "400", "Nograce", "Fe", "F6", "260101", "260110"), boundary)
+	process(t, pr, s)
+	if n := countIn(t, p, `SELECT count(*) FROM iam_v2.entitlements WHERE stay_id=$1 AND end_mode='GRACE_AFTER_CHECKOUT'`, stayID); n != 0 {
+		t.Fatalf("After Check-out Access is off, yet %d grace packages exist", n)
+	}
+	insertLive(t, p, s, "D-GI2", "GI", pay("RM6", "401", "Nograce", "Fe", "F6", "260101", "260110"))
+	process(t, pr, s)
+	if n := countIn(t, p, `SELECT count(*) FROM iam_v2.entitlement_devices ed JOIN iam_v2.entitlements e ON e.id=ed.entitlement_id
+		JOIN iam_v2.purchases pu ON pu.id=e.purchase_id
+		WHERE e.stay_id=$1 AND e.status='ACTIVE' AND pu.trigger='ROOM_MOVE_RESTORE' AND ed.device_id::text=$2 AND ed.status='AUTHORIZED'`, stayID, dev); n != 1 {
+		t.Fatal("the device the checkout disconnected did not get its place back on the continued package")
+	}
+}
+
+// A checkout closed by a same-room reinstatement is not a move, even if the stay moves rooms later.
+func TestIntegration_RecoveryRefusesACheckoutClosedByAReinstatement(t *testing.T) {
+	p, s, pr, pkgRev := moveFixture(t)
+	ctx := context.Background()
+	insertLive(t, p, s, "R-GI", "GI", pay("RM7", "300", "Back", "Gu", "F7", "260101", "260110"))
+	process(t, pr, s)
+	stayID := stayOf(t, p, s, "RM7")
+	boundary := time.Now().Add(-20 * time.Minute).Truncate(time.Microsecond)
+	grantEntitlement(t, p, s, stayID, pkgRev, boundary.Add(-time.Hour))
+	insertLiveAt(t, p, s, "R-GO", "GO", pay("RM7", "300", "Back", "Gu", "F7", "260101", "260110"), boundary)
+	process(t, pr, s)
+	insertLive(t, p, s, "R-GI2", "GI", pay("RM7", "300", "Back", "Gu", "F7", "260101", "260110"))
+	process(t, pr, s)
+	insertLive(t, p, s, "R-GI3", "GI", pay("RM7", "301", "Back", "Gu", "F7", "260101", "260110"))
+	process(t, pr, s)
+	if _, err := p.Exec(ctx, `SELECT * FROM iam_v2.restore_room_move_access($1,$2,$3::uuid,1,NULL,'RECOVERY',false)`, s.tenant, s.site, stayID); err == nil {
+		t.Fatal("a checkout closed by a same-room reinstatement was restored because the stay moved later")
+	}
+	if n := countIn(t, p, `SELECT count(*) FROM iam_v2.room_move_restorations WHERE stay_id=$1`, stayID); n != 0 {
+		t.Fatal("a refused recovery left a record")
+	}
+}
+
 func TestIntegration_RoomMoveCheckinFirstNeverChecksOut(t *testing.T) {
 	p, s, pr, pkgRev := moveFixture(t)
 	insertLive(t, p, s, "N-GI", "GI", pay("RM2", "700", "Early", "Bo", "F2", "260101", "260110"))

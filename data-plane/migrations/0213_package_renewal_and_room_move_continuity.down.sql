@@ -16,6 +16,7 @@ BEGIN
 END $guard$;
 
 DROP FUNCTION iam_v2.restore_room_move_access(uuid, uuid, uuid, integer, uuid, text, boolean);
+DROP FUNCTION iam_v2.stay_next_applied_checkin(uuid, uuid);
 DROP FUNCTION iam_v2.stay_event_room(jsonb);
 DROP TABLE iam_v2.room_move_restorations;
 DROP FUNCTION iam_v2.room_move_restorations_append_only();
