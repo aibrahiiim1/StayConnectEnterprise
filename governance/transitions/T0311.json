@@ -1,0 +1,35 @@
+{
+  "transition_id": "T0311",
+  "seq": 311,
+  "timestamp": "2026-11-06T00:49:37+02:00",
+  "timestamp_derivation": "Read from the workstation clock (UTC+02:00) by the script that wrote this receipt, immediately before the commit that introduces it.",
+  "record_type": "CONNECTIVITY_IMPROVEMENTS",
+  "authorisation": "The Product Owner's Connectivity Improvements mission of 2026-11-05 (D96): Kea authoritative on the test appliance's client VLANs, minimal automatic reconnection for Room Sign-in, record and reporting corrections, deadlock handling, the controlled migration 0210 with verified backup and rollback, protected merges and deployment to the test appliance 172.21.96.97 under D79.",
+  "delivery": "PR #363 (merged 51e5030a): Kea subnets rendered authoritative (appliance-served client networks only); netd answers POST /v1/address/owner from its lease evidence (owned/foreign/unknown); scd refuses a room sign-in from an address leased to another device as ADDRESS_CONFLICT before anything is written, and serves /v1/phase3/auth/pms/rejoin, which reconnects a device whose last session ended for an address or place change to its same-stay ACTIVE in-window entitlement only while the device is still AUTHORIZED and netd confirms it owns its lease (session method REJOIN; licence slot and enforcement as for a sign-in); portald asks for it on the OS captive probes and the portal page; grant and paid sign-in passes that meet SQLSTATE 40P01/40001 run once more on a buffered response without a second attempt record; a paid session is linked to its sign-in whether or not enforcement confirmed in time; the enforcement plan tears an ended package's session as ENTITLEMENT_ENDED; Client activity and Guest sign-in attempts show 'Verified, but no package was taken' and 'Old network address'; migration 0210 (ADDRESS_CONFLICT result; a retried success replaces a retryable refusal; down refuses while ADDRESS_CONFLICT rows exist); baseline regenerated. PR #367 (merged 12a00cba): the reconnection reads the device's authorization from entitlement_devices, which svc_scd may read, after the live test appliance refused every reconnection with permission denied on entitlement_device_authorizations.",
+  "findings": "On the test appliance devices kept addresses since leased to other devices (Kea answered nothing to their re-requests), signed in, and lost the session within the second, the guest seeing 'service unavailable'; room-sign-in devices whose 8-hour lease expired lost their session and had to sign in again although their package was still valid; retried grants left their attempt recorded as the refusal; paid sessions whose enforcement confirmed late were never linked to their sign-in; package-end teardowns were recorded as ENFORCEMENT_TORN_DOWN. The first live deployment of the reconnection found the svc_scd permission defect fixed in PR #367; the production-role integration test now covers it.",
+  "verification": "Linux integration tests on the disposable test database with Gate-P re-applied: scd reconnection (own entitlement only, concurrency, every refusal reason, ownership owned/foreign/unknown, another device, a released device, ended package, After Check-out, stale address as ADDRESS_CONFLICT, retried success replacing a retryable refusal, paid-session link, and the reconnection as the production svc_scd role); netd address-owner endpoint and caller authorisation; Kea render; enforcement teardown reason; edged sign-in attempts and Client activity; Hotel Admin unit tests for the new words; tenant-isolation check re-recorded; factory-clean baseline IDENTICAL. Codex review clean on both PRs. NOT VERIFIED within the 300 s rule: TestIntegration_UsageAfterRawPurge_EqualsTheRawFunctionsWhenRawIsComplete (unrelated, exceeds 5 minutes).",
+  "deployment": {
+    "test_appliance": "Recorded in T0312.",
+    "central": "Not changed."
+  },
+  "not_touched": "DHCP lease durations, the offline device-slot policy, After Check-out Access settings, WAN and management networking, financial behaviour, PMS configuration and postings, payments, licences, PKI and trust, the production Central.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "12a00cba2092237dc522234df9ddc600a8139b52",
+  "previous_delivery": "T0310",
+  "decision": "D96",
+  "go_live": "NOT authorised."
+}

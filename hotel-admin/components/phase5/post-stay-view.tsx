@@ -1,18 +1,16 @@
 "use client";
 
-// The reconnections list of After Check-out Access: who reconnected with room + reservation number, and staff ending a
-// stay's reconnection, irreversibly. It sets no duration or package; those live in the After Check-out Access policy.
-
 import { usePmsConnections } from "@/lib/pms-scope";
 import * as React from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarClock } from "lucide-react";
-import { api } from "@/lib/api";
-import { formatDate } from "@/lib/utils";
+import { AlertTriangle, CalendarClock, RefreshCw } from "lucide-react";
+import { api, ApiError } from "@/lib/api";
+import { cn, formatDate } from "@/lib/utils";
 import { PageHeader, PageShell, StatCard, StatGrid } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { Badge, StatusBadge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
@@ -20,7 +18,7 @@ import { DialogForm } from "@/components/ui/dialog";
 import { DetailsDrawer } from "@/components/ui/details-drawer";
 import { RowActions } from "@/components/ui/row-actions";
 import { DescriptionList } from "@/components/ui/data";
-import { MonoId, SkeletonRows } from "@/components/ui/misc";
+import { MonoId, Skeleton, SkeletonRows } from "@/components/ui/misc";
 import { ConsequenceList, ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 
@@ -49,13 +47,29 @@ const STAY_WORDS: Record<string, string> = {
   CANCELLED: "Cancelled",
   NO_SHOW: "No show",
 };
-const stayWords = (s: string) => STAY_WORDS[s] ?? s.replace(/_/g, " ").toLowerCase();
+const stayWords = (s: string) => STAY_WORDS[s] ?? "Status not recognised";
+
+const ISSUED_WORDS: Record<string, string> = {
+  ROOM_RESERVATION: "Room and reservation number",
+  GUEST_AUTHENTICATED_SESSION: "The guest's own signed-in session",
+  OPERATOR_RESET: "Reset by staff",
+};
+
+const FADE = "animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none";
+
+function revokeError(e: unknown): string {
+  if (e instanceof ApiError) {
+    if (e.code === "reauth_required" || e.status === 401) return "Your password was not accepted. Nothing was changed.";
+    if (e.status === 403) return "Your role cannot end reconnections.";
+    if (e.status === 409) return "This reconnection has already ended or changed. The list has been refreshed.";
+  }
+  return "The reconnection could not be ended. Nothing was changed; try again.";
+}
 
 type StateWords = { label: string; tone: "ok" | "warn" | "err" | "default"; hint?: string };
 function stateOf(row: Profile): StateWords {
   if (row.status === "REVOKED") return { label: "Ended", tone: "default", hint: "Access ended for this stay" };
   if (row.authenticable) return { label: "Active", tone: "ok" };
-  // Explain why an active profile cannot authenticate; guests receive no such distinction.
   return { label: "Active, not usable", tone: "warn", hint: "Expired, or the stay moved on" };
 }
 
@@ -63,7 +77,6 @@ function Shell({ embedded, children }: { embedded: boolean; children: React.Reac
   return embedded ? <section aria-label="Reconnections" className="space-y-5">{children}</section> : <PageShell>{children}</PageShell>;
 }
 
-/** Wait for role loading before showing a read-only notice. */
 export function PostStayView({ canAct, rolesKnown = true, embedded = false }: { canAct: boolean; rolesKnown?: boolean; embedded?: boolean }) {
   const toast = useToast();
   const { multi } = usePmsConnections();
@@ -77,8 +90,10 @@ export function PostStayView({ canAct, rolesKnown = true, embedded = false }: { 
   const [confirmWord, setConfirmWord] = useState("");
   const [detail, setDetail] = useState<Profile | null>(null);
   const [unavailable, setUnavailable] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const load = useCallback(() => {
+    setLoading(true);
     api
       .get<{ profiles?: Profile[] }>("/post-stay-profiles/")
       .then((m) => {
@@ -87,10 +102,9 @@ export function PostStayView({ canAct, rolesKnown = true, embedded = false }: { 
       })
       .catch((e) => {
         if (embedded && (e?.status === 404 || e?.status === 403)) setUnavailable(true);
-        setError(String(e?.message ?? e));
-        // Keep the last good list when refresh fails.
-        setRows((prev) => prev ?? []);
-      });
+        setError("The reconnections list could not be refreshed. What is shown may be out of date.");
+      })
+      .finally(() => setLoading(false));
   }, [embedded]);
 
   useEffect(load, [load]);
@@ -103,7 +117,6 @@ export function PostStayView({ canAct, rolesKnown = true, embedded = false }: { 
     setConfirmWord("");
   };
 
-  // Require a typed confirmation because revocation cannot be undone.
   const canSubmit = useMemo(() => {
     if (!dialog) return false;
     if (password.length === 0 || reason.trim().length < 4) return false;
@@ -117,11 +130,12 @@ export function PostStayView({ canAct, rolesKnown = true, embedded = false }: { 
     setDialogError(null);
     try {
       await api.post(`/post-stay-profiles/${dialog.row.id}/revoke`, { password, reason: reason.trim() });
-      toast.success("Reconnection ended", `Room ${dialog.row.normalized_room_number ?? "—"}${multi && dialog.row.pms_interface_label ? ` at ${dialog.row.pms_interface_label}` : ""} can no longer reconnect after check-out.`);
+      toast.success("Reconnection ended", `${dialog.row.normalized_room_number ? `Room ${dialog.row.normalized_room_number}` : "This stay"}${multi && dialog.row.pms_interface_label ? ` at ${dialog.row.pms_interface_label}` : ""} can no longer reconnect after check-out.`);
       closeDialog();
       load();
     } catch (e: unknown) {
-      setDialogError(String((e as { message?: string })?.message ?? e));
+      setDialogError(revokeError(e));
+      if (e instanceof ApiError && e.status === 409) load();
     } finally {
       setBusy(false);
     }
@@ -137,6 +151,9 @@ export function PostStayView({ canAct, rolesKnown = true, embedded = false }: { 
   }, [rows]);
 
   if (unavailable) return null;
+
+  const tile = (n: number) =>
+    rows ? n.toLocaleString() : error ? <span className="text-muted-foreground">Not known</span> : <Skeleton className="h-6 w-16" />;
 
   return (
     <Shell embedded={embedded}>
@@ -156,27 +173,44 @@ export function PostStayView({ canAct, rolesKnown = true, embedded = false }: { 
       )}
 
       {rolesKnown && !canAct && <ReadOnlyNotice />}
-      <ErrorBanner err={error} />
+      {rows !== null && <ErrorBanner err={error} />}
 
       <StatGrid cols={3}>
-        <StatCard label="Can reconnect now" value={rows ? counts.usable.toLocaleString() : "—"} />
+        <StatCard label="Can reconnect now" value={tile(counts.usable)} />
         <StatCard
           label="Active, not usable"
-          value={rows ? counts.notUsable.toLocaleString() : "—"}
+          value={tile(counts.notUsable)}
           hint="Expired, or the stay moved on"
         />
-        <StatCard label="Ended by staff" value={rows ? counts.ended.toLocaleString() : "—"} />
+        <StatCard label="Ended by staff" value={tile(counts.ended)} />
       </StatGrid>
 
       <Card className="overflow-hidden">
         {rows === null ? (
-          <SkeletonRows rows={4} cols={6} />
+          error ? (
+            <div role="alert" className={FADE}>
+              <EmptyState size="sm"
+                icon={<AlertTriangle />}
+                title="Reconnections could not be loaded"
+                hint="The appliance did not return the reconnections, so the list and the counts above are not known. Nothing has been changed."
+                action={
+                  <Button variant="secondary" disabled={loading} onClick={() => load()}>
+                    <RefreshCw className={cn(loading && "animate-spin motion-reduce:animate-none")} /> Try again
+                  </Button>
+                }
+              />
+            </div>
+          ) : (
+            <SkeletonRows rows={4} cols={6} />
+          )
         ) : rows.length === 0 ? (
-          <EmptyState size="sm"
-            icon={<CalendarClock />}
-            title="No reconnections yet"
-            hint="A guest who has reconnected after check-out appears here with their room and until when."
-          />
+          <div className={FADE}>
+            <EmptyState size="sm"
+              icon={<CalendarClock />}
+              title="No reconnections yet"
+              hint="A guest who has reconnected after check-out appears here with their room and until when."
+            />
+          </div>
         ) : (
           <Table>
             <THead>
@@ -198,7 +232,7 @@ export function PostStayView({ canAct, rolesKnown = true, embedded = false }: { 
                       {row.normalized_room_number ? `Room ${row.normalized_room_number}` : "No room"}
                       {multi && row.pms_interface_label && <div className="text-xs font-normal text-muted-foreground">{row.pms_interface_label}</div>}
                     </TD>
-                    <TD truncate title={row.external_reservation_id || undefined} className="hidden max-w-[12rem] md:table-cell">{row.external_reservation_id || "—"}</TD>
+                    <TD truncate title={row.external_reservation_id || undefined} className="hidden max-w-[12rem] md:table-cell">{row.external_reservation_id || "Not given"}</TD>
                     <TD muted className="hidden lg:table-cell">
                       {stayWords(row.stay_status)}
                       <div className="text-xs">Stay episode {row.origin_lifecycle_version}</div>
@@ -237,7 +271,7 @@ export function PostStayView({ canAct, rolesKnown = true, embedded = false }: { 
         onOpenChange={(v) => !v && setDetail(null)}
         eyebrow="Reconnection"
         title={detail?.normalized_room_number ? `Room ${detail.normalized_room_number}${multi && detail.pms_interface_label ? ` · ${detail.pms_interface_label}` : ""}` : "Reconnection"}
-        description={detail ? `Reservation ${detail.external_reservation_id || "—"}` : undefined}
+        description={detail ? (detail.external_reservation_id ? `Reservation ${detail.external_reservation_id}` : "No reservation number given") : undefined}
         badges={detail ? (
           <>
             <StatusBadge tone={stateOf(detail).tone}>{stateOf(detail).label}</StatusBadge>
@@ -256,9 +290,9 @@ export function PostStayView({ canAct, rolesKnown = true, embedded = false }: { 
               items={[
                 { label: "Stay episode", value: String(detail.origin_lifecycle_version) },
                 { label: "Issued", value: formatDate(detail.issued_at) },
-                { label: "Issued via", value: detail.issued_via ? detail.issued_via.replace(/_/g, " ").toLowerCase() : "—" },
+                { label: "Issued via", value: detail.issued_via ? ISSUED_WORDS[detail.issued_via] ?? "Not recognised" : "Not recorded" },
                 { label: "Valid until", value: formatDate(detail.valid_until) },
-                { label: "Ended", value: detail.revoked_at ? formatDate(detail.revoked_at) : "—" },
+                { label: "Ended", value: detail.revoked_at ? formatDate(detail.revoked_at) : "Not ended" },
                 { label: "Stay reference", value: <MonoId value={detail.stay_id} title="Stay" /> },
                 { label: "Access reference", value: <MonoId value={detail.id} title="Reconnection" /> },
               ]}
@@ -271,7 +305,7 @@ export function PostStayView({ canAct, rolesKnown = true, embedded = false }: { 
         open={dialog !== null}
         onOpenChange={(v) => { if (!v) closeDialog(); }}
         title="End reconnection"
-        description={dialog ? `Room ${dialog.row.normalized_room_number ?? "—"} · reservation ${dialog.row.external_reservation_id}` : undefined}
+        description={dialog ? `${dialog.row.normalized_room_number ? `Room ${dialog.row.normalized_room_number}` : "No room"} · ${dialog.row.external_reservation_id ? `reservation ${dialog.row.external_reservation_id}` : "no reservation number given"}` : undefined}
         size="sm"
         submitLabel="End access permanently"
         submitVariant="danger"

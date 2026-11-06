@@ -13,8 +13,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { SkeletonRows } from "@/components/ui/misc";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/components/ui/toast";
-import { BadgeCheck, RotateCcw, Send, Power, Trash2 } from "lucide-react";
+import { AlertTriangle, BadgeCheck, RefreshCw, RotateCcw, Send, Power, Trash2 } from "lucide-react";
 import { formatBytes, formatDate } from "@/lib/utils";
 import { verificationStatus } from "@/lib/account-verification";
 import { DeviceDetailDialog } from "@/components/devices/device-detail";
@@ -59,16 +60,19 @@ export function ManageAccountDialog({
   const [device, setDevice] = useState<string | null>(null);
   const [vouching, setVouching] = useState(false);
   const [vouchErr, setVouchErr] = useState<unknown>(null);
+  const [loadErr, setLoadErr] = useState<unknown>(null);
+  const [askDisconnect, setAskDisconnect] = useState(false);
+  const [disconnectErr, setDisconnectErr] = useState<unknown>(null);
   const deviceActions = mayActOnDevices ?? mayWrite;
 
   const load = useCallback(async () => {
     if (!account) return;
-    setErr(null);
+    setLoadErr(null);
     try {
       setData(await api.get<GuestAccountManage>(`/guest-accounts/${account.id}/manage`));
-    } catch (e) { setErr(e); }
+    } catch (e) { setLoadErr(e); }
   }, [account]);
-  useEffect(() => { setData(null); void load(); }, [load]);
+  useEffect(() => { setData(null); setErr(null); setAskDisconnect(false); void load(); }, [load]);
 
   async function act(key: string, fn: () => Promise<unknown>, done: string) {
     setBusy(key); setErr(null);
@@ -149,17 +153,22 @@ export function ManageAccountDialog({
                 )}
                 {(a?.active_devices ?? 0) > 0 && (
                   <Button size="sm" variant="secondary" disabled={busy !== null}
-                    onClick={() => void act("disconnect", () => api.post(`/guest-accounts/${a!.id}/disconnect`),
-                      "The account's devices were disconnected.")}>
+                    onClick={() => { setDisconnectErr(null); setAskDisconnect(true); }}>
                     <Power /> {busy === "disconnect" ? "Disconnecting…" : "Disconnect devices"}
                   </Button>
                 )}
                 <Button size="sm" variant="danger-outline"
                   disabled={busy !== null || !data}
+                  aria-describedby={!data ? "manage-remove-wait" : undefined}
                   onClick={() => data && onRemove(data.account, data.removal)}>
                   <Trash2 /> Remove account
                 </Button>
               </div>
+            )}
+            {mayWrite && !removed && !data && (
+              <p id="manage-remove-wait" className="text-caption text-muted-foreground">
+                Remove account is available once the account&apos;s details are loaded.
+              </p>
             )}
             {canAdjust && (
               <p className="text-caption text-muted-foreground">
@@ -172,12 +181,21 @@ export function ManageAccountDialog({
 
           <section className="space-y-2">
             <h3 className="text-sm font-medium">Packages</h3>
-            {!data && !err ? (
+            {!data && loadErr ? (
+              <EmptyState
+                size="sm"
+                icon={<AlertTriangle />}
+                title="The account's packages could not be loaded"
+                hint={loadErr instanceof Error ? loadErr.message : undefined}
+                action={<Button size="sm" variant="secondary" onClick={() => void load()}><RefreshCw /> Try again</Button>}
+              />
+            ) : !data ? (
               <SkeletonRows rows={2} />
-            ) : data && data.entitlements.length === 0 ? (
+            ) : data.entitlements.length === 0 ? (
               <p className="text-sm text-muted-foreground">This account has not taken a package.</p>
             ) : (
-              data?.entitlements.map((e) => (
+              <div className="space-y-2 animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none">
+              {data.entitlements.map((e) => (
                 <div key={e.id} className="rounded-md border border-border p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="font-medium">{e.package_name || "Package"}</div>
@@ -237,7 +255,8 @@ export function ManageAccountDialog({
                     </p>
                   ) : null}
                 </div>
-              ))
+              ))}
+              </div>
             )}
             {data && data.entitlements_total > data.entitlements.length && (
               <p className="text-caption text-muted-foreground">
@@ -249,6 +268,27 @@ export function ManageAccountDialog({
       </DialogContent>
       <DeviceDetailDialog deviceId={device} mayWrite={deviceActions} onClose={() => setDevice(null)}
         onChanged={() => { onChanged(); void load(); }} />
+      <ConfirmDialog
+        open={askDisconnect}
+        onOpenChange={(v) => !v && busy !== "disconnect" && setAskDisconnect(false)}
+        title="Disconnect this account's devices?"
+        description={a ? `All ${a.active_devices ?? 0} device${(a.active_devices ?? 0) === 1 ? "" : "s"} signed in as "${a.username}" will lose internet access immediately. The account still works, so they can sign in again.` : undefined}
+        confirmLabel="Disconnect devices"
+        confirmVariant="danger"
+        busy={busy === "disconnect"}
+        error={disconnectErr}
+        onConfirm={async () => {
+          if (!a) return;
+          setBusy("disconnect"); setDisconnectErr(null);
+          try {
+            await api.post(`/guest-accounts/${a.id}/disconnect`);
+            toast.success("The account's devices were disconnected.");
+            setAskDisconnect(false);
+            onChanged();
+            await load();
+          } catch (e) { setDisconnectErr(e); } finally { setBusy(null); }
+        }}
+      />
       <ConfirmDialog
         open={vouching}
         onOpenChange={(v) => !v && setVouching(false)}

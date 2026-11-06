@@ -130,7 +130,7 @@ describe("connection recovery is scoped to one interface", () => {
     const field = await screen.findByDisplayValue("1200");
     await userEvent.clear(field);
     await userEvent.type(field, "600");
-    await userEvent.type(screen.getByPlaceholderText(/Reason/i), "alerting sooner during the upgrade");
+    await userEvent.type(screen.getByLabelText(/Reason/i), "alerting sooner during the upgrade");
     await userEvent.click(screen.getByRole("button", { name: /Save recovery settings/i }));
 
     await waitFor(() => expect(put).toHaveBeenCalled());

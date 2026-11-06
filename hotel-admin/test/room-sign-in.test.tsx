@@ -44,7 +44,7 @@ function routes(roles: string[], pms: Record<string, unknown>) {
 }
 
 const SUPPORTED = [
-  "Room number + any one of: first name, surname or reservation number (recommended)",
+  "Room number + first name, surname or reservation number",
   "Room number + surname",
   "Room number + first name",
   "Room number + reservation number",

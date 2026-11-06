@@ -1,8 +1,5 @@
 "use client";
 
-// One renderer for every provider's configuration, driven by the provider's own schema. The server remains
-// the authority; this only catches what is certainly wrong before Create.
-
 import { useState } from "react";
 import { Field, FieldGrid, Input, Select } from "@/components/ui/input";
 import { Switch } from "@/components/ui/misc";
@@ -116,14 +113,13 @@ const ms = (v: unknown): string | null => {
 };
 
 const shown = (v: unknown): string => {
-  if (v === undefined || v === null || v === "") return "—";
+  if (v === undefined || v === null || v === "") return "Not set";
   if (v === "[redacted]") return "Hidden";
   if (typeof v === "boolean") return v ? "Yes" : "No";
   if (typeof v === "object") return "Set";
   return String(v);
 };
 
-/** Nothing is invented; absent is "—". */
 export function configRows(
   provider: PmsProvider,
   rev: { config?: Record<string, unknown>; source_timezone?: string },
@@ -133,22 +129,22 @@ export function configRows(
     const auth = (cfg.auth ?? {}) as Record<string, unknown>;
     const rows: { label: string; value: string }[] = [
       { label: "Connects to", value: shown(cfg.endpoint) },
-      { label: "PMS time zone", value: rev.source_timezone || "—" },
+      { label: "PMS time zone", value: rev.source_timezone || "Not set" },
       {
         label: "Keep-alive",
         value: [ms(cfg.heartbeat_interval_ms) && `every ${ms(cfg.heartbeat_interval_ms)}`,
           ms(cfg.heartbeat_timeout_ms) && `give up after ${ms(cfg.heartbeat_timeout_ms)}`]
-          .filter(Boolean).join(", ") || "—",
+          .filter(Boolean).join(", ") || "Not set",
       },
-      { label: "Guest data treated as stale after", value: ms(cfg.feed_freshness_ms) ?? "—" },
-      { label: "Full guest-list refresh at least every", value: ms(cfg.complete_sync_ms) ?? "—" },
+      { label: "Guest data treated as stale after", value: ms(cfg.feed_freshness_ms) ?? "Not set" },
+      { label: "Full guest-list refresh at least every", value: ms(cfg.complete_sync_ms) ?? "Not set" },
       {
         label: "Timeouts",
         value: [ms(cfg.dial_timeout_ms) && `connect ${ms(cfg.dial_timeout_ms)}`,
           ms(cfg.read_timeout_ms) && `read ${ms(cfg.read_timeout_ms)}`,
-          ms(cfg.write_timeout_ms) && `write ${ms(cfg.write_timeout_ms)}`].filter(Boolean).join(", ") || "—",
+          ms(cfg.write_timeout_ms) && `write ${ms(cfg.write_timeout_ms)}`].filter(Boolean).join(", ") || "Not set",
       },
-      { label: "Direction", value: auth.read_only === false ? "Read and write" : "Read-only — OneGate never writes to the PMS" },
+      { label: "Direction", value: auth.read_only === false ? "Read and write" : "Reads the guest list. Sends nothing except room charges, and only once room charge is approved" },
       { label: "Credential", value: auth.credential_mode === "NONE" || auth.credential_mode === undefined ? "None needed for this link" : "Required" },
     ];
     if (cfg.resync_supported != null) {
@@ -157,7 +153,7 @@ export function configRows(
     return rows;
   }
   const nested = storedProviderValues(cfg);
-  const rows = [{ label: "PMS time zone", value: rev.source_timezone || "—" }];
+  const rows = [{ label: "PMS time zone", value: rev.source_timezone || "Not set" }];
   for (const f of fieldsFor(provider)) {
     const raw = nested[f.key] ?? cfg[f.key];
     const opt = f.type === "enum" ? f.options?.find((o) => o.value === raw)?.label : undefined;

@@ -1,7 +1,5 @@
 "use client";
 
-// Membership uses verified identity only; any rule matches and the lowest priority wins.
-
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api, ApiError, ListResp, ClientGroup, ClientGroupChange, ClientGroupRule, ClientGroupRuleType } from "@/lib/api";
@@ -22,17 +20,19 @@ import { ErrorBanner } from "@/components/ui/error-banner";
 import { DialogForm, ConfirmDialog } from "@/components/ui/dialog";
 import { Switch, SkeletonRows } from "@/components/ui/misc";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Plus, Trash2, UsersRound, ArrowUpRight } from "lucide-react";
-import { canWrite } from "@/lib/roles";
+import { Plus, Trash2, UsersRound, ArrowUpRight, AlertTriangle, RefreshCw, Pencil } from "lucide-react";
+import { canRead, canWrite } from "@/lib/roles";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
-import { formatDate } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
+import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
 import { ruleSummary } from "./rule-summary";
 import { useOperatorRoles } from "@/lib/whoami-context";
 
 const PRIORITY_DEFAULT = 100;
 const PRIORITY_MIN = 1;
 const PRIORITY_MAX = 1000;
+const FADE = "animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none";
 
 const RULE_KINDS: { type: ClientGroupRuleType; label: string; assurance: string; hint: string }[] = [
   {
@@ -55,7 +55,15 @@ const RULE_KINDS: { type: ClientGroupRuleType; label: string; assurance: string;
   },
 ];
 
-type RuleForm = { type: ClientGroupRuleType; list: string; include_subdomains: boolean };
+const PROVIDER_OF: Partial<Record<ClientGroupRuleType, { id: string; name: string }>> = {
+  IDP_TENANT: { id: "microsoft", name: "Microsoft" },
+  IDP_HOSTED_DOMAIN: { id: "google", name: "Google" },
+};
+
+const DOMAIN_RE = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
+const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+type RuleForm = { type: ClientGroupRuleType; list: string; include_subdomains: boolean; note?: string };
 
 const splitList = (s: string, lower = false): string[] =>
   Array.from(new Set(s.split(/[\n,;\s]+/).map((x) => (lower ? x.trim().toLowerCase() : x.trim())).filter(Boolean)));
@@ -75,6 +83,17 @@ function ruleFromForm(f: RuleForm): ClientGroupRule {
   }
 }
 
+function ruleProblem(r: RuleForm, n: string): string | undefined {
+  const items = splitList(r.list);
+  if (items.length === 0) return `${n}: enter at least one ${r.type === "IDP_TENANT" ? "tenant ID" : "domain"}.`;
+  if (r.type === "IDP_TENANT") {
+    const bad = items.find((x) => !GUID_RE.test(x));
+    return bad ? `${n}: "${bad}" is not a tenant ID. A tenant ID looks like 00000000-0000-0000-0000-000000000000.` : undefined;
+  }
+  const bad = items.find((x) => !DOMAIN_RE.test(x));
+  return bad ? `${n}: "${bad}" is not a domain. Enter a domain such as company.com, without @ or https://.` : undefined;
+}
+
 type FormState = {
   name: string;
   description: string;
@@ -87,6 +106,8 @@ const EMPTY: FormState = {
   name: "", description: "", priority: String(PRIORITY_DEFAULT), enabled: true,
   rules: [{ type: "EMAIL_DOMAIN", list: "", include_subdomains: false }], reason: "",
 };
+type FormErrors = { name?: string; priority?: string; rules: Record<number, string>; empty?: string };
+const NO_ERRORS: FormErrors = { rules: {} };
 
 const ACTION_WORDS: Record<ClientGroupChange["action"], string> = { CREATED: "Created", UPDATED: "Changed", DELETED: "Deleted" };
 
@@ -100,29 +121,58 @@ function groupDiff(c: ClientGroupChange) {
     { field: "Description", before: b.description ?? undefined, after: a.description ?? undefined },
     { field: "Priority", before: b.priority?.toString(), after: a.priority?.toString() },
     { field: "State", before: onOff(b.enabled), after: onOff(a.enabled) },
-    { field: "Members", before: rules(b), after: rules(a) },
+    { field: "Who is in it", before: rules(b), after: rules(a) },
   ];
   return rows.filter((r) => r.before !== r.after);
 }
 
+function RuleDetail({ rule }: { rule: ClientGroupRule }) {
+  const kind = RULE_KINDS.find((k) => k.type === rule.type);
+  const items = rule.type === "IDP_TENANT" ? rule.value.tenant_ids ?? [] : rule.value.domains ?? [];
+  return (
+    <li className="space-y-1.5 rounded-md border border-border px-3.5 py-2.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm font-medium">{kind?.label ?? rule.type}</span>
+        <Badge tone={rule.type === "EMAIL_DOMAIN" ? "info" : "accent"}>{kind?.assurance ?? "Rule"}</Badge>
+      </div>
+      <ul className="space-y-0.5 font-mono text-xs" dir="ltr">
+        {items.map((x) => <li key={x} className="break-all">{x}</li>)}
+      </ul>
+      {rule.type === "EMAIL_DOMAIN" && rule.value.include_subdomains && (
+        <p className="text-caption text-muted-foreground">Subdomains count too.</p>
+      )}
+    </li>
+  );
+}
+
 export default function ClientGroupsPage() {
   const toast = useToast();
+  const caps = useCapabilities();
+  const socialMod = moduleLicensed(caps, "social_login");
   const [rows, setRows] = useState<ClientGroup[] | null>(null);
   const roles = useOperatorRoles();
   const [err, setErr] = useState<unknown>(null);
+  const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [formErr, setFormErr] = useState<unknown>(null);
+  const [errors, setErrors] = useState<FormErrors>(NO_ERRORS);
+  const [emptyOk, setEmptyOk] = useState(false);
 
   const [mode, setMode] = useState<"closed" | "new" | "edit">("closed");
   const [editing, setEditing] = useState<ClientGroup | null>(null);
+  const [viewing, setViewing] = useState<ClientGroup | null>(null);
   const [f, setF] = useState<FormState>(EMPTY);
+  const [initial, setInitial] = useState<FormState>(EMPTY);
   const [deleting, setDeleting] = useState<ClientGroup | null>(null);
   const [deleteReason, setDeleteReason] = useState("");
 
   const [tab, setTab] = useState<"groups" | "history">("groups");
   const [changes, setChanges] = useState<ClientGroupChange[] | null>(null);
   const [changesErr, setChangesErr] = useState<unknown>(null);
+  const [changesLoading, setChangesLoading] = useState(false);
   const [openChange, setOpenChange] = useState<ClientGroupChange | null>(null);
+
+  const [providers, setProviders] = useState<string[] | null>(null);
 
   const writable = roles !== null && canWrite("client-groups", roles);
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setF((p) => ({ ...p, [k]: v }));
@@ -130,48 +180,107 @@ export default function ClientGroupsPage() {
     setF((p) => ({ ...p, rules: p.rules.map((r, j) => (j === i ? { ...r, ...patch } : r)) }));
 
   const load = useCallback(async () => {
-    try { setRows((await api.get<ListResp<ClientGroup>>("/client-groups")).data ?? []); }
-    catch (e) { setErr(e); }
+    setLoading(true);
+    try {
+      setRows((await api.get<ListResp<ClientGroup>>("/client-groups")).data ?? []);
+      setErr(null);
+    } catch (e) {
+      setErr(e);
+    } finally {
+      setLoading(false);
+    }
   }, []);
   useEffect(() => {
-    load();
+    void load();
   }, [load]);
 
   const loadChanges = useCallback(async () => {
-    setChangesErr(null);
-    try { setChanges((await api.get<ListResp<ClientGroupChange>>("/client-groups/changes")).data ?? []); }
-    catch (e) { setChangesErr(e); setChanges([]); }
+    setChangesLoading(true);
+    try {
+      setChanges((await api.get<ListResp<ClientGroupChange>>("/client-groups/changes")).data ?? []);
+      setChangesErr(null);
+    } catch (e) {
+      setChangesErr(e);
+    } finally {
+      setChangesLoading(false);
+    }
   }, []);
-  useEffect(() => { if (tab === "history") loadChanges(); }, [tab, loadChanges]);
+  useEffect(() => { if (tab === "history") void loadChanges(); }, [tab, loadChanges]);
+
+  const providersReadable = socialMod && roles !== null && canRead("social-providers", roles);
+  useEffect(() => {
+    if (mode === "closed" || !providersReadable) return;
+    let live = true;
+    api.get<ListResp<{ provider: string; enabled: boolean }>>("/social-providers")
+      .then((r) => { if (live) setProviders((r.data ?? []).filter((p) => p.enabled).map((p) => p.provider)); })
+      .catch(() => { if (live) setProviders(null); });
+    return () => { live = false; };
+  }, [mode, providersReadable]);
 
   const sorted = useMemo(
     () => (rows ?? []).slice().sort((a, b) => a.priority - b.priority || a.name.localeCompare(b.name)),
     [rows]);
   const nameOf = useCallback((id: string) => rows?.find((g) => g.id === id)?.name, [rows]);
 
+  function resetForm(next: FormState) {
+    setF(next); setInitial(next); setFormErr(null); setErrors(NO_ERRORS); setEmptyOk(false);
+  }
   function openNew() {
-    setF(EMPTY); setEditing(null); setFormErr(null); setMode("new");
+    resetForm(EMPTY); setEditing(null); setMode("new");
   }
   function openEdit(g: ClientGroup) {
-    setF({
+    resetForm({
       name: g.name, description: g.description ?? "", priority: String(g.priority), enabled: g.enabled,
       rules: (g.rules ?? []).length ? g.rules.map(ruleToForm) : [{ type: "EMAIL_DOMAIN", list: "", include_subdomains: false }],
       reason: "",
     });
-    setEditing(g); setFormErr(null); setMode("edit");
+    setViewing(null);
+    setEditing(g); setMode("edit");
+  }
+
+  const dirty = useMemo(() => JSON.stringify(f) !== JSON.stringify(initial), [f, initial]);
+
+  function changeKind(i: number, type: ClientGroupRuleType) {
+    const r = f.rules[i];
+    const sameShape = (r.type === "IDP_TENANT") === (type === "IDP_TENANT");
+    const cleared = !sameShape && r.list.trim() !== "";
+    setRule(i, {
+      type,
+      list: sameShape ? r.list : "",
+      include_subdomains: type === "EMAIL_DOMAIN" ? r.include_subdomains : false,
+      note: cleared ? "The list was cleared: tenant IDs and domains are not interchangeable." : undefined,
+    });
+    setErrors((e) => ({ ...e, rules: { ...e.rules, [i]: "" } }));
+  }
+
+  function focusFirstError() {
+    requestAnimationFrame(() => {
+      const el = document.querySelector<HTMLElement>('[role="dialog"] [aria-invalid="true"]');
+      el?.scrollIntoView?.({ block: "center" });
+      el?.focus();
+    });
   }
 
   async function onSubmit() {
     setFormErr(null);
     const prio = Number(f.priority);
-    if (!f.name.trim()) { setFormErr("Give the group a name."); return; }
-    if (!Number.isInteger(prio) || prio < PRIORITY_MIN || prio > PRIORITY_MAX) {
-      setFormErr(`Priority must be a whole number between ${PRIORITY_MIN} and ${PRIORITY_MAX}.`); return;
+    const next: FormErrors = { rules: {} };
+    if (!f.name.trim()) next.name = "Give the group a name.";
+    if (f.priority.trim() === "" || !Number.isInteger(prio) || prio < PRIORITY_MIN || prio > PRIORITY_MAX) {
+      next.priority = `Priority must be a whole number between ${PRIORITY_MIN} and ${PRIORITY_MAX}.`;
     }
-    for (const [i, r] of f.rules.entries()) {
-      if (splitList(r.list).length === 0) {
-        setFormErr(`Rule ${i + 1}: enter at least one ${r.type === "IDP_TENANT" ? "tenant ID" : "domain"}.`); return;
-      }
+    f.rules.forEach((r, i) => {
+      const p = ruleProblem(r, `Rule ${i + 1}`);
+      if (p) next.rules[i] = p;
+    });
+    if (f.rules.length === 0 && !emptyOk) {
+      next.empty = `This group has no rules, so it matches nobody. Select ${mode === "new" ? "Create group" : "Save changes"} again to save it anyway.`;
+      setEmptyOk(true);
+    }
+    setErrors(next);
+    if (next.name || next.priority || Object.keys(next.rules).length > 0 || next.empty) {
+      focusFirstError();
+      return;
     }
     setBusy(true);
     const body = {
@@ -208,7 +317,24 @@ export default function ClientGroupsPage() {
     finally { setBusy(false); }
   }
 
-  const changeName = (c: ClientGroupChange) => c.after?.name ?? c.before?.name ?? nameOf(c.group_id) ?? c.group_id;
+  const changeName = (c: ClientGroupChange) => c.after?.name ?? c.before?.name ?? nameOf(c.group_id) ?? "A deleted group";
+
+  const providerWarning = (type: ClientGroupRuleType): React.ReactNode => {
+    const p = PROVIDER_OF[type];
+    if (!p || caps === null) return null;
+    if (!socialMod) {
+      return <>Identity providers are not licensed on this site, so this rule matches nobody.</>;
+    }
+    if (providers === null || providers.includes(p.id)) return null;
+    return (
+      <>
+        The {p.name} identity provider is not set up, so this rule matches nobody until it is set up under{" "}
+        <Link href="/social-providers" className="underline underline-offset-2">Identity providers</Link>.
+      </>
+    );
+  };
+
+  const loadFailed = rows === null && err !== null;
 
   return (
     <PageShell>
@@ -252,7 +378,7 @@ export default function ClientGroupsPage() {
       />
 
       {roles !== null && !writable && <ReadOnlyNotice>Your role can see the client groups but not change them.</ReadOnlyNotice>}
-      <ErrorBanner err={err} className="mb-0" />
+      {rows !== null && <ErrorBanner err={err} className="mb-0" />}
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as "groups" | "history")}>
         <TabsList>
@@ -263,7 +389,18 @@ export default function ClientGroupsPage() {
         <TabsContent value="groups" className="mt-5">
           <Card className="overflow-hidden">
               {rows === null ? (
-                <SkeletonRows rows={3} cols={5} />
+                loadFailed ? (
+                  <EmptyState
+                    icon={<AlertTriangle />}
+                    title="Client groups could not be loaded"
+                    hint="The appliance did not return its client groups. Nothing has been changed."
+                    action={
+                      <Button variant="secondary" disabled={loading} onClick={() => void load()}>
+                        <RefreshCw className={cn(loading && "animate-spin motion-reduce:animate-none")} /> Try again
+                      </Button>
+                    }
+                  />
+                ) : <SkeletonRows rows={3} cols={5} />
               ) : rows.length === 0 ? (
                 <EmptyState
                   icon={<UsersRound />}
@@ -283,27 +420,35 @@ export default function ClientGroupsPage() {
               ) : (
                 <Table label="Client groups">
                   <THead>
-                    <TR><TH>Group</TH><TH numeric>Priority</TH><TH>Members</TH><TH>State</TH><TH><span className="sr-only">Actions</span></TH></TR>
+                    <TR>
+                      <TH>Group</TH>
+                      <TH numeric className="hidden sm:table-cell">Priority</TH>
+                      <TH>Who is in it</TH>
+                      <TH>State</TH>
+                      <TH><span className="sr-only">Actions</span></TH>
+                    </TR>
                   </THead>
                   <TBody>
                     {sorted.map((g) => (
-                      <TR key={g.id} onClick={writable ? () => openEdit(g) : undefined}>
+                      <TR key={g.id} onClick={() => setViewing(g)}>
                         <TD className="max-w-[16rem]">
                           <div className="truncate font-medium" title={g.name}>{g.name}</div>
                           {g.description && <div className="truncate text-xs text-muted-foreground" title={g.description}>{g.description}</div>}
+                          <div className="text-xs text-muted-foreground tabular sm:hidden">Priority {g.priority}</div>
                         </TD>
-                        <TD numeric>{g.priority}</TD>
-                        <TD truncate muted title={ruleSummary(g.rules)} className="max-w-md">{ruleSummary(g.rules)}</TD>
+                        <TD numeric className="hidden sm:table-cell">{g.priority}</TD>
+                        <TD truncate muted title={ruleSummary(g.rules)} className="max-w-[10rem] sm:max-w-md">{ruleSummary(g.rules)}</TD>
                         <TD nowrap>{g.enabled ? <StatusBadge tone="ok">On</StatusBadge> : <StatusBadge>Off</StatusBadge>}</TD>
                         <TD className="w-0">
-                          {writable && (
-                            <RowActions
-                              subject={g.name}
-                              primary={{ label: "Edit", onSelect: () => openEdit(g) }}
-                              items={[{ label: "Delete…", danger: true, icon: <Trash2 />,
-                                onSelect: () => { setFormErr(null); setDeleteReason(""); setDeleting(g); } }]}
-                            />
-                          )}
+                          <RowActions
+                            subject={g.name}
+                            primary={{ label: "Details", onSelect: () => setViewing(g) }}
+                            items={writable ? [
+                              { label: "Edit", icon: <Pencil />, onSelect: () => openEdit(g) },
+                              { label: "Delete…", danger: true, icon: <Trash2 />,
+                                onSelect: () => { setFormErr(null); setDeleteReason(""); setDeleting(g); } },
+                            ] : undefined}
+                          />
                         </TD>
                       </TR>
                     ))}
@@ -326,9 +471,20 @@ export default function ClientGroupsPage() {
 
         <TabsContent value="history" className="mt-5">
           <Card className="overflow-hidden">
-            <ErrorBanner err={changesErr} className="m-4" />
+            {changes !== null && <ErrorBanner err={changesErr} className="m-4" />}
             {changes === null ? (
-              <SkeletonRows rows={3} cols={4} />
+              changesErr ? (
+                <EmptyState
+                  icon={<AlertTriangle />}
+                  title="The history could not be loaded"
+                  hint="The appliance did not return the change log. Nothing has been changed."
+                  action={
+                    <Button variant="secondary" disabled={changesLoading} onClick={() => void loadChanges()}>
+                      <RefreshCw className={cn(changesLoading && "animate-spin motion-reduce:animate-none")} /> Try again
+                    </Button>
+                  }
+                />
+              ) : <SkeletonRows rows={3} cols={4} />
             ) : changes.length === 0 ? (
               <EmptyState size="sm" title="No changes recorded" hint="Every creation, edit and deletion of a group is recorded here, with who made it and the reason given." />
             ) : (
@@ -350,6 +506,38 @@ export default function ClientGroupsPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <DetailsDrawer
+        open={viewing !== null}
+        onOpenChange={(v) => !v && setViewing(null)}
+        eyebrow="Client group"
+        title={viewing?.name ?? ""}
+        description={viewing?.description || undefined}
+        badges={viewing ? (viewing.enabled ? <StatusBadge tone="ok">On</StatusBadge> : <StatusBadge>Off</StatusBadge>) : undefined}
+        actions={writable && viewing ? <Button onClick={() => openEdit(viewing)}><Pencil /> Edit</Button> : undefined}
+      >
+        {viewing && (
+          <>
+            <DetailsSection title="Who is in it">
+              {(viewing.rules ?? []).length === 0 ? (
+                <p className="text-sm text-muted-foreground">No rules, so this group matches nobody.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {viewing.rules.map((r, i) => <RuleDetail key={r.id ?? i} rule={r} />)}
+                </ul>
+              )}
+              <p className="mt-2 text-caption text-muted-foreground">Any one rule matching puts the client in the group.</p>
+            </DetailsSection>
+            <DetailsSection title="Settings">
+              <DescriptionList items={[
+                { label: "Priority", value: <span className="tabular">{viewing.priority}</span> },
+                { label: "State", value: viewing.enabled ? "On" : "Off, so it matches nobody" },
+                { label: "Last changed", value: formatDate(viewing.updated_at) },
+              ]} />
+            </DetailsSection>
+          </>
+        )}
+      </DetailsDrawer>
 
       <DetailsDrawer
         open={openChange !== null}
@@ -383,19 +571,22 @@ export default function ClientGroupsPage() {
         size="lg"
         busy={busy}
         error={formErr}
+        dirty={dirty}
         onSubmit={onSubmit}
       >
         <QuietHints>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Name" required hint="As it appears when a package chooses its audience.">
-            <Input value={f.name} onChange={(e) => set("name", e.target.value)} placeholder="Employees" required />
+          <Field label="Name" required hint="As it appears when a package chooses its audience." error={errors.name}>
+            <Input value={f.name} onChange={(e) => { set("name", e.target.value); setErrors((x) => ({ ...x, name: undefined })); }}
+              placeholder="Employees" required />
           </Field>
           <Field
             label="Priority"
             hint={`When a client matches several groups, the lowest number wins. Default ${PRIORITY_DEFAULT}; allowed ${PRIORITY_MIN}–${PRIORITY_MAX}.`}
+            error={errors.priority}
           >
             <Input type="number" min={PRIORITY_MIN} max={PRIORITY_MAX} step={1} value={f.priority}
-              onChange={(e) => set("priority", e.target.value)} />
+              onChange={(e) => { set("priority", e.target.value); setErrors((x) => ({ ...x, priority: undefined })); }} />
           </Field>
           <Field label="Description" hint="For the next operator. Clients never see it." className="sm:col-span-2">
             <Input value={f.description} onChange={(e) => set("description", e.target.value)} placeholder="Optional" />
@@ -409,27 +600,33 @@ export default function ClientGroupsPage() {
               <InfoHint>Any one rule matching puts the client in the group.</InfoHint>
             </div>
             <Button type="button" variant="ghost" size="sm"
-              onClick={() => set("rules", [...f.rules, { type: "EMAIL_DOMAIN", list: "", include_subdomains: false }])}>
+              onClick={() => { set("rules", [...f.rules, { type: "EMAIL_DOMAIN", list: "", include_subdomains: false }]); setEmptyOk(false); setErrors((x) => ({ ...x, empty: undefined })); }}>
               <Plus /> Add rule
             </Button>
           </div>
           {f.rules.length === 0 && (
-            <p className="text-xs text-warning-subtle-foreground" role="status">A group with no rules matches nobody.</p>
+            <p className={cn("text-xs", errors.empty ? "text-destructive" : "text-warning-subtle-foreground", FADE)} role={errors.empty ? "alert" : "status"}>
+              {errors.empty ?? "A group with no rules matches nobody."}
+            </p>
           )}
           {f.rules.map((r, i) => {
             const kind = RULE_KINDS.find((k) => k.type === r.type) ?? RULE_KINDS[0];
             const n = `Rule ${i + 1}`;
+            const warn = providerWarning(r.type);
             return (
-              <div key={i} className="space-y-3 rounded-md border border-border bg-surface/40 p-3.5" data-testid={`group-rule-${i}`}>
+              <div key={i} className={cn("space-y-3 rounded-md border border-border bg-surface/40 p-3.5", FADE)} data-testid={`group-rule-${i}`}>
                 <div className="flex items-start gap-2">
                   <Field label={`${n}: kind`} className="flex-1">
                     <Select value={r.type} aria-label={`${n}: kind`} data-testid={`group-rule-type-${i}`}
-                      onChange={(e) => setRule(i, { type: e.target.value as ClientGroupRuleType, list: "", include_subdomains: false })}>
+                      onChange={(e) => changeKind(i, e.target.value as ClientGroupRuleType)}>
                       {RULE_KINDS.map((k) => <option key={k.type} value={k.type}>{k.label}</option>)}
                     </Select>
                   </Field>
                   <Button type="button" variant="ghost" size="icon" className="mt-6" aria-label={`Remove ${n.toLowerCase()}`}
-                    onClick={() => set("rules", f.rules.filter((_, j) => j !== i))}>
+                    onClick={() => {
+                      set("rules", f.rules.filter((_, j) => j !== i));
+                      setErrors((x) => ({ ...x, rules: {} }));
+                    }}>
                     <Trash2 />
                   </Button>
                 </div>
@@ -437,16 +634,21 @@ export default function ClientGroupsPage() {
                   <Badge tone={r.type === "EMAIL_DOMAIN" ? "info" : "accent"}>{kind.assurance}</Badge>
                   <InfoHint>{kind.hint}</InfoHint>
                 </div>
+                {warn && <p className={cn("text-xs text-warning-subtle-foreground", FADE)} role="status">{warn}</p>}
                 <Field
                   label={r.type === "IDP_TENANT" ? `${n}: tenant ID(s)` : `${n}: domain(s)`}
                   required
-                  hint={r.type === "IDP_TENANT"
+                  error={errors.rules[i] || undefined}
+                  hint={r.note ?? (r.type === "IDP_TENANT"
                     ? "The directory (tenant) ID from Microsoft Entra, a GUID. One per line."
-                    : "One per line, for example company.com. Matched against the verified address, case-insensitively."}
+                    : "One per line, for example company.com. Matched against the verified address, case-insensitively.")}
                 >
                   <Textarea value={r.list} data-testid={`group-rule-list-${i}`} dir="ltr" required
                     placeholder={r.type === "IDP_TENANT" ? "00000000-0000-0000-0000-000000000000" : "company.com\ncompany.ae"}
-                    onChange={(e) => setRule(i, { list: e.target.value })} />
+                    onChange={(e) => {
+                      setRule(i, { list: e.target.value, note: undefined });
+                      setErrors((x) => ({ ...x, rules: { ...x.rules, [i]: "" } }));
+                    }} />
                 </Field>
                 {r.type === "EMAIL_DOMAIN" && (
                   <div className="flex items-center justify-between gap-3">
