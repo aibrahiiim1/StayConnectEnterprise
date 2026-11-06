@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -63,6 +65,18 @@ func TestTheDiagnosticsFileIsCompleteWhenPartsAreMissing(t *testing.T) {
 	}
 	if ev, ok := out["recovery_events"].([]any); !ok || len(ev) != 0 {
 		t.Fatalf("recovery_events must be an empty list: %v", out["recovery_events"])
+	}
+}
+
+func TestTheDiagnosticsFileNeedsTheRoleThatReadsLogs(t *testing.T) {
+	h := (&server{}).healthRoutes()
+	for _, role := range []string{"front_office_operator", "guest_relations_operator", "voucher_operator",
+		"payments_operator", "site_viewer"} {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, withSession(httptest.NewRequest("GET", "/bundle", nil), role))
+		if w.Code != http.StatusForbidden {
+			t.Errorf("%s downloaded the diagnostics file: %d", role, w.Code)
+		}
 	}
 }
 
