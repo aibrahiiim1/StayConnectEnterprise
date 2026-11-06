@@ -26,6 +26,8 @@ import { DeleteDialog } from "@/components/delete-dialog";
 import { ActivateDialog, MoveDialog, SetLicenseDialog } from "@/components/appliance-dialogs";
 import { ActivationBadge, ConnectionBadge, LicenseBadge } from "@/components/status-badge";
 import { PayloadView, hasPayload } from "@/components/record-view";
+import { NotesCard } from "@/components/notes";
+import { TagsBar } from "@/components/tags";
 import { usePermissions } from "@/lib/permissions";
 import { usePoll } from "@/lib/use-poll";
 import { saveFile } from "@/lib/download";
@@ -236,6 +238,7 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
             <ActivationBadge value={a.activation} />
             <ConnectionBadge value={a.connection} />
             <LicenseBadge value={lic.state} />
+            <TagsBar subject={{ appliance_id: a.id }} what="appliance" />
           </div>
         }
         description={[a.hostname, a.model, a.version ? `version ${a.version}` : null].filter(Boolean).join(" · ") || undefined}
@@ -595,6 +598,8 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
             onPackage={() => download("package")}
             onAction={openReason}
           />
+
+          <NotesCard subject={{ appliance_id: a.id }} what="appliance" />
         </div>
       </div>
 

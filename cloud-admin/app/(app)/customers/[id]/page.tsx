@@ -17,6 +17,8 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { ConfirmDialog, DialogForm } from "@/components/ui/dialog";
 import { PageHeader, PageShell, StatCard, StatGrid } from "@/components/ui/page";
+import { NotesCard } from "@/components/notes";
+import { TagsBar } from "@/components/tags";
 import { TabList, TabPanel } from "@/components/ui/tabs";
 import { NotAvailable } from "@/components/ui/patterns";
 import { Skeleton } from "@/components/ui/misc";
@@ -121,7 +123,12 @@ function CustomerView({ id }: { id: string }) {
     <PageShell width="wide">
       <PageHeader
         title={c.name}
-        meta={archived ? <StateBadge info={recordStatusInfo(c.status)} /> : undefined}
+        meta={
+          <div className="flex flex-wrap items-center gap-1.5">
+            {archived && <StateBadge info={recordStatusInfo(c.status)} />}
+            <TagsBar subject={{ customer_id: c.id }} what="customer" />
+          </div>
+        }
         actions={
           can["customers.edit"] ? (
             <RowActions
@@ -283,6 +290,7 @@ function Summary({ c, onTab }: { c: Customer; onTab: (t: Tab) => void }) {
           ]}
         />
       </SectionCard>
+      <NotesCard subject={{ customer_id: c.id }} what="customer" />
     </div>
   );
 }

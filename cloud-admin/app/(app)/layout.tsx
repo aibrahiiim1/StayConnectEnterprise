@@ -7,6 +7,7 @@ import { Menu } from "lucide-react";
 import Link from "next/link";
 import { Nav, crumbs } from "@/components/nav";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { GlobalSearch } from "@/components/global-search";
 import { Skeleton } from "@/components/ui/misc";
 import { OneGateLoader } from "@/components/brand";
 import { ToastProvider } from "@/components/ui/toast";
@@ -167,6 +168,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                     </nav>
                   </div>
 
+                  <GlobalSearch />
                   <ThemeToggle />
                 </header>
 
