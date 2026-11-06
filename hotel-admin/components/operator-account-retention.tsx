@@ -1,16 +1,15 @@
 "use client";
 
-// Disabled-account retention bounds come from the appliance; changes require password and reason.
-
 import type { AccountRetention } from "@/lib/api";
 import { OperatorPolicyPanel } from "@/components/operator-policy-panel";
+import { periodWords } from "@/lib/operator-errors";
 
 export function OperatorAccountRetention({ writable }: { writable: boolean }) {
   return (
     <OperatorPolicyPanel<AccountRetention>
       endpoint="/operators/account-retention"
       title="Disabled accounts"
-      summary={(s) => `Anonymised ${s.disabled_account_days} days after being disabled`}
+      summary={(s) => `Anonymised ${periodWords(s.disabled_account_days)} after being disabled`}
       description={
         <>
           A disabled account is kept so the activity log can still say who did what. After this period its email, name,
@@ -18,7 +17,7 @@ export function OperatorAccountRetention({ writable }: { writable: boolean }) {
         </>
       }
       saveLabel="Save disabled-account period"
-      saved={{ title: "Saved", body: "Disabled accounts are anonymised after the new period from the next hourly run." }}
+      saved={{ title: "Disabled-account period saved", body: "Disabled accounts are anonymised after the new period from the next hourly run." }}
       writable={writable}
     />
   );

@@ -1,9 +1,5 @@
 "use client";
 
-// One collapsible panel for each operator policy the appliance bounds (sign-in protection, session limits,
-// disabled-account retention): the appliance supplies the values and their bounds, a change is confirmed in a popup
-// (no reason or password to retype), and a failure to load leaves the Operators page usable.
-
 import { useCallback, useEffect, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { api } from "@/lib/api";
@@ -12,7 +8,9 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { SettingField } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
-import { errMsg, formatDate } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
+import { operatorError } from "@/lib/operator-errors";
+import { FADE, LoadFailure } from "@/app/(app)/backups/load-failure";
 
 export type PolicySettings = { config_version: number; updated_at?: string | null; updated_by?: string | null };
 export type PolicyBound<S> = {
@@ -32,7 +30,6 @@ export function OperatorPolicyPanel<S extends PolicySettings>({
 }: {
   endpoint: string;
   title: string;
-  /** One line shown beside the title while the panel is closed. */
   summary: (settings: S) => React.ReactNode;
   description: React.ReactNode;
   saveLabel: string;
@@ -45,18 +42,36 @@ export function OperatorPolicyPanel<S extends PolicySettings>({
   const [confirming, setConfirming] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const load = useCallback(async () => {
+    setLoading(true);
     try {
       const r = await api.get<{ settings: S; bounds: PolicyBound<S>[] }>(endpoint);
-      if (!r?.settings || !Array.isArray(r.bounds)) return;
+      if (!r?.settings || !Array.isArray(r.bounds)) { setFailed(true); return; }
       setData(r);
+      setFailed(false);
       setEdits(Object.fromEntries(r.bounds.map((b) => [b.key, String(r.settings[b.key])])));
-    } catch { /* Keep the Operators page usable if this setting cannot load. */ }
+    } catch {
+      setFailed(true);
+    } finally {
+      setLoading(false);
+    }
   }, [endpoint]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
-  if (!data) return null;
+  if (!data) {
+    if (!failed) return null;
+    return (
+      <Card className={FADE}>
+        <div className="px-5 py-3.5 text-emphasis">{title}</div>
+        <div className="border-t border-border">
+          <LoadFailure what={`The ${title.toLowerCase()} settings`} busy={loading} onRetry={() => void load()} />
+        </div>
+      </Card>
+    );
+  }
   const { settings, bounds } = data;
   const current = (b: PolicyBound<S>) => settings[b.key] as unknown as number;
   const valueOf = (b: PolicyBound<S>) => {
@@ -75,7 +90,9 @@ export function OperatorPolicyPanel<S extends PolicySettings>({
       toast.success(saved.title, saved.body);
       setConfirming(false);
       await load();
-    } catch (e) { setErr(errMsg(e)); } finally { setSaving(false); }
+    } catch (e) {
+      setErr(operatorError(e, "The settings could not be saved. Try again in a moment. Nothing was changed."));
+    } finally { setSaving(false); }
   }
 
   const provenance = settings.config_version === 0
@@ -92,7 +109,7 @@ export function OperatorPolicyPanel<S extends PolicySettings>({
           <span className="text-emphasis">{title}</span>
           <span className="ms-auto hidden text-caption text-muted-foreground sm:inline">{summary(settings)}</span>
         </summary>
-        <div className="space-y-5 border-t border-border px-5 py-4">
+        <div className={`space-y-5 border-t border-border px-5 py-4 ${FADE}`}>
           <p className="max-w-3xl text-sm text-muted-foreground">
             {description}
             {provenance && <> {provenance}</>}
@@ -135,10 +152,10 @@ export function OperatorPolicyPanel<S extends PolicySettings>({
           )}
           <ConfirmDialog
             open={confirming}
-            onOpenChange={setConfirming}
+            onOpenChange={(v) => { setConfirming(v); if (!v) setErr(null); }}
             title={saveLabel}
-            description="The change applies right away."
-            confirmLabel="Confirm"
+            description={saved.body}
+            confirmLabel="Save"
             busy={saving}
             error={err}
             onConfirm={save}

@@ -35,7 +35,7 @@ describe("Disabled accounts", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save disabled-account period" }));
     expect(screen.queryByLabelText(/password/i)).toBeNull();
     expect(screen.queryByLabelText(/^Reason/)).toBeNull();
-    await userEvent.click(await screen.findByRole("button", { name: "Confirm" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Save" }));
     await waitFor(() => expect(put).toHaveBeenCalledWith("/operators/account-retention", { disabled_account_days: 365 }));
   });
 

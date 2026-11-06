@@ -182,7 +182,7 @@ describe("Operators (N-8)", () => {
     const save = screen.getByRole("button", { name: "Save sign-in protection" }) as HTMLButtonElement;
     await userEvent.click(save);
     expect(screen.queryByLabelText(/Confirm your password/)).toBeNull();
-    await userEvent.click(await screen.findByRole("button", { name: "Confirm" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Save" }));
     await waitFor(() => expect(put).toHaveBeenCalledWith("/operators/signin-protection", {
       account_max_failures: 3, account_window_seconds: 900, ip_max_failures: 20, ip_window_seconds: 900,
       lockout_seconds: 900,

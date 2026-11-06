@@ -1,16 +1,15 @@
 "use client";
 
-// New throttle settings affect the next attempt; active lockouts keep their expiry until password reset.
-
 import type { SigninProtection } from "@/lib/api";
 import { OperatorPolicyPanel } from "@/components/operator-policy-panel";
+import { lockoutWords } from "@/lib/operator-errors";
 
 export function OperatorSigninProtection({ writable }: { writable: boolean }) {
   return (
     <OperatorPolicyPanel<SigninProtection>
       endpoint="/operators/signin-protection"
       title="Sign-in protection"
-      summary={(s) => `${s.account_max_failures} wrong passwords lock an account for ${Math.round(s.lockout_seconds / 60)} min`}
+      summary={(s) => lockoutWords(s.account_max_failures, s.lockout_seconds)}
       description={
         <>
           Wrong passwords are counted per account and per address; reaching a limit locks it for the lockout period.
