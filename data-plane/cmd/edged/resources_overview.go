@@ -501,6 +501,9 @@ func (s *server) reportsOverview(w http.ResponseWriter, r *http.Request) {
 	if canDiag {
 		attIn.DefaultDBPassword = s.dbDefaultPassword.inUse(ctx)
 	}
+	if can("operators") {
+		attIn.PasswordResetNoMail = s.passwordResetNeedsMail(ctx)
+	}
 	out.Attention = deriveAttention(attIn)
 	writeJSON(w, http.StatusOK, out)
 }

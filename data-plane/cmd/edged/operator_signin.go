@@ -535,6 +535,7 @@ func (s *server) changeOwnPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	wasForced := sess.MustChangePassword
 	s.restartSessions(w, sess)
+	s.discardResetCode(ctx, sess.OperatorID)
 	s.audit(r, "operator.password_changed", "operator", sess.OperatorID, map[string]any{
 		"self": true, "was_required": wasForced, "source_ip": clientIP(r),
 	})

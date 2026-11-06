@@ -22,6 +22,7 @@ import { canRead, canWrite, roleLabel, SITE_ROLES, ROLE_LABELS, SiteRole } from 
 import { formatRelative } from "@/lib/utils";
 import { HelpList, HelpSection } from "@/components/help";
 import { OperatorSigninProtection } from "@/components/operator-signin-protection";
+import { OperatorPasswordReset } from "@/components/operator-password-reset";
 import { OperatorSessionLimits } from "@/components/operator-session-limits";
 import { OperatorAccountRetention } from "@/components/operator-account-retention";
 
@@ -341,6 +342,8 @@ export default function OperatorsPage() {
       </Card>
 
       <OperatorSigninProtection writable={writable} />
+
+      <OperatorPasswordReset writable={writable} />
 
       <OperatorSessionLimits writable={writable} />
 

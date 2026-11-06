@@ -334,6 +334,9 @@ func main() {
 		r.Post("/auth/login", s.login)
 		r.Post("/auth/login/code", s.loginCode)
 		r.Post("/auth/logout", s.logout)
+		r.Get("/auth/password-reset", s.passwordResetAvailable)
+		r.Post("/auth/password-reset/request", s.passwordResetRequest)
+		r.Post("/auth/password-reset/confirm", s.passwordResetConfirm)
 
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)

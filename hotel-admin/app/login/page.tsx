@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Eye, EyeOff } from "lucide-react";
 import { BySemantics, OneGateLockup } from "@/components/brand";
@@ -96,9 +97,19 @@ function LoginInner() {
   const emailRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
 
+  const [resetOffered, setResetOffered] = useState(false);
+
   useEffect(() => {
     if (!codeStep) emailRef.current?.focus();
   }, [codeStep]);
+
+  useEffect(() => {
+    let live = true;
+    api.get<{ available?: boolean }>("/auth/password-reset")
+      .then((r) => { if (live) setResetOffered(r?.available === true); })
+      .catch(() => { if (live) setResetOffered(false); });
+    return () => { live = false; };
+  }, []);
 
   const finish = useCallback(() => {
     router.replace(next);
@@ -198,6 +209,16 @@ function LoginInner() {
                 <Button type="submit" loading={loading} className="w-full" size="lg">
                   Sign in
                 </Button>
+                {resetOffered && (
+                  <p className={cn("text-center text-sm", FADE)}>
+                    <Link
+                      href="/forgot-password"
+                      className="font-medium text-primary underline-offset-2 hover:underline"
+                    >
+                      Forgot your password?
+                    </Link>
+                  </p>
+                )}
               </form>
             )}
           </div>
