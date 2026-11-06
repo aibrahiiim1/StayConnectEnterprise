@@ -1,79 +1,106 @@
 "use client";
 
-// Read-only for every role: which connection wins is decided on the PMS connection itself. The raw id is shown
-// only when there is no label.
-
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Layers } from "lucide-react";
+import { AlertTriangle, Layers, RefreshCw } from "lucide-react";
 import { api, PmsSourceConflict } from "@/lib/api";
 import { PageHeader, PageShell, StatCard, StatGrid } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { StatusBadge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
-import { ErrorBanner } from "@/components/ui/error-banner";
+import { Callout } from "@/components/ui/error-banner";
 import { HelpSection } from "@/components/help";
 import { MonoId, SkeletonRows } from "@/components/ui/misc";
+import { cn } from "@/lib/utils";
+
+const FADE = "animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none";
 
 const SEVERITY: Record<string, { tone: "err" | "warn" | "info"; label: string }> = {
   HIGH: { tone: "err", label: "High" },
   MEDIUM: { tone: "warn", label: "Medium" },
   LOW: { tone: "info", label: "Low" },
-  // Detected from published configuration: two connections whose live versions dial the same PMS source.
   DUPLICATE_SOURCE: { tone: "err", label: "Same PMS source" },
 };
 
-const RESOLUTION_WORDS: Record<string, string> = {
-  UNRESOLVED: "Not decided yet",
-};
-const resolutionWords = (r?: string) =>
-  !r ? "Not decided yet" : RESOLUTION_WORDS[r] ?? r.replace(/_/g, " ").toLowerCase().replace(/^./, (c) => c.toUpperCase());
+const LINK = "font-medium underline underline-offset-2";
+
+function isOpen(c: PmsSourceConflict): boolean {
+  return !c.resolution || c.resolution === "UNRESOLVED";
+}
 
 function ConnectionName({ label, id }: { label?: string; id: string }) {
   if (label) return <span className="font-medium">{label}</span>;
   return (
     <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
-      Unnamed connection <MonoId value={id} title="PMS connection" />
+      Unnamed PMS connection <MonoId value={id} title="PMS connection" />
     </span>
   );
 }
 
+function WhatToDo({ c }: { c: PmsSourceConflict }) {
+  if (c.detected) {
+    return (
+      <>
+        Both point at the same PMS. Retire one, or point it at its own PMS, on{" "}
+        <Link href="/pms-interfaces" className={LINK}>PMS connection</Link>.
+      </>
+    );
+  }
+  if (isOpen(c)) {
+    return (
+      <>
+        Not fixed yet. Check both on <Link href="/pms-interfaces" className={LINK}>PMS connection</Link>.
+      </>
+    );
+  }
+  return <>Recorded with an outcome this console does not recognise.</>;
+}
+
 export default function PMSSourceConflictsPage() {
   const [rows, setRows] = useState<PmsSourceConflict[] | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await api.get<{ conflicts: PmsSourceConflict[] }>("/pms-source-conflicts");
+      setRows(r.conflicts ?? []);
+      setFailed(false);
+    } catch {
+      setFailed(true);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const r = await api.get<{ conflicts: PmsSourceConflict[] }>("/pms-source-conflicts");
-        if (alive) setRows(r.conflicts ?? []);
-      } catch (e: any) {
-        if (!alive) return;
-        setErr(e?.message ?? "Failed to load source conflicts");
-        setRows([]);
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, []);
+    void load();
+  }, [load]);
 
   const counts = useMemo(() => {
     const list = rows ?? [];
     return {
       all: list.length,
-      high: list.filter((c) => c.severity === "HIGH").length,
-      open: list.filter((c) => !c.resolution || c.resolution === "UNRESOLVED").length,
+      same: list.filter((c) => c.severity === "DUPLICATE_SOURCE").length,
+      open: list.filter(isOpen).length,
     };
   }, [rows]);
+
+  const spin = cn(loading && "animate-spin motion-reduce:animate-none");
 
   return (
     <PageShell>
       <PageHeader
         title="Duplicate sources"
         description="Two PMS connections that point at the same PMS server, so they cannot both be trusted for the same guests."
+        actions={rows ? (
+          <Button size="sm" variant="secondary" onClick={() => void load()} disabled={loading}>
+            <RefreshCw className={spin} /> Refresh
+          </Button>
+        ) : undefined}
         help={
           <>
             <HelpSection title="What a duplicate source is">
@@ -96,35 +123,58 @@ export default function PMSSourceConflictsPage() {
         }
       />
 
-      <ErrorBanner err={err} />
+      {failed && rows && (
+        <div className={FADE}>
+          <Callout tone="warning">The list could not be refreshed. What is shown may be out of date.</Callout>
+        </div>
+      )}
 
       {rows !== null && rows.length > 0 && (
-        <StatGrid cols={3}>
-          <StatCard label="Conflicts" value={counts.all.toLocaleString()} />
-          <StatCard label="High severity" value={counts.high.toLocaleString()} tone={counts.high > 0 ? "err" : "default"} />
-          <StatCard label="Not decided yet" value={counts.open.toLocaleString()} tone={counts.open > 0 ? "warn" : "default"} />
-        </StatGrid>
+        <>
+          <StatGrid cols={3} className={FADE}>
+            <StatCard label="Pairs found" value={counts.all.toLocaleString()} />
+            <StatCard label="Same PMS source" value={counts.same.toLocaleString()} tone={counts.same > 0 ? "err" : "default"} />
+            <StatCard label="Still to fix" value={counts.open.toLocaleString()} tone={counts.open > 0 ? "warn" : "default"} />
+          </StatGrid>
+          <p className="text-sm text-muted-foreground">
+            While both connections of a pair are in use, one client network cannot check both of them on{" "}
+            <Link href="/pms-routing" className={LINK}>PMS routing</Link>.
+          </p>
+        </>
       )}
 
       <Card className="overflow-hidden">
-        {rows === null ? (
+        {failed && !rows ? (
+          <div role="alert" className={FADE}>
+            <EmptyState
+              size="sm"
+              icon={<AlertTriangle />}
+              title="Duplicate sources could not be loaded"
+              hint="Check the appliance is reachable, then try again. Nothing has been changed."
+              action={
+                <Button size="sm" variant="secondary" onClick={() => void load()} disabled={loading}>
+                  <RefreshCw className={spin} /> Try again
+                </Button>
+              }
+            />
+          </div>
+        ) : rows === null ? (
           <SkeletonRows rows={3} cols={4} />
         ) : rows.length === 0 ? (
-          err ? null : (
-            <EmptyState size="sm"
-              icon={<Layers />}
-              title="No source conflicts"
-              hint="No two PMS connections are claiming the same rooms."
-            />
-          )
+          <EmptyState
+            size="sm"
+            icon={<Layers />}
+            title="No duplicate sources"
+            hint="No two PMS connections point at the same PMS."
+          />
         ) : (
-          <Table label="Source conflicts">
+          <Table label="Duplicate sources" aria-label="Duplicate sources" className={FADE}>
             <THead>
               <TR>
                 <TH>Connection</TH>
-                <TH>Conflicts with</TH>
-                <TH>Severity</TH>
-                <TH>Resolution</TH>
+                <TH>Same PMS as</TH>
+                <TH>Type</TH>
+                <TH>What to do</TH>
               </TR>
             </THead>
             <TBody>
@@ -135,17 +185,13 @@ export default function PMSSourceConflictsPage() {
                     <TD><ConnectionName label={c.interface_a_label} id={c.interface_a} /></TD>
                     <TD><ConnectionName label={c.interface_b_label} id={c.interface_b} /></TD>
                     <TD nowrap>
-                      {c.severity ? (
-                        <StatusBadge tone={sev?.tone ?? "default"}>{sev?.label ?? c.severity.toLowerCase()}</StatusBadge>
+                      {sev ? (
+                        <StatusBadge tone={sev.tone}>{sev.label}</StatusBadge>
                       ) : (
-                        <span className="text-muted-foreground">—</span>
+                        <span className="text-muted-foreground">{c.severity ? "Not recognised" : "Not recorded"}</span>
                       )}
                     </TD>
-                    <TD className="text-sm">
-                      {c.detected
-                        ? "Both live versions point at the same PMS. Retire or reconfigure one of them on PMS connection."
-                        : resolutionWords(c.resolution)}
-                    </TD>
+                    <TD className="text-sm"><WhatToDo c={c} /></TD>
                   </TR>
                 );
               })}
