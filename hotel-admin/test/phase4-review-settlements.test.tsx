@@ -250,6 +250,62 @@ describe("package payments", () => {
     expect(await screen.findByRole("link", { name: /decide it on manual review/i })).toHaveAttribute("href", "/financial-review");
   });
 
+  it("sends the chosen period and the search to the list, the counts and the totals in one question", async () => {
+    route({ "/financial-ops/settlements": SETTLEMENTS });
+    render(<SettlementsView />);
+    await screen.findByText("Room 14340");
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Period" }), "yesterday");
+    await waitFor(() => expect(get.mock.calls.at(-1)?.[0]).toContain("from="));
+    const today = new Date();
+    const midnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const u = new URL(get.mock.calls.at(-1)![0], "http://x");
+    expect(u.searchParams.get("from")).toBe(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1).toISOString());
+    expect(u.searchParams.get("to")).toBe(midnight.toISOString());
+
+    await userEvent.type(screen.getByRole("searchbox", { name: /search package payments/i }), "205");
+    await waitFor(() => expect(get.mock.calls.at(-1)?.[1]).toEqual({ "X-Payment-Search": "205" }));
+    expect(get.mock.calls.at(-1)?.[0]).not.toContain("205");
+    expect(get.mock.calls.at(-1)?.[0]).toContain("from=");
+  });
+
+  it("asks for From and To on a custom range and sends nothing until they are in order", async () => {
+    route({ "/financial-ops/settlements": SETTLEMENTS });
+    render(<SettlementsView />);
+    await screen.findByText("Room 14340");
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Period" }), "custom");
+    const from = screen.getByLabelText("From") as HTMLInputElement;
+    const to = screen.getByLabelText("To") as HTMLInputElement;
+    expect(from.type).toBe("date");
+    expect(to.type).toBe("date");
+    await userEvent.clear(to);
+    await userEvent.type(to, "2026-09-01");
+    await userEvent.clear(from);
+    await userEvent.type(from, "2026-09-30");
+    expect(await screen.findByRole("alert")).toHaveTextContent(/from must be on or before to/i);
+    const sent = get.mock.calls.length;
+    await userEvent.clear(from);
+    await userEvent.type(from, "2026-09-01");
+    await waitFor(() => expect(get.mock.calls.length).toBeGreaterThan(sent));
+    const u = new URL(get.mock.calls.at(-1)![0], "http://x");
+    expect(u.searchParams.get("from")).toBe(new Date(2026, 8, 1).toISOString());
+    expect(u.searchParams.get("to")).toBe(new Date(2026, 8, 2).toISOString());
+  });
+
+  it("says nothing matches, and offers to clear, when a period or search selects nothing", async () => {
+    route({
+      "/financial-ops/settlements": (p: string) =>
+        p.includes("from=") ? fakeSettlements([])(p) : SETTLEMENTS(p),
+    });
+    render(<SettlementsView />);
+    await screen.findByText("Room 14340");
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Period" }), "last_month");
+    expect(await screen.findByText("No payment matches")).toBeInTheDocument();
+    expect(screen.getByText("Nothing in this selection")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /clear filters/i }));
+    expect(await screen.findByText("Room 14340")).toBeInTheDocument();
+    expect((screen.getByRole("combobox", { name: "Period" }) as HTMLSelectElement).value).toBe("all");
+  });
+
   it("never names a payment provider as live or supported", async () => {
     route({ "/financial-ops/settlements": SETTLEMENTS, "/financial-ops/settlements/s1": SETTLEMENT_DETAIL });
     render(<SettlementsView />);

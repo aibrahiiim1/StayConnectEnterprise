@@ -78,7 +78,9 @@ SELECT v.settlement_id::text, v.purchase_id::text, v.method, v.status, v.purchas
             WHEN e.anonymous_subject_id IS NOT NULL THEN 'OPEN'
             ELSE '' END,
        st.normalized_room_number,
-       (SELECT NULLIF(pi.display_label,'') FROM iam_v2.pms_interfaces pi WHERE pi.id = st.pms_interface_id)
+       (SELECT NULLIF(pi.display_label,'') FROM iam_v2.pms_interfaces pi WHERE pi.id = st.pms_interface_id)` + settlementFrom
+
+const settlementFrom = `
   FROM iam_v2.v_financial_settlements v
   JOIN iam_v2.purchases p ON p.id = v.purchase_id
   LEFT JOIN iam_v2.internet_package_revisions r ON r.id = p.package_revision_id
@@ -87,6 +89,35 @@ SELECT v.settlement_id::text, v.purchase_id::text, v.method, v.status, v.purchas
   LEFT JOIN LATERAL (SELECT en.voucher_id, en.guest_account_id, en.anonymous_subject_id, en.activated_at
                        FROM iam_v2.entitlements en WHERE en.purchase_id = p.id LIMIT 1) e ON true
   LEFT JOIN iam_v2.stays st ON st.id = p.stay_id`
+
+const settlementSearchHeader = "X-Payment-Search"
+
+// The listed payments as v: the status filter, the period over the time shown as "When", and the search. Summary, view
+// counts and the page all read it, so the tiles describe exactly what the period and search select.
+const settlementListed = `
+WITH v AS (
+SELECT v.settlement_id::text AS settlement_id, v.purchase_id::text AS purchase_id, v.method, v.status, v.purchase_state,
+       coalesce(v.amount_minor,0) AS amount_minor, coalesce(v.currency,'') AS currency,
+       coalesce(v.currency_exponent,0) AS currency_exponent,
+       coalesce(r.display->>'name', ip.code) AS package_name, coalesce(q.consumed_at, e.activated_at) AS paid_at,
+       CASE WHEN p.stay_id IS NOT NULL THEN 'ROOM'
+            WHEN e.voucher_id IS NOT NULL OR v.method = 'PREPAID' THEN 'VOUCHER'
+            WHEN e.guest_account_id IS NOT NULL THEN 'ACCOUNT'
+            WHEN e.anonymous_subject_id IS NOT NULL THEN 'OPEN'
+            ELSE '' END AS source,
+       st.normalized_room_number AS room,
+       (SELECT NULLIF(pi.display_label,'') FROM iam_v2.pms_interfaces pi WHERE pi.id = st.pms_interface_id) AS pms_label` +
+	settlementFrom + `
+ WHERE v.tenant_id=$1 AND v.site_id=$2 AND ($3::text IS NULL OR v.status=$3::text)
+   AND ($4::timestamptz IS NULL OR coalesce(q.consumed_at, e.activated_at) >= $4::timestamptz)
+   AND ($5::timestamptz IS NULL OR coalesce(q.consumed_at, e.activated_at) < $5::timestamptz)
+   AND ($6::text IS NULL
+        OR coalesce(r.display->>'name','') ILIKE $6 OR coalesce(ip.code,'') ILIKE $6
+        OR coalesce(st.normalized_room_number,'') ILIKE $6
+        OR coalesce((SELECT pi.display_label FROM iam_v2.pms_interfaces pi WHERE pi.id = st.pms_interface_id),'') ILIKE $6
+        OR CASE v.method WHEN 'NOT_REQUIRED' THEN 'Free' WHEN 'PREPAID' THEN 'Voucher' WHEN 'ONLINE_PAYMENT' THEN 'Card payment'
+                         WHEN 'PMS_POSTING' THEN 'Room charge' WHEN 'MANUAL_APPROVAL' THEN 'Manual approval' ELSE '' END ILIKE $6
+        OR v.settlement_id::text ILIKE $6 OR v.purchase_id::text ILIKE $6))`
 
 func scanSettlement(row interface{ Scan(...any) error }, e *settlementRow) error {
 	return row.Scan(&e.SettlementID, &e.PurchaseID, &e.Method, &e.Status, &e.PurchaseState,
@@ -137,27 +168,48 @@ func (s *server) listSettlements(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	scope := `
- WHERE v.tenant_id=$1 AND v.site_id=$2 AND ($3::text IS NULL OR v.status=$3::text)`
+	var bounds [2]any
+	for i, k := range []string{"from", "to"} {
+		if v := strings.TrimSpace(r.URL.Query().Get(k)); v != "" {
+			t, err := time.Parse(time.RFC3339, v)
+			if err != nil {
+				jsonErr(w, http.StatusBadRequest, "bad_request", k+" must be an RFC 3339 time")
+				return
+			}
+			bounds[i] = t
+		}
+	}
+	if f, ok := bounds[0].(time.Time); ok {
+		if t, ok := bounds[1].(time.Time); ok && !f.Before(t) {
+			jsonErr(w, http.StatusBadRequest, "bad_request", "from must be before to")
+			return
+		}
+	}
+	q, ok := readSearch(w, r, settlementSearchHeader)
+	if !ok {
+		return
+	}
+	args := []any{s.tenantID, s.siteID, statusArg, bounds[0], bounds[1], likePattern(q)}
 
 	sum := settlementsSummary{Collected: []settlementCollected{}}
 	var total int
-	if err := s.db.QueryRow(ctx, `SELECT count(*)::int,
-	       count(*) FILTER (WHERE `+settlementViews["attention"]+`)::int,
-	       count(*) FILTER (WHERE `+settlementViews["paid"]+`)::int,
-	       count(*) FILTER (WHERE `+settlementViews["voucher"]+`)::int,
-	       count(*) FILTER (WHERE `+settlementViews["free"]+`)::int,
-	       count(*) FILTER (WHERE `+viewClause+`)::int
-	  FROM iam_v2.v_financial_settlements v`+scope, s.tenantID, s.siteID, statusArg).
+	if err := s.db.QueryRow(ctx, settlementListed+`
+SELECT count(*)::int,
+       count(*) FILTER (WHERE `+settlementViews["attention"]+`)::int,
+       count(*) FILTER (WHERE `+settlementViews["paid"]+`)::int,
+       count(*) FILTER (WHERE `+settlementViews["voucher"]+`)::int,
+       count(*) FILTER (WHERE `+settlementViews["free"]+`)::int,
+       count(*) FILTER (WHERE `+viewClause+`)::int
+  FROM v`, args...).
 		Scan(&sum.All, &sum.Attention, &sum.Paid, &sum.Voucher, &sum.Free, &total); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 		return
 	}
-	crows, err := s.db.Query(ctx, `SELECT coalesce(v.currency,''), coalesce(max(v.currency_exponent),0)::int2,
-	       coalesce(sum(v.amount_minor),0)::bigint
-	  FROM iam_v2.v_financial_settlements v`+scope+`
-	   AND v.status = 'SETTLED' AND `+settlementViews["paid"]+`
-	 GROUP BY 1 ORDER BY 1`, s.tenantID, s.siteID, statusArg)
+	crows, err := s.db.Query(ctx, settlementListed+`
+SELECT v.currency, max(v.currency_exponent)::int2, sum(v.amount_minor)::bigint
+  FROM v
+ WHERE v.status = 'SETTLED' AND `+settlementViews["paid"]+`
+ GROUP BY 1 ORDER BY 1`, args...)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 		return
@@ -177,10 +229,13 @@ func (s *server) listSettlements(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := s.db.Query(ctx, settlementSelect+scope+`
-   AND `+viewClause+`
- ORDER BY coalesce(q.consumed_at, e.activated_at) DESC NULLS LAST, v.settlement_id
- LIMIT $4 OFFSET $5`, s.tenantID, s.siteID, statusArg, pg.Fetch(), pg.Offset())
+	rows, err := s.db.Query(ctx, settlementListed+`
+SELECT v.settlement_id, v.purchase_id, v.method, v.status, v.purchase_state, v.amount_minor, v.currency,
+       v.currency_exponent, v.package_name, v.paid_at, v.source, v.room, v.pms_label
+  FROM v
+ WHERE `+viewClause+`
+ ORDER BY v.paid_at DESC NULLS LAST, v.settlement_id
+ LIMIT $7 OFFSET $8`, append(args, pg.Fetch(), pg.Offset())...)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 		return
