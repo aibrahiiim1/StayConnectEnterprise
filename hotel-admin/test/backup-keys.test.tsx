@@ -40,9 +40,10 @@ async function renderPage() {
 }
 
 describe("Backup encryption", () => {
-  it("says plainly when backups are not encrypted", async () => {
+  it("says plainly that no backup can be taken without a key holder", async () => {
     await renderPage();
-    expect(await screen.findByText("Backups are not encrypted")).toBeTruthy();
+    expect(await screen.findByText("No backup can be taken yet")).toBeTruthy();
+    expect(screen.getByText("No key holder")).toBeTruthy();
   });
 
   it("hands a new key over once and switches on only with the check code typed back", async () => {
@@ -84,7 +85,7 @@ describe("Backup encryption", () => {
     };
     await renderPage();
     expect(await screen.findByText("Restore test overdue")).toBeTruthy();
-    expect(screen.queryByText("Backups are not encrypted")).toBeNull();
+    expect(screen.queryByText("No backup can be taken yet")).toBeNull();
   });
 
   it("asks for a key holder's key to verify or restore an encrypted backup", async () => {

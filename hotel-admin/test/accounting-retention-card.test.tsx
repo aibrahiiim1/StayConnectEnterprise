@@ -70,11 +70,22 @@ describe("Usage detail retention", () => {
   });
 
   it("shows nothing on an appliance without the setting", async () => {
-    get.mockImplementation(() => Promise.reject(new Error("404")));
+    const { ApiError } = await import("@/lib/api");
+    get.mockImplementation(() => Promise.reject(new ApiError(404, { error: "not_found", message: "not found" })));
     const { AccountingRetentionCard } = await import("@/app/(app)/backups/accounting-retention-card");
     const { ToastProvider } = await import("@/components/ui/toast");
     const { container } = render(<ToastProvider><AccountingRetentionCard writable /></ToastProvider>);
     await waitFor(() => expect(get).toHaveBeenCalled());
     expect(container.textContent).not.toContain("Usage detail kept for");
+  });
+
+  it("offers Try again when the setting cannot be read", async () => {
+    const { ApiError } = await import("@/lib/api");
+    get.mockImplementation(() => Promise.reject(new ApiError(503, { error: "scd_unreachable", message: "unreachable" })));
+    const { AccountingRetentionCard } = await import("@/app/(app)/backups/accounting-retention-card");
+    const { ToastProvider } = await import("@/components/ui/toast");
+    render(<ToastProvider><AccountingRetentionCard writable /></ToastProvider>);
+    expect(await screen.findByText("The usage detail period could not be loaded")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Try again/ })).toBeTruthy();
   });
 });
