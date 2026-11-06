@@ -86,11 +86,22 @@ describe("Guest data retention", () => {
   });
 
   it("shows nothing on an appliance without the setting", async () => {
-    get.mockImplementation(() => Promise.reject(new Error("404")));
+    const { ApiError } = await import("@/lib/api");
+    get.mockImplementation(() => Promise.reject(new ApiError(404, { error: "not_found", message: "not found" })));
     const { DataRetentionCard } = await import("@/app/(app)/backups/data-retention-card");
     const { ToastProvider } = await import("@/components/ui/toast");
     const { container } = render(<ToastProvider><DataRetentionCard writable /></ToastProvider>);
     await waitFor(() => expect(get).toHaveBeenCalled());
     expect(container.textContent).not.toContain("Guest data kept for");
+  });
+
+  it("offers Try again when the periods cannot be read", async () => {
+    const { ApiError } = await import("@/lib/api");
+    get.mockImplementation(() => Promise.reject(new ApiError(503, { error: "scd_unreachable", message: "unreachable" })));
+    const { DataRetentionCard } = await import("@/app/(app)/backups/data-retention-card");
+    const { ToastProvider } = await import("@/components/ui/toast");
+    render(<ToastProvider><DataRetentionCard writable /></ToastProvider>);
+    expect(await screen.findByText("The guest data periods could not be loaded")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Try again/ })).toBeTruthy();
   });
 });

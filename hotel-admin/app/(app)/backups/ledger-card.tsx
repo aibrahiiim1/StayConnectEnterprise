@@ -149,7 +149,7 @@ export function LedgerCard({ writable }: { writable: boolean }) {
       setSaving(false);
       if (e instanceof ApiError && e.body?.saved) {
         setSaveOpen(false); stopEditing();
-        setNotice({ tone: "warning", text: isSentence(e.message) ? e.message : "The setting was saved, but the copy could not be confirmed yet. The appliance keeps trying." });
+        setNotice({ tone: "warning", text: isSentence(e.message) || /^Saved\b/.test(e.message) ? e.message : "The setting was saved, but the copy could not be confirmed yet. The appliance keeps trying." });
         await load(true);
         return;
       }
