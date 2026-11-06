@@ -313,7 +313,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	roles, err := s.loadRoles(ctx, id)
 	if err != nil || len(roles) == 0 {
 		s.audit(r, "operator.login_failed", "operator", id, map[string]any{"reason": "no_roles", "source_ip": ip})
-		jsonErr(w, http.StatusForbidden, "forbidden", "no roles assigned")
+		jsonErr(w, http.StatusForbidden, "no_roles", "This account has no role yet. Ask an administrator to give it one.")
 		return
 	}
 	if err := s.throttleClear(ctx, scopeAccount, account); err != nil {

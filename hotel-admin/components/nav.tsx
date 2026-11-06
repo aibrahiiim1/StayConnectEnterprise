@@ -15,7 +15,7 @@ import {
   LifeBuoy, Globe, AtSign, MessageSquare, Stethoscope, Bell, Hourglass, ChartColumn,
   CreditCard, BedSingle, Blocks, UsersRound, UserSearch, ChevronRight, Radar,
 } from "lucide-react";
-import { BySemantics, OneGateLockup } from "@/components/brand";
+import { OneGateLockup } from "@/components/brand";
 import { Tooltip } from "@/components/ui/tooltip";
 import { MfaRecommendation } from "@/components/mfa-recommendation";
 
@@ -253,7 +253,7 @@ export function Nav({
           collapsed ? "flex-col gap-2 px-2" : "px-4",
         )}
       >
-        <OneGateLockup product="Admin Console" collapsed={collapsed} inverse className={collapsed ? undefined : "flex-1"} />
+        <OneGateLockup byline collapsed={collapsed} inverse className={collapsed ? undefined : "flex-1"} />
         {onToggleCollapsed && (
           // Name the action; aria-expanded reports the current state separately.
           <Tooltip content={collapsed ? "Expand sidebar" : "Collapse sidebar"} side="right">
@@ -533,11 +533,6 @@ export function Nav({
           return collapsed ? <Tooltip content="Sign out" side="right">{signOut}</Tooltip> : signOut;
         })()}
 
-        {!collapsed && (
-          <div className="mt-2 border-t border-sidebar-border/70 px-2.5 pt-2">
-            <BySemantics className="text-2xs text-sidebar-muted" />
-          </div>
-        )}
       </div>
 
     </aside>

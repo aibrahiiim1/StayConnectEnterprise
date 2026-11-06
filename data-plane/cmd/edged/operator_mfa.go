@@ -337,7 +337,7 @@ func (s *server) loginCode(w http.ResponseWriter, r *http.Request) {
 		s.clearPendingCookie(w)
 		if errors.Is(err, errNoRoles) {
 			s.audit(r, "operator.login_failed", "operator", ps.OperatorID, map[string]any{"reason": "no_roles", "source_ip": ip})
-			jsonErr(w, http.StatusForbidden, "forbidden", "no roles assigned")
+			jsonErr(w, http.StatusForbidden, "no_roles", "This account has no role yet. Ask an administrator to give it one.")
 			return
 		}
 		jsonErr(w, http.StatusUnauthorized, "unauthenticated", "invalid credentials")

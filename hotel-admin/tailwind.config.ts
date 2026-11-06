@@ -85,6 +85,7 @@ const config: Config = {
         input: token("--input"),
         ring: token("--ring"),
         scrim: token("--scrim"),
+        "brand-panel": token("--brand-panel"),
 
         sidebar: {
           DEFAULT: token("--sidebar"),
