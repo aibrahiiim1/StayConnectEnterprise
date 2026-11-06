@@ -196,7 +196,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <Menu className="size-5" />
             </DialogPrimitive.Trigger>
 
-            <div className="min-w-0 flex-1" />
+            <div className="min-w-0 flex-1">
+              <span className="block truncate text-headline font-semibold tracking-tight text-foreground">Admin Console</span>
+            </div>
 
             <ApplianceStatus />
             <ThemeToggle />
