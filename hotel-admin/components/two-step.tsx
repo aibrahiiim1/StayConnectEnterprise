@@ -1,11 +1,9 @@
 "use client";
 
-// Turning two-step sign-in on and off from the account page (D68). The QR code is drawn locally so the secret never
-// reaches another service; recovery codes are shown once.
-
 import { useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import QRCode from "qrcode";
-import { Download } from "lucide-react";
+import { Download, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { ErrorBanner } from "@/components/ui/error-banner";
@@ -13,21 +11,32 @@ import { DialogForm } from "@/components/ui/dialog";
 import { Stepper } from "@/components/ui/data";
 import { CopyButton } from "@/components/ui/patterns";
 import { api, ApiError } from "@/lib/api";
+import { FADE } from "@/app/(app)/backups/load-failure";
 
-/** Fired on window when this operator's two-step sign-in changes, so the sidebar hint can re-check. */
 export const MFA_CHANGED_EVENT = "onegate:mfa-changed";
+
+const NOTHING_CHANGED = "Nothing was changed.";
 
 export function groupKey(secret: string): string {
   return secret.replace(/(.{4})/g, "$1 ").trim();
 }
 
 function announceChange() {
-  try { window.dispatchEvent(new Event(MFA_CHANGED_EVENT)); } catch { /* no window in some tests */ }
+  try { window.dispatchEvent(new Event(MFA_CHANGED_EVENT)); } catch { return; }
 }
 
-function passwordProblem(e: unknown): unknown {
-  return e instanceof ApiError && e.code === "reauth_required" ? new Error("Your password was not accepted.") : e;
+export function twoStepError(e: unknown, fallback: string): string {
+  const o = (e ?? {}) as { status?: unknown; code?: unknown; message?: unknown };
+  const code = typeof o.code === "string" ? o.code : "";
+  const text = typeof o.message === "string" ? o.message.trim() : "";
+  if (code === "reauth_required") return `Your password was not accepted. ${NOTHING_CHANGED}`;
+  if (code === "bad_request" || code === "invalid") return `Fill in every field. ${NOTHING_CHANGED}`;
+  if (/^[A-Z]/.test(text) && /[.!?]$/.test(text)) return text;
+  if (o.status === 429) return `Too many attempts. Wait a minute, then try again. ${NOTHING_CHANGED}`;
+  return fallback;
 }
+
+export const isPasswordRefused = (e: unknown) => e instanceof ApiError && e.code === "reauth_required";
 
 const isCodeError = (e: unknown): e is ApiError =>
   e instanceof ApiError && (e.code === "wrong_code" || e.code === "code_required");
@@ -49,7 +58,9 @@ export function RecoveryCodes({ codes, label = "Recovery codes" }: { codes: stri
           const a = document.createElement("a");
           a.href = URL.createObjectURL(blob);
           a.download = "admin-console-recovery-codes.txt";
+          document.body.appendChild(a);
           a.click();
+          a.remove();
           URL.revokeObjectURL(a.href);
         }}><Download /> Download</Button>
       </div>
@@ -61,11 +72,9 @@ type Setup = { secret: string; otpauth_uri: string };
 
 const STEPS = ["Confirm your password", "Add to your app", "Save recovery codes"];
 
-/** Password, then the QR code and the first code, then the recovery codes once. */
 export function TwoStepEnable({ onDone, onCancel, onEnabled }: {
   onDone: () => void;
   onCancel: () => void;
-  /** Called as soon as the first code is accepted, before the recovery codes are acknowledged. */
   onEnabled?: () => void;
 }) {
   const [password, setPassword] = useState("");
@@ -75,9 +84,22 @@ export function TwoStepEnable({ onDone, onCancel, onEnabled }: {
   const [codeErr, setCodeErr] = useState<string | null>(null);
   const [codes, setCodes] = useState<string[] | null>(null);
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<unknown>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [expired, setExpired] = useState(false);
   const heading = useRef<HTMLHeadingElement | null>(null);
-  useEffect(() => { if (codes) heading.current?.focus(); }, [codes]);
+  const passwordRef = useRef<HTMLInputElement | null>(null);
+  const codeRef = useRef<HTMLInputElement | null>(null);
+
+  const step = codes ? 2 : setup ? 1 : 0;
+  useEffect(() => {
+    if (step === 0) passwordRef.current?.focus();
+    else if (step === 1) codeRef.current?.focus();
+    else heading.current?.focus();
+  }, [step]);
+
+  function startAgain() {
+    setSetup(null); setQr(""); setCode(""); setCodeErr(null); setErr(null); setExpired(false);
+  }
 
   async function start(e: React.FormEvent) {
     e.preventDefault();
@@ -87,8 +109,9 @@ export function TwoStepEnable({ onDone, onCancel, onEnabled }: {
       setPassword("");
       setSetup(s);
       try { setQr(await QRCode.toDataURL(s.otpauth_uri, { margin: 1, width: 208 })); } catch { setQr(""); }
-    } catch (e) {
-      setErr(passwordProblem(e));
+    } catch (e2) {
+      setErr(twoStepError(e2, "Two-step sign-in could not be set up. Try again in a moment."));
+      if (isPasswordRefused(e2)) { setPassword(""); passwordRef.current?.focus(); }
     } finally { setBusy(false); }
   }
 
@@ -100,18 +123,21 @@ export function TwoStepEnable({ onDone, onCancel, onEnabled }: {
       setCodes(r.recovery_codes);
       announceChange();
       onEnabled?.();
-    } catch (e) {
-      if (isCodeError(e)) { setCodeErr(e.message); setCode(""); } else setErr(e);
+    } catch (e2) {
+      if (isCodeError(e2)) { setCodeErr(e2.message); setCode(""); codeRef.current?.focus(); }
+      else {
+        setErr(twoStepError(e2, "Two-step sign-in could not be turned on. Try again in a moment."));
+        if (e2 instanceof ApiError && e2.code === "nothing_to_confirm") setExpired(true);
+      }
     } finally { setBusy(false); }
   }
 
-  const step = codes ? 2 : setup ? 1 : 0;
   return (
     <div className="space-y-5">
       <Stepper steps={STEPS} current={step} />
 
       {codes ? (
-        <div className="space-y-4">
+        <div key="codes" className={`space-y-4 ${FADE}`}>
           <div className="space-y-1">
             <h3 ref={heading} tabIndex={-1} className="text-emphasis focus:outline-none">
               Two-step sign-in is on. Save your recovery codes
@@ -127,13 +153,23 @@ export function TwoStepEnable({ onDone, onCancel, onEnabled }: {
           </div>
         </div>
       ) : setup ? (
-        <form onSubmit={confirmCode} className="space-y-4" noValidate>
+        <form key="scan" onSubmit={confirmCode} className={`space-y-4 ${FADE}`} noValidate>
           <ErrorBanner err={err} className="mb-0" />
+          {expired && (
+            <Button type="button" size="sm" variant="secondary" onClick={startAgain}><RotateCcw /> Start again</Button>
+          )}
           <div className="grid gap-5 sm:grid-cols-[auto_minmax(0,1fr)]">
             <div className="flex justify-center sm:block">
-              {/* A browser-generated data URL needs no Next.js image optimization. */}
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              {qr && <img src={qr} alt="QR code to scan with your authenticator app" width={176} height={176} className="rounded-md border border-border bg-white p-1.5" />}
+              {qr && (
+                <Image
+                  unoptimized
+                  src={qr}
+                  alt="QR code to scan with your authenticator app"
+                  width={176}
+                  height={176}
+                  className="rounded-md border border-border bg-white p-1.5"
+                />
+              )}
             </div>
             <div className="min-w-0 space-y-4">
               <p className="text-sm text-muted-foreground">
@@ -146,8 +182,7 @@ export function TwoStepEnable({ onDone, onCancel, onEnabled }: {
               </div>
               <Field label="Code from the app" required error={codeErr ?? undefined}>
                 <Input
-                  // eslint-disable-next-line jsx-a11y/no-autofocus
-                  autoFocus
+                  ref={codeRef}
                   inputMode="numeric"
                   autoComplete="one-time-code"
                   maxLength={7}
@@ -160,18 +195,17 @@ export function TwoStepEnable({ onDone, onCancel, onEnabled }: {
           </div>
           <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-4">
             <Button type="button" variant="ghost" disabled={busy} onClick={onCancel}>Cancel</Button>
-            <Button type="submit" variant="primary" loading={busy} disabled={!/^\d{6}$/.test(code.replace(/\s/g, ""))}>
+            <Button type="submit" variant="primary" loading={busy} disabled={expired || !/^\d{6}$/.test(code.replace(/\s/g, ""))}>
               Turn on
             </Button>
           </div>
         </form>
       ) : (
-        <form onSubmit={start} className="space-y-4">
+        <form key="password" onSubmit={start} className={`space-y-4 ${FADE}`}>
           <ErrorBanner err={err} className="mb-0" />
           <Field label="Your password" required hint="Confirms it is you before an authenticator is added." className="max-w-sm">
             <Input
-              // eslint-disable-next-line jsx-a11y/no-autofocus
-              autoFocus
+              ref={passwordRef}
               type="password"
               autoComplete="current-password"
               value={password}
@@ -188,7 +222,6 @@ export function TwoStepEnable({ onDone, onCancel, onEnabled }: {
   );
 }
 
-/** Turning it off needs the password and a code from the second factor. */
 export function TwoStepDisable({ open, onOpenChange, onDone }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -198,7 +231,8 @@ export function TwoStepDisable({ open, onOpenChange, onDone }: {
   const [code, setCode] = useState("");
   const [codeErr, setCodeErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<unknown>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const passwordRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!open) { setPassword(""); setCode(""); setCodeErr(null); setErr(null); }
@@ -211,7 +245,11 @@ export function TwoStepDisable({ open, onOpenChange, onDone }: {
       announceChange();
       onDone();
     } catch (e) {
-      if (isCodeError(e)) { setCodeErr(e.message); setCode(""); } else setErr(passwordProblem(e));
+      if (isCodeError(e)) { setCodeErr(e.message); setCode(""); }
+      else {
+        setErr(twoStepError(e, "Two-step sign-in could not be turned off. Try again in a moment. It is still on."));
+        if (isPasswordRefused(e)) { setPassword(""); passwordRef.current?.focus(); }
+      }
     } finally { setBusy(false); }
   }
 
@@ -232,7 +270,7 @@ export function TwoStepDisable({ open, onOpenChange, onDone }: {
       onSubmit={submit}
     >
       <Field label="Your password" required>
-        <Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        <Input ref={passwordRef} type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
       </Field>
       <Field label="Code" required hint="From your authenticator app, or a recovery code." error={codeErr ?? undefined}>
         <Input
