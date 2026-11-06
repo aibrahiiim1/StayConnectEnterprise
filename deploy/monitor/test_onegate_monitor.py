@@ -130,6 +130,25 @@ class Thresholds(unittest.TestCase):
         r = lic("2026-11-20T00:00:00Z", "2026-10-30T00:00:00Z")
         self.assertEqual((r["lic:valid"].status, r["lic:central"].status), (om.WARN, om.CRIT))
 
+    def test_a_revoked_licence_is_critical_and_an_unreadable_revocation_list_unverified(self):
+        f = FakeSys()
+        payload = {"license_id": "L1", "status": "active", "valid_until": "2027-12-01T23:59:59Z", "offline_grace_days": 7}
+        f.files["/etc/stayconnect/license/current.json"] = json.dumps({"payload": json.dumps(payload)})
+        f.files["/etc/stayconnect/license/state.json"] = json.dumps({"last_cloud_validation": "2026-11-06T09:00:00Z"})
+        f.files["/etc/stayconnect/license/revoked.json"] = '["L0", "L1"]'
+        self.assertEqual(by_key(run(f))["lic:valid"].status, om.CRIT)
+        f.files["/etc/stayconnect/license/revoked.json"] = '["L0"'
+        self.assertEqual(by_key(run(f))["lic:valid"].status, om.NV)
+        f.files["/etc/stayconnect/license/revoked.json"] = '["L0"]'
+        self.assertEqual(by_key(run(f))["lic:valid"].status, om.PASS)
+
+    def test_unreadable_disks_are_unverified_not_zero(self):
+        f = FakeSys()
+        f.files.update({"/proc/stat": "cpu 100 0 100 800 0 0 0 0\n", "/proc/meminfo": "MemAvailable: 4000000 kB\n", "/proc/loadavg": "0.5 0.4 0.3 1/200 1\n"})
+        mon = run(f)
+        self.assertEqual(by_key(mon)["res:disk:/"].status, om.NV)
+        self.assertEqual(mon.m["disk"], "?")
+
     def test_certificates(self):
         f = FakeSys()
         f.files["/etc/caddy/hotel-admin/hotel-admin.crt"] = "x"

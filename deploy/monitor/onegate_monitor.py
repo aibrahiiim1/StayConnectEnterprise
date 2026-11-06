@@ -278,16 +278,17 @@ class Monitor:
         self.m["mem"] = avail
         self.add("res:memory", "resources", WARN if avail < 500 else PASS, f"{avail} MB memory available", persist=2)
         self.add("res:memory-critical", "resources", CRIT if avail < 200 else PASS, f"{avail} MB memory available, under 200 MB", persist=2)
-        worst = 0
+        worst = None
         for path in ("/", "/var/lib/docker"):
             try:
                 v = self.s.statvfs(path)
-            except Unavailable:
+            except Unavailable as e:
+                self.add(f"res:disk:{path}", "resources", NV, f"disk {path} unreadable: {e}")
                 continue
             pct = round(100 * (1 - v.f_bavail / v.f_blocks)) if v.f_blocks else 0
-            worst = max(worst, pct)
+            worst = pct if worst is None else max(worst, pct)
             self.add(f"res:disk:{path}", "resources", CRIT if pct > 95 else WARN if pct > 85 else PASS, f"disk {path} {pct}% used")
-        self.m["disk"] = worst
+        self.m["disk"] = "?" if worst is None else worst
         self.m["load"] = self.s.read("/proc/loadavg").split()[0]
 
     def check_database(self, state):
@@ -506,7 +507,19 @@ class Monitor:
         until = ts(p.get("valid_until"))
         days = (until - self.now).days if until else None
         status = p.get("status")
-        if status != "active" or days is None or days < 0:
+        rpath = os.path.join(self.cfg["license_dir"], "revoked.json")
+        revoked = []
+        if self.s.glob(rpath):
+            try:
+                revoked = json.loads(self.s.read(rpath))
+                if not isinstance(revoked, list):
+                    raise ValueError("not a list")
+            except (Unavailable, ValueError) as e:
+                self.add("lic:valid", "licensing", NV, f"licence revocation list unreadable: {e}")
+                return
+        if p.get("license_id") in revoked:
+            self.add("lic:valid", "licensing", CRIT, "the installed licence was revoked by Central; new guests are refused")
+        elif status != "active" or days is None or days < 0:
             self.add("lic:valid", "licensing", CRIT, f"licence {status}, valid until {p.get('valid_until')}")
         else:
             self.add("lic:valid", "licensing", CRIT if days < 7 else WARN if days < 30 else PASS, f"licence active, {days} days left")
