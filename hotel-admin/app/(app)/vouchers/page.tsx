@@ -3,19 +3,12 @@
 // The flags only decide which controls are offered; edged enforces the real gate (RBAC, password step-up, reason).
 // Issue, reveal-code and format are separate powers a role can hold in any combination.
 
-import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
 import { canRead, canWrite } from "@/lib/roles";
+import { useOperatorRoles } from "@/lib/whoami-context";
 import { VouchersView } from "@/components/vouchers/vouchers-view";
 
 export default function VouchersPage() {
-  const [roles, setRoles] = useState<string[] | null>(null);
-  useEffect(() => {
-    api
-      .get<{ roles?: string[] }>("/auth/whoami")
-      .then((m) => setRoles(m.roles ?? []))
-      .catch(() => setRoles([]));
-  }, []);
+  const roles = useOperatorRoles();
   const r = roles ?? [];
   return (
     <VouchersView

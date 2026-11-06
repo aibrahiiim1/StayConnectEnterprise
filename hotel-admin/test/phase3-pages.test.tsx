@@ -28,6 +28,12 @@ afterEach(() => vi.resetModules());
 describe("Stays page", () => {
   it("shows a stay with its guest, dates and sharing count, and opens details", async () => {
     get.mockImplementation((path: string) => {
+      if (path === "/capabilities") {
+        return Promise.resolve({
+          surfaces: ["pms-stays", "pms-financial-onboarding"],
+          modules: { room_charge: { deployed: true, licensed: true, enabled: true, ready: true, effective: true, manageable: true } },
+        });
+      }
       if (path.startsWith("/pms-stays/")) {
         return Promise.resolve({
           id: "s1", pms_interface_id: "i1", external_reservation_id: "R900", room: "900",
@@ -177,11 +183,15 @@ describe("Stays page — room charge on a stay", () => {
     expect(within(section).queryByRole("button")).toBeNull();
   });
 
-  it("offers no block action where room charge is not licensed", async () => {
+  it("shows no room charge at all where room charge is not licensed", async () => {
     routes({ posting_allowed: true, posting_blocks: [] }, ["site_admin"], { surfaces: ["pms-stays"], modules: {} });
-    const section = await openStay();
-    expect(within(section).getByText(/charge goes to this guest.s reservation/i)).toBeTruthy();
-    expect(within(section).queryByRole("button")).toBeNull();
+    const { default: StaysPage } = await import("@/app/(app)/stays/page");
+    render(<StaysPage />);
+    await userEvent.click(await screen.findByRole("button", { name: /^View\b/ }));
+    await screen.findByText("Packages of this stay");
+    expect(screen.queryByRole("region", { name: "Room charge" })).toBeNull();
+    expect(screen.queryByText(/Room charge allowed/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /Block room charge/ })).toBeNull();
   });
 });
 
@@ -202,7 +212,7 @@ describe("Stay events page", () => {
     await waitFor(() => expect(get).toHaveBeenCalled());
     expect(get.mock.calls[0][0]).not.toContain("processing_status=");
     expect(await screen.findByText(/folio claimed by other stay/i)).toBeTruthy();
-    expect(screen.getByText(/need a decision/i)).toBeTruthy();
+    expect(screen.getByText(/1 message needs a decision/i)).toBeTruthy();
   });
 });
 
@@ -210,7 +220,7 @@ describe("Operational alerts page", () => {
   it("acknowledges an alert and reloads the queue", async () => {
     get.mockResolvedValue({
       data: [{
-        audit_id: "a1", stay_id: "s1", lifecycle_version: 1, alert_code: "EMERGENCY_GRACE_USED",
+        audit_id: "a1", stay_id: "s1", lifecycle_version: 1, alert_code: "CHECKOUT_GRACE_CONFIG_INVALID",
         trigger: "EMERGENCY_GRACE", reason_code: "POLICY_MISMATCH",
         boundary_at: new Date().toISOString(), boundary_clock_suspect: false, created_at: new Date().toISOString(),
         state: "OPEN", seq: 1,
@@ -226,13 +236,13 @@ describe("Operational alerts page", () => {
     expect(path).toBe("/operational-alerts/a1/acknowledge");
     // Carry the viewed state so concurrent changes return a conflict.
     expect(body.expected_state).toBe("OPEN");
-    expect(get).toHaveBeenCalledTimes(2); // the queue is re-read after acting
+    expect(get.mock.calls.filter(([path]) => path === "/operational-alerts")).toHaveLength(2);
   });
 
   it("surfaces a refused action rather than pretending it succeeded", async () => {
     get.mockResolvedValue({
       data: [{
-        audit_id: "a1", stay_id: "s1", lifecycle_version: 1, alert_code: "EMERGENCY_GRACE_USED",
+        audit_id: "a1", stay_id: "s1", lifecycle_version: 1, alert_code: "CHECKOUT_GRACE_CONFIG_INVALID",
         trigger: "EMERGENCY_GRACE", boundary_at: new Date().toISOString(),
         boundary_clock_suspect: false, created_at: new Date().toISOString(), state: "OPEN", seq: 1,
       }],
@@ -243,13 +253,18 @@ describe("Operational alerts page", () => {
     render(<AlertsPage />);
     fireEvent.keyDown(await screen.findByRole("button", { name: /^Actions for alert/ }), { key: "Enter" });
     await userEvent.click(await screen.findByRole("menuitem", { name: "Resolve" }));
-    expect(await screen.findByRole("alert")).toBeTruthy();
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("It leaves the queue and cannot be reopened.")).toBeTruthy();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Resolve" }));
+    expect(await within(dialog).findByRole("alert")).toBeTruthy();
+    expect(within(dialog).getByText(/Nothing was changed/)).toBeTruthy();
+    expect(screen.queryByText("illegal transition")).toBeNull();
   });
 
   it("hides the actions from a role that may only read", async () => {
     get.mockResolvedValue({
       data: [{
-        audit_id: "a1", stay_id: "s1", lifecycle_version: 1, alert_code: "EMERGENCY_GRACE_USED",
+        audit_id: "a1", stay_id: "s1", lifecycle_version: 1, alert_code: "CHECKOUT_GRACE_CONFIG_INVALID",
         trigger: "EMERGENCY_GRACE", boundary_at: new Date().toISOString(),
         boundary_clock_suspect: false, created_at: new Date().toISOString(), state: "OPEN", seq: 1,
       }],
@@ -257,8 +272,28 @@ describe("Operational alerts page", () => {
     });
     const { OperationalAlertsView: AlertsPage } = await import("@/components/phase3/operational-alerts-view");
     render(<AlertsPage canAct={false} />);
-    await screen.findByText(/emergency grace used/i);
+    await screen.findByText("Emergency after check-out terms used");
     expect(screen.queryByRole("button", { name: /^Acknowledge|^Actions for/ })).toBeNull();
+  });
+
+  it("names the room of the alert and says what to do", async () => {
+    get.mockImplementation((path: string) => {
+      if (path === "/pms-stays/s1") return Promise.resolve({ id: "s1", room: "412", external_reservation_id: "R-88" });
+      return Promise.resolve({
+        data: [{
+          audit_id: "a1", stay_id: "s1", lifecycle_version: 1, alert_code: "CHECKOUT_GRACE_CONFIG_INVALID",
+          trigger: "EMERGENCY_GRACE", reason_code: "CONFIG_INVALID_EMERGENCY_FALLBACK", boundary_at: new Date().toISOString(),
+          boundary_clock_suspect: false, created_at: new Date().toISOString(), state: "OPEN", seq: 1,
+        }],
+        meta: { has_more: false },
+      });
+    });
+    const { OperationalAlertsView: AlertsPage } = await import("@/components/phase3/operational-alerts-view");
+    render(<AlertsPage canAct={false} />);
+    expect(await screen.findByText("Room 412 · Reservation R-88")).toBeTruthy();
+    expect(screen.getByText("The After Check-out Access settings were invalid")).toBeTruthy();
+    expect(screen.getAllByRole("link", { name: "After Check-out Access" })[0]).toHaveAttribute("href", "/after-checkout-access");
+    expect(document.body.textContent ?? "").not.toMatch(/CHECKOUT_GRACE_CONFIG_INVALID|CONFIG_INVALID_EMERGENCY_FALLBACK/);
   });
 });
 
@@ -266,7 +301,7 @@ describe("Concurrency contracts in the UI", () => {
   it("an alert changed by someone else reloads the queue instead of overwriting it", async () => {
     get.mockResolvedValue({
       data: [{
-        audit_id: "a1", stay_id: "s1", lifecycle_version: 1, alert_code: "EMERGENCY_GRACE_USED",
+        audit_id: "a1", stay_id: "s1", lifecycle_version: 1, alert_code: "CHECKOUT_GRACE_CONFIG_INVALID",
         trigger: "EMERGENCY_GRACE", boundary_at: new Date().toISOString(),
         boundary_clock_suspect: false, created_at: new Date().toISOString(), state: "OPEN", seq: 1,
       }],
@@ -278,13 +313,13 @@ describe("Concurrency contracts in the UI", () => {
     await userEvent.click(await screen.findByRole("button", { name: /^Acknowledge: alert/ }));
     // Reload after conflict instead of retrying a stale decision.
     expect(await screen.findByRole("status")).toBeTruthy();
-    await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(get.mock.calls.filter(([path]) => path === "/operational-alerts")).toHaveLength(2));
   });
 
   it("a refusal that is not a state conflict is shown as an error, not as someone else's change", async () => {
     get.mockResolvedValue({
       data: [{
-        audit_id: "a1", stay_id: "s1", lifecycle_version: 1, alert_code: "EMERGENCY_GRACE_USED",
+        audit_id: "a1", stay_id: "s1", lifecycle_version: 1, alert_code: "CHECKOUT_GRACE_CONFIG_INVALID",
         trigger: "EMERGENCY_GRACE", boundary_at: new Date().toISOString(),
         boundary_clock_suspect: false, created_at: new Date().toISOString(), state: "OPEN", seq: 1,
       }],
@@ -294,7 +329,8 @@ describe("Concurrency contracts in the UI", () => {
     const { OperationalAlertsView: AlertsPage } = await import("@/components/phase3/operational-alerts-view");
     render(<AlertsPage />);
     await userEvent.click(await screen.findByRole("button", { name: /^Acknowledge: alert/ }));
-    expect(await screen.findByText(/the alert action was refused/i)).toBeInTheDocument();
+    expect(await screen.findByText(/The action could not be completed/)).toBeInTheDocument();
+    expect(screen.queryByText(/the alert action was refused/i)).toBeNull();
     expect(screen.queryByText(/changed while you were looking/i)).toBeNull();
   });
 });

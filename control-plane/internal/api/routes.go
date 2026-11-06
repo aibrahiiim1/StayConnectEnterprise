@@ -96,6 +96,15 @@ func (b *Base) CloudRoutes(off *OfflineBase) http.Handler {
 	r.With(perm(auth.PermFleetView)).Get("/settings/registration", b.getRegistrationSettings)
 	tm.Patch("/settings/registration", b.patchRegistrationSettings)
 
+	fv := r.With(perm(auth.PermFleetView))
+	fv.Get("/notifications/settings", b.getNotificationSettings)
+	fv.Get("/notifications/log", b.listNotificationLog)
+	fv.Get("/notifications/subscriptions/me", b.getMySubscriptions)
+	fv.Put("/notifications/subscriptions/me", b.putMySubscriptions)
+	tm.Patch("/notifications/settings", b.patchNotificationSettings)
+	tm.Put("/notifications/smtp-password", b.putNotificationPassword)
+	tm.Post("/notifications/test", b.testNotification)
+
 	b.portalTLSRoutes(r)
 
 	return r

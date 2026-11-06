@@ -45,6 +45,8 @@ type Base struct {
 
 	// MFA names an account's sign-in locks so resetting two-step sign-in can lift them; nil falls back to the plain hash.
 	MFA *auth.MFA
+
+	NotifyDir string
 }
 
 type ListMeta struct {

@@ -73,7 +73,7 @@ describe("Diagnostics", () => {
     post.mockResolvedValue({});
     const Page = (await import("@/app/(app)/health/page")).default;
     render(<Page />);
-    await openRowMenu("scd");
+    await openRowMenu("Session control (scd)");
     fireEvent.click(await screen.findByRole("menuitem", { name: "Restart…" }));
 
     const dialog = await screen.findByRole("dialog");
@@ -93,7 +93,7 @@ describe("Diagnostics", () => {
     const Page = (await import("@/app/(app)/health/page")).default;
     render(<Page />);
     await screen.findByText(/can view diagnostics, but not read service logs/i);
-    expect(screen.queryByRole("button", { name: "Actions for scd" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Actions for Session control (scd)" })).toBeNull();
     expect(screen.queryByRole("button", { name: /Recheck/ })).toBeNull();
   });
 
@@ -101,8 +101,37 @@ describe("Diagnostics", () => {
     routes({ "/diagnostics/services": SUMMARY }, ["hotel_it_manager"]);
     const Page = (await import("@/app/(app)/health/page")).default;
     render(<Page />);
-    const menu = await openRowMenu("scd");
+    const menu = await openRowMenu("Session control (scd)");
     expect(within(menu).getByRole("menuitem", { name: "Logs" })).toBeTruthy();
+  });
+
+  it("does not call a restart of the admin service failed when it drops this console's own connection", async () => {
+    routes({ "/diagnostics/services": { ...SUMMARY, services: [{ ...SERVICE, service: "edged" }] } }, ["site_admin"]);
+    post.mockRejectedValue(new TypeError("Failed to fetch"));
+    const Page = (await import("@/app/(app)/health/page")).default;
+    render(<Page />);
+    await openRowMenu("Admin service (edged)");
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Restart\u2026" }));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.type(within(dialog).getByLabelText(/Why are you restarting it/), "stuck");
+    await userEvent.type(within(dialog).getByLabelText(/Confirm your password/), "pw-123");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Restart now" }));
+    expect(await within(dialog).findByText(/The restart was most likely carried out/)).toBeTruthy();
+    expect(within(dialog).queryByText(/Failed to fetch|restart failed/i)).toBeNull();
+  });
+
+  it("says when a service's details could not be loaded instead of loading forever", async () => {
+    routes({ "/diagnostics/services": SUMMARY }, ["site_admin"]);
+    get.mockImplementation((path: string) => {
+      if (path === "/auth/whoami") return Promise.resolve({ roles: ["site_admin"], operator_id: "me" });
+      if (path === "/diagnostics/services") return Promise.resolve(SUMMARY);
+      return Promise.reject(new Error("boom"));
+    });
+    const Page = (await import("@/app/(app)/health/page")).default;
+    render(<Page />);
+    fireEvent.click(await screen.findByText("Session control (scd)"));
+    expect(await screen.findByText("The details could not be loaded")).toBeTruthy();
+    expect(screen.queryByText("boom")).toBeNull();
   });
 });
 

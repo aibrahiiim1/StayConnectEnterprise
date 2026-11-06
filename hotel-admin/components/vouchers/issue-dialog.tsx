@@ -4,6 +4,7 @@
 // Later recovery requires an audited export.
 
 import * as React from "react";
+import Link from "next/link";
 import { Package, RefreshCw, Ticket } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -13,13 +14,17 @@ import { ErrorBanner, Callout } from "@/components/ui/error-banner";
 import { Field, Input } from "@/components/ui/input";
 import { KeyValueGrid, OptionCard, Stepper } from "@/components/ui/data";
 import { Skeleton } from "@/components/ui/misc";
-import { useToast } from "@/components/ui/toast";
 import { InfoHint } from "@/components/ui/quiet";
 import { formatPrice, validityWords, type Grantable, type IssuedBatch } from "@/lib/api/vouchers";
 import { CodesHeld } from "./codes-held";
 import { stepUpError } from "./shared";
 
 const STEPS = ["Package", "Quantity & validity", "Review"];
+
+const browserTimeZone = (): string => {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "this computer's time zone"; }
+  catch { return "this computer's time zone"; }
+};
 
 function toIso(local: string): string | undefined {
   if (!local) return undefined;
@@ -38,7 +43,6 @@ export function IssueDialog({
   onIssued: () => void;
   hotelName?: string;
 }) {
-  const toast = useToast();
   const [grantable, setGrantable] = React.useState<Grantable[] | null>(null);
   const [loadErr, setLoadErr] = React.useState<unknown>(null);
   const [step, setStep] = React.useState(0);
@@ -51,6 +55,12 @@ export function IssueDialog({
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState<unknown>(null);
   const [issued, setIssued] = React.useState<IssuedBatch | null>(null);
+  const [askClose, setAskClose] = React.useState(false);
+  const keepRef = React.useRef<HTMLButtonElement>(null);
+  React.useEffect(() => {
+    if (askClose) keepRef.current?.focus();
+  }, [askClose]);
+  const tz = browserTimeZone();
 
   const loadGrantable = React.useCallback(() => {
     setLoadErr(null);
@@ -78,12 +88,14 @@ export function IssueDialog({
       setErr(null);
       setIssued(null);
       setBusy(false);
+      setAskClose(false);
     }
   }, [open]);
 
   const chosen = grantable?.find((g) => g.id === revisionId) ?? null;
   const n = Number(count);
-  const countProblem = !/^\d+$/.test(count) || n < 1 || n > 500 ? "Enter a whole number from 1 to 500." : null;
+  const countProblem = count.trim() === "" ? "Enter how many cards to print, from 1 to 500."
+    : !/^\d+$/.test(count) || n < 1 || n > 500 ? "Enter a whole number from 1 to 500." : null;
   const fromIso = toIso(validFrom);
   const untilIso = toIso(validUntil);
   const windowProblem =
@@ -92,6 +104,7 @@ export function IssueDialog({
       : fromIso && untilIso && Date.parse(untilIso) <= Date.parse(fromIso)
         ? "Valid until must be after valid from."
         : null;
+  const reachable = !chosen ? 0 : countProblem || windowProblem ? 1 : 2;
 
   async function issue() {
     if (!chosen || countProblem || windowProblem || !password) return;
@@ -105,7 +118,6 @@ export function IssueDialog({
       const out = await api.post<IssuedBatch>("/vouchers/issue", body);
       setIssued(out);
       setPassword("");
-      toast.success(`${out.count} voucher${out.count === 1 ? "" : "s"} issued`, "Print or save the codes before closing.");
       onIssued();
     } catch (e) {
       // Preserve the server's reason when the selected package cannot be redeemed by voucher.
@@ -118,7 +130,14 @@ export function IssueDialog({
   const validity = validityWords(fromIso ?? null, untilIso ?? null);
 
   return (
-    <Dialog open={open} onOpenChange={(v) => !busy && onOpenChange(v)}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (busy) return;
+        if (!v && issued) { setAskClose(true); return; }
+        onOpenChange(v);
+      }}
+    >
       <DialogContent size="lg">
         <DialogHeader>
           <DialogTitle>{issued ? `${issued.count.toLocaleString()} voucher${issued.count === 1 ? "" : "s"} issued` : "Issue vouchers"}</DialogTitle>
@@ -127,10 +146,11 @@ export function IssueDialog({
               ? "These codes are shown once. Copy, download or print them now."
               : "Print a batch of cards a client redeems for internet access."}
           </DialogDescription>
-          {!issued && <Stepper steps={STEPS} current={step} onStep={(i) => !busy && setStep(i)} className="pt-2" />}
+          {!issued && <Stepper steps={STEPS} current={step} onStep={(i) => !busy && i <= reachable && setStep(i)} className="pt-2" />}
         </DialogHeader>
         <DialogBody className="space-y-4">
           <ErrorBanner err={err} />
+          <div key={issued ? "issued" : step} className="space-y-4 animate-in fade-in-0 slide-in-from-right-2 duration-base ease-onegate rtl:slide-in-from-left-2 motion-reduce:animate-none">
           {issued ? (
             <CodesHeld
               codes={issued.codes.map((c) => ({ code: c }))}
@@ -164,7 +184,14 @@ export function IssueDialog({
               <EmptyState
                 icon={<Package />}
                 title="No internet package can be put on a card yet"
-                hint="Vouchers are issued only for an active package that clients may get by Voucher. Under Internet packages, tick Voucher on the package, then come back to issue cards for it. Where a card can be used is set by the package (some packages are limited to certain networks or PMS connections) and by Sign-in methods."
+                hint={
+                  <>
+                    Vouchers are issued only for an active package that clients may get by Voucher. Under{" "}
+                    <Link href="/internet-packages" className="underline">Internet packages</Link>, tick Voucher on the
+                    package, then come back to issue cards for it. Where a card can be used is set by the package (some
+                    packages are limited to certain networks or PMS connections) and by Sign-in methods.
+                  </>
+                }
               />
             ) : (
               <div role="radiogroup" aria-label="Package the cards grant" className="grid gap-3 sm:grid-cols-2">
@@ -185,14 +212,14 @@ export function IssueDialog({
             )
           ) : step === 1 ? (
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="How many cards" hint="1 to 500 per batch." error={count !== "" ? countProblem : undefined} required>
+              <Field label="How many cards" hint="1 to 500 per batch." error={countProblem ?? undefined} required>
                 <Input type="number" inputMode="numeric" min={1} max={500} value={count} onChange={(e) => setCount(e.target.value)} />
               </Field>
               <div className="hidden sm:block" />
-              <Field label="Valid from (optional)" hint="Leave empty to make the cards usable straight away.">
+              <Field label="Valid from (optional)" hint={`Leave empty to make the cards usable straight away. In ${tz}.`}>
                 <Input type="datetime-local" value={validFrom} onChange={(e) => setValidFrom(e.target.value)} />
               </Field>
-              <Field label="Valid until (optional)" hint="Leave empty for cards that never expire." error={windowProblem ?? undefined}>
+              <Field label="Valid until (optional)" hint={`Leave empty for cards that never expire. In ${tz}.`} error={windowProblem ?? undefined}>
                 <Input type="datetime-local" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />
               </Field>
               <Field label="Batch name (optional)" hint="Shown on the Batches tab and beside each card, e.g. who the cards are for." className="sm:col-span-2">
@@ -217,13 +244,28 @@ export function IssueDialog({
               <Field label="Confirm your password" hint="Issuing a batch of cards is recorded against your name." required
                 htmlFor="voucher-issue-password">
                 <Input id="voucher-issue-password" type="password" autoComplete="current-password" value={password}
-                  onChange={(e) => setPassword(e.target.value)} />
+                  onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      void issue();
+                    }
+                  }} />
               </Field>
             </div>
           )}
+          </div>
         </DialogBody>
         <DialogFooter>
-          {issued ? (
+          {issued && askClose ? (
+            <>
+              <p role="status" className="me-auto text-caption text-foreground">
+                Close without keeping these codes? They are not shown again here.
+              </p>
+              <Button ref={keepRef} variant="secondary" onClick={() => setAskClose(false)}>Keep them open</Button>
+              <Button variant="danger" onClick={() => onOpenChange(false)}>Close anyway</Button>
+            </>
+          ) : issued ? (
             <Button onClick={() => onOpenChange(false)}>Done</Button>
           ) : (
             <>

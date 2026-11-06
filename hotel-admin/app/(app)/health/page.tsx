@@ -1,12 +1,10 @@
 "use client";
 
-// Reading service logs needs diagnostics WRITE since journal lines can include client details; Restart also needs
-// a reason and password confirmation, enforced by edged.
-
 import Link from "next/link";
 import { useEffect, useState, useCallback } from "react";
-import { api, ApiError, Whoami } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { canWrite } from "@/lib/roles";
+import { useOperatorRoles } from "@/lib/whoami-context";
 import { cn } from "@/lib/utils";
 import { PageShell, PageHeader, StatCard, StatGrid } from "@/components/ui/page";
 import { SectionCard } from "@/components/ui/card";
@@ -15,7 +13,7 @@ import { StatusBadge } from "@/components/ui/badge";
 import { RowActions } from "@/components/ui/row-actions";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/dialog";
-import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { Callout } from "@/components/ui/error-banner";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton, SkeletonRows } from "@/components/ui/misc";
 import { DescriptionList, Timeline } from "@/components/ui/data";
@@ -24,7 +22,7 @@ import { LiveStatus, ReadOnlyNotice, refreshingClass } from "@/components/ui/pat
 import { useToast } from "@/components/ui/toast";
 import { HelpList, HelpSection } from "@/components/help";
 import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
-import { FileText, CheckCircle2, XCircle, Server, Hourglass } from "lucide-react";
+import { AlertTriangle, FileText, CheckCircle2, XCircle, Server, Hourglass, RefreshCw } from "lucide-react";
 import { usePoll } from "@/lib/use-poll";
 
 type ServiceHealth = {
@@ -56,13 +54,18 @@ type Boot = { converged: boolean; alert_open: boolean; pending: string[]; boot_a
 type Check = { name: string; level: "ok" | "warn" | "critical" | string; reason?: string; message: string };
 type Summary = { overall: string; counts: Record<string, number>; services: ServiceHealth[]; boot: Boot | null; checks?: Check[]; generated_at: string };
 type RecoveryEvent = { id: number; service: string; event: string; cause: string; action: string; backoff_level: number; result: string; duration_ms: number; actor: string; created_at: string };
+type Detail = { service: ServiceHealth; recovery_events: RecoveryEvent[] };
 
 type Tone = "ok" | "warn" | "err" | "default" | "info";
+
+const FADE = "animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none";
+const LINK = "font-medium underline underline-offset-2";
+const SPIN = "animate-spin motion-reduce:animate-none";
+const POLL_SECONDS = 10;
 
 function stateTone(s: string): Tone {
   switch (s) {
     case "healthy": return "ok";
-    // "waiting" is not a fault: the service is idle until its prerequisite exists.
     case "waiting": return "default";
     case "recovering": case "starting": return "info";
     case "degraded": return "warn";
@@ -76,7 +79,39 @@ const STATE_WORDS: Record<string, string> = {
   healthy: "Healthy", waiting: "Waiting", degraded: "Degraded", recovering: "Recovering",
   crash_loop: "Crash-loop", failed: "Failed", starting: "Starting",
 };
-const stateWord = (s: string) => STATE_WORDS[s] ?? (s ? s.replace(/_/g, " ") : "Unknown");
+const stateWord = (s: string) => STATE_WORDS[s] ?? "Not recognised";
+
+const SERVICE_NAMES: Record<string, string> = {
+  scd: "Session control",
+  edged: "Admin service",
+  netd: "Network control",
+  portald: "Client Portal",
+  acctd: "Usage measurement",
+  "hotel-admin": "Admin Console",
+  caddy: "Web front end",
+  kea: "DHCP server",
+  unbound: "DNS resolver",
+  postgres: "Database",
+  appliance: "Appliance",
+};
+const serviceName = (s: string) => (SERVICE_NAMES[s] ? `${SERVICE_NAMES[s]} (${s})` : s);
+
+const CHECK_TITLES: Record<string, string> = { portal_https: "Client Portal HTTPS" };
+
+const EVENT_WORDS: Record<string, { title: string; tone: "ok" | "warn" | "err" | "info" }> = {
+  failure_detected: { title: "Failure detected", tone: "warn" },
+  recovering: { title: "Restarting automatically", tone: "warn" },
+  recovered: { title: "Recovered", tone: "ok" },
+  crash_loop: { title: "Crash-loop: kept stopping", tone: "err" },
+  waiting: { title: "Waiting for a prerequisite", tone: "info" },
+  manual_recheck: { title: "Checked again by an operator", tone: "info" },
+  manual_restart: { title: "Restarted by an operator", tone: "info" },
+  boot_converged: { title: "Boot finished", tone: "ok" },
+  boot_not_converged: { title: "Boot did not finish in time", tone: "err" },
+};
+const eventWords = (e: string) => EVENT_WORDS[e] ?? { title: "An event this console does not recognise", tone: "warn" as const };
+
+const SELF_RESTART = new Set(["edged", "hotel-admin", "caddy"]);
 
 const TILES: { keys: string[]; label: string; tone: "ok" | "warn" | "err" | "default" }[] = [
   { keys: ["healthy"], label: "Healthy", tone: "ok" },
@@ -86,8 +121,8 @@ const TILES: { keys: string[]; label: string; tone: "ok" | "warn" | "err" | "def
   { keys: ["crash_loop", "failed"], label: "Crash-loop or failed", tone: "err" },
 ];
 
-function ago(ts?: string | null): string {
-  if (!ts) return "—";
+function ago(ts?: string | null, none = "Never"): string {
+  if (!ts) return none;
   const s = Math.max(0, Math.floor((Date.now() - new Date(ts).getTime()) / 1000));
   if (s < 60) return `${s}s ago`;
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
@@ -95,71 +130,103 @@ function ago(ts?: string | null): string {
   return `${Math.floor(s / 86400)}d ago`;
 }
 function until(ts?: string | null): string {
-  if (!ts) return "—";
+  if (!ts) return "No retry planned";
   const s = Math.floor((new Date(ts).getTime() - Date.now()) / 1000);
-  return s <= 0 ? "now" : `in ${s}s`;
+  if (s <= 0) return "now";
+  if (s < 60) return `in ${s}s`;
+  return `in ${Math.round(s / 60)} min`;
+}
+function windowWords(secs: number): string {
+  if (secs >= 3600 && secs % 3600 === 0) return secs === 3600 ? "the last hour" : `the last ${secs / 3600} hours`;
+  if (secs >= 60 && secs % 60 === 0) return secs === 60 ? "the last minute" : `the last ${secs / 60} minutes`;
+  return `the last ${secs.toLocaleString()} seconds`;
 }
 
-const POLL_SECONDS = 10;
+function actionWords(e: unknown, what: string): string {
+  if (e instanceof ApiError && e.code === "not_found") return "This service is not monitored on this appliance.";
+  return `The ${what} could not be completed. Check the appliance is reachable, then try again.`;
+}
+
+function restartWords(e: unknown, name: string): string {
+  const dropped = !(e instanceof ApiError) || [502, 503, 504].includes(e.status);
+  if (SELF_RESTART.has(name) && dropped) {
+    return `The connection dropped, which is expected while ${serviceName(name)} restarts. The restart was most likely carried out: wait a few seconds, then refresh this page.`;
+  }
+  if (e instanceof ApiError) {
+    if (e.code === "reauth_required") return "Your password was not accepted. Nothing was restarted.";
+    if (e.code === "reason_required") return "Enter why you are restarting it. Nothing was restarted.";
+    if (e.code === "not_found") return "This service is not monitored on this appliance. Nothing was restarted.";
+    if (e.code === "restart_failed") {
+      const detail = typeof e.message === "string" && e.message !== e.code ? e.message.trim() : "";
+      return `The service could not be restarted.${detail ? ` The system reported: ${detail}` : ""}`;
+    }
+  }
+  return "The restart could not be confirmed. Check the service's state below before trying again.";
+}
 
 export default function HealthPage() {
   const toast = useToast();
   const hospitality = moduleLicensed(useCapabilities(), "hospitality");
+  const roles = useOperatorRoles();
   const [sum, setSum] = useState<Summary | null>(null);
-  const [me, setMe] = useState<Whoami | null>(null);
-  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [actionErr, setActionErr] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [sel, setSel] = useState<string | null>(null);
-  const [detail, setDetail] = useState<{ service: ServiceHealth; recovery_events: RecoveryEvent[] } | null>(null);
+  const [detail, setDetail] = useState<Detail | null>(null);
+  const [detailFailed, setDetailFailed] = useState(false);
   const [logs, setLogs] = useState<string[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const writable = me ? canWrite("diagnostics", me.roles) : false;
+  const writable = roles ? canWrite("diagnostics", roles) : false;
 
   const load = useCallback(async () => {
     setRefreshing(true);
     try {
       setSum(await api.get<Summary>("/diagnostics/services"));
-      setLoadErr(null);
+      setLoadFailed(false);
       setUpdatedAt(Date.now());
-    } catch (e) {
-      setLoadErr(e instanceof ApiError ? e.message : "failed to load health");
+    } catch {
+      setLoadFailed(true);
     } finally {
       setRefreshing(false);
     }
   }, []);
 
-  useEffect(() => { api.get<Whoami>("/auth/whoami").then(setMe).catch(() => {}); }, []);
   useEffect(() => { void load(); }, [load]);
   usePoll(() => load(), POLL_SECONDS * 1000);
 
   const [restarting, setRestarting] = useState<string | null>(null);
   const [restartErr, setRestartErr] = useState<string | null>(null);
 
-  async function openDetail(name: string) {
-    setSel(name); setLogs(null);
-    try { setDetail(await api.get(`/diagnostics/services/${name}`)); } catch { setDetail(null); }
+  async function fetchDetail(name: string) {
+    setDetailFailed(false);
+    try { setDetail(await api.get<Detail>(`/diagnostics/services/${name}`)); }
+    catch { setDetail(null); setDetailFailed(true); }
   }
-  function closeDetail() { setSel(null); setDetail(null); setLogs(null); }
+  async function openDetail(name: string) {
+    setSel(name); setLogs(null); setDetail(null);
+    await fetchDetail(name);
+  }
+  function closeDetail() { setSel(null); setDetail(null); setLogs(null); setDetailFailed(false); }
 
   async function recheck(name: string) {
     setBusy("recheck:" + name);
     setActionErr(null);
     try {
       await api.post(`/diagnostics/services/${name}/recheck`);
-      toast.success(`${name} was checked again`);
+      toast.success(`${serviceName(name)} was checked again`);
       await load();
-      if (sel === name) await openDetail(name);
+      if (sel === name) await fetchDetail(name);
     }
-    catch (e) { setActionErr(e instanceof ApiError ? e.message : "recheck failed"); }
+    catch (e) { setActionErr(actionWords(e, "recheck")); }
     finally { setBusy(null); }
   }
   async function viewLogs(name: string) {
     setBusy("logs:" + name);
     setActionErr(null);
     try { const r = await api.get<{ lines: string[] }>(`/diagnostics/services/${name}/logs`); setLogs(r.lines || []); }
-    catch (e) { setActionErr(e instanceof ApiError ? e.message : "logs failed"); }
+    catch (e) { setActionErr(actionWords(e, "log request")); }
     finally { setBusy(null); }
   }
   async function restart({ reason, password }: { reason: string; password: string }) {
@@ -170,16 +237,17 @@ export default function HealthPage() {
     try {
       await api.post(`/diagnostics/services/${name}/restart`, { reason, password });
       setRestarting(null);
-      toast.success(`Restart of ${name} requested`, "It is recorded in Activity against your account.");
+      toast.success(`Restart of ${serviceName(name)} requested`, "It is recorded in Activity against your account.");
       await load();
     } catch (e) {
-      setRestartErr(e instanceof ApiError ? (e.body?.error === "reauth_required" ? "Password confirmation failed." : e.message) : "restart failed");
+      setRestartErr(restartWords(e, name));
     } finally { setBusy(null); }
   }
 
   const c = sum?.counts || {};
   const services = sum?.services || [];
-  const loading = sum === null && !loadErr;
+  const loading = sum === null && !loadFailed;
+  const failedFirst = sum === null && loadFailed;
 
   return (
     <PageShell width="wide">
@@ -208,7 +276,7 @@ export default function HealthPage() {
             <HelpSection title="Actions">
               <HelpList
                 items={[
-                  <><strong>Logs</strong> — recent log lines, sanitised by the appliance (secrets and client details removed). Every role that can open this page can read them.</>,
+                  <><strong>Logs</strong> — recent log lines, sanitised by the appliance (secrets and client details removed). They need a role that can change diagnostics, because log lines can still name a guest&rsquo;s room.</>,
                   <><strong>Recheck</strong> — runs the service&rsquo;s health check again now.</>,
                   <><strong>Restart</strong> — stops and starts the service. It asks for a reason and your password, says what it will interrupt, and is recorded against your account.</>,
                 ]}
@@ -223,69 +291,91 @@ export default function HealthPage() {
           </StatusBadge>
         )}
         actions={
-          <>
+          sum ? (
             <LiveStatus
               updatedAt={updatedAt}
               refreshing={refreshing}
               intervalSeconds={POLL_SECONDS}
-              error={!!loadErr && sum !== null}
+              error={loadFailed}
               onRefresh={() => void load()}
             />
-          </>
+          ) : undefined
         }
       />
 
-      {me && !writable && (
+      {roles !== null && !writable && (
         <ReadOnlyNotice>Your role can view diagnostics, but not read service logs, recheck or restart services.</ReadOnlyNotice>
       )}
 
-      <ErrorBanner err={sum === null ? loadErr : null} className="mb-0" />
-      <ErrorBanner err={actionErr} className="mb-0" />
-
-      {sum?.boot && !sum.boot.converged && (
-        <Callout
-          tone={sum.boot.alert_open ? "danger" : "warning"}
-          icon={<Hourglass />}
-          title="The appliance is still starting after boot"
-        >
-          Waiting on: {sum.boot.pending?.join(", ") || "—"}.
-          {sum.boot.alert_open && <> This has taken longer than expected — check the waiting services below.</>}
-        </Callout>
+      {actionErr && (
+        <div className={FADE}>
+          <Callout tone="danger">{actionErr}</Callout>
+        </div>
       )}
 
-      {(sum?.checks ?? []).filter((c) => c.level !== "ok").map((c) => (
-        <Callout
-          key={c.name}
-          tone={c.level === "critical" ? "danger" : "warning"}
-          title={c.name === "portal_https" ? "Client Portal HTTPS" : c.name}
-        >
-          {c.message}{" "}
-          {c.name === "portal_https" && <Link className="underline" href="/portal-https">Open Portal HTTPS</Link>}
-        </Callout>
+      {sum?.boot && !sum.boot.converged && (
+        <div className={FADE}>
+          <Callout
+            tone={sum.boot.alert_open ? "danger" : "warning"}
+            icon={<Hourglass />}
+            title="The appliance is still starting after boot"
+          >
+            Waiting on: {sum.boot.pending?.length ? sum.boot.pending.map(serviceName).join(", ") : "nothing reported"}.
+            {sum.boot.alert_open && <> This has taken longer than expected. Check the waiting services below.</>}
+          </Callout>
+        </div>
+      )}
+
+      {(sum?.checks ?? []).filter((x) => x.level !== "ok").map((x) => (
+        <div key={x.name} className={FADE}>
+          <Callout
+            tone={x.level === "critical" ? "danger" : "warning"}
+            title={CHECK_TITLES[x.name] ?? "A check this console does not recognise"}
+          >
+            {x.message}{" "}
+            {x.name === "portal_https" && <Link className={LINK} href="/portal-https">Open Portal HTTPS</Link>}
+          </Callout>
+        </div>
       ))}
 
-      <StatGrid cols={5} className={cn(refreshing && sum && refreshingClass)}>
-        {loading
-          ? TILES.map((t) => <Skeleton key={t.label} className="h-[4.75rem] rounded-lg" />)
-          : TILES.map((t) => {
-              const n = t.keys.reduce((a, k) => a + (c[k] ?? 0), 0);
-              return <StatCard key={t.label} label={t.label} value={n} tone={n > 0 ? t.tone : "default"} />;
-            })}
-      </StatGrid>
+      {!failedFirst && (
+        <StatGrid cols={5} className={cn(refreshing && sum && refreshingClass)}>
+          {loading
+            ? TILES.map((t) => <Skeleton key={t.label} className="h-[4.75rem] rounded-lg" />)
+            : TILES.map((t) => {
+                const n = t.keys.reduce((a, k) => a + (c[k] ?? 0), 0);
+                return <StatCard key={t.label} label={t.label} value={n.toLocaleString()} tone={n > 0 ? t.tone : "default"} />;
+              })}
+        </StatGrid>
+      )}
 
       <SectionCard flush title="Services" description="Select a service for its details, logs and recovery history.">
         <div className={cn(refreshing && sum && refreshingClass)}>
-          {loading ? (
+          {failedFirst ? (
+            <div role="alert" className={FADE}>
+              <EmptyState
+                size="sm"
+                icon={<AlertTriangle />}
+                title="The services could not be loaded"
+                hint="Check the appliance is reachable, then try again. Nothing has been changed."
+                action={
+                  <Button size="sm" variant="secondary" onClick={() => void load()} disabled={refreshing}>
+                    <RefreshCw className={cn(refreshing && SPIN)} /> Try again
+                  </Button>
+                }
+              />
+            </div>
+          ) : loading ? (
             <SkeletonRows rows={6} cols={5} />
           ) : services.length === 0 ? (
             <EmptyState
               size="sm"
               icon={<Server />}
-              title={sum ? "No services reported" : "Services could not be read"}
-              hint={sum ? "The appliance did not report any monitored services." : "The list appears here once the appliance answers."}
+              title="No services reported"
+              hint="The appliance did not report any monitored services."
             />
           ) : (
-            <Table label="Services">
+            <Table label="Services" aria-label="Services">
               <THead>
                 <TR>
                   <TH>Service</TH>
@@ -301,13 +391,12 @@ export default function HealthPage() {
               <TBody>
                 {services.map((s) => (
                   <TR key={s.service} onClick={() => openDetail(s.service)} selected={sel === s.service}>
-                    <TD nowrap className="max-w-[12rem]">
-                      <div className="truncate font-medium text-foreground" title={s.service}>{s.service}</div>
-                      <div className="truncate text-caption text-muted-foreground" title={s.process_state}>{s.process_state}</div>
+                    <TD nowrap className="max-w-[14rem]">
+                      <div className="truncate font-medium text-foreground" title={serviceName(s.service)}>{serviceName(s.service)}</div>
+                      <div className="truncate text-caption text-muted-foreground" title={s.process_state}>{s.process_state || "Not reported"}</div>
                     </TD>
                     <TD nowrap>
                       <StatusBadge tone={stateTone(s.state)}>{stateWord(s.state)}</StatusBadge>
-                      {/* The Backoff column needs a 2xl screen; below it the retry sits under the state. */}
                       {s.backoff_level > 0 && (
                         <div className="mt-1 text-caption text-warning-subtle-foreground 2xl:hidden">Retry {until(s.next_retry_at)}</div>
                       )}
@@ -320,35 +409,35 @@ export default function HealthPage() {
                           <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-success" aria-label="Check passing" />
                         ) : null}
                         <span className="truncate">
-                          {s.degraded_dependency ? <span className="text-warning-subtle-foreground">Depends on {s.degraded_dependency} — </span> : ""}
-                          {s.health_detail || "—"}
+                          {s.degraded_dependency ? <span className="text-warning-subtle-foreground">Depends on {serviceName(s.degraded_dependency)}. </span> : ""}
+                          {s.health_detail || "Not reported"}
                         </span>
                       </div>
                     </TD>
                     <TD numeric className="hidden text-xs lg:table-cell">
-                      {s.restart_count}
-                      <div className="text-caption text-muted-foreground">{s.restarts_in_window} in {s.restart_window_secs}s</div>
+                      {s.restart_count.toLocaleString()}
+                      <div className="text-caption text-muted-foreground">{s.restarts_in_window.toLocaleString()} in {windowWords(s.restart_window_secs)}</div>
                       {s.consecutive_failures > 0 && (
-                        <div className="text-caption text-destructive">{s.consecutive_failures} failures in a row</div>
+                        <div className="text-caption text-destructive">{s.consecutive_failures.toLocaleString()} failures in a row</div>
                       )}
                     </TD>
                     <TD nowrap className="hidden text-xs 2xl:table-cell">
                       {s.backoff_level > 0
                         ? <span className="text-warning-subtle-foreground">Level {s.backoff_level} · retry {until(s.next_retry_at)}</span>
-                        : <span className="text-muted-foreground">—</span>}
+                        : <span className="text-muted-foreground">None</span>}
                     </TD>
                     <TD className="hidden max-w-[14rem] text-xs text-muted-foreground 2xl:table-cell" title={s.last_failure_reason}>
                       {s.last_failure_reason
                         ? <><div className="truncate">{s.last_failure_reason}</div><div className="text-caption">{ago(s.last_failure_at)}</div></>
-                        : "—"}
+                        : "None"}
                     </TD>
                     <TD nowrap muted className="hidden text-xs sm:table-cell">
-                      {s.state === "healthy" ? ago(s.last_healthy_at) : (s.last_recovery_at ? "recovered " + ago(s.last_recovery_at) : "—")}
+                      {s.state === "healthy" ? ago(s.last_healthy_at) : (s.last_recovery_at ? `Recovered ${ago(s.last_recovery_at)}` : "Never")}
                     </TD>
                     {writable && (
                       <TD className="w-0">
                         <RowActions
-                          subject={s.service}
+                          subject={serviceName(s.service)}
                           primary={{ label: "Recheck", disabled: busy === "recheck:" + s.service, onSelect: () => void recheck(s.service) }}
                           items={[
                             {
@@ -380,27 +469,42 @@ export default function HealthPage() {
         onOpenChange={(v) => !v && closeDetail()}
         width="lg"
         eyebrow="Service"
-        title={sel ?? "Service"}
+        title={sel ? serviceName(sel) : "Service"}
         badges={detail ? <StatusBadge tone={stateTone(detail.service.state)}>{stateWord(detail.service.state)}</StatusBadge> : undefined}
-        loading={sel !== null && !detail}
+        loading={sel !== null && !detail && !detailFailed}
       >
+        {detailFailed && sel && (
+          <div role="alert" className={FADE}>
+            <EmptyState
+              size="sm"
+              icon={<AlertTriangle />}
+              title="The details could not be loaded"
+              hint="Check the appliance is reachable, then try again."
+              action={
+                <Button size="sm" variant="secondary" onClick={() => void fetchDetail(sel)}>
+                  <RefreshCw /> Try again
+                </Button>
+              }
+            />
+          </div>
+        )}
         {detail && (
           <div className="space-y-6">
             <DetailsSection title="Details">
               <DescriptionList
                 items={[
-                  { label: "Process", value: detail.service.process_state || "—" },
-                  { label: "Restarts (lifetime)", value: String(detail.service.restart_count) },
-                  { label: "Restarts in window", value: `${detail.service.restarts_in_window} in ${detail.service.restart_window_secs}s` },
-                  { label: "Failures in a row", value: String(detail.service.consecutive_failures) },
+                  { label: "Process", value: detail.service.process_state || "Not reported" },
+                  { label: "Restarts (lifetime)", value: detail.service.restart_count.toLocaleString() },
+                  { label: "Restarts recently", value: `${detail.service.restarts_in_window.toLocaleString()} in ${windowWords(detail.service.restart_window_secs)}` },
+                  { label: "Failures in a row", value: detail.service.consecutive_failures.toLocaleString() },
                   { label: "Backoff", value: detail.service.backoff_level > 0 ? `Level ${detail.service.backoff_level} (about ${Math.round(detail.service.backoff_ms / 1000)}s)` : "None" },
                   { label: "Next retry", value: until(detail.service.next_retry_at) },
                   { label: "First failure", value: ago(detail.service.first_failure_at) },
                   { label: "Last failure", value: ago(detail.service.last_failure_at) },
                   { label: "Last recovery", value: ago(detail.service.last_recovery_at) },
                   { label: "Last healthy", value: ago(detail.service.last_healthy_at) },
-                  { label: "Exit", value: detail.service.last_exit_signal || (detail.service.last_exit_code != null ? `code ${detail.service.last_exit_code}` : "—") },
-                  { label: "Dependency", value: detail.service.degraded_dependency || "—" },
+                  { label: "Exit", value: detail.service.last_exit_signal || (detail.service.last_exit_code != null ? `Exit code ${detail.service.last_exit_code}` : "Not reported") },
+                  { label: "Dependency", value: detail.service.degraded_dependency ? serviceName(detail.service.degraded_dependency) : "None" },
                 ]}
               />
               {detail.service.last_failure_reason && (
@@ -424,8 +528,8 @@ export default function HealthPage() {
                 }
               >
                 {logs ? (
-                  <pre className="max-h-72 overflow-auto rounded-md border border-border bg-surface p-3 font-mono text-2xs leading-relaxed text-foreground">
-                    {logs.join("\n") || "(no logs)"}
+                  <pre className={cn("max-h-72 overflow-auto rounded-md border border-border bg-surface p-3 font-mono text-2xs leading-relaxed text-foreground", FADE)}>
+                    {logs.join("\n") || "No log lines."}
                   </pre>
                 ) : busy === "logs:" + sel ? (
                   <Skeleton className="h-24 w-full" />
@@ -436,20 +540,27 @@ export default function HealthPage() {
             <DetailsSection title="Recovery history">
               <Timeline
                 emptyLabel="No events recorded."
-                items={(detail.recovery_events || []).map((e) => ({
-                  key: String(e.id),
-                  title: e.event.replace(/_/g, " "),
-                  when: ago(e.created_at),
-                  tone: e.event.includes("recover") || e.event.includes("converged") ? "ok"
-                    : e.event.includes("crash") || e.event.includes("not_converged") ? "err"
-                    : e.event.includes("manual") ? "info" : "warn",
-                  body: (
-                    <>
-                      {e.action || e.cause || e.result}
-                      {e.actor && e.actor !== "system" ? ` · by ${e.actor.slice(0, 8)}` : ""}
-                    </>
-                  ),
-                }))}
+                items={(detail.recovery_events || []).map((e) => {
+                  const w = eventWords(e.event);
+                  const byOperator = !!e.actor && e.actor !== "system";
+                  return {
+                    key: String(e.id),
+                    title: w.title,
+                    when: ago(e.created_at, "Not recorded"),
+                    tone: w.tone,
+                    body: (
+                      <>
+                        {e.cause}
+                        {e.result?.startsWith("failed") ? `${e.cause ? " " : ""}It did not succeed.` : ""}
+                        {byOperator && (
+                          <>
+                            {e.cause || e.result?.startsWith("failed") ? " · " : ""}by an operator (see <Link className={LINK} href="/audit">Activity</Link>)
+                          </>
+                        )}
+                      </>
+                    ),
+                  };
+                })}
               />
             </DetailsSection>
           </div>
@@ -459,7 +570,7 @@ export default function HealthPage() {
       <ConfirmDialog
         open={restarting !== null}
         onOpenChange={(v) => { if (!v) { setRestarting(null); setRestartErr(null); } }}
-        title={restarting ? `Restart ${restarting}?` : "Restart service"}
+        title={restarting ? `Restart ${serviceName(restarting)}?` : "Restart service"}
         description={restarting
           ? (hospitality ? RESTART_IMPACT_HOSPITALITY[restarting] : undefined) ?? RESTART_IMPACT[restarting] ?? GENERIC_RESTART_IMPACT
           : undefined}
@@ -481,7 +592,6 @@ export default function HealthPage() {
   );
 }
 
-// An unrecognised service falls back to the generic warning rather than claiming something specific.
 const RESTART_IMPACT: Record<string, string> = {
   scd: "Every client currently online is disconnected and has to reconnect. Enforcement of speed and data limits stops until it comes back.",
   edged: "This admin interface goes away for a few seconds and you may have to sign in again. Clients are not affected.",
@@ -495,7 +605,6 @@ const RESTART_IMPACT: Record<string, string> = {
   postgres: "Everything stops: client sign-in and this admin both depend on the database.",
 };
 
-/** Name the PMS as a casualty only where hospitality is licensed. */
 const RESTART_IMPACT_HOSPITALITY: Record<string, string> = {
   postgres: "Everything stops: client sign-in, this admin and the PMS connection all depend on the database.",
 };

@@ -22,8 +22,11 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { ResultsCount, SearchInput } from "@/components/ui/data";
 import { SkeletonRows } from "@/components/ui/misc";
+import { LiveStatus, refreshingClass } from "@/components/ui/patterns";
+import { usePoll } from "@/lib/use-poll";
+import { cn } from "@/lib/utils";
 import { useToast } from "@/components/ui/toast";
-import { Settings2, Smartphone } from "lucide-react";
+import { AlertTriangle, RefreshCw, Settings2, Smartphone } from "lucide-react";
 import { formatRelative } from "@/lib/utils";
 import { DeviceDetailDialog } from "@/components/devices/device-detail";
 import { SIGNIN_SETTING_GROUPS, SigninSettingsGroup } from "@/components/devices/signin-limits-card";
@@ -61,12 +64,17 @@ export default function DevicesPage() {
   const [err, setErr] = useState<unknown>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
+  const [refreshFailed, setRefreshFailed] = useState(false);
 
   useEffect(() => { setPage(1); }, [q]);
   const latest = useRef(0);
+  const hasRows = useRef(false);
   const load = useCallback(async () => {
     const mine = ++latest.current;
     setErr(null);
+    setLoading(true);
     try {
       const needle = q.trim();
       const r = await api.get<{ data: ClientDeviceRow[]; meta: { has_more: boolean } }>(
@@ -75,18 +83,28 @@ export default function DevicesPage() {
       );
       if (mine !== latest.current) return;
       setRows(r?.data ?? []); setMore(!!r?.meta?.has_more);
+      setUpdatedAt(Date.now());
+      setRefreshFailed(false);
+      hasRows.current = true;
     } catch (e) {
       if (mine !== latest.current) return;
-      setErr(e); setRows([]);
+      if (hasRows.current) setRefreshFailed(true);
+      else setErr(e);
+    } finally {
+      if (mine === latest.current) setLoading(false);
     }
   }, [q, page]);
   useEffect(() => { void load(); }, [load]);
+  usePoll(() => load(), 30_000, { enabled: open === null && !settingsOpen && !err });
 
   return (
     <PageShell width="wide">
       <PageHeader
         title="Devices"
         description="Every device that has used the Wi-Fi, and the package places it holds."
+        meta={rows !== null ? (
+          <LiveStatus updatedAt={updatedAt} refreshing={loading} error={refreshFailed} onRefresh={() => void load()} intervalSeconds={30} />
+        ) : undefined}
         actions={maySeeSettings ? (
           <Button variant="secondary" onClick={() => setSettingsOpen(true)}>
             <Settings2 /> Device settings
@@ -120,12 +138,20 @@ export default function DevicesPage() {
           search={<SearchInput value={q} onChange={setQ} delay={300} placeholder="Search MAC, address or account…" label="Search devices" />}
           actions={<ResultsCount count={rows?.length} noun="device" more={more} />}
         />
-        <ErrorBanner err={err} className="mx-4 mt-3" />
-        {rows === null ? (
+        {err && rows === null ? (
+          <EmptyState
+            icon={<AlertTriangle />}
+            title="The devices could not be loaded"
+            hint={err instanceof Error ? err.message : undefined}
+            action={<Button variant="secondary" disabled={loading} onClick={() => void load()}><RefreshCw /> Try again</Button>}
+          />
+        ) : rows === null ? (
           <SkeletonRows rows={5} />
         ) : rows.length === 0 ? (
-          <EmptyState size="sm" icon={<Smartphone />} title={q ? "No device matches" : "No devices yet"} hint={q ? "Try part of the MAC address, the address or the account name." : "Devices appear here once they have used the Wi-Fi."} />
+          <EmptyState size="sm" icon={<Smartphone />} title={q ? "No device matches" : "No devices yet"} hint={q ? "Try part of the MAC address, the address or the account name." : "Devices appear here once they have used the Wi-Fi."}
+            action={q ? <Button variant="secondary" size="sm" onClick={() => setQ("")}>Clear search</Button> : undefined} />
         ) : (
+          <div className={cn(loading && refreshingClass)}>
           <Table label="Devices">
             <THead>
               <TR>
@@ -163,7 +189,6 @@ export default function DevicesPage() {
                         </Badge>
                       </div>
                     )}
-                    {/* The Last seen column needs the room of a 2xl screen; below it the time sits here. */}
                     {r.last_seen && (
                       <div className="mt-1 text-caption text-muted-foreground 2xl:hidden">Seen {formatRelative(r.last_seen)}</div>
                     )}
@@ -190,9 +215,11 @@ export default function DevicesPage() {
               })}
             </TBody>
           </Table>
+          </div>
         )}
         {rows && rows.length > 0 && (page > 1 || more) && (
           <CardFooter className="justify-end">
+            <span className="me-auto text-caption text-muted-foreground tabular" aria-live="polite">Page {page}</span>
             <Button size="sm" variant="secondary" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>Previous</Button>
             <Button size="sm" variant="secondary" disabled={!more} onClick={() => setPage((p) => p + 1)}>Next</Button>
           </CardFooter>
@@ -229,6 +256,7 @@ export default function DevicesPage() {
 function DeviceChangesSetting({ canEdit }: { canEdit: boolean }) {
   const toast = useToast();
   const [value, setValue] = useState<number | null>(null);
+  const [unavailable, setUnavailable] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -237,9 +265,13 @@ function DeviceChangesSetting({ canEdit }: { canEdit: boolean }) {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
+    setErr(null);
+    setUnavailable(null);
     try {
-      const r = await api.get<{ settings: DeviceSettings }>("/device-settings/");
-      setValue(r.settings.client_device_changes_per_day);
+      const r = await api.get<{ settings?: DeviceSettings; awaiting_assignment?: boolean; reason?: string }>("/device-settings/");
+      const v = r?.settings?.client_device_changes_per_day;
+      if (typeof v === "number") setValue(v);
+      else setUnavailable(r?.reason || "This appliance did not report the setting.");
     } catch (e) { setErr(e); }
   }, []);
   useEffect(() => { void load(); }, [load]);
@@ -257,7 +289,9 @@ function DeviceChangesSetting({ canEdit }: { canEdit: boolean }) {
   }
 
   const n = Number(draft);
-  const valid = Number.isInteger(n) && n >= 1 && n <= 10 && n !== value;
+  const inRange = draft.trim() !== "" && Number.isInteger(n) && n >= 1 && n <= 10;
+  const valid = inRange && n !== value;
+  const whyNot = !inRange ? "Enter a whole number from 1 to 10." : n === value ? "That is the current value." : null;
   return (
     <QuietHints>
       <div className="space-y-3" data-testid="device-changes-setting">
@@ -269,23 +303,33 @@ function DeviceChangesSetting({ canEdit }: { canEdit: boolean }) {
             </InfoHint>
           </div>
           <div className="flex items-center gap-2">
-            <Badge tone="neutral">{value === null ? "—" : `${value} per day`}</Badge>
-            {canEdit && !editing && (
+            {value !== null && <Badge tone="neutral">{`${value} per day`}</Badge>}
+            {canEdit && !editing && value !== null && (
               <Button size="sm" variant="secondary" onClick={() => { setDraft(String(value ?? 3)); setEditing(true); }}>Change</Button>
             )}
           </div>
         </div>
-        <ErrorBanner err={err} />
-        {editing && (
-          <div className="flex flex-wrap items-end gap-3">
-            <Field label="Changes per day" hint="1 to 10" className="w-40">
-              <Input type="number" min={1} max={10} value={draft} onChange={(e) => setDraft(e.target.value)} />
-            </Field>
-            <div className="ms-auto flex gap-2">
-              <Button size="sm" variant="secondary" disabled={busy} onClick={() => setEditing(false)}>Cancel</Button>
-              <Button size="sm" variant="primary" disabled={busy || !valid} onClick={() => { setSaveErr(null); setConfirming(true); }}>Save</Button>
-            </div>
+        {unavailable && <p className="text-caption text-muted-foreground">{unavailable}</p>}
+        {err !== null && (
+          <div className="flex flex-wrap items-center gap-2">
+            <ErrorBanner err={err} className="mb-0 flex-1" />
+            <Button size="sm" variant="secondary" onClick={() => void load()}><RefreshCw /> Try again</Button>
           </div>
+        )}
+        {editing && (
+          <form
+            className="flex flex-wrap items-end gap-3 animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none"
+            onSubmit={(e) => { e.preventDefault(); if (valid && !busy) { setSaveErr(null); setConfirming(true); } }}
+          >
+            <Field label="Changes per day" hint="1 to 10" className="w-40">
+              <Input type="number" min={1} max={10} value={draft} onChange={(e) => setDraft(e.target.value)} aria-describedby={whyNot ? "device-changes-why" : undefined} />
+            </Field>
+            <div className="ms-auto flex flex-wrap items-center justify-end gap-2">
+              {whyNot && <span id="device-changes-why" className="text-caption text-muted-foreground">{whyNot}</span>}
+              <Button type="button" size="sm" variant="secondary" disabled={busy} onClick={() => setEditing(false)}>Cancel</Button>
+              <Button type="submit" size="sm" variant="primary" disabled={busy || !valid}>Save</Button>
+            </div>
+          </form>
         )}
         <ConfirmDialog
           open={confirming}
