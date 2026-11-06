@@ -537,13 +537,16 @@ class Monitor:
             age_h = (self.now - last).total_seconds() / 3600
             self.add("lic:central", "central", CRIT if age_h > grace * 24 * 0.8 else WARN if age_h > 24 else PASS,
                      f"last licence validation with Central {age_h:.1f} h ago (offline grace {grace} days)")
-        cap = n(p.get("max_concurrent_online_guests"))
+# The effective cap as license.Document.EffectiveMaxConcurrentOnlineGuests reads it; zero or less is unlimited.
+        cap = n(p.get("max_concurrent_online_guests")) or n((p.get("limits") or {}).get("max_concurrent_guest_sessions"))
         online = self.m.get("online")
-        if cap and online is not None:
+        if cap <= 0:
+            self.add("lic:capacity", "licensing", PASS, "licence has no online-guest limit")
+        elif online is None:
+            self.add("lic:capacity", "licensing", NV, f"online count unknown (licence allows {cap})")
+        else:
             pct = 100 * online / cap
             self.add("lic:capacity", "licensing", CRIT if pct >= 100 else WARN if pct > 85 else PASS, f"{online} of {cap} licensed online guests")
-        else:
-            self.add("lic:capacity", "licensing", NV, "licensed capacity or online count unknown")
         self.m["licence_days"] = days
 
     def check_certs(self, state):

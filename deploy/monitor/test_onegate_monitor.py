@@ -142,6 +142,20 @@ class Thresholds(unittest.TestCase):
         f.files["/etc/stayconnect/license/revoked.json"] = '["L0"]'
         self.assertEqual(by_key(run(f))["lic:valid"].status, om.PASS)
 
+    def test_licence_capacity_uses_the_legacy_cap_and_treats_none_as_unlimited(self):
+        def cap(payload, online=95):
+            f = FakeSys()
+            p = {"license_id": "L1", "status": "active", "valid_until": "2027-12-01T23:59:59Z", "offline_grace_days": 7, **payload}
+            f.files["/etc/stayconnect/license/current.json"] = json.dumps({"payload": json.dumps(p)})
+            f.files["/etc/stayconnect/license/state.json"] = json.dumps({"last_cloud_validation": "2026-11-06T09:00:00Z"})
+            mon = om.Monitor(f, "quick")
+            mon.m["online"] = online
+            mon.check_licence({})
+            return by_key(mon)["lic:capacity"].status
+        self.assertEqual(cap({"limits": {"max_concurrent_guest_sessions": 100}}), om.WARN)
+        self.assertEqual(cap({"max_concurrent_online_guests": 0, "limits": {}}), om.PASS)
+        self.assertEqual(cap({"max_concurrent_online_guests": 100}, online=100), om.CRIT)
+
     def test_unreadable_disks_are_unverified_not_zero(self):
         f = FakeSys()
         f.files.update({"/proc/stat": "cpu 100 0 100 800 0 0 0 0\n", "/proc/meminfo": "MemAvailable: 4000000 kB\n", "/proc/loadavg": "0.5 0.4 0.3 1/200 1\n"})
