@@ -3,7 +3,7 @@
 import { ImpactPanel } from "@/components/network/impact-panel";
 import { useEffect, useState } from "react";
 import { Layers, Plus, Rocket, X } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import {
   CHANGE_VERB, FactoryInfo, GROUP_LABEL, PORT_MODE_LABEL, PortInfo, PortModePlan, PortNetwork, StagedGroup,
 } from "@/lib/api/network-lifecycle";
@@ -14,20 +14,29 @@ import { DialogForm } from "@/components/ui/dialog";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { Checkbox, Field, Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
-import { errMsg } from "@/lib/utils";
+import { netErrorWords } from "@/components/network/shared";
 
-/** The prepared Access network: shown until it is activated, never as if it were already serving. */
-export function FactoryNetworkCard({ writable, onStaged }: { writable: boolean; onStaged: () => void }) {
+const FADE = "animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none";
+
+export type LoadReport = (ok: boolean) => void;
+
+function absent(e: unknown): boolean {
+  return e instanceof ApiError && e.status === 404;
+}
+
+export function FactoryNetworkCard({ writable, onStaged, onLoaded }: { writable: boolean; onStaged: () => void; onLoaded?: LoadReport }) {
   const [info, setInfo] = useState<FactoryInfo | null>(null);
   const [open, setOpen] = useState(false);
   const [ack, setAck] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<unknown>(null);
+  const [err, setErr] = useState<string | null>(null);
   const toast = useToast();
 
   useEffect(() => {
-    api.get<FactoryInfo>("/network/factory").then(setInfo).catch(() => setInfo(null));
-  }, []);
+    api.get<FactoryInfo>("/network/factory")
+      .then((r) => { setInfo(r); onLoaded?.(true); })
+      .catch((e) => { setInfo(null); onLoaded?.(absent(e)); });
+  }, [onLoaded]);
 
   if (!info || !["prepared", "blocked", "awaiting_assignment", "lan_unknown"].includes(info.state)) return null;
   const t = info.template;
@@ -42,7 +51,7 @@ export function FactoryNetworkCard({ writable, onStaged }: { writable: boolean; 
       onStaged();
       setInfo({ ...info!, state: "staged" });
     } catch (e) {
-      setErr(e);
+      setErr(netErrorWords(e));
     } finally {
       setBusy(false);
     }
@@ -95,16 +104,17 @@ export function FactoryNetworkCard({ writable, onStaged }: { writable: boolean; 
   );
 }
 
-/** Operations staged together (a port conversion, an activation) and waiting to be applied; one can be cancelled until it is applied. */
-export function StagedChangesList({ writable, reloadKey, onCancelled }: { writable: boolean; reloadKey: number; onCancelled: () => void }) {
+export function StagedChangesList({ writable, reloadKey, onCancelled, onLoaded }: { writable: boolean; reloadKey: number; onCancelled: () => void; onLoaded?: LoadReport }) {
   const [groups, setGroups] = useState<StagedGroup[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState<string | null>(null);
   const toast = useToast();
 
   useEffect(() => {
-    api.get<{ groups: StagedGroup[] }>("/network/changes").then((r) => setGroups(r.groups ?? [])).catch(() => setGroups([]));
-  }, [reloadKey]);
+    api.get<{ groups: StagedGroup[] }>("/network/changes")
+      .then((r) => { setGroups(r.groups ?? []); onLoaded?.(true); })
+      .catch((e) => { setGroups([]); onLoaded?.(absent(e)); });
+  }, [reloadKey, onLoaded]);
 
   if (groups.length === 0) return null;
 
@@ -117,21 +127,21 @@ export function StagedChangesList({ writable, reloadKey, onCancelled }: { writab
       toast.success(`${GROUP_LABEL[g.group_kind]} cancelled`, "Nothing had been applied.");
       onCancelled();
     } catch (e) {
-      setErr(errMsg(e));
+      setErr(netErrorWords(e));
     } finally {
       setCancelling(null);
     }
   }
 
   return (
-    <SectionCard title="Staged changes" description="Waiting to be applied. Nothing here is live yet: the networks stay as they are until you press Apply changes and keep the change.">
+    <SectionCard className={FADE} title="Staged changes" description="Waiting to be applied. Nothing here is live yet: the networks stay as they are until you press Apply changes and keep the change.">
       <ErrorBanner err={err} className="mb-3" />
       <ul className="space-y-2">
         {groups.map((g) => (
           <li key={g.group_id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
             <span className="min-w-0 flex-1">
               <strong>{GROUP_LABEL[g.group_kind]}</strong>:{" "}
-              {g.changes.map((c) => `${CHANGE_VERB[c.kind]} ${c.network || c.network_id}`).join("; ")}
+              {g.changes.map((c) => `${CHANGE_VERB[c.kind]} ${c.network || "an unnamed client network"}`).join("; ")}
             </span>
             <span className="flex items-center gap-2">
               {g.state === "PENDING" && <Badge tone="warn">Not applied yet</Badge>}
@@ -157,14 +167,13 @@ export function StagedChangesList({ writable, reloadKey, onCancelled }: { writab
 
 type VlanRow = { vlan: string; name: string };
 
-/** One sentence on what the port carries; a native network and tagged VLANs on one trunk is an ordinary, supported arrangement. */
 export function portSummary(p: PortInfo): string {
   const tagged = p.vlans.length;
   if (p.mode === "trunk" && p.native) {
     return `Trunk: carries the untagged (native) network ${p.native.name} and ${tagged} tagged VLAN${tagged === 1 ? "" : "s"} side by side. They stay separate networks.`;
   }
   if (p.mode === "trunk") return `Trunk: carries ${tagged} tagged VLAN${tagged === 1 ? "" : "s"} and no untagged network.`;
-  if (p.mode === "access") return `Access: carries one untagged network, ${p.native?.name ?? "—"}. Adding VLANs makes it a trunk and keeps this network as the native one.`;
+  if (p.mode === "access") return `Access: carries one untagged network, ${p.native?.name ?? "with no name"}. Adding VLANs makes it a trunk and keeps this network as the native one.`;
   return "No network on this port is serving clients.";
 }
 
@@ -175,24 +184,33 @@ function PortNetworkLine({ n, how, state }: { n: PortNetwork; how: string; state
       <span className={state === "off" ? "text-muted-foreground" : "font-medium"}>{n.name}</span>
       {state === "off" && <Badge tone="neutral" size="sm">Switched off</Badge>}
       <span className="font-mono text-xs text-muted-foreground">{n.subnet_cidr}</span>
-      {state === "serving" && <span className="text-xs text-muted-foreground">{n.active_clients} connected</span>}
+      {state === "serving" && <span className="text-xs text-muted-foreground">{n.active_clients.toLocaleString()} connected</span>}
     </li>
   );
 }
 
-/** Access / Trunk per port, with a previewed, staged, atomic conversion. */
-export function PortModeCard({ writable, reloadKey, onStaged }: { writable: boolean; reloadKey: number; onStaged: () => void }) {
+function vlanBad(v: string): boolean {
+  const t = v.trim();
+  if (t === "") return false;
+  if (!/^\d+$/.test(t)) return true;
+  const n = Number(t);
+  return n < 1 || n > 4094;
+}
+
+export function PortModeCard({ writable, reloadKey, onStaged, onLoaded }: { writable: boolean; reloadKey: number; onStaged: () => void; onLoaded?: LoadReport }) {
   const [ports, setPorts] = useState<PortInfo[]>([]);
   const [target, setTarget] = useState<{ port: PortInfo; mode: "trunk" | "access" } | null>(null);
   const [rows, setRows] = useState<VlanRow[]>([{ vlan: "", name: "" }]);
   const [plan, setPlan] = useState<PortModePlan | null>(null);
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<unknown>(null);
+  const [err, setErr] = useState<string | null>(null);
   const toast = useToast();
 
   useEffect(() => {
-    api.get<{ ports: PortInfo[] }>("/network/ports").then((r) => setPorts((r.ports ?? []).filter((p) => !p.protected))).catch(() => setPorts([]));
-  }, [reloadKey]);
+    api.get<{ ports: PortInfo[] }>("/network/ports")
+      .then((r) => { setPorts((r.ports ?? []).filter((p) => !p.protected)); onLoaded?.(true); })
+      .catch((e) => { setPorts([]); onLoaded?.(absent(e)); });
+  }, [reloadKey, onLoaded]);
 
   if (ports.length === 0) return null;
 
@@ -213,7 +231,7 @@ export function PortModeCard({ writable, reloadKey, onStaged }: { writable: bool
       setPlan(await api.post<PortModePlan>(`/network/ports/${target!.port.name}/mode`, body(true)));
     } catch (e) {
       setPlan(null);
-      setErr(e);
+      setErr(netErrorWords(e));
     } finally {
       setBusy(false);
     }
@@ -229,11 +247,14 @@ export function PortModeCard({ writable, reloadKey, onStaged }: { writable: bool
       setPlan(null);
       onStaged();
     } catch (e) {
-      setErr(e);
+      setErr(netErrorWords(e));
     } finally {
       setBusy(false);
     }
   }
+
+  const anyBad = rows.some((r) => vlanBad(r.vlan));
+  const noVlan = rows.every((r) => r.vlan.trim() === "");
 
   function open(port: PortInfo, mode: "trunk" | "access") {
     setTarget({ port, mode });
@@ -281,16 +302,16 @@ export function PortModeCard({ writable, reloadKey, onStaged }: { writable: bool
         submitLabel={plan ? "Stage this change" : "Preview"}
         busy={busy}
         error={err}
-        disabled={plan ? plan.conflicts.length > 0 : target?.mode === "trunk" && rows.every((r) => r.vlan.trim() === "")}
-        disabledReason={plan ? "Resolve the conflicts first." : "Give at least one VLAN id."}
+        disabled={plan ? plan.conflicts.length > 0 : target?.mode === "trunk" && (noVlan || anyBad)}
+        disabledReason={plan ? "Resolve the conflicts first." : anyBad ? "A VLAN ID is a whole number from 1 to 4094." : "Give at least one VLAN ID."}
         onSubmit={() => (plan ? stage() : show())}
       >
         {target?.mode === "trunk" && (
           <div className="space-y-2">
             {rows.map((r, i) => (
               <div key={i} className="grid grid-cols-[7rem_1fr_auto] items-end gap-2">
-                <Field label={i === 0 ? "VLAN id" : undefined}>
-                  <Input inputMode="numeric" value={r.vlan} aria-label={`VLAN id ${i + 1}`}
+                <Field label={i === 0 ? "VLAN ID" : undefined} error={vlanBad(r.vlan) ? "1 to 4094" : undefined}>
+                  <Input inputMode="numeric" value={r.vlan} aria-label={`VLAN ID ${i + 1}`} aria-invalid={vlanBad(r.vlan) || undefined}
                     onChange={(e) => { setPlan(null); setRows(rows.map((x, j) => (j === i ? { ...x, vlan: e.target.value } : x))); }} />
                 </Field>
                 <Field label={i === 0 ? "Name" : undefined} optional={i === 0}>
@@ -313,7 +334,7 @@ export function PortModeCard({ writable, reloadKey, onStaged }: { writable: bool
           </div>
         )}
         {plan && (
-          <div className="space-y-3 text-sm">
+          <div className={`space-y-3 text-sm ${FADE}`}>
             {plan.conflicts.length > 0 && (
               <Callout tone="warning" title="Conflicts">
                 <ul className="list-disc space-y-1 ps-5">{plan.conflicts.map((c) => <li key={c}>{c}</li>)}</ul>
@@ -323,14 +344,14 @@ export function PortModeCard({ writable, reloadKey, onStaged }: { writable: bool
               <div>
                 <strong>Networks that would be created (switched on when applied)</strong>
                 <ul className="list-disc ps-5">
-                  {plan.create.map((c) => <li key={c.vlan_id}>VLAN {c.vlan_id} “{c.name}” — <span className="font-mono">{c.subnet_cidr}</span>, gateway <span className="font-mono">{c.gateway_ip}</span></li>)}
+                  {plan.create.map((c) => <li key={c.vlan_id}>VLAN {c.vlan_id} “{c.name}”: <span className="font-mono">{c.subnet_cidr}</span>, gateway <span className="font-mono">{c.gateway_ip}</span></li>)}
                 </ul>
               </div>
             )}
             {plan.switch_off.length > 0 && (
               <div>
                 <strong>Networks that would be switched off</strong>
-                <ul className="list-disc ps-5">{plan.switch_off.map((n) => <li key={n.id}>{n.name} (VLAN {n.vlan_id}) — {n.active_clients} connected</li>)}</ul>
+                <ul className="list-disc ps-5">{plan.switch_off.map((n) => <li key={n.id}>{n.name} (VLAN {n.vlan_id}), {n.active_clients.toLocaleString()} connected</li>)}</ul>
               </div>
             )}
             <div>

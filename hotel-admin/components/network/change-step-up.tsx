@@ -1,22 +1,18 @@
 "use client";
 
-// Applying, keeping, and rolling back client-network changes are confirmed in one popup. Where the console does not
-// run confirm-only, the password field is shown and the server verifies it.
-
 import * as React from "react";
 import { ConfirmDialog } from "@/components/ui/dialog";
-import { errMsg } from "@/lib/utils";
+import { netErrorWords } from "@/components/network/shared";
 
 export type NetworkChangeKind = "apply" | "confirm" | "rollback";
 
-/** Keep the dialog open when password step-up is refused; no change was made. */
 export function isReauth(e: unknown): boolean {
   const x = e as { status?: number; code?: string; body?: { error?: string } } | null;
   return !!x && x.status === 401 && (x.code === "reauth_required" || x.body?.error === "reauth_required");
 }
 
 function stepUpMessage(e: unknown, password: string): string {
-  if (!isReauth(e)) return errMsg(e);
+  if (!isReauth(e)) return netErrorWords(e, true);
   return password
     ? "That password is not correct. Nothing was changed."
     : "The appliance refused the confirmation; sign in again and retry. Nothing was changed.";
