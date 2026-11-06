@@ -90,6 +90,11 @@ const RESULT_WORDS: Record<string, { tone: "ok" | "warn" | "err" | "info" | "neu
     meaning:
       "The departed guest's details were right, but After Check-out Access continues only on devices the stay used before check-out, and this was another device. The guest was told to use one of those devices.",
   },
+  ADDRESS_CONFLICT: {
+    tone: "warn",
+    meaning:
+      "The device was still using a network address the DHCP server had since given to another device, so it could not be connected. Nothing about the room was checked; the guest was asked to turn Wi-Fi off and on again, which gives the device a valid address.",
+  },
 };
 
 const RESULT_LABELS: Record<string, string> = {
@@ -109,9 +114,12 @@ const RESULT_LABELS: Record<string, string> = {
   LICENSE_CAPACITY_REACHED: "Licensed capacity full",
   DEVICE_LIMIT_REACHED: "Device limit reached",
   AFTER_CHECKOUT_NEW_DEVICE_REJECTED: "New device after check-out",
+  ADDRESS_CONFLICT: "Old network address",
 };
 
 const resultLabel = (code: string, serverLabel?: string) => RESULT_LABELS[code] ?? serverLabel ?? "Result not recognised";
+const attemptLabel = (a: { result: string; result_label?: string; no_package_taken?: boolean }) =>
+  a.no_package_taken ? "Verified, but no package was taken" : resultLabel(a.result, a.result_label);
 
 const RESULT_FILTERS = [
   { value: "", label: "Every result" },
@@ -411,9 +419,9 @@ export default function GuestSignInAttemptsPage() {
                     <TD nowrap className="font-medium">{a.room || <span className="font-normal text-muted-foreground">Not given</span>}</TD>
                     <TD truncate muted title={a.guest_network || undefined} className="hidden max-w-[12rem] md:table-cell">{a.guest_network || "Not known"}</TD>
                     <TD nowrap>
-                      <StatusBadge tone={tone(a.result)}>{a.succeeded ? "Connected" : "Refused"}</StatusBadge>
+                      <StatusBadge tone={a.no_package_taken ? "neutral" : tone(a.result)}>{a.no_package_taken ? "No package taken" : a.succeeded ? "Connected" : "Refused"}</StatusBadge>
                     </TD>
-                    <TD className="hidden lg:table-cell">{resultLabel(a.result, a.result_label)}</TD>
+                    <TD className="hidden lg:table-cell">{attemptLabel(a)}</TD>
                     <TD nowrap muted className="hidden xl:table-cell">{KIND_WORDS[a.verifier_kind] ?? "Could not tell"}</TD>
                     <TD numeric muted className="hidden xl:table-cell">{mirrorAge(a.mirror_age_seconds)}</TD>
                     <TD className="hidden whitespace-nowrap text-xs text-muted-foreground lg:table-cell">
@@ -513,14 +521,16 @@ export default function GuestSignInAttemptsPage() {
         width="lg"
         eyebrow="Sign-in attempt"
         title={detail?.room ? `Room ${detail.room}` : "Sign-in attempt"}
-        description={detail ? resultLabel(detail.result, detail.result_label) : undefined}
-        badges={detail ? <StatusBadge tone={tone(detail.result)}>{detail.succeeded ? "Connected" : "Refused"}</StatusBadge> : undefined}
+        description={detail ? attemptLabel(detail) : undefined}
+        badges={detail ? <StatusBadge tone={detail.no_package_taken ? "neutral" : tone(detail.result)}>{detail.no_package_taken ? "No package taken" : detail.succeeded ? "Connected" : "Refused"}</StatusBadge> : undefined}
       >
         {detail && (
           <>
             <Callout tone={tone(detail.result) === "ok" ? "success" : tone(detail.result) === "err" ? "danger" : "warning"}
-              title={resultLabel(detail.result, detail.result_label)}>
-              {RESULT_WORDS[detail.result]?.meaning ?? "No further explanation is recorded for this result."}
+              title={attemptLabel(detail)}>
+              {detail.no_package_taken
+                ? "The guest's details were right and the stay was found, but no package was taken: the guest left at the package choice (often when only paid packages were left). Nothing was granted."
+                : RESULT_WORDS[detail.result]?.meaning ?? "No further explanation is recorded for this result."}
               {!RESULT_LABELS[detail.result] && (
                 <span className="mt-1 block text-xs">For support: result <span className="font-mono">{detail.result}</span></span>
               )}

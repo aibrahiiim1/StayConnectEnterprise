@@ -1,8 +1,5 @@
 "use client";
 
-// Restoring saves the earlier design again as a new entry, so history stays truthful. It asks for the operator's
-// password because it can change custom CSS and HTML as much as any save.
-
 import { useState } from "react";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -17,7 +14,6 @@ import { formatDate, formatRelative } from "@/lib/utils";
 import { RotateCcw } from "lucide-react";
 import { restoreRevision, type RevisionSummary } from "@/lib/api/portal-design";
 
-/** The only note the server writes itself is the restore marker. */
 function describe(note?: string) {
   const m = note?.match(/^rolled back to version (\d+)$/);
   if (m) return `Restored save #${m[1]}`;
@@ -91,8 +87,8 @@ export function HistorySection({ revisions, writable, dirty, onRestored, profile
           <DetailsSection title="Record">
             <DescriptionList items={[
               { label: "Saved", value: formatDate(open.published_at) },
-              { label: "Saved by", value: open.published_by || "—" },
-              { label: "Note", value: describe(open.note) || "—" },
+              { label: "Saved by", value: open.published_by || "Not recorded" },
+              { label: "Note", value: describe(open.note) || "None" },
             ]} />
           </DetailsSection>
         )}

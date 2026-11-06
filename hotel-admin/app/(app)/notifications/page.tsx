@@ -1,13 +1,13 @@
 "use client";
 
-// A blank secret on Edit keeps the stored one.
-
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api, ListResp, NotificationProvider, NotificationTestResult } from "@/lib/api";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { Card } from "@/components/ui/card";
 import { RowActions } from "@/components/ui/row-actions";
+import { DescriptionList } from "@/components/ui/data";
+import { DetailsDrawer, DetailsSection } from "@/components/ui/details-drawer";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input, Field, Select, QuietHints } from "@/components/ui/input";
@@ -17,11 +17,11 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { DialogForm, ConfirmDialog } from "@/components/ui/dialog";
 import { Switch, SkeletonRows } from "@/components/ui/misc";
-import { Plus, Send } from "lucide-react";
+import { Plus, Send, AlertTriangle, RefreshCw, Pencil } from "lucide-react";
 import { canWrite } from "@/lib/roles";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
-import { formatRelative } from "@/lib/utils";
+import { cn, formatRelative } from "@/lib/utils";
 import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
 import { useOperatorRoles } from "@/lib/whoami-context";
 
@@ -52,12 +52,23 @@ const IMPLIED_PORT: Record<Security, string> = { starttls: "587", tls: "465", no
 const SMTP_TIMEOUT_DEFAULT = 10;
 const SMTP_TIMEOUT_MIN = 1;
 const SMTP_TIMEOUT_MAX = 120;
+const FADE = "animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none";
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHONE_RE = /^\+[1-9]\d{6,14}$/;
+const SECURITY_WORDS: Record<Security, string> = { starttls: "STARTTLS", tls: "TLS", none: "None (internal relay)" };
 
-function health(n: NotificationProvider): { tone: "ok" | "err" | "default"; label: string; detail?: string } {
+const phoneDigits = (v: string) => v.replace(/[\s().-]/g, "");
+const wholeIn = (v: string, min: number, max: number) => {
+  const n = Number(v);
+  return /^\d+$/.test(v.trim()) && n >= min && n <= max;
+};
+
+function health(n: NotificationProvider): { tone: "ok" | "err" | "warn" | "default"; label: string; detail?: string } {
+  if (n.kind === "stub") return { tone: "warn", label: "Test only: clients get nothing" };
   if (n.last_error_at && (!n.last_success_at || n.last_error_at > n.last_success_at)) {
     return { tone: "err", label: "Failing", detail: n.last_error ?? undefined };
   }
-  if (n.last_success_at) return { tone: "ok", label: "Sending" };
+  if (n.last_success_at) return { tone: "ok", label: "Working" };
   return { tone: "default", label: "Not tested yet" };
 }
 
@@ -86,7 +97,6 @@ const EMPTY: FormState = {
   host: "", port: "", security: "starttls", username: "", timeout_seconds: "", enabled: true,
 };
 
-// Non-secret settings in `extra`; an empty value removes one.
 function extraOf(f: FormState): Record<string, string> | undefined {
   if (f.channel === "whatsapp") {
     return { template_name: f.template_name.trim(), language: f.language.trim(), content_sid: f.content_sid.trim() };
@@ -105,14 +115,17 @@ export default function NotificationsPage() {
   const [rows, setRows] = useState<NotificationProvider[] | null>(null);
   const roles = useOperatorRoles();
   const [err, setErr] = useState<unknown>(null);
+  const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
-  // Save asks once, without a password (Product Owner, 2026-11-04); removing a sender still asks for it.
   const [confirming, setConfirming] = useState(false);
   const [formErr, setFormErr] = useState<unknown>(null);
+  const [attempted, setAttempted] = useState(false);
 
   const [mode, setMode] = useState<"closed" | "new" | "edit">("closed");
   const [editing, setEditing] = useState<NotificationProvider | null>(null);
+  const [viewing, setViewing] = useState<NotificationProvider | null>(null);
   const [f, setF] = useState<FormState>(EMPTY);
+  const [initial, setInitial] = useState<FormState>(EMPTY);
   const [deleting, setDeleting] = useState<NotificationProvider | null>(null);
 
   const [testing, setTesting] = useState<NotificationProvider | null>(null);
@@ -126,21 +139,32 @@ export default function NotificationsPage() {
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setF((p) => ({ ...p, [k]: v }));
 
   async function load() {
-    try { setRows((await api.get<ListResp<NotificationProvider>>("/notification-providers")).data); }
-    catch (e) { setErr(e); }
+    setLoading(true);
+    try {
+      setRows((await api.get<ListResp<NotificationProvider>>("/notification-providers")).data ?? []);
+      setErr(null);
+    } catch (e) {
+      setErr(e);
+    } finally {
+      setLoading(false);
+    }
   }
   useEffect(() => {
-    load();
+    void load();
   }, []);
 
+  function begin(next: FormState) {
+    setF(next); setInitial(next); setFormErr(null); setAttempted(false);
+  }
   function openNew() {
     const first = channels[0] ?? "email";
-    setF({ ...EMPTY, channel: first, kind: KINDS[first][1] ?? KINDS[first][0] });
-    setEditing(null); setFormErr(null); setMode("new");
+    begin({ ...EMPTY, channel: first, kind: KINDS[first][1] ?? KINDS[first][0] });
+    setEditing(null); setMode("new");
   }
   function openEdit(n: NotificationProvider) {
     const sec = n.extra?.security;
-    setF({
+    setViewing(null);
+    begin({
       channel: n.channel,
       kind: n.kind,
       display_name: n.display_name ?? "",
@@ -158,7 +182,7 @@ export default function NotificationsPage() {
       timeout_seconds: n.extra?.timeout_seconds !== undefined && n.extra?.timeout_seconds !== null ? String(n.extra.timeout_seconds) : "",
       enabled: n.enabled,
     });
-    setEditing(n); setFormErr(null); setMode("edit");
+    setEditing(n); setMode("edit");
   }
 
   async function onSubmit() {
@@ -223,7 +247,12 @@ export default function NotificationsPage() {
   }
 
   function setChannel(channel: Channel) {
-    setF((p) => ({ ...p, channel, kind: KINDS[channel][1] ?? KINDS[channel][0] }));
+    setF((p) => ({ ...EMPTY, display_name: p.display_name, enabled: p.enabled, channel, kind: KINDS[channel][1] ?? KINDS[channel][0] }));
+    setAttempted(false);
+  }
+  function setKind(kind: string) {
+    setF((p) => ({ ...EMPTY, display_name: p.display_name, enabled: p.enabled, channel: p.channel, kind }));
+    setAttempted(false);
   }
 
   const secretLabel =
@@ -232,6 +261,51 @@ export default function NotificationsPage() {
         : f.kind === "twilio_whatsapp" || f.kind === "twilio" ? "Auth token"
           : "API key";
   const testIsEmail = testing?.channel === "email";
+  const testToErr = testTo.trim() === "" ? undefined
+    : testIsEmail ? (EMAIL_RE.test(testTo.trim()) ? undefined : "Enter an email address such as you@example.com.")
+      : (PHONE_RE.test(phoneDigits(testTo)) ? undefined : "Enter the number with its country code, for example +20 100 000 0000.");
+
+  const needsSecret = mode === "new" && f.kind !== "stub" && f.kind !== "smtp";
+  const fieldErr = useMemo(() => {
+    const e: Partial<Record<"secret" | "host" | "port" | "timeout" | "from" | "number", string>> = {};
+    if (needsSecret && f.api_key === "" && attempted) e.secret = `Enter the ${secretLabel.toLowerCase()} from the service's console.`;
+    if (f.kind === "smtp") {
+      if (f.host.trim() === "" && attempted) e.host = "Enter the mail server's host name or address.";
+      if (mode === "new" && f.username.trim() !== "" && f.api_key === "" && attempted) e.secret = "A username needs the mail server's password.";
+      if (f.port.trim() !== "" && !wholeIn(f.port, 1, 65535)) e.port = "Enter a whole number from 1 to 65535, or leave it blank.";
+      if (f.timeout_seconds.trim() !== "" && !wholeIn(f.timeout_seconds, SMTP_TIMEOUT_MIN, SMTP_TIMEOUT_MAX)) {
+        e.timeout = `Enter a whole number of seconds from ${SMTP_TIMEOUT_MIN} to ${SMTP_TIMEOUT_MAX}, or leave it blank.`;
+      }
+    }
+    if (f.channel === "email" && f.from_address.trim() !== "" && !EMAIL_RE.test(f.from_address.trim())) {
+      e.from = "Enter an email address such as noreply@example.com.";
+    }
+    if (f.kind === "twilio_whatsapp" && f.from_address.trim() !== "" && !PHONE_RE.test(phoneDigits(f.from_address))) {
+      e.number = "Enter the number with its country code, for example +14155238886.";
+    }
+    return e;
+  }, [f, attempted, mode, needsSecret, secretLabel]);
+  const dirty = useMemo(() => JSON.stringify(f) !== JSON.stringify(initial), [f, initial]);
+
+  function requestSave() {
+    setFormErr(null);
+    const missing =
+      (needsSecret && f.api_key === "") ||
+      (f.kind === "smtp" && (f.host.trim() === "" || (mode === "new" && f.username.trim() !== "" && f.api_key === "")));
+    if (missing || Object.keys(fieldErr).length > 0) {
+      setAttempted(true);
+      requestAnimationFrame(() => {
+        const el = document.querySelector<HTMLElement>('[role="dialog"] [aria-invalid="true"]');
+        el?.scrollIntoView?.({ block: "center" });
+        el?.focus();
+      });
+      return;
+    }
+    setConfirming(true);
+  }
+
+  const loadFailed = rows === null && err !== null;
+  const nameOf = (n: NotificationProvider) => n.display_name || CHANNEL_LABELS[n.channel] || n.channel;
 
   return (
     <PageShell>
@@ -267,11 +341,22 @@ export default function NotificationsPage() {
       />
 
       {roles !== null && !writable && <ReadOnlyNotice>Your role can see the senders but not change them.</ReadOnlyNotice>}
-      <ErrorBanner err={err} className="mb-0" />
+      {rows !== null && <ErrorBanner err={err} className="mb-0" />}
 
       <Card className="overflow-hidden">
           {rows === null ? (
-            <SkeletonRows rows={3} cols={5} />
+            loadFailed ? (
+              <EmptyState
+                icon={<AlertTriangle />}
+                title="Senders could not be loaded"
+                hint="The appliance did not return its senders. Nothing has been changed."
+                action={
+                  <Button variant="secondary" disabled={loading} onClick={() => void load()}>
+                    <RefreshCw className={cn(loading && "animate-spin motion-reduce:animate-none")} /> Try again
+                  </Button>
+                }
+              />
+            ) : <SkeletonRows rows={3} cols={5} />
           ) : rows.length === 0 ? (
             <EmptyState
               size="sm"
@@ -294,7 +379,7 @@ export default function NotificationsPage() {
                 {rows.map((n) => {
                   const h = health(n);
                   return (
-                    <TR key={n.id} onClick={writable ? () => openEdit(n) : undefined}>
+                    <TR key={n.id} onClick={() => (writable ? openEdit(n) : setViewing(n))}>
                       <TD nowrap className="max-w-[16rem]">
                         <div className="truncate font-medium" title={n.display_name || undefined}>{n.display_name || CHANNEL_LABELS[n.channel] || n.channel}</div>
                         <div className="text-xs text-muted-foreground">
@@ -308,36 +393,37 @@ export default function NotificationsPage() {
                         )}
                       </TD>
                       <TD muted className="hidden max-w-[14rem] truncate text-xs lg:table-cell">
-                        {n.from_address || n.api_user || "—"}
+                        {n.from_address || n.api_user || "Not set"}
                         {n.from_name && <div>{n.from_name}</div>}
                       </TD>
                       <TD>
                         <StatusBadge tone={h.tone}>{h.label}</StatusBadge>
-                        {n.last_success_at && (
+                        {n.last_success_at && n.kind !== "stub" && (
                           <div className="mt-0.5 text-2xs text-muted-foreground">
                             Last delivered {formatRelative(n.last_success_at)}
                           </div>
                         )}
                         {h.detail && (
                           <div className="mt-0.5 max-w-xs truncate text-2xs text-destructive" title={h.detail}>
-                            Last error: {h.detail}{n.last_error_at ? ` at ${formatRelative(n.last_error_at)}` : ""}
+                            {n.last_error_at ? `Last error ${formatRelative(n.last_error_at)}: ${h.detail}` : `Last error: ${h.detail}`}
                           </div>
                         )}
                       </TD>
                       <TD nowrap>
-                        {n.enabled ? <Badge tone="ok">Active</Badge> : <Badge tone="default">Off</Badge>}
+                        {n.enabled ? <Badge tone="ok">On</Badge> : <Badge tone="default">Off</Badge>}
                       </TD>
                       <TD className="w-0">
-                        {writable && (
-                          <RowActions
-                            subject={n.display_name || CHANNEL_LABELS[n.channel] || n.channel}
-                            primary={{ label: "Edit", onSelect: () => openEdit(n) }}
-                            items={[
-                              { label: "Send a test message", icon: <Send />, onSelect: () => openTest(n) },
-                              { label: "Remove…", danger: true, onSelect: () => { setFormErr(null); setDeleting(n); } },
-                            ]}
-                          />
-                        )}
+                        <RowActions
+                          subject={nameOf(n)}
+                          primary={writable
+                            ? { label: "Edit", onSelect: () => openEdit(n) }
+                            : { label: "Details", onSelect: () => setViewing(n) }}
+                          items={writable ? [
+                            { label: "Details", onSelect: () => setViewing(n) },
+                            { label: "Send a test message", icon: <Send />, onSelect: () => openTest(n) },
+                            { label: "Remove…", danger: true, onSelect: () => { setFormErr(null); setDeleting(n); } },
+                          ] : undefined}
+                        />
                       </TD>
                     </TR>
                   );
@@ -347,6 +433,61 @@ export default function NotificationsPage() {
           )}
       </Card>
 
+      <DetailsDrawer
+        open={viewing !== null}
+        onOpenChange={(v) => !v && setViewing(null)}
+        eyebrow="Sender"
+        title={viewing ? nameOf(viewing) : ""}
+        badges={viewing ? (
+          <>
+            {viewing.enabled ? <Badge tone="ok">On</Badge> : <Badge tone="default">Off</Badge>}
+            <StatusBadge tone={health(viewing).tone}>{health(viewing).label}</StatusBadge>
+          </>
+        ) : undefined}
+        actions={writable && viewing ? <Button onClick={() => openEdit(viewing)}><Pencil /> Edit</Button> : undefined}
+      >
+        {viewing && (
+          <>
+            <DetailsSection title="Service">
+              <DescriptionList items={[
+                { label: "Channel", value: CHANNEL_LABELS[viewing.channel] ?? viewing.channel },
+                { label: "Service", value: KIND_LABELS[viewing.kind] ?? viewing.kind },
+                ...(viewing.kind === "smtp" ? [
+                  { label: "Mail server", value: <span className="break-all font-mono text-xs">{viewing.extra?.host || "Not set"}</span> },
+                  { label: "Security", value: SECURITY_WORDS[(viewing.extra?.security as Security) ?? "starttls"] ?? "STARTTLS" },
+                  { label: "Port", value: viewing.extra?.port || `Usual (${IMPLIED_PORT[(viewing.extra?.security as Security) ?? "starttls"] ?? "587"})` },
+                  { label: "Username", value: viewing.extra?.username || "No login" },
+                  { label: "Timeout", value: `${viewing.extra?.timeout_seconds || SMTP_TIMEOUT_DEFAULT} seconds` },
+                ] : []),
+                ...(viewing.api_user ? [{
+                  label: viewing.kind === "meta_whatsapp" ? "Phone number ID" : viewing.channel === "email" ? "API user" : "Account SID",
+                  value: <span className="break-all font-mono text-xs">{viewing.api_user}</span>,
+                }] : []),
+                ...(viewing.kind === "meta_whatsapp" ? [
+                  { label: "Template", value: viewing.extra?.template_name || "Not set" },
+                  { label: "Template language", value: viewing.extra?.language || "Not set" },
+                ] : []),
+                ...(viewing.kind === "twilio_whatsapp" ? [{ label: "Content SID", value: viewing.extra?.content_sid || "Not set" }] : []),
+              ]} />
+            </DetailsSection>
+            {(viewing.from_address || viewing.from_name) && (
+              <DetailsSection title="Sending as">
+                <DescriptionList items={[
+                  ...(viewing.from_address ? [{ label: viewing.kind === "twilio_whatsapp" ? "WhatsApp number" : "From address", value: viewing.from_address }] : []),
+                  ...(viewing.from_name ? [{ label: "From name", value: viewing.from_name }] : []),
+                ]} />
+              </DetailsSection>
+            )}
+            <DetailsSection title="Health">
+              <DescriptionList items={[
+                { label: viewing.kind === "stub" ? "Last test run" : "Last delivered", value: viewing.last_success_at ? formatRelative(viewing.last_success_at) : "Never" },
+                ...(viewing.last_error ? [{ label: "Last error", value: `${viewing.last_error_at ? `${formatRelative(viewing.last_error_at)}: ` : ""}${viewing.last_error}` }] : []),
+              ]} />
+            </DetailsSection>
+          </>
+        )}
+      </DetailsDrawer>
+
       <DialogForm
         open={mode !== "closed"}
         onOpenChange={(v) => { if (!v) { setMode("closed"); setEditing(null); } }}
@@ -355,7 +496,8 @@ export default function NotificationsPage() {
         submitLabel={mode === "edit" ? "Save changes" : "Add sender"}
         busy={busy}
         error={formErr}
-        onSubmit={() => { setFormErr(null); setConfirming(true); }}
+        dirty={dirty}
+        onSubmit={requestSave}
       >
         <QuietHints>
         <FormSection title="Sender">
@@ -368,7 +510,7 @@ export default function NotificationsPage() {
                 </Select>
               </Field>
               <Field label="Service">
-                <Select value={f.kind} onChange={(e) => set("kind", e.target.value)}>
+                <Select value={f.kind} onChange={(e) => setKind(e.target.value)}>
                   {KINDS[f.channel].map((k) => <option key={k} value={k}>{KIND_LABELS[k] ?? k}</option>)}
                 </Select>
               </Field>
@@ -389,17 +531,17 @@ export default function NotificationsPage() {
         <div className="grid gap-4 sm:grid-cols-2">
           {f.kind === "smtp" && (
             <>
-              <Field label="Mail server" required hint="The SMTP host name or address.">
+              <Field label="Mail server" required hint="The SMTP host name or address." error={fieldErr.host}>
                 <Input value={f.host} onChange={(e) => set("host", e.target.value)} placeholder="smtp.example.com" dir="ltr" required />
               </Field>
               <Field label="Security" hint="STARTTLS upgrades a plain connection; TLS connects encrypted from the start. 'None' sends in the clear, so it is accepted only for a mail server at a private address on your own network.">
                 <Select value={f.security} onChange={(e) => set("security", e.target.value as Security)}>
                   <option value="starttls">STARTTLS (port 587)</option>
                   <option value="tls">TLS (port 465)</option>
-                  <option value="none">None — internal relay only (port 25)</option>
+                  <option value="none">None, internal relay only (port 25)</option>
                 </Select>
               </Field>
-              <Field label="Port" hint={`Leave blank for the usual port for the security chosen (${IMPLIED_PORT[f.security]}). 1–65535.`}>
+              <Field label="Port" hint={`Leave blank for the usual port for the security chosen (${IMPLIED_PORT[f.security]}). 1–65535.`} error={fieldErr.port}>
                 <Input type="number" min={1} max={65535} step={1} value={f.port} onChange={(e) => set("port", e.target.value)} placeholder={IMPLIED_PORT[f.security]} />
               </Field>
               <Field label="Username" hint="Only if the server requires a login. A username needs a password.">
@@ -409,13 +551,14 @@ export default function NotificationsPage() {
           )}
           <Field
             label={secretLabel}
+            required={needsSecret}
+            error={fieldErr.secret}
             hint={(f.kind === "smtp" ? "The mail server's password, not your Admin Console password. " : "") + (mode === "edit"
               ? "Leave blank to keep the one already stored."
               : f.kind === "smtp" ? "Required when a username is set. Stored write-only." : "From the service's console. Stored write-only.")}
           >
             <Input
               type="password"
-              // new-password: a browser must never fill the saved Admin Console login into the sender's secret.
               autoComplete="new-password"
               name="sender-secret"
               value={f.api_key}
@@ -439,7 +582,7 @@ export default function NotificationsPage() {
         <div className="grid gap-4 sm:grid-cols-2">
           {f.channel === "email" && (
             <>
-              <Field label="From address" hint="Clients see this as the sender.">
+              <Field label="From address" hint="Clients see this as the sender." error={fieldErr.from}>
                 <Input
                   type="email"
                   value={f.from_address}
@@ -453,7 +596,7 @@ export default function NotificationsPage() {
             </>
           )}
           {f.kind === "twilio_whatsapp" && (
-            <Field label="WhatsApp sender number" hint="The approved WhatsApp sender, with the country code.">
+            <Field label="WhatsApp sender number" hint="The approved WhatsApp sender, with the country code." error={fieldErr.number}>
               <Input value={f.from_address} onChange={(e) => set("from_address", e.target.value)} placeholder="+14155238886" dir="ltr" />
             </Field>
           )}
@@ -476,10 +619,11 @@ export default function NotificationsPage() {
         </FormSection>
         )}
         {f.kind === "smtp" && (
-          <Disclosure title="Advanced: timeout" defaultOpen={f.timeout_seconds.trim() !== "" && f.timeout_seconds.trim() !== String(SMTP_TIMEOUT_DEFAULT)}>
+          <Disclosure title="Advanced: timeout" defaultOpen={!!fieldErr.timeout || (f.timeout_seconds.trim() !== "" && f.timeout_seconds.trim() !== String(SMTP_TIMEOUT_DEFAULT))}>
             <Field
               label="Timeout"
               hint={`Seconds to wait for the mail server before a send is reported as failed. Default ${SMTP_TIMEOUT_DEFAULT} seconds; allowed ${SMTP_TIMEOUT_MIN}–${SMTP_TIMEOUT_MAX}.`}
+              error={fieldErr.timeout}
             >
               <Input type="number" min={SMTP_TIMEOUT_MIN} max={SMTP_TIMEOUT_MAX} step={1} value={f.timeout_seconds}
                 onChange={(e) => set("timeout_seconds", e.target.value)} placeholder={String(SMTP_TIMEOUT_DEFAULT)} className="sm:max-w-[12rem]" />
@@ -506,12 +650,14 @@ export default function NotificationsPage() {
         submitLabel={testResult ? "Send again" : "Send test"}
         busy={busy}
         error={testErr}
-        disabled={!testTo.trim()}
+        disabled={!testTo.trim() || !!testToErr}
+        disabledReason={!testTo.trim() ? `Enter ${testIsEmail ? "an email address" : "a phone number"} to send to.` : testToErr}
         onSubmit={onTest}
       >
         <Field
           label={testIsEmail ? "Send to (email address)" : "Send to (phone number)"}
           required
+          error={testToErr}
           hint={testIsEmail ? "Your own address is the usual choice." : "With the country code, for example +20 100 000 0000."}
         >
           <Input
@@ -525,13 +671,15 @@ export default function NotificationsPage() {
         </Field>
         {testResult && (
           testResult.ok ? (
-            <Callout tone="success" title="Delivered">
-              The message was sent{testResult.kind ? ` through ${KIND_LABELS[testResult.kind] ?? testResult.kind}` : ""}. Check the inbox or phone; a message that was accepted by the service can still be delayed on its way.
+            <Callout tone="success" title="Accepted by the service" className={FADE}>
+              The message was sent{testResult.kind ? ` through ${KIND_LABELS[testResult.kind] ?? testResult.kind}` : ""} and the service accepted it. Check the inbox or phone: an accepted message can still be delayed or filtered on its way.
             </Callout>
           ) : (
-            <Callout tone="danger" title="Not delivered">
+            <Callout tone="danger" title="Not delivered" className={FADE}>
               {testResult.message || "The service refused the message without saying why."}
-              {testResult.error && <div className="mt-1 font-mono text-xs opacity-80">{testResult.error}</div>}
+              {testResult.error && (
+                <div className="mt-1 text-xs opacity-80">For support: <span className="font-mono">{testResult.error}</span></div>
+              )}
             </Callout>
           )
         )}
