@@ -1,7 +1,5 @@
 "use client";
 
-// Guest-affecting changes require the operator's password; edged enforces it.
-
 import { RemoveConnectionDialog } from "@/components/pms/remove-connection-dialog";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -21,7 +19,7 @@ import { DetailsDrawer, DetailsSection } from "@/components/ui/details-drawer";
 import { Skeleton } from "@/components/ui/misc";
 import { useToast } from "@/components/ui/toast";
 import { describePmsReadiness } from "@/lib/health-words";
-import { formatDate } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 import {
   type FormValues, type PmsConnection, type PmsProvider, type TestConnectionResult,
   CONTINUITY_WORDS, LIFECYCLE_REASONS, LIFECYCLE_WORDS, PUBLISH_REASONS, REASON_WORDS, ROOM_AUTH_WORDS,
@@ -32,10 +30,12 @@ import {
 import { ChecksRow, ProviderTile, When, lifecycleTone, providerLabel } from "./connection-card";
 import { ConfigSummary, ProviderFieldsForm, configRows } from "./provider-fields";
 import { SynchronizationCard } from "./synchronization-card";
-import { Router } from "lucide-react";
+import { RefreshCw, Router } from "lucide-react";
 import { RoomChargeLiveNotice } from "@/components/room-charge-live-notice";
 
 export type SheetTab = "overview" | "configuration" | "credentials" | "networks" | "history" | "actions";
+
+const FADE = "animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none";
 
 const UNKNOWN_PROVIDER = (kind: string): PmsProvider => ({
   kind, label: "Unrecognised system", credential: { mode: "NONE", fields: [] }, fields: [], capabilities: {},
@@ -60,9 +60,12 @@ export function ConnectionSheet({
   const [provenance, setProvenance] = useState("AVAILABLE");
   const [routes, setRoutes] = useState<PmsGuestNetworkRoute[] | null>(null);
   const [err, setErr] = useState<unknown>(null);
+  const [failed, setFailed] = useState(false);
+  const [reading, setReading] = useState(false);
 
   const load = useCallback(async () => {
     if (!id) return;
+    setReading(true);
     try {
       const [r, d] = await Promise.all([
         api.get<{ revisions: PmsRevision[]; provenance_status?: string }>(`/pms-interfaces/${id}/revisions`),
@@ -72,15 +75,17 @@ export function ConnectionSheet({
       setProvenance(r.provenance_status ?? "AVAILABLE");
       setRoutes(d.guest_networks ?? []);
       setErr(null);
+      setFailed(false);
     } catch (e) {
       setErr(e);
-      setRevisions((x) => x ?? []);
-      setRoutes((x) => x ?? []);
+      setFailed(true);
+    } finally {
+      setReading(false);
     }
   }, [id]);
 
   useEffect(() => {
-    setRevisions(null); setRoutes(null); setErr(null);
+    setRevisions(null); setRoutes(null); setErr(null); setFailed(false);
     if (open && id) void load();
   }, [open, id, load]);
 
@@ -128,12 +133,22 @@ export function ConnectionSheet({
           </div>
           <SheetBody>
             <RoomChargeLiveNotice className="mb-3" />
-            <ErrorBanner err={pmsErrorText(err)} />
+            {failed && (
+              <Callout tone="warning" title="Part of this connection could not be read" className={cn("mb-3", FADE)}>
+                <p>
+                  {pmsErrorText(err) ?? "The appliance did not answer."} Its configuration versions, history and client
+                  networks are not shown until they can be read. Nothing has been changed.
+                </p>
+                <Button size="sm" variant="secondary" className="mt-2" disabled={reading} onClick={() => void load()}>
+                  <RefreshCw className={cn(reading && "animate-spin motion-reduce:animate-none")} /> Try again
+                </Button>
+              </Callout>
+            )}
             <TabsContent value="overview" className="space-y-5">
-              <OverviewTab iface={iface} health={health} provider={p} routes={routes} />
+              <OverviewTab iface={iface} health={health} provider={p} routes={routes} failed={failed} />
             </TabsContent>
             <TabsContent value="configuration" className="space-y-5">
-              <ConfigurationTab iface={iface} provider={p} revisions={revisions} provenance={provenance}
+              <ConfigurationTab iface={iface} provider={p} revisions={revisions} provenance={provenance} failed={failed}
                 writable={writable && !retired} onChanged={reloadAll} applianceTimezone={applianceTimezone} />
             </TabsContent>
             {showCreds && (
@@ -142,10 +157,10 @@ export function ConnectionSheet({
               </TabsContent>
             )}
             <TabsContent value="networks" className="space-y-5">
-              <NetworksTab routes={routes} />
+              <NetworksTab routes={routes} failed={failed} />
             </TabsContent>
             <TabsContent value="history" className="space-y-5">
-              <HistoryTab iface={iface} provider={p} revisions={revisions} provenance={provenance}
+              <HistoryTab iface={iface} provider={p} revisions={revisions} provenance={provenance} failed={failed}
                 writable={writable && !retired} onChanged={reloadAll} />
             </TabsContent>
             <TabsContent value="actions" className="space-y-5">
@@ -159,17 +174,22 @@ export function ConnectionSheet({
   );
 }
 
+function NotRead({ what }: { what: string }) {
+  return <p className="text-sm text-muted-foreground">{what} could not be read. Use Try again at the top of this panel.</p>;
+}
+
 function OverviewTab({
-  iface, health, provider, routes,
+  iface, health, provider, routes, failed,
 }: {
   iface: PmsConnection;
   health?: PmsInterfaceHealth;
   provider: PmsProvider;
   routes: PmsGuestNetworkRoute[] | null;
+  failed: boolean;
 }) {
   if (!health && isNeverConfigured(iface)) {
     return (
-      <Callout tone="neutral" title="Never configured — not connected to any PMS">
+      <Callout tone="neutral" title="Never configured, so not connected to any PMS">
         This connection was added but has no live configuration, so the appliance does not contact any PMS through
         it. Configure it on Configuration, put the configuration live, then activate it from Actions. (A connection added with Add connection is put live and activated in one step.)
       </Callout>
@@ -203,7 +223,7 @@ function OverviewTab({
           : iface.lifecycle_state === "DRAINING"
             ? "No new room sign-ins are accepted through this connection while it winds down."
             : !iface.published
-              ? "Never configured — not connected to any PMS. Publish a configuration and activate it to start."
+              ? "Never configured, so not connected to any PMS. Publish a configuration and activate it to start."
               : "This connection is switched off, so nobody signs in with a room number through it. Activate it from Actions."}
       </Notice>
 
@@ -271,7 +291,7 @@ function OverviewTab({
             {health.review_events.toLocaleString()} recorded PMS message{health.review_events === 1 ? "" : "s"} could
             not be matched to a stay. Sign-in continues from the guest list already in use; what these messages
             would have changed has not been applied.{" "}
-            <Link href="/stay-events" className="font-medium underline underline-offset-2">Review stay events</Link>
+            <Link href="/stay-events?show=undecided" className="font-medium underline underline-offset-2">Decide in PMS activity</Link>
             {" · "}
             <Link href="/pms-reconciliation" className="font-medium underline underline-offset-2">Unresolved departures</Link>
           </Callout>
@@ -285,13 +305,13 @@ function OverviewTab({
 
       <Disclosure title="Troubleshooting">
         <ul className="grid gap-2 text-sm sm:grid-cols-2">
-          <li className="flex items-center gap-1"><Link href="/stay-events" className="font-medium underline underline-offset-2">Stay events</Link>
+          <li className="flex items-center gap-1"><Link href="/stay-events" className="font-medium underline underline-offset-2">PMS activity</Link>
             <InfoHint>Every check-in, move and check-out received.</InfoHint></li>
           <li className="flex items-center gap-1"><Link href="/roster-reconciliation" className="font-medium underline underline-offset-2">Roster reconciliation</Link>
             <InfoHint>How the guest list is kept identical to the PMS&rsquo;s.</InfoHint></li>
           <li className="flex items-center gap-1"><Link href="/pms-reconciliation" className="font-medium underline underline-offset-2">Unresolved departures</Link>
             <InfoHint>Messages that could not be matched to a stay.</InfoHint></li>
-          <li className="flex items-center gap-1"><Link href="/pms-source-conflicts" className="font-medium underline underline-offset-2">Source conflicts</Link>
+          <li className="flex items-center gap-1"><Link href="/pms-source-conflicts" className="font-medium underline underline-offset-2">Duplicate sources</Link>
             <InfoHint>Two connections that may be the same PMS.</InfoHint></li>
         </ul>
       </Disclosure>
@@ -301,9 +321,9 @@ function OverviewTab({
           columns={2}
           items={[
             { label: "Property management system", value: providerLabel(iface, provider) },
-            { label: "Connects to", value: safeHost(iface.endpoint) ?? "—" },
-            { label: "Link", value: (iface.transport || provider.transport) ? TRANSPORT_KIND_WORDS[(iface.transport || provider.transport) as string] ?? "—" : "—" },
-            { label: "Client networks", value: routes === null ? "—" : routes.length === 0 ? "None" : routes.map((r) => r.guest_network_name || "Unnamed network").join(", ") },
+            { label: "Connects to", value: safeHost(iface.endpoint) ?? "Not set" },
+            { label: "Link", value: (iface.transport || provider.transport) ? TRANSPORT_KIND_WORDS[(iface.transport || provider.transport) as string] ?? "Not recognised" : "Not set" },
+            { label: "Client networks", value: routes === null ? (failed ? "Could not be read" : "Loading") : routes.length === 0 ? "None" : routes.map((r) => r.guest_network_name || "Unnamed network").join(", ") },
             {
               label: "Verification",
               value: verificationWords(iface.verification ?? provider.verification).label,
@@ -328,9 +348,9 @@ function PublishDialog({
   const [reason, setReason] = useState(PUBLISH_REASONS[0].value);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<unknown>(null);
-  // edged refuses a publish that drops the live posting target unless the operator confirms.
   const [resetWarning, setResetWarning] = useState<string | null>(null);
   const [resetAck, setResetAck] = useState(false);
+  const [ackErr, setAckErr] = useState<string | null>(null);
   const older = !!target && !!iface.current_revision_no && target.revision_no < iface.current_revision_no;
 
   useEffect(() => {
@@ -338,6 +358,7 @@ function PublishDialog({
       setErr(null);
       setResetWarning(null);
       setResetAck(false);
+      setAckErr(null);
       setReason(older ? "CONFIG_ROLLBACK" : iface.published ? "CONFIG_CORRECTION" : "INITIAL_COMMISSIONING");
     }
   }, [target, older, iface.published]);
@@ -350,7 +371,7 @@ function PublishDialog({
       description={
         iface.lifecycle_state === "ACTIVE"
           ? "From this moment the connection uses these settings and reconnects with them. Guests keep being verified against the guest list already loaded while it does."
-          : "This becomes the configuration the connection uses. It does not activate the connection — that is a separate step."
+          : "This becomes the configuration the connection uses. It does not activate the connection; that is a separate step."
       }
       confirmLabel={resetWarning ? "Put live and turn room charge off" : "Put live"}
       confirmVariant={resetWarning ? "danger" : "primary"}
@@ -359,12 +380,11 @@ function PublishDialog({
       requirePassword strictPassword
       onConfirm={async ({ password }) => {
         if (!target) return;
-        if (resetWarning && !resetAck) return;
+        if (resetWarning && !resetAck) { setAckErr("Tick the box to confirm that room charge will be turned off."); return; }
         setBusy(true); setErr(null);
         try {
           await api.post(`/pms-interfaces/${iface.id}/publish`, {
             revision_id: target.id,
-            // If the live version changed meanwhile, edged refuses rather than reverting someone else's publish.
             expected_revision_id: iface.current_revision_id ?? "",
             reason_code: reason,
             password,
@@ -386,12 +406,14 @@ function PublishDialog({
       }}
     >
       {resetWarning && (
-        <Callout tone="warning" title="Room charge will be turned off for this connection">
+        <Callout tone="warning" title="Room charge will be turned off for this connection" className={FADE}>
           {resetWarning}
           <label className="mt-2 flex items-start gap-2 text-sm">
-            <input type="checkbox" checked={resetAck} onChange={(e) => setResetAck(e.target.checked)} />
+            <input type="checkbox" checked={resetAck} aria-invalid={ackErr ? true : undefined}
+              onChange={(e) => { setResetAck(e.target.checked); setAckErr(null); }} />
             <span>I understand that clients will not be offered charge to room until the connection is approved for room charge again.</span>
           </label>
+          {ackErr && <p key={ackErr} role="alert" className={cn("mt-1 text-sm text-destructive", FADE)}>{ackErr}</p>}
         </Callout>
       )}
       <Field label="Reason" hint="Recorded with the change.">
@@ -411,12 +433,13 @@ function orderRevisions(revisions: PmsRevision[] | null) {
 }
 
 function ConfigurationTab({
-  iface, provider, revisions, provenance, writable, onChanged, applianceTimezone,
+  iface, provider, revisions, provenance, failed, writable, onChanged, applianceTimezone,
 }: {
   iface: PmsConnection;
   provider: PmsProvider;
   revisions: PmsRevision[] | null;
   provenance: string;
+  failed: boolean;
   writable: boolean;
   onChanged: () => void | Promise<void>;
   applianceTimezone: string;
@@ -425,7 +448,7 @@ function ConfigurationTab({
   const [publishing, setPublishing] = useState<PmsRevision | null>(null);
   const { ordered, current, drafts } = orderRevisions(revisions);
 
-  if (revisions === null) return <Skeleton className="h-40 w-full" />;
+  if (revisions === null) return failed ? <NotRead what="The configuration versions" /> : <Skeleton className="h-40 w-full" />;
 
   return (
     <>
@@ -519,14 +542,14 @@ export function RevisionDialog({
   const [err, setErr] = useState<unknown>(null);
 
   const tzEdited = useRef(false);
+  const tzRef = useRef(applianceTimezone);
+  tzRef.current = applianceTimezone;
   useEffect(() => {
     if (!open) return;
-    const v = valuesFromRevision(provider, from, applianceTimezone);
+    const v = valuesFromRevision(provider, from, tzRef.current);
     setValues(v.values); setTimezone(v.timezone); setShowErrors(false); setErr(null);
     tzEdited.current = false;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, provider, from]);
-  // A late appliance time zone fills only an untouched field of a revision that has none of its own; it never resets the form.
   useEffect(() => {
     if (open && applianceTimezone && !tzEdited.current && !from?.source_timezone) setTimezone(applianceTimezone);
   }, [open, applianceTimezone, from]);
@@ -570,7 +593,7 @@ function ChangeSummary({ rev, prev, provider }: { rev: PmsRevision; prev?: PmsRe
   const a = configRows(provider, prev);
   const b = configRows(provider, rev);
   const changes = b
-    .map((row, i) => ({ field: row.label, before: a[i]?.value ?? "—", after: row.value }))
+    .map((row, i) => ({ field: row.label, before: a[i]?.value ?? "Not set", after: row.value }))
     .filter((c) => c.before !== c.after);
   if (changes.length > 0) {
     return (
@@ -610,7 +633,7 @@ function VersionProvenance({ rev, unavailable }: { rev: PmsRevision; unavailable
     return (
       <p className="text-xs text-warning-subtle-foreground">
         The record of how this version was saved could not be read just now, so it is not shown. This is a fault
-        to report, not a sign that nothing was recorded — the configuration itself is unaffected.
+        to report, not a sign that nothing was recorded. The configuration itself is unaffected.
       </p>
     );
   }
@@ -629,66 +652,116 @@ function VersionProvenance({ rev, unavailable }: { rev: PmsRevision; unavailable
 }
 
 const CONN_FIELDS: {
-  key: Extract<keyof PmsConnectionSettings, string>;
+  key: Extract<keyof PmsConnectionSettings, "backoff_min_ms" | "backoff_max_ms" | "stable_reset_seconds" | "link_down_alert_seconds" | "blocked_after_refusals">;
   label: string;
   unit: string;
+  min: number;
+  max: number;
   what: string;
   when: string;
 }[] = [
   {
-    key: "backoff_min_ms", label: "Shortest wait before retrying", unit: "milliseconds",
+    key: "backoff_min_ms", label: "Shortest wait before retrying", unit: "milliseconds", min: 100, max: 600000,
     what: "After the PMS link drops, how soon the first reconnection attempt happens. Each further attempt waits a little longer, up to the maximum below.",
     when: "Raise it if the site's PMS complains about repeated connections during its nightly restart.",
   },
   {
-    key: "backoff_max_ms", label: "Longest wait before retrying", unit: "milliseconds",
-    what: "Attempts never get further apart than this. The appliance retries indefinitely — this caps the gap, never the number of tries.",
+    key: "backoff_max_ms", label: "Longest wait before retrying", unit: "milliseconds", min: 100, max: 3600000,
+    what: "Attempts never get further apart than this. The appliance retries indefinitely; this caps the gap, never the number of tries.",
     when: "Lower it if the PMS restarts often and you want the guest list current again sooner.",
   },
   {
-    key: "stable_reset_seconds", label: "Connection must hold this long to count as recovered", unit: "seconds",
+    key: "stable_reset_seconds", label: "Connection must hold this long to count as recovered", unit: "seconds", min: 1, max: 86400,
     what: "Once a reconnection survives this long, the waiting resets to the shortest value.",
     when: "Raise it if the link reconnects and drops again within a minute or two.",
   },
   {
-    key: "link_down_alert_seconds", label: "Report the link as down after", unit: "seconds",
-    what: "How long the link may stay down before it is reported. Nothing stops when the link drops — guests keep signing in from the last good guest list.",
+    key: "link_down_alert_seconds", label: "Report the link as down after", unit: "seconds", min: 30, max: 604800,
+    what: "How long the link may stay down before it is reported. Nothing stops when the link drops: guests keep signing in from the last good guest list.",
     when: "Lower it to hear about an outage sooner; raise it if nightly maintenance produces an alert nobody acts on.",
   },
   {
-    key: "blocked_after_refusals", label: "Report reconciliation as blocked after", unit: "consecutive runs",
+    key: "blocked_after_refusals", label: "Report reconciliation as blocked after", unit: "consecutive runs", min: 1, max: 1000,
     what: "Reconciliation declines to act on an incomplete or contradictory guest list, which protects guests. After this many refusals in a row it is reported.",
     when: "Lower it to hear about a degrading feed sooner.",
   },
 ];
 
+type ConnKey = (typeof CONN_FIELDS)[number]["key"];
+
 function ConnectionRecovery({ id, writable }: { id: string; writable: boolean }) {
   const toast = useToast();
   const [settings, setSettings] = useState<PmsConnectionSettings | null>(null);
-  const [form, setForm] = useState<Record<string, number>>({});
+  const [failed, setFailed] = useState(false);
+  const [reading, setReading] = useState(false);
+  const [form, setForm] = useState<Partial<Record<ConnKey, string>>>({});
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<unknown>(null);
 
   const load = useCallback(async () => {
+    setReading(true);
     try {
-      setSettings(await api.get<PmsConnectionSettings>(`/pms-interfaces/${id}/connection-settings`));
+      const got = await api.get<PmsConnectionSettings>(`/pms-interfaces/${id}/connection-settings`);
+      if (!CONN_FIELDS.every((f) => typeof got?.[f.key] === "number")) throw new Error("incomplete");
+      setSettings(got);
+      setFailed(false);
     } catch {
+      setFailed(true);
+    } finally {
+      setReading(false);
     }
   }, [id]);
   useEffect(() => { void load(); }, [load]);
 
-  if (!settings) return null;
+  if (!settings) {
+    if (!failed) return null;
+    return (
+      <SheetSection title="Connection recovery">
+        <Callout tone="warning" title="The recovery settings could not be read" className={FADE}>
+          <p>They are not shown until they can be. Nothing has been changed.</p>
+          <Button size="sm" variant="secondary" className="mt-2" disabled={reading} onClick={() => void load()}>
+            <RefreshCw className={cn(reading && "animate-spin motion-reduce:animate-none")} /> Try again
+          </Button>
+        </Callout>
+      </SheetSection>
+    );
+  }
+
+  const current = settings;
+  const valueOf = (k: ConnKey) => (form[k] !== undefined ? Number(form[k]!.trim()) : current[k]);
+  const fieldError = (f: (typeof CONN_FIELDS)[number]): string | null => {
+    const raw = form[f.key];
+    if (raw === undefined) return null;
+    const t = raw.trim();
+    if (!/^\d+$/.test(t) || Number(t) < f.min || Number(t) > f.max) {
+      return `Enter a whole number from ${f.min.toLocaleString()} to ${f.max.toLocaleString()}.`;
+    }
+    if (f.key === "backoff_max_ms" && valueOf("backoff_max_ms") < valueOf("backoff_min_ms")) {
+      return "Must be at least the shortest wait.";
+    }
+    if (f.key === "backoff_min_ms" && form.backoff_max_ms === undefined && valueOf("backoff_min_ms") > current.backoff_max_ms) {
+      return `Must not be more than the longest wait (${current.backoff_max_ms.toLocaleString()}).`;
+    }
+    return null;
+  };
+  const errors = Object.fromEntries(CONN_FIELDS.map((f) => [f.key, fieldError(f)])) as Record<ConnKey, string | null>;
+  const invalid = Object.values(errors).some(Boolean);
+  const changed = CONN_FIELDS.map((f) => f.key).filter((k) => form[k] !== undefined && form[k]!.trim() !== String(current[k]));
 
   async function save() {
+    if (invalid || changed.length === 0) return;
     setBusy(true); setErr(null);
     try {
-      const out = await api.put<{ config_version: number }>(`/pms-interfaces/${id}/connection-settings`, { ...form, reason });
+      const body = Object.fromEntries(changed.map((k) => [k, Number(form[k]!.trim())]));
+      const out = await api.put<{ config_version: number }>(`/pms-interfaces/${id}/connection-settings`, { ...body, reason: reason.trim() });
       toast.success("Recovery settings saved", `Version ${out.config_version}. They apply on the next reconnect.`);
       setForm({}); setReason("");
       await load();
     } catch (e) {
-      setErr(e);
+      setErr(e instanceof ApiError && e.code === "settings_rejected"
+        ? "The appliance refused these values. Check that each one is within its range and the longest wait is not shorter than the shortest."
+        : e);
     } finally {
       setBusy(false);
     }
@@ -721,32 +794,41 @@ function ConnectionRecovery({ id, writable }: { id: string; writable: boolean })
       </p>
       <div className="rounded-lg border border-border p-4">
         <FieldGrid cols={2}>
-          {CONN_FIELDS.map((f) => (
-            <Field
-              key={f.key}
-              label={f.label}
-              hint={`Currently ${settings[f.key]} ${f.unit}${settings.is_default ? " (nobody has changed this one)" : ""}`}
-            >
-              <InputGroup suffix={f.unit}>
-                <Input
-                  type="number"
-                  inputMode="numeric"
-                  className="tabular"
-                  value={form[f.key] ?? settings[f.key] ?? ""}
-                  onChange={(e) => setForm({ ...form, [f.key]: Number(e.target.value) })}
-                  disabled={busy || !writable}
-                />
-              </InputGroup>
-            </Field>
-          ))}
+          {CONN_FIELDS.map((f) => {
+            const e = errors[f.key];
+            return (
+              <Field
+                key={f.key}
+                label={f.label}
+                hint={`Currently ${current[f.key].toLocaleString()} ${f.unit}${current.is_default ? " (nobody has changed this one)" : ""}. Allowed ${f.min.toLocaleString()} to ${f.max.toLocaleString()}.`}
+                error={e ? <span key={e} className={FADE}>{e}</span> : undefined}
+              >
+                <InputGroup suffix={f.unit}>
+                  <Input
+                    type="number"
+                    inputMode="numeric"
+                    min={f.min}
+                    max={f.max}
+                    className="tabular"
+                    value={form[f.key] ?? String(current[f.key])}
+                    onChange={(ev) => setForm((x) => ({ ...x, [f.key]: ev.target.value }))}
+                    disabled={busy || !writable}
+                  />
+                </InputGroup>
+              </Field>
+            );
+          })}
         </FieldGrid>
         {writable && (
           <div className="mt-4 flex flex-wrap items-end gap-2 border-t border-border pt-4">
-            <Field label="Reason" className="min-w-[14rem] flex-1">
-              <Input placeholder="Reason - recorded against this change" value={reason}
+            <Field label="Reason" optional className="min-w-[14rem] flex-1">
+              <Input placeholder="Recorded against this change" value={reason}
                 onChange={(e) => setReason(e.target.value)} disabled={busy} />
             </Field>
-            <Button variant="secondary" loading={busy} onClick={() => void save()} disabled={busy || Object.keys(form).length === 0}>
+            <Button variant="ghost" disabled={busy || changed.length === 0} onClick={() => { setForm({}); setErr(null); }}>
+              Undo changes
+            </Button>
+            <Button variant="secondary" loading={busy} onClick={() => void save()} disabled={busy || invalid || changed.length === 0}>
               Save recovery settings
             </Button>
           </div>
@@ -782,7 +864,7 @@ function CredentialsTab({
     <>
       <SheetSection
         title="Credential"
-        description="What the appliance presents to the PMS provider. It is stored encrypted and is never shown — not here and not to any other operator."
+        description="What the appliance presents to the PMS provider. It is stored encrypted and is never shown, not here and not to any other operator."
         actions={writable && (
           <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>
             {stored ? "Replace credential" : "Store credential"}
@@ -791,7 +873,7 @@ function CredentialsTab({
       >
         {stored ? (
           <KeyValueGrid items={[
-            { label: "Stored", value: `Yes — version ${iface.secret_generation}` },
+            { label: "Stored", value: `Yes, version ${iface.secret_generation}` },
             { label: "Last replaced", value: iface.secret_rotated_at ? <When at={iface.secret_rotated_at} /> : "Not replaced since it was first stored" },
           ]} />
         ) : (
@@ -843,7 +925,7 @@ function CredentialsTab({
   );
 }
 
-function NetworksTab({ routes }: { routes: PmsGuestNetworkRoute[] | null }) {
+function NetworksTab({ routes, failed }: { routes: PmsGuestNetworkRoute[] | null; failed: boolean }) {
   return (
     <SheetSection
       title="Client networks using this connection"
@@ -851,7 +933,7 @@ function NetworksTab({ routes }: { routes: PmsGuestNetworkRoute[] | null }) {
       actions={<Link href="/pms-routing" className="text-sm font-medium underline underline-offset-2">Change routing</Link>}
     >
       {routes === null ? (
-        <Skeleton className="h-16 w-full" />
+        failed ? <NotRead what="The client networks" /> : <Skeleton className="h-16 w-full" />
       ) : routes.length === 0 ? (
         <Callout tone="warning" title="No Wi-Fi network points at this connection">
           It may be configured and connected, but no guest is ever checked against it. Point at least one guest
@@ -874,18 +956,19 @@ function NetworksTab({ routes }: { routes: PmsGuestNetworkRoute[] | null }) {
 }
 
 function HistoryTab({
-  iface, provider, revisions, provenance, writable, onChanged,
+  iface, provider, revisions, provenance, failed, writable, onChanged,
 }: {
   iface: PmsConnection;
   provider: PmsProvider;
   revisions: PmsRevision[] | null;
   provenance: string;
+  failed: boolean;
   writable: boolean;
   onChanged: () => void | Promise<void>;
 }) {
   const [publishing, setPublishing] = useState<PmsRevision | null>(null);
   const [viewing, setViewing] = useState<string | null>(null);
-  if (revisions === null) return <Skeleton className="h-40 w-full" />;
+  if (revisions === null) return failed ? <NotRead what="The configuration history" /> : <Skeleton className="h-40 w-full" />;
   const { ordered, current } = orderRevisions(revisions);
   const status = (r: PmsRevision) => {
     const isDraft = !r.published && (!current || r.revision_no > current.revision_no);
@@ -978,7 +1061,7 @@ function lifecycleMoves(iface: PmsConnection, providerName: string): LifecycleMo
   const drain: LifecycleMove = {
     to: "DRAINING", label: "Wind down", variant: "secondary",
     title: "Wind this connection down?",
-    description: "No new room sign-ins or room charges are accepted through this connection. Work already queued — such as charges waiting to be sent — is allowed to finish. Use this before replacing the connection. You can activate it again or pause it afterwards.",
+    description: "No new room sign-ins or room charges are accepted through this connection. Work already queued, such as charges waiting to be sent, is allowed to finish. Use this before replacing the connection. You can activate it again or pause it afterwards.",
   };
   switch (iface.lifecycle_state) {
     case "AUTH_DISABLED": return [activate];
@@ -1017,7 +1100,7 @@ function ActionsTab({
             : iface.lifecycle_state === "ACTIVE" ? "Active: the appliance is connected to the PMS and serves room sign-in through it."
               : iface.lifecycle_state === "DRAINING" ? "Winding down: no new room sign-ins or charges; queued work finishes."
                 : iface.published ? "Paused: the appliance does not connect to the PMS through this connection."
-                  : "Never configured — not connected to any PMS."
+                  : "Never configured, so not connected to any PMS."
         }
       >
         {!writable && !retired ? (
@@ -1038,8 +1121,8 @@ function ActionsTab({
         {writable && iface.lifecycle_state === "AUTH_DISABLED" && !iface.published && (
           <Callout tone="info">
             {drafts.length
-              ? "Put the draft configuration live first (on Configuration) — there is nothing to connect to until then."
-              : "Configure the connection and put the configuration live first — there is nothing to connect to until then."}
+              ? "Put the draft configuration live first (on Configuration): there is nothing to connect to until then."
+              : "Configure the connection and put the configuration live first: there is nothing to connect to until then."}
           </Callout>
         )}
       </SheetSection>
@@ -1058,7 +1141,7 @@ function ActionsTab({
           {writable ? (
             iface.published
               ? <TestConnectionButton iface={iface} provider={provider} revision={null} showResultInline />
-              : <p className="text-sm text-muted-foreground">Test a draft from Configuration — nothing is live yet.</p>
+              : <p className="text-sm text-muted-foreground">Nothing is live yet, so test a draft from Configuration.</p>
           ) : <p className="text-sm text-muted-foreground">Your role cannot run a connection test.</p>}
         </SheetSection>
       )}
@@ -1145,7 +1228,7 @@ function TestConnectionButton({
       </Button>
       {showResultInline && result && (
         result.ok ? (
-          <Callout tone="success" title={`The connection test passed${ranAt ? ` at ${ranAt.toLocaleTimeString()}` : ""}`}>
+          <Callout key={ranAt?.getTime()} className={FADE} tone="success" title={`The connection test passed${ranAt ? ` at ${ranAt.toLocaleTimeString()}` : ""}`}>
             {provider.label} answered
             {typeof result.latency_ms === "number" ? ` in ${result.latency_ms.toLocaleString()} ms` : ""}.
             {typeof result.details?.sample_reservations === "number"
@@ -1154,7 +1237,7 @@ function TestConnectionButton({
             {result.details?.property ? ` Property: ${result.details.property}.` : ""}
           </Callout>
         ) : (
-          <Callout tone="danger" title={`The test failed while ${STAGE_WORDS[result.stage ?? ""] ?? "testing"}${ranAt ? ` at ${ranAt.toLocaleTimeString()}` : ""}`}>
+          <Callout key={ranAt?.getTime()} className={FADE} tone="danger" title={`The test failed while ${STAGE_WORDS[result.stage ?? ""] ?? "testing"}${ranAt ? ` at ${ranAt.toLocaleTimeString()}` : ""}`}>
             {result.message || "The provider did not accept the request."}
           </Callout>
         )

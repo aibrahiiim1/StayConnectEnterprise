@@ -329,7 +329,7 @@ describe("the overview", () => {
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     await userEvent.click(toggle);
     expect(screen.getByText("Test link")).toBeTruthy();
-    expect(screen.getByText(/Never configured — not connected to any PMS/)).toBeTruthy();
+    expect(screen.getByText(/Never configured, so not connected to any PMS/)).toBeTruthy();
   });
 
   it("states how far each provider has been verified", async () => {

@@ -1,8 +1,5 @@
 "use client";
 
-// Guest names are PII: never write them to logs or diagnostics.
-// Only ADMIN_BLOCK can be lifted here; PMS and review blocks clear by themselves.
-
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { api, Stay, StayDetail, StayPostingBlock, StaysPage as StaysPageResp } from "@/lib/api";
@@ -21,17 +18,18 @@ import { Badge, StatusBadge, type Tone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox, Select } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { Callout } from "@/components/ui/error-banner";
 import { DetailsDrawer, DetailsSection } from "@/components/ui/details-drawer";
 import { PackageControls } from "@/components/package-controls";
 import { Explain } from "@/components/ui/tooltip";
-import { SkeletonRows } from "@/components/ui/misc";
+import { Skeleton, SkeletonRows } from "@/components/ui/misc";
+import { OneGateLoader } from "@/components/brand";
 import { DescriptionList, MetricStrip, Pagination, ResultsCount, SearchInput } from "@/components/ui/data";
 import { FilterBar } from "@/components/ui/toolbar";
 import { RowActions } from "@/components/ui/row-actions";
-import { formatDate, formatRelative } from "@/lib/utils";
+import { cn, formatDate, formatRelative } from "@/lib/utils";
 import { speedPair } from "@/lib/session-words";
-import { Hotel, Ban, Undo2 } from "lucide-react";
+import { AlertTriangle, Ban, Hotel, RefreshCw, Undo2 } from "lucide-react";
 import { usePmsConnections } from "@/lib/pms-scope";
 import { PmsTag, roomWithPms } from "@/components/pms/pms-tag";
 import { FilterChips } from "@/components/ui/data";
@@ -51,13 +49,24 @@ const toneFor = (status: string): Tone =>
 
 const PAGE_SIZES = [25, 50, 100, 200];
 
-const label = (s: string) => STATUS_LABELS[s] ?? s.replace(/_/g, " ").toLowerCase();
+const FADE = "animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none";
+
+const ACCESS_WORDS: Record<string, string> = {
+  PENDING: "granted but not in force yet",
+  SUSPENDED: "suspended",
+  EXPIRED: "expired",
+  REVOKED: "withdrawn",
+};
+
+const label = (s: string) => STATUS_LABELS[s] ?? "Status not recognised";
 
 function shortDate(v?: string | null): string {
-  if (!v) return "—";
+  if (!v) return "Not set";
   const d = new Date(v);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString(undefined, { day: "2-digit", month: "short" });
+  if (Number.isNaN(d.getTime())) return "Not set";
+  const opts: Intl.DateTimeFormatOptions = { day: "2-digit", month: "short" };
+  if (d.getFullYear() !== new Date().getFullYear()) opts.year = "numeric";
+  return d.toLocaleDateString(undefined, opts);
 }
 
 export default function StaysPage() {
@@ -71,12 +80,13 @@ export default function StaysPage() {
   const [rows, setRows] = useState<Stay[] | null>(null);
   const [resp, setResp] = useState<StaysPageResp | null>(null);
   const [detail, setDetail] = useState<StayDetail | null>(null);
-  const [detailBusy, setDetailBusy] = useState(false);
-  const [err, setErr] = useState<unknown>(null);
+  const [openingId, setOpeningId] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [reloading, setReloading] = useState(false);
   const toast = useToast();
   const roles = useOperatorRoles();
   const caps = useCapabilities();
-  // Fails closed while unknown.
+  const roomCharge = moduleLicensed(caps, "room_charge");
   const canManageRoomCharge =
     (roles?.includes("site_admin") ?? false) &&
     surfaceAvailable(caps, "pms-financial-onboarding") &&
@@ -87,13 +97,12 @@ export default function StaysPage() {
 
   useEffect(() => { setOffset(0); }, [status, q, vipOnly, pms, pageSize]);
 
-  // Search goes in a header: it may be a guest name, and edged logs request lines.
-  // Apply only the newest response.
   const latest = useRef(0);
   const load = useCallback(async () => {
     const mine = ++latest.current;
     setRows(null);
-    setErr(null);
+    setLoadFailed(false);
+    setReloading(true);
     try {
       const params = new URLSearchParams();
       if (status) params.set("status", status);
@@ -104,17 +113,18 @@ export default function StaysPage() {
       const needle = q.trim();
       const r = await api.get<StaysPageResp>(
         "/pms-stays?" + params.toString(),
-        // Percent-encoded: browsers refuse non-Latin-1 text in a header.
         needle ? { "X-Stay-Search": encodeURIComponent(needle) } : undefined,
       );
       if (mine !== latest.current) return;
       setResp(r);
       setRows(r.data ?? []);
-    } catch (e) {
+    } catch {
       if (mine !== latest.current) return;
-      setErr(e);
       setResp(null);
-      setRows([]);
+      setRows(null);
+      setLoadFailed(true);
+    } finally {
+      if (mine === latest.current) setReloading(false);
     }
   }, [status, vipOnly, pms, offset, pageSize, q]);
 
@@ -132,12 +142,14 @@ export default function StaysPage() {
     };
   }, [resp, rows]);
 
-  async function open(id: string) {
-    if (detailBusy) return;
-    setErr(null); setDetailBusy(true);
+  async function open(id: string, quiet = false) {
+    if (openingId) return;
+    setOpeningId(id);
     try { setDetail(await api.get<StayDetail>("/pms-stays/" + id)); }
-    catch (e) { setErr(e); }
-    finally { setDetailBusy(false); }
+    catch (e) {
+      if (!quiet) toast.error("This stay could not be opened", saveErrorMessage(e));
+    }
+    finally { setOpeningId(null); }
   }
 
   const openRef = useRef(open);
@@ -161,7 +173,7 @@ export default function StaysPage() {
           : r?.result === "CLEARED" ? "Administrative block removed"
           : "There was no administrative block to remove",
       );
-      await open(detail.id);
+      await open(detail.id, true);
       void load();
     } catch (e) {
       setBlockErr(saveErrorMessage(e));
@@ -176,6 +188,8 @@ export default function StaysPage() {
   const byPms = resp?.by_interface ?? [];
   const showPms = multi || byPms.length > 1;
   const pmsTotal = byPms.reduce((a, b) => a + b.total, 0);
+  const statValue = (n: number) =>
+    rows ? n.toLocaleString() : loadFailed ? <span className="text-muted-foreground">Not known</span> : <Skeleton className="h-6 w-16" />;
 
   return (
     <PageShell width="wide">
@@ -197,7 +211,7 @@ export default function StaysPage() {
             </HelpSection>
             <HelpSection title="Internet packages on a stay">
               <p>
-                A stay has a package once a guest from that room has signed in and been given one &mdash; a package
+                A stay has a package once a guest from that room has signed in and been given one. A package
                 is granted at sign-in, not at check-in. A room with no package is not a fault: it usually means
                 nobody from it has connected yet.
               </p>
@@ -205,8 +219,8 @@ export default function StaysPage() {
             </HelpSection>
             <HelpSection title="Search and pages">
               <p>
-                Search covers every stay for the selected status &mdash; room, reservation, guest name, travel agent
-                or internet package &mdash; not only the page on screen. The counters above the list count every
+                Search covers every stay for the selected status (room, reservation, guest name, travel agent
+                or internet package), not only the page on screen. The counters above the list count every
                 matching stay.
               </p>
             </HelpSection>
@@ -223,30 +237,30 @@ export default function StaysPage() {
       <StatGrid cols={4}>
         <StatCard
           label={status ? `${label(status)} stays` : "Stays listed"}
-          value={rows ? summary.total.toLocaleString() : "—"}
+          value={statValue(summary.total)}
         />
         <StatCard
           label="With an internet package"
-          value={rows ? summary.withInternet.toLocaleString() : "—"}
+          value={statValue(summary.withInternet)}
           tone={inHouseNoInternet ? "warn" : "default"}
           explain={
             <Explain>
               A stay has a package once a guest from that room has signed in and been given one. A room with no
-              package is not a fault — it usually means nobody from it has connected yet.
+              package is not a fault: it usually means nobody from it has connected yet.
             </Explain>
           }
         />
         <StatCard
           label="Devices online"
-          value={rows ? summary.online.toLocaleString() : "—"}
+          value={statValue(summary.online)}
           href="/sessions"
           hint="Across every matching stay"
         />
-        <StatCard label="VIP guests" value={rows ? summary.vip.toLocaleString() : "—"} hint="Marked VIP in the PMS" />
+        <StatCard label="VIP guests" value={statValue(summary.vip)} hint="Marked VIP in the PMS" />
       </StatGrid>
 
       {inHouseNoInternet && (
-        <Callout tone="warning" title="No in-house room has an internet package">
+        <Callout tone="warning" title="No in-house room has an internet package" className={FADE}>
           If guests cannot get online, check that a package applies to these stays on{" "}
           <Link href="/internet-packages" className="underline underline-offset-2">Internet packages</Link>, and
           that their Wi-Fi network is routed to the PMS they belong to on{" "}
@@ -309,12 +323,27 @@ export default function StaysPage() {
             />
           </div>
         )}
-        <ResultsCount count={rows?.length} noun="stay" />
-        {err !== null && <div className="px-4 pt-3"><ErrorBanner err={err} /></div>}
+        <ResultsCount count={rows ? resp?.summary?.total ?? rows.length : undefined} noun="stay" />
 
         {rows === null ? (
-          <SkeletonRows rows={6} cols={6} />
+          loadFailed ? (
+            <div role="alert" className={FADE}>
+              <EmptyState
+                icon={<AlertTriangle />}
+                title="Stays could not be loaded"
+                hint="The appliance did not return the stays, so the list and the counts above are not known. Nothing has been changed."
+                action={
+                  <Button variant="secondary" disabled={reloading} onClick={() => void load()}>
+                    <RefreshCw className={cn(reloading && "animate-spin motion-reduce:animate-none")} /> Try again
+                  </Button>
+                }
+              />
+            </div>
+          ) : (
+            <SkeletonRows rows={6} cols={6} />
+          )
         ) : rows.length === 0 ? (
+          <div className={FADE}>
           <EmptyState
             size="sm"
             icon={<Hotel />}
@@ -323,7 +352,9 @@ export default function StaysPage() {
               ? "Nothing matches across all stays for the selected status."
               : "Nothing has arrived from a PMS for this filter yet."}
           />
+          </div>
         ) : (
+          <div className={FADE}>
           <Table label="Stays">
             <THead>
               <TR>
@@ -332,7 +363,7 @@ export default function StaysPage() {
                 <TH className="hidden sm:table-cell">Stay</TH>
                 <TH>Status</TH>
                 <TH className="hidden md:table-cell">Internet package</TH>
-                <TH className="hidden lg:table-cell">Room charge</TH>
+                {roomCharge && <TH className="hidden lg:table-cell">Room charge</TH>}
                 <TH><span className="sr-only">Actions</span></TH>
               </TR>
             </THead>
@@ -341,8 +372,8 @@ export default function StaysPage() {
                 <TR key={s.id} onClick={() => void open(s.id)}>
                   <TD nowrap className="max-w-[10rem]">
                     <div className="flex items-center gap-1.5 font-medium">
-                      {s.room ?? "—"}
-                      {s.vip ? <Badge tone="warn" size="sm">VIP</Badge> : null}
+                      {s.room ?? "No room"}
+                      {s.vip ? <Badge tone="neutral" size="sm">VIP</Badge> : null}
                       {showPms && <PmsTag label={s.pms_interface_label} />}
                     </div>
                     {s.external_reservation_id && (
@@ -369,7 +400,7 @@ export default function StaysPage() {
                     )}
                   </TD>
                   <TD className="hidden md:table-cell"><AccessCell stay={s} /></TD>
-                  <TD className="hidden lg:table-cell">
+                  {roomCharge && <TD className="hidden lg:table-cell">
                     {s.posting_allowed ? (
                       <Badge tone="ok">Allowed</Badge>
                     ) : (
@@ -380,17 +411,24 @@ export default function StaysPage() {
                         )}
                       </span>
                     )}
-                  </TD>
+                  </TD>}
                   <TD className="w-0">
-                    <RowActions
-                      subject={`stay, ${roomWithPms(s.room, s.pms_interface_label, showPms)}`}
-                      primary={{ label: "View", onSelect: () => void open(s.id), disabled: detailBusy }}
-                    />
+                    {openingId === s.id ? (
+                      <span role="status" className={cn("inline-flex size-8 items-center justify-center", FADE)}>
+                        <OneGateLoader className="size-4" label="Opening this stay" />
+                      </span>
+                    ) : (
+                      <RowActions
+                        subject={`stay, ${roomWithPms(s.room, s.pms_interface_label, showPms)}`}
+                        primary={{ label: "View", onSelect: () => void open(s.id), disabled: openingId !== null }}
+                      />
+                    )}
                   </TD>
                 </TR>
               ))}
             </TBody>
           </Table>
+          </div>
         )}
         {rows && rows.length > 0 && (
           <CardFooter>
@@ -411,19 +449,19 @@ export default function StaysPage() {
         onOpenChange={(v) => !v && setDetail(null)}
         width="lg"
         eyebrow="Stay"
-        title={detail ? `Room ${detail.room ?? "—"}${detail.primary_guest ? ` · ${detail.primary_guest}` : ""}` : ""}
+        title={detail ? `${detail.room ? `Room ${detail.room}` : "No room number"}${detail.primary_guest ? ` · ${detail.primary_guest}` : ""}` : ""}
         description={
           detail
-            ? `${detail.identity_hidden ? "Reservation not shown to your role" : `Reservation ${detail.external_reservation_id}`}${detail.pms_interface_label ? ` · from ${detail.pms_interface_label}` : ""}`
+            ? `${detail.identity_hidden ? "Reservation not shown to your role" : detail.external_reservation_id ? `Reservation ${detail.external_reservation_id}` : "No reservation number from the PMS"}${detail.pms_interface_label ? ` · from ${detail.pms_interface_label}` : ""}`
             : undefined
         }
         badges={detail && (
           <>
             <StatusBadge tone={toneFor(detail.status)}>{label(detail.status)}</StatusBadge>
-            {detail.vip && <Badge tone="warn">VIP</Badge>}
-            {detail.posting_allowed
+            {detail.vip && <Badge tone="neutral">VIP</Badge>}
+            {roomCharge && (detail.posting_allowed
               ? <Badge tone="ok">Room charge allowed</Badge>
-              : <Badge tone="default">Room charge not allowed</Badge>}
+              : <Badge tone="default">Room charge not allowed</Badge>)}
           </>
         )}
       >
@@ -434,9 +472,9 @@ export default function StaysPage() {
                 <>
                   <MetricStrip
                     items={[
-                      { label: "Package", value: <span className="text-sm">{detail.access_package_name || detail.access_package_code || "—"}</span> },
-                      { label: "Service plan", value: <span className="text-sm">{detail.access_plan_code ?? "—"}</span> },
-                      { label: "Speed", value: <span className="text-sm">{speedPair(detail.access_down_kbps, detail.access_up_kbps) ?? "—"}</span> },
+                      { label: "Package", value: <span className="text-sm">{detail.access_package_name || detail.access_package_code || "Not set"}</span> },
+                      { label: "Service plan", value: <span className="text-sm">{detail.access_plan_code ?? "Not set"}</span> },
+                      { label: "Speed", value: <span className="text-sm">{speedPair(detail.access_down_kbps, detail.access_up_kbps) ?? "Not set"}</span> },
                       {
                         label: "Devices with a place",
                         tone: atDeviceLimit(detail) ? "warn" : undefined,
@@ -456,12 +494,12 @@ export default function StaysPage() {
                   />
                   {detail.access_status !== "ACTIVE" && (
                     <p className="text-xs text-muted-foreground">
-                      The access record is <strong>{detail.access_status.toLowerCase()}</strong> rather than active —
-                      granted but not yet in force, or suspended.
+                      This room&rsquo;s package is <strong>{ACCESS_WORDS[detail.access_status] ?? "not active right now"}</strong>{" "}
+                      rather than active, so its devices are not online through it.
                     </p>
                   )}
-                  <Link href="/sessions" className="inline-block text-xs font-medium text-primary hover:underline">
-                    See this room&rsquo;s devices →
+                  <Link href={`/usage?stay=${encodeURIComponent(detail.id)}`} className="inline-block text-xs font-medium text-primary hover:underline">
+                    See this room&rsquo;s devices and usage →
                   </Link>
                 </>
               ) : (
@@ -511,12 +549,12 @@ export default function StaysPage() {
               )}
             </DetailsSection>
 
-            <RoomChargeSection
+            {roomCharge && <RoomChargeSection
               stay={detail}
               canManage={canManageRoomCharge}
               onBlock={() => { setBlockErr(null); setBlockAction("SET"); }}
               onUnblock={() => { setBlockErr(null); setBlockAction("CLEAR"); }}
-            />
+            />}
           </>
         )}
       </DetailsDrawer>
@@ -551,7 +589,7 @@ function BlockLine({ b }: { b: StayPostingBlock }) {
       <div className="flex flex-wrap items-center gap-1.5">
         <StatusBadge tone={active ? "warn" : "default"}>{active ? "Active" : "Cleared"}</StatusBadge>
         <span className="font-medium">{postingBlockWords(b.reason)}</span>
-        {b.pa_as_status && <span className="font-mono text-xs text-muted-foreground">PMS answer {b.pa_as_status}</span>}
+        {b.pa_as_status && <span className="text-xs text-muted-foreground">For support: PMS answer <span className="font-mono">{b.pa_as_status}</span></span>}
       </div>
       <div className="text-xs text-muted-foreground">
         Placed by {b.created_by ?? postingSourceWords(b.source).toLowerCase()} · {formatDate(b.created_at)}
@@ -674,7 +712,7 @@ function AccessCell({ stay }: { stay: Stay }) {
         {typeof stay.access_max_devices === "number" && stay.access_max_devices > 0
           ? ` / ${stay.access_max_devices} devices`
           : " devices"}
-        {atLimit && " — at the limit"}
+        {atLimit && ", at the limit"}
       </div>
     </>
   );

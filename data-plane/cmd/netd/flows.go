@@ -53,6 +53,38 @@ func (s *server) flowsEnd(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+type addressOwnerReq struct {
+	IP  string `json:"ip"`
+	MAC string `json:"mac"`
+}
+
+// addressOwnerQuery is POST /v1/address/owner: whom DHCP says the address belongs to, by the same evidence the
+// enforcement pass uses (owned, foreign, or unknown when Kea cannot be asked or its absence is not trusted yet). It
+// reads and grants nothing; scd refuses a sign-in at an address leased to another device and requires "owned" to reconnect.
+func (s *server) addressOwnerQuery(w http.ResponseWriter, r *http.Request) {
+	var req addressOwnerReq
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "malformed body"})
+		return
+	}
+	ip := net.ParseIP(req.IP).To4()
+	mac, merr := net.ParseMAC(req.MAC)
+	if ip == nil || merr != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "ip and mac are required"})
+		return
+	}
+	state := "unknown"
+	if p := s.phase3; p != nil {
+		switch p.owner.Evidence(r.Context(), ip, mac.String()).State {
+		case addressOwned:
+			state = "owned"
+		case addressForeign:
+			state = "foreign"
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"state": state})
+}
+
 // endFlows flushes after the revocation so a flow cannot re-establish against a still-present element.
 func (s *server) endFlows(ctx context.Context, ip net.IP, bridge string, flows conntrack.Flusher) (flowsEndResp, error) {
 	out := flowsEndResp{IP: ip.String()}

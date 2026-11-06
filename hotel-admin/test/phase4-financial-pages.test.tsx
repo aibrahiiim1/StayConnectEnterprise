@@ -67,8 +67,8 @@ describe("financial health", () => {
   it("says plainly that provider egress is off and never implies a provider is live", async () => {
     route({ "/financial-ops/health": { health: HEALTHY } });
     render(<FinancialHealthView />);
-    expect(await screen.findByText("Disabled")).toBeInTheDocument();
-    expect(screen.getByText(/No payment provider has been integrated or verified/i)).toBeInTheDocument();
+    expect(await screen.findByText("Not allowed")).toBeInTheDocument();
+    expect(screen.getByText(/does not contact any payment provider/i)).toBeInTheDocument();
     const body = document.body.textContent ?? "";
     for (const name of ["Stripe", "Adyen", "Checkout.com", "PayPal", "Braintree"]) {
       expect(body).not.toContain(name);
@@ -78,7 +78,7 @@ describe("financial health", () => {
   it("has an accessible name on every control", async () => {
     route({ "/financial-ops/health": { health: HEALTHY } });
     render(<FinancialHealthView />);
-    await screen.findByText("OK");
+    await screen.findByText("Normal");
     for (const el of screen.getAllByRole("button")) {
       expect(el).toHaveAccessibleName();
     }
