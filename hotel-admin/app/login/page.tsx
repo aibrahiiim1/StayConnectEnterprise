@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Eye, EyeOff } from "lucide-react";
-import { BySemantics, OneGateLockup } from "@/components/brand";
+import { BySemantics, OneGateLockup, OneGateWordmark } from "@/components/brand";
 import { Button } from "@/components/ui/button";
 import { Input, Field } from "@/components/ui/input";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
@@ -77,7 +77,7 @@ function PasswordBox({ id, readOnly, value, onChange, onCapsLock, inputRef, ...a
         onKeyDown={caps}
         onKeyUp={caps}
         onBlur={() => onCapsLock(false)}
-        className="pe-10"
+        className="h-11 pe-10"
       />
       <button
         type="button"
@@ -189,17 +189,48 @@ function LoginInner() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-background">
-      <header className="flex items-center justify-between gap-3 px-4 py-4 sm:px-6">
-        <OneGateLockup animated />
-        <ThemeToggle />
-      </header>
+    <div className="grid min-h-screen bg-background lg:grid-cols-2">
+      <aside className="relative hidden overflow-hidden bg-[#08130D] text-white lg:flex lg:flex-col lg:justify-between lg:p-12">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 bg-[radial-gradient(60rem_40rem_at_0%_0%,rgba(21,128,61,0.45),transparent_60%),radial-gradient(40rem_30rem_at_100%_100%,rgba(74,222,128,0.14),transparent_60%)]"
+        />
+        <svg
+          aria-hidden
+          viewBox="0 0 600 600"
+          className="pointer-events-none absolute -bottom-40 -right-40 size-[38rem] text-white/[0.07]"
+          fill="none"
+          stroke="currentColor"
+        >
+          {[0, 60, 120, 180, 240].map((i) => (
+            <rect key={i} x={i / 2 + 20} y={i / 2 + 20} width={560 - i} height={560 - i} rx={(560 - i) / 5} strokeWidth="1.5" />
+          ))}
+        </svg>
 
-      <main className="flex flex-1 items-start justify-center px-4 pb-12 pt-6 sm:items-center sm:px-6 sm:pt-0">
-        <div className="w-full max-w-[24rem] space-y-4">
-          <div className="rounded-xl border border-border bg-card p-6 text-card-foreground shadow-card sm:p-7">
-            <div className="mb-6 space-y-1">
-              <h1 className="text-title">Sign in</h1>
+        <OneGateWordmark animated className="relative h-8 [--og-gate:#FFFFFF] [--og-one:#4ADE80]" />
+
+        <div className="relative max-w-md space-y-4">
+          <h2 className="text-4xl font-semibold leading-tight tracking-tight text-balance">
+            Guest internet for your site, in one place.
+          </h2>
+          <p className="text-base leading-relaxed text-white/70 text-pretty">
+            Sign-in, access, devices and networking for this site, run from this appliance.
+          </p>
+        </div>
+
+        <BySemantics className="relative text-white/60" />
+      </aside>
+
+      <div className="flex min-h-screen flex-col">
+        <header className="flex items-center justify-between gap-3 px-4 py-4 sm:px-6 lg:justify-end">
+          <OneGateLockup animated className="lg:hidden" />
+          <ThemeToggle />
+        </header>
+
+        <main className="flex flex-1 items-start justify-center px-4 pb-12 pt-6 sm:items-center sm:px-6 sm:pt-0">
+          <div className="w-full max-w-[24rem]">
+            <div className="mb-8 space-y-1.5">
+              <h1 className="text-[1.75rem] font-semibold leading-9 tracking-tight">Sign in</h1>
               <p className="text-sm text-muted-foreground">
                 {codeStep ? "One more step to finish signing in." : "Use your account for this site."}
               </p>
@@ -230,6 +261,7 @@ function LoginInner() {
                     spellCheck={false}
                     value={email}
                     onChange={(e) => { setEmail(e.target.value); setEmailErr(null); }}
+                    className="h-11"
                   />
                 </Field>
                 <Field
@@ -260,19 +292,18 @@ function LoginInner() {
                     <ErrorBanner err={err} className="mb-0" />
                   </div>
                 ) : null}
-                <Button type="submit" loading={loading} disabled={lockedUntil !== null} className="w-full" size="lg">
+                <Button type="submit" loading={loading} disabled={lockedUntil !== null} className="mt-2 w-full" size="lg">
                   {lockedUntil !== null ? `Try again in ${clockWords(lockLeft)}` : "Sign in"}
                 </Button>
               </form>
             )}
           </div>
+        </main>
 
-        </div>
-      </main>
-
-      <footer className="px-4 pb-6 text-center text-muted-foreground sm:px-6">
-        <BySemantics />
-      </footer>
+        <footer className="px-4 pb-6 text-center text-muted-foreground sm:px-6 lg:hidden">
+          <BySemantics />
+        </footer>
+      </div>
     </div>
   );
 }
