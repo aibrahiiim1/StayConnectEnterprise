@@ -20,6 +20,10 @@ const (
 
 // healthMonitor serves the monitor's last snapshot as it is, never a substitute: missing, unreadable or old evidence is said to be so.
 func (s *server) healthMonitor(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, monitorReport())
+}
+
+func monitorReport() map[string]any {
 	out := map[string]any{"available": false, "generated_at": time.Now().UTC()}
 	st, err := os.Stat(monitorSnapshotPath)
 	switch {
@@ -49,7 +53,7 @@ func (s *server) healthMonitor(w http.ResponseWriter, r *http.Request) {
 			out["stale"] = age > monitorStaleAfter
 		}
 	}
-	writeJSON(w, http.StatusOK, out)
+	return out
 }
 
 // redactMonitor applies the log redaction to every text: the monitor already leaves addresses out and masks hardware addresses.

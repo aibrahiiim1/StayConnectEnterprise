@@ -25,6 +25,7 @@ func (s *server) healthRoutes() http.Handler {
 	r.With(s.requireRole("diagnostics", permWrite)).Get("/services/{name}/logs", s.healthLogs)
 	r.Get("/recovery-events", s.healthRecoveryEvents)
 	r.Get("/monitor", s.healthMonitor)
+	r.With(s.requireRole("diagnostics", permWrite)).Get("/bundle", s.healthBundle)
 	return r
 }
 
@@ -39,14 +40,18 @@ func (s *server) unitFor(name string) (string, bool) {
 }
 
 func (s *server) healthServices(w http.ResponseWriter, r *http.Request) {
-	all := s.allHealth(r.Context())
+	writeJSON(w, http.StatusOK, s.servicesAnswer(r.Context()))
+}
+
+func (s *server) servicesAnswer(ctx context.Context) map[string]any {
+	all := s.allHealth(ctx)
 	overall, counts := overallHealth(all)
 	var boot map[string]any
 	{
 		var converged, alertOpen bool
 		var pending []string
 		var bootAt, convergedAt, deadline *time.Time
-		if s.db.QueryRow(r.Context(), `SELECT converged, alert_open, pending_services, boot_at, converged_at, deadline_at
+		if s.db.QueryRow(ctx, `SELECT converged, alert_open, pending_services, boot_at, converged_at, deadline_at
 		    FROM appliance_boot_convergence WHERE id`).Scan(&converged, &alertOpen, &pending, &bootAt, &convergedAt, &deadline) == nil {
 			boot = map[string]any{"converged": converged, "alert_open": alertOpen, "pending": pending,
 				"boot_at": bootAt, "converged_at": convergedAt, "deadline_at": deadline}
@@ -54,13 +59,13 @@ func (s *server) healthServices(w http.ResponseWriter, r *http.Request) {
 	}
 	// Checks that are not supervised services (portal_https) do not change `overall`.
 	checks := []portalHTTPSCheck{}
-	if c, ok := s.portalHTTPSHealth(r.Context()); ok {
+	if c, ok := s.portalHTTPSHealth(ctx); ok {
 		checks = append(checks, c)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	return map[string]any{
 		"overall": overall, "counts": counts, "services": all, "boot": boot, "checks": checks,
 		"generated_at": time.Now().UTC(),
-	})
+	}
 }
 
 func (s *server) healthService(w http.ResponseWriter, r *http.Request) {
@@ -159,16 +164,23 @@ func (s *server) healthLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
-	out, _ := exec.CommandContext(ctx, "journalctl", "-u", unit, "-n", "60", "--no-pager", "-o", "short-iso").CombinedOutput()
 	var lines []string
-	for _, l := range strings.Split(string(out), "\n") {
-		if strings.TrimSpace(l) == "" {
-			continue
-		}
+	for _, l := range journalLines(ctx, unit, 60) {
 		lines = append(lines, sanitizeLog(l))
 	}
 	s.audit(r, "health.logs_viewed", "service", name, nil)
 	writeJSON(w, http.StatusOK, map[string]any{"service": name, "lines": lines})
+}
+
+var journalLines = func(ctx context.Context, unit string, n int) []string {
+	out, _ := exec.CommandContext(ctx, "journalctl", "-u", unit, "-n", strconv.Itoa(n), "--no-pager", "-o", "short-iso").CombinedOutput()
+	var lines []string
+	for _, l := range strings.Split(string(out), "\n") {
+		if strings.TrimSpace(l) != "" {
+			lines = append(lines, l)
+		}
+	}
+	return lines
 }
 
 func (s *server) healthRecoveryEvents(w http.ResponseWriter, r *http.Request) {
