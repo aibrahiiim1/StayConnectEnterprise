@@ -38,6 +38,8 @@ REJOIN_FAILURES = ("device:", "begin", "candidate:", "capacity:", "session:", "c
 STAY_REJOINABLE = """(st.status IN ('IN_HOUSE','POST_STAY_ACTIVE') OR (st.status = 'CHECKED_OUT' AND EXISTS (
     SELECT 1 FROM iam_v2.entitlements g WHERE g.tenant_id = st.tenant_id AND g.site_id = st.site_id AND g.stay_id = st.id
       AND g.status = 'ACTIVE' AND g.end_mode = 'GRACE_AFTER_CHECKOUT' AND (g.window_ends_at IS NULL OR g.window_ends_at > now()))))"""
+# Units an appliance runs only once commissioned; disabled they are not a fault, enabled and down they are.
+OPTIONAL_UNITS = {"stayconnect-pmsd": "no PMS commissioned", "kea-dhcp4-server": "no client network served yet"}
 UNITS = ["stayconnect-edged", "stayconnect-scd", "stayconnect-portald", "stayconnect-netd", "stayconnect-acctd",
          "stayconnect-pmsd", "stayconnect-caddy", "stayconnect-hotel-admin", "kea-dhcp4-server", "unbound", "docker"]
 
@@ -234,7 +236,7 @@ class Monitor:
 
     # ---- quick checks ------------------------------------------------------------------------------------------------
     def check_services(self, state):
-        rc, out = self.s.sh(["systemctl", "show", "-p", "Id,ActiveState,SubState,NRestarts", *[u + ".service" for u in UNITS]])
+        rc, out = self.s.sh(["systemctl", "show", "-p", "Id,ActiveState,SubState,NRestarts,UnitFileState", *[u + ".service" for u in UNITS]])
         if rc != 0 and not out:
             raise Unavailable("systemctl unavailable")
         prev = state.get("restarts", {})
@@ -243,10 +245,13 @@ class Monitor:
             kv = dict(l.split("=", 1) for l in block.splitlines() if "=" in l)
             unit = kv.get("Id", "?").removesuffix(".service")
             cur[unit] = n(kv.get("NRestarts"))
-            if kv.get("ActiveState") != "active":
-                self.add(f"svc:{unit}", "services", CRIT, f"{unit} is {kv.get('ActiveState', 'unknown')}/{kv.get('SubState', '?')}")
-            else:
+            if kv.get("ActiveState") == "active":
                 self.add(f"svc:{unit}", "services", PASS, f"{unit} active")
+            elif unit in OPTIONAL_UNITS and kv.get("UnitFileState") in ("disabled", "masked"):
+                self.add(f"svc:{unit}", "services", PASS, f"{unit} not enabled on this appliance ({OPTIONAL_UNITS[unit]})")
+            else:
+                self.add(f"svc:{unit}", "services", CRIT, f"{unit} is {kv.get('ActiveState', 'unknown')}/{kv.get('SubState', '?')}"
+                         + (f", {kv.get('UnitFileState')}" if kv.get("UnitFileState") not in (None, "enabled", "static") else ""))
             if unit in prev and cur[unit] > prev[unit]:
                 self.add(f"svc-restart:{unit}", "services", WARN, f"{unit} crashed and was restarted by systemd {cur[unit] - prev[unit]} time(s) since the last run")
             else:
@@ -255,15 +260,20 @@ class Monitor:
         rc, out = self.s.sh(["systemctl", "--failed", "--no-legend", "--plain"])
         failed = [l.split()[0] for l in out.splitlines() if l.strip()]
         self.add("svc:failed-units", "services", WARN if failed else PASS, "failed units: " + " ".join(failed) if failed else "no failed units")
-        rc, out = self.s.sh(["docker", "inspect", "-f", "{{.Name}} {{.State.Running}} {{.RestartCount}}", "stayconnect-pg", "stayconnect-redis"])
-        seen = {}
-        for l in out.splitlines():
-            p = l.split()
-            if len(p) >= 2:
-                seen[p[0].lstrip("/")] = p[1] == "true"
-        for c in ("stayconnect-pg", "stayconnect-redis"):
-            ok = seen.get(c)
-            self.add(f"container:{c}", "services", PASS if ok else CRIT, f"container {c} " + ("running" if ok else "not running"))
+
+    def check_containers(self, state):
+        rc, out = self.s.sh(["docker", "ps", "-a", "--format", "{{.Names}} {{.State}}"])
+        if rc != 0:
+            self.add("container:stayconnect-pg", "services", NV, "docker unreadable")
+            return
+        seen = {p[0]: p[1] for p in (l.split() for l in out.splitlines()) if len(p) >= 2}
+        ok = seen.get("stayconnect-pg") == "running"
+        self.add("container:stayconnect-pg", "services", PASS if ok else CRIT, "database container " + ("running" if ok else seen.get("stayconnect-pg", "missing")))
+        # Nothing on an appliance uses Redis (AD-63); an old one is retired by appliance-install.sh --upgrade.
+        r = seen.get("stayconnect-redis")
+        self.add("container:stayconnect-redis", "installation", WARN if r == "running" else PASS,
+                 "an unused Redis container runs (nothing on an appliance uses it, AD-63; the next upgrade retires it)" if r == "running"
+                 else "no Redis container, as on a fresh install")
 
     def check_resources(self, state):
         def cpu_times():
@@ -372,7 +382,15 @@ class Monitor:
         passes = [l for l in lines if '"msg":"phase3: pass"' in l]
         recent = [l for l in passes if self._log_time(l) and self._log_time(l) >= self.now - dt.timedelta(minutes=3)]
         if not recent:
-            self.add("enf:pass", "enforcement", CRIT, "netd has not completed an enforcement pass in 3 minutes")
+            try:
+                nets = n(self.s.sql("SELECT count(*) FROM public.guest_networks WHERE enabled")[0][0])
+            except Unavailable as e:
+                self.add("enf:pass", "enforcement", NV, f"no enforcement pass in 3 minutes, and client networks unreadable: {e}")
+                return
+            if nets == 0:
+                self.add("enf:pass", "enforcement", PASS, "no client network is enabled, so there is nothing to enforce")
+            else:
+                self.add("enf:pass", "enforcement", CRIT, "netd has not completed an enforcement pass in 3 minutes")
             return
         last = recent[-1]
         sessions, failed, pms = (n(self._json_field(last, k)) for k in ("sessions", "failed", "pass_ms"))
@@ -995,7 +1013,7 @@ class Monitor:
             return None
 
     # ---- run -----------------------------------------------------------------------------------------------------------
-    QUICK = ["check_services", "check_resources", "check_database", "check_enforcement", "check_acctd", "check_http",
+    QUICK = ["check_services", "check_containers", "check_resources", "check_database", "check_enforcement", "check_acctd", "check_http",
              "check_network", "check_dhcp", "check_pms", "check_licence", "check_certs", "check_signin", "check_integrity", "check_errors"]
     DEEP = ["check_backup", "check_parity"]
 

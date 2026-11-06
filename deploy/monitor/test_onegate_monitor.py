@@ -80,10 +80,34 @@ class NoEvidenceIsNeverPass(unittest.TestCase):
         mon = run(f)
         self.assertEqual(by_key(mon)["enf:pass"].status, om.NV)
 
-    def test_a_readable_journal_without_a_pass_is_critical(self):
+    def test_a_readable_journal_without_a_pass_is_critical_when_a_network_needs_enforcing(self):
         f = FakeSys()
         f.cmds.append((["journalctl", "-u", "stayconnect-netd"], 0, '{"time":"2026-11-06T11:40:00Z","msg":"other"}\n'))
+        f.sqls.append((r"FROM public.guest_networks WHERE enabled\"?$|guest_networks WHERE enabled$", [["2"]]))
         self.assertEqual(by_key(run(f))["enf:pass"].status, om.CRIT)
+        f.sqls[0] = (r"FROM public.guest_networks WHERE enabled\"?$|guest_networks WHERE enabled$", [["0"]])
+        self.assertEqual(by_key(run(f))["enf:pass"].status, om.PASS)
+        f.sqls.clear()
+        self.assertEqual(by_key(run(f))["enf:pass"].status, om.NV)
+
+    def test_an_optional_unit_switched_off_is_not_a_fault_but_one_switched_on_and_down_is(self):
+        def svc(unit, active, filestate):
+            f = FakeSys()
+            f.cmds.append((["systemctl", "show"], 0, f"Id={unit}.service\nActiveState={active}\nSubState=dead\nNRestarts=0\nUnitFileState={filestate}\n"))
+            return by_key(run(f))[f"svc:{unit}"].status
+        self.assertEqual(svc("stayconnect-pmsd", "inactive", "disabled"), om.PASS)
+        self.assertEqual(svc("kea-dhcp4-server", "inactive", "disabled"), om.PASS)
+        self.assertEqual(svc("stayconnect-pmsd", "inactive", "enabled"), om.CRIT)
+        self.assertEqual(svc("stayconnect-scd", "inactive", "disabled"), om.CRIT)
+
+    def test_an_unused_redis_container_is_a_parity_warning_and_the_database_is_required(self):
+        f = FakeSys()
+        f.cmds.append((["docker", "ps"], 0, "stayconnect-pg running\nstayconnect-redis running\n"))
+        r = by_key(run(f))
+        self.assertEqual((r["container:stayconnect-pg"].status, r["container:stayconnect-redis"].status), (om.PASS, om.WARN))
+        f.cmds[0] = (["docker", "ps"], 0, "stayconnect-pg exited\n")
+        r = by_key(run(f))
+        self.assertEqual((r["container:stayconnect-pg"].status, r["container:stayconnect-redis"].status), (om.CRIT, om.PASS))
 
 
 class Thresholds(unittest.TestCase):
@@ -310,6 +334,7 @@ class ReviewFindings(unittest.TestCase):
     def test_an_enforcement_outage_does_not_resolve_other_enforcement_incidents(self):
         f = FakeSys()
         f.cmds.append((["journalctl", "-u", "stayconnect-netd"], 0, '{"time":"2026-11-06T11:00:00Z","msg":"other"}\n'))
+        f.sqls.append((r"guest_networks WHERE enabled$", [["1"]]))
         state = {"incidents": {"enf:consistency": {"first": NOW.isoformat(), "last": NOW.isoformat(), "count": 2, "streak": 2,
                                                    "raised": True, "status": om.WARN, "text": "gap", "area": "enforcement"}}}
         mon = run(f, state=state)

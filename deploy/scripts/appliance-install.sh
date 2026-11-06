@@ -232,6 +232,23 @@ sync_caddy_unit() {
     say "Caddy unit updated from the release (description only; no restart)"
   fi
 }
+# Nothing on an appliance uses Redis (AD-63): a fresh install starts none, but appliances installed before kept the container. It is
+# removed only when no Central runs on this host and it holds no key and serves no other client; its volume is kept, so
+#   docker compose --profile central-dev -f /opt/stayconnect/deploy/compose/infra.yml up -d redis
+# brings it back.
+retire_appliance_redis() {
+  docker inspect stayconnect-redis >/dev/null 2>&1 || return 0
+  if [ -e /etc/systemd/system/stayconnect-ctrlapi.service ]; then say "stayconnect-redis kept: a Central runs on this host"; return 0; fi
+  local keys clients
+  keys="$(docker exec stayconnect-redis redis-cli dbsize 2>/dev/null | tr -dc 0-9)"
+  clients="$(docker exec stayconnect-redis redis-cli info clients 2>/dev/null | sed -n 's/^connected_clients:\([0-9]*\).*/\1/p')"
+  if [ "${keys:-x}" != 0 ] || [ "${clients:-x}" != 1 ]; then
+    say "stayconnect-redis kept: it holds ${keys:-?} key(s) and serves ${clients:-?} client(s); nothing on an appliance should"
+    return 0
+  fi
+  docker stop stayconnect-redis >/dev/null && docker rm stayconnect-redis >/dev/null
+  say "stayconnect-redis removed (unused on an appliance, AD-63); its volume is kept"
+}
 install_binaries() { # copy binaries, keeping a differing installed one as <bin>.bak-$STAMP
   local changed=0
   for b in scd edged netd portald acctd pmsd keybootstrap svc-run; do
@@ -357,6 +374,7 @@ else
   step "6. units and the product profile"
   bash "$SC/deploy/scripts/install-service-units.sh" "$SC/deploy"
   sync_caddy_unit
+  retire_appliance_redis
   # Kernel settings the release carries (deploy/sysctl): a fresh install applies them in provisioning, so an upgrade must too, or an appliance installed
   # before a setting existed (the neighbour table size for the licensed guest count) never gets it.
   cp "$SC/deploy/sysctl"/*.conf /etc/sysctl.d/ 2>/dev/null || true
