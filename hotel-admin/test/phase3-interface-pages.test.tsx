@@ -457,9 +457,10 @@ describe("Resolution evidence page", () => {
     const { container } = render(<Page />);
 
     expect(await screen.findByText("Checks recorded")).toBeTruthy();
-    expect(screen.getAllByText("Let online").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Matched a stay").length).toBeGreaterThan(0);
     expect(screen.getAllByText("2").length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/ambiguous discriminator required/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Result not recognised").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("AMBIGUOUS_DISCRIMINATOR_REQUIRED").length).toBeGreaterThan(0);
     // The data carries no guest identity: naming rooms or reservations would let someone enumerate who is staying.
     const table = container.querySelector("table")!.innerHTML.toLowerCase();
     for (const forbidden of ["room", "reservation", "guest_name", "stay_id", "folio"]) {

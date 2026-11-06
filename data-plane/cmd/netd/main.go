@@ -330,6 +330,7 @@ func (s *server) routes() http.Handler {
 	// Per-class generations: the only trustworthy answer to "did this counter series restart?"
 	r.Get("/v1/phase3/shaping/epochs", s.phase3EpochsHandler)
 	r.Post("/v1/flows/end", s.callers.gate(classFlows, s.flowsEnd))
+	r.Post("/v1/address/owner", s.callers.gate(classFlows, s.addressOwnerQuery))
 	// Outage continuity (phase3_continuity.go): a durable revocation that does not need acctd or the database, and the governor's state.
 	r.Post("/v1/phase3/continuity/revoke", s.callers.gate(classFlows, s.continuityRevoke))
 	r.Get("/v1/phase3/continuity", admin(s.continuityStatus))

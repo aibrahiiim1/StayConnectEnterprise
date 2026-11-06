@@ -1,18 +1,77 @@
 "use client";
 
-import { Suspense, useCallback, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { Eye, EyeOff } from "lucide-react";
 import { BySemantics, OneGateLockup } from "@/components/brand";
 import { Button } from "@/components/ui/button";
 import { Input, Field } from "@/components/ui/input";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { safeNextPath } from "@/lib/safe-next";
 import { SigninSecondStep } from "@/components/signin-second-step";
+import { cn } from "@/lib/utils";
+
+const FADE = "animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none";
+
+function signinWords(e: unknown): unknown {
+  if (e instanceof ApiError) {
+    if (e.code === "unauthenticated") {
+      return new Error("The email, username or password is not right. Check them and try again.");
+    }
+    if (e.code === "forbidden" && /no roles/i.test(e.message)) {
+      return new Error("This account has no role yet. Ask an administrator to give it one.");
+    }
+  }
+  return e;
+}
+
+type PasswordBoxProps = {
+  id?: string;
+  "aria-describedby"?: string;
+  "aria-invalid"?: boolean;
+  value: string;
+  onChange: (v: string) => void;
+  onCapsLock: (on: boolean) => void;
+  inputRef: React.RefObject<HTMLInputElement>;
+};
+
+function PasswordBox({ id, value, onChange, onCapsLock, inputRef, ...aria }: PasswordBoxProps) {
+  const [shown, setShown] = useState(false);
+  const caps = (e: React.KeyboardEvent<HTMLInputElement>) => onCapsLock(e.getModifierState?.("CapsLock") ?? false);
+  return (
+    <div className="relative">
+      <Input
+        ref={inputRef}
+        id={id}
+        aria-describedby={aria["aria-describedby"]}
+        aria-invalid={aria["aria-invalid"]}
+        type={shown ? "text" : "password"}
+        autoComplete="current-password"
+        autoCapitalize="none"
+        spellCheck={false}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={caps}
+        onKeyUp={caps}
+        onBlur={() => onCapsLock(false)}
+        className="pe-10"
+      />
+      <button
+        type="button"
+        onClick={() => setShown((s) => !s)}
+        aria-label={shown ? "Hide password" : "Show password"}
+        aria-pressed={shown}
+        className="absolute inset-y-0 end-0 flex w-10 items-center justify-center rounded-e-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-4"
+      >
+        {shown ? <EyeOff aria-hidden /> : <Eye aria-hidden />}
+      </button>
+    </div>
+  );
+}
 
 export default function LoginPage() {
-  // useSearchParams must live inside a Suspense boundary for the production build.
   return (
     <Suspense fallback={null}>
       <LoginInner />
@@ -23,34 +82,24 @@ export default function LoginPage() {
 function LoginInner() {
   const router = useRouter();
   const params = useSearchParams();
-  // Only a path on this console: an external ?next= would hand the sign-in off to another site.
   const next = safeNextPath(params.get("next"));
   const expired = params.get("reason") === "expired";
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [err, setErr] = useState<unknown>(null);
+  const [emailErr, setEmailErr] = useState<string | null>(null);
+  const [passwordErr, setPasswordErr] = useState<string | null>(null);
+  const [capsOn, setCapsOn] = useState(false);
   const [loading, setLoading] = useState(false);
-  // An account with two-step sign-in on gets no session from the password: the code step opens it.
   const [codeStep, setCodeStep] = useState(false);
+  const emailRef = useRef<HTMLInputElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setErr(null);
-    setLoading(true);
-    try {
-      const r = await api.post<{ second_step?: "none" | "code" }>("/auth/login", { email, password });
-      setPassword("");
-      if (r.second_step === "none") finish();
-      else setCodeStep(true);
-    } catch (e) {
-      setErr(e);
-    } finally {
-      setLoading(false);
-    }
-  }
+  useEffect(() => {
+    if (!codeStep) emailRef.current?.focus();
+  }, [codeStep]);
 
-  // A weak or admin-chosen password gets a session that can only replace it; the app layout shows that form.
   const finish = useCallback(() => {
     router.replace(next);
     router.refresh();
@@ -59,6 +108,30 @@ function LoginInner() {
     setCodeStep(false);
     setErr(why ? new Error(why) : null);
   }, []);
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setErr(null);
+    const noEmail = email.trim() === "";
+    const noPassword = password === "";
+    setEmailErr(noEmail ? "Enter your email or username." : null);
+    setPasswordErr(noPassword ? "Enter your password." : null);
+    if (noEmail) { emailRef.current?.focus(); return; }
+    if (noPassword) { passwordRef.current?.focus(); return; }
+    setLoading(true);
+    try {
+      const r = await api.post<{ second_step?: "none" | "code" }>("/auth/login", { email, password });
+      setPassword("");
+      if (r.second_step === "none") finish();
+      else setCodeStep(true);
+    } catch (e) {
+      setErr(signinWords(e));
+      setPassword("");
+      requestAnimationFrame(() => passwordRef.current?.focus());
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
@@ -71,7 +144,6 @@ function LoginInner() {
         <div className="w-full max-w-[24rem] space-y-4">
           <div className="rounded-xl border border-border bg-card p-6 text-card-foreground shadow-card sm:p-7">
             <div className="mb-6 space-y-1">
-              {/* sr-only keeps the full product name in the heading's accessible name. */}
               <h1 className="text-title">
                 <span className="sr-only">OneGate </span>Admin Console
               </h1>
@@ -80,7 +152,6 @@ function LoginInner() {
               </p>
             </div>
 
-            {/* role="status" (polite): informational, must not cut off the page's own announcement. */}
             <div role="status" className={expired && !codeStep ? "mb-4" : "sr-only"}>
               {expired && !codeStep ? (
                 <Callout tone="neutral">
@@ -91,33 +162,39 @@ function LoginInner() {
             </div>
 
             {codeStep ? (
-              <SigninSecondStep onDone={finish} onRestart={restart} />
+              <div className={FADE}>
+                <SigninSecondStep onDone={finish} onRestart={restart} />
+              </div>
             ) : (
-              <form onSubmit={onSubmit} className="space-y-4">
-                {/* The banner is role="alert"; an aria-live wrapper would make screen readers read it twice. */}
-                <ErrorBanner err={err} className="mb-0" />
-                <Field label="Email or username">
+              <form onSubmit={onSubmit} className={cn("space-y-4", FADE)} noValidate>
+                <Field label="Email or username" error={emailErr ?? undefined}>
                   <Input
+                    ref={emailRef}
                     type="text"
-                    required
-                    // eslint-disable-next-line jsx-a11y/no-autofocus
-                    autoFocus
                     autoComplete="username"
                     autoCapitalize="none"
                     spellCheck={false}
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    onChange={(e) => { setEmail(e.target.value); setEmailErr(null); }}
                   />
                 </Field>
-                <Field label="Password">
-                  <Input
-                    type="password"
-                    required
-                    autoComplete="current-password"
+                <Field
+                  label="Password"
+                  error={passwordErr ?? undefined}
+                  hint={capsOn && !passwordErr ? "Caps Lock is on." : undefined}
+                >
+                  <PasswordBox
+                    inputRef={passwordRef}
                     value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                    onChange={(v) => { setPassword(v); setPasswordErr(null); }}
+                    onCapsLock={setCapsOn}
                   />
                 </Field>
+                {err ? (
+                  <div key={String((err as { message?: string })?.message ?? err)} className={FADE}>
+                    <ErrorBanner err={err} className="mb-0" />
+                  </div>
+                ) : null}
                 <Button type="submit" loading={loading} className="w-full" size="lg">
                   Sign in
                 </Button>
