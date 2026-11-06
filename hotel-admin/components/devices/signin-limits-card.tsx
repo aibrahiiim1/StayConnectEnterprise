@@ -70,13 +70,17 @@ export function SigninSettingsGroup({
   const [confirming, setConfirming] = useState(false);
   const { triggerRef, panelRef } = useEditFocus(editing);
   const [err, setErr] = useState<unknown>(null);
+  const [unavailable, setUnavailable] = useState<string | null>(null);
   const [saveErr, setSaveErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
+    setErr(null);
+    setUnavailable(null);
     try {
-      const r = await api.get<Payload>("/signin-capacity-settings/");
+      const r = await api.get<Payload & { reason?: string }>("/signin-capacity-settings/");
       if (r && r.bounds && r.settings) setData(r);
+      else setUnavailable(r?.reason || "This appliance did not report these settings.");
     } catch (e) {
       setErr(e);
     }
@@ -143,7 +147,13 @@ export function SigninSettingsGroup({
             <Button ref={triggerRef} size="sm" variant="secondary" onClick={startEdit}>Change</Button>
           )}
         </div>
-        <ErrorBanner err={err} />
+        {unavailable && <p className="text-caption text-muted-foreground">{unavailable}</p>}
+        {err !== null && (
+          <div className="flex flex-wrap items-center gap-2">
+            <ErrorBanner err={err} className="mb-0 flex-1" />
+            <Button size="sm" variant="secondary" onClick={() => void load()}>Try again</Button>
+          </div>
+        )}
         {data && !editing && (
           <dl className="grid gap-x-6 gap-y-1.5 sm:grid-cols-2">
             {shown.map((k) => (

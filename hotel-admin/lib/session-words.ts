@@ -90,6 +90,7 @@ export function methodLabel(method?: string | null): string {
     PRINCIPAL: "Email, phone or social login",
     OPEN: "No sign-in (chose a package)",
     POST_STAY: "After Check-out Access (reconnection)",
+  REJOIN: "Reconnected automatically",
     GRACE: "After Check-out Access",
     ADMIN: "Granted by an operator",
   };

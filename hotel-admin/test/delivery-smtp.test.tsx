@@ -73,20 +73,19 @@ describe("the page", () => {
     routes([SMTP, SENDGRID]);
     render(<NotificationsPage />);
     expect(await screen.findByText(/Last delivered 2m ago/)).toBeInTheDocument();
-    expect(screen.getByText(/Last error: 401 Unauthorized: invalid API key at 3h ago/)).toBeInTheDocument();
-    expect(screen.getByText("Sending")).toBeInTheDocument();
+    expect(screen.getByText(/Last error 3h ago: 401 Unauthorized: invalid API key/)).toBeInTheDocument();
+    expect(screen.getByText("Working")).toBeInTheDocument();
     expect(screen.getByText("Failing")).toBeInTheDocument();
     expect(screen.getByText("smtp.example.com:587")).toBeInTheDocument();
   });
 
-  // Status says whether a sender is switched on (Active / Off); Health says whether it works. "In use" said neither clearly.
-  it("separates on/off from working: Status Active or Off, Health Sending, Failing or Not tested yet", async () => {
+  it("separates on/off from working: Status On or Off, Health Working, Failing or Not tested yet", async () => {
     const UNTESTED = { ...SMTP, id: "p3", display_name: "New relay", last_success_at: undefined };
     routes([SMTP, SENDGRID, UNTESTED]);
     render(<NotificationsPage />);
     await screen.findByText("Site relay");
     expect(screen.getByRole("columnheader", { name: "Status" })).toBeInTheDocument();
-    expect(screen.getAllByText("Active")).toHaveLength(2);
+    expect(screen.getAllByText("On")).toHaveLength(2);
     expect(screen.getByText("Off")).toBeInTheDocument();
     expect(screen.getByText("Not tested yet")).toBeInTheDocument();
     expect(screen.queryByText("In use")).toBeNull();
@@ -183,9 +182,49 @@ describe("an SMTP sender", () => {
     fireEvent.change(within(dialog).getByLabelText("Service"), { target: { value: "smtp" } });
     fireEvent.change(within(dialog).getByLabelText(/Mail server/), { target: { value: "smtp.example.com" } });
     fireEvent.change(within(dialog).getByLabelText(/^Username/), { target: { value: "codes" } });
+    fireEvent.change(within(dialog).getByLabelText(/^Login password/), { target: { value: "pw" } });
     fireEvent.click(within(dialog).getByRole("button", { name: /^Add sender$/ }));
     await confirmIn(/Add this sender\?/, /^Add sender$/);
     expect(await within(dialog).findByText("a username requires a password")).toBeInTheDocument();
+  });
+});
+
+describe("checks before saving", () => {
+  it("asks for a username's password beside the field, and sends nothing", async () => {
+    routes([]);
+    render(<NotificationsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /Add sender/ }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText("Service"), { target: { value: "smtp" } });
+    fireEvent.change(within(dialog).getByLabelText(/Mail server/), { target: { value: "smtp.example.com" } });
+    fireEvent.change(within(dialog).getByLabelText(/^Username/), { target: { value: "codes" } });
+    fireEvent.change(within(dialog).getByLabelText(/^Port/), { target: { value: "70000" } });
+    expect(within(dialog).getByText(/whole number from 1 to 65535/)).toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText(/^Port/), { target: { value: "" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Add sender$/ }));
+    expect(await within(dialog).findByText("A username needs the mail server's password.")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /Add this sender\?/ })).toBeNull();
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("clears the previous service's values when the service changes", async () => {
+    routes([]);
+    render(<NotificationsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /Add sender/ }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText(/From address/), { target: { value: "a@b.com" } });
+    fireEvent.change(within(dialog).getByLabelText("Service"), { target: { value: "smtp" } });
+    expect((within(dialog).getByLabelText(/From address/) as HTMLInputElement).value).toBe("");
+  });
+});
+
+describe("a test-only sender", () => {
+  it("is marked as reaching no client, even after a successful test", async () => {
+    routes([{ id: "p9", tenant_id: "t", channel: "sms", kind: "stub", enabled: true, display_name: "Trial",
+      last_success_at: new Date(Date.now() - 60_000).toISOString(), created_at: "2026-10-01T10:00:00Z", updated_at: "2026-10-01T10:00:00Z" }]);
+    render(<NotificationsPage />);
+    expect(await screen.findByText("Test only: clients get nothing")).toBeInTheDocument();
+    expect(screen.queryByText("Working")).toBeNull();
   });
 });
 
@@ -203,7 +242,7 @@ describe("Send a test message", () => {
     fireEvent.change(to, { target: { value: "me@example.com" } });
     fireEvent.click(within(dialog).getByRole("button", { name: /Send test/ }));
     await waitFor(() => expect(post).toHaveBeenCalledWith("/notification-providers/p1/test", { to: "me@example.com" }));
-    expect(await within(dialog).findByText("Delivered")).toBeInTheDocument();
+    expect(await within(dialog).findByText("Accepted by the service")).toBeInTheDocument();
     expect(within(dialog).getByText(/sent through Your own mail server \(SMTP\)/)).toBeInTheDocument();
     expect(get.mock.calls.filter((c) => c[0] === "/notification-providers").length).toBeGreaterThanOrEqual(2);
 

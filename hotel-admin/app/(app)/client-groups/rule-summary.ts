@@ -1,4 +1,3 @@
-// Beside the page because a Next page file may export only page members.
 import type { ClientGroupRule } from "@/lib/api";
 
 export function ruleSummary(rules: ClientGroupRule[] | null | undefined): string {

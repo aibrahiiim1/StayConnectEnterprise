@@ -63,12 +63,10 @@ export const DEFAULT_BOUNDS: AccessBounds = {
   duration_hours: { min: 1, max: 72, default: 12, unit: "hours" },
   down_kbps: { min: 64, max: 1_000_000, default: 5000, unit: "kbps" },
   up_kbps: { min: 64, max: 1_000_000, default: 2000, unit: "kbps" },
-  // Byte values match the server's (grace.go: 10 MiB, 100 GiB, 1 GiB); only the display is decimal.
   data_quota_bytes: { min: 10 * MiB, max: 100 * 1024 * MiB, default: 1024 * MiB, unit: "bytes" },
   device_limit: { min: 1, max: 20, default: 5, unit: "devices" },
 };
 
-/** Published and emergency terms arrive in different shapes; one shape for every view. */
 export function normalisePolicy(p: (Partial<AccessPolicy> & { device_limit_policy?: string }) | null | undefined): AccessPolicy | undefined {
   if (!p) return undefined;
   const seconds = typeof p.duration_seconds === "number" ? p.duration_seconds
@@ -84,7 +82,6 @@ export function normalisePolicy(p: (Partial<AccessPolicy> & { device_limit_polic
   };
 }
 
-/** A device limit of 0 is unset: no separate cap, only the stay's own devices (the emergency terms carry 0). */
 export function deviceAllowanceWords(limit: number): string {
   return limit > 0 ? `Up to ${limit} device${limit === 1 ? "" : "s"} at once` : "No separate limit";
 }
@@ -151,7 +148,7 @@ function humanise(code: string): string {
 }
 
 export function devicePolicyTitle(p?: string): string {
-  if (!p) return "—";
+  if (!p) return "Not set";
   return DEVICE_POLICY_TEXT[p]?.title ?? humanise(p);
 }
 
@@ -164,7 +161,7 @@ export function sourceWords(source: AccessSource | undefined): { label: string; 
     case "DISABLED":
       return { label: "Disabled", tone: "neutral", hint: "Nobody receives access after check-out" };
     default:
-      return { label: "Unknown", tone: "neutral", hint: "" };
+      return { label: "Not known", tone: "neutral", hint: "This console does not recognise the setting in force" };
   }
 }
 
@@ -204,7 +201,7 @@ const FIELDS: { key: TermKey; label: string; get: (s: AccessSnapshot) => string 
   { key: "down", label: "Download speed", get: (s) => (s.grace_down_kbps === undefined ? undefined : fmtSpeed(s.grace_down_kbps)) },
   { key: "up", label: "Upload speed", get: (s) => (s.grace_up_kbps === undefined ? undefined : fmtSpeed(s.grace_up_kbps)) },
   { key: "quota", label: "Shared data quota", get: (s) => (s.grace_data_quota_bytes === undefined ? undefined : fmtData(s.grace_data_quota_bytes)) },
-  { key: "limit", label: "Device allowance", get: (s) => (s.grace_device_limit === undefined ? undefined : String(s.grace_device_limit)) },
+  { key: "limit", label: "Device allowance", get: (s) => (s.grace_device_limit === undefined ? undefined : deviceAllowanceWords(s.grace_device_limit)) },
   { key: "policy", label: "New devices", get: (s) => (s.grace_device_limit_policy === undefined ? undefined : devicePolicyTitle(s.grace_device_limit_policy)) },
 ];
 
@@ -214,7 +211,7 @@ export function compareSnapshots(prev: AccessSnapshot | null | undefined, next: 
   return FIELDS.map(({ key, label, get }) => {
     const a = prev ? get(prev) : undefined;
     const b = next ? get(next) : undefined;
-    return { key, label, from: a ?? "—", to: b ?? "—", changed: a !== b };
+    return { key, label, from: a ?? NOT_SET, to: b ?? NOT_SET, changed: a !== b };
   });
 }
 
@@ -233,10 +230,12 @@ export function changeLine(history: AccessHistoryItem[], idx: number): string {
   }
   const prev = termsAt(history, idx + 1);
   const changes = compareSnapshots(prev, h.policy).filter((c) => c.changed);
-  if (!prev) return `First recorded terms: ${compareSnapshots(null, h.policy).filter((c) => c.to !== "—").map((c) => c.to).slice(0, 3).join(" · ")}`;
+  if (!prev) return `First recorded terms: ${compareSnapshots(null, h.policy).filter((c) => c.to !== NOT_SET).map((c) => c.to).slice(0, 3).join(" · ")}`;
   if (changes.length === 0) return "No term changes";
   return changes.map((c) => `${c.label} ${c.from} → ${c.to}`).join(", ");
 }
+
+export const NOT_SET = "Not set";
 
 export const REASON_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/;
 
@@ -293,7 +292,6 @@ export function draftFromState(s: AccessState, supported: string[]): AccessDraft
     hours: String(p ? Math.round(p.duration_hours) || b.duration_hours.default : b.duration_hours.default),
     downMbps: String((p?.down_kbps ?? b.down_kbps.default) / 1000),
     upMbps: String((p?.up_kbps ?? b.up_kbps.default) / 1000),
-    // Six decimals of MB is byte precision, so saving other changes keeps the stored quota exactly.
     quotaMb: String(+((p?.data_quota_bytes ?? b.data_quota_bytes.default) / MB).toFixed(6)),
     deviceLimit: String(p?.device_limit ?? b.device_limit.default),
     devicePolicy: policy,
@@ -340,7 +338,6 @@ export type PublishFailure = { conflict: boolean; message: string; field?: "pass
 export function describePublishFailure(e: any): PublishFailure {
   const status: number | undefined = e?.status;
   const code: string | undefined = e?.code ?? e?.body?.error;
-  const serverMsg: string = typeof e?.message === "string" ? e.message : "";
   if (status === 409 || code === "version_conflict")
     return {
       conflict: true,
@@ -366,16 +363,16 @@ export function describePublishFailure(e: any): PublishFailure {
     case "phase2_disabled":
       return { conflict: false, message: "The package catalogue is not available on this appliance, so nothing was saved." };
     case "validation":
-      return { conflict: false, message: "The appliance refused these terms: " + serverMsg };
+      return { conflict: false, message: "The appliance did not accept these terms. Check each value is within its allowed range. Nothing was saved." };
   }
   if (status === 401) return { conflict: false, field: "password", message: "Your password was not accepted. Nothing was saved." };
   if (status === 403) return { conflict: false, message: "Your role cannot change After Check-out Access." };
-  return { conflict: false, message: serverMsg ? `The change was refused: ${serverMsg}` : "The change was refused." };
+  return { conflict: false, message: "The change could not be saved. Nothing was saved; try again." };
 }
 
 export type AccessWarning = { id: string; tone: "warning" | "danger" | "info" | "neutral"; title: string; body: string; href?: string };
 
-export function accessWarnings(state: AccessState, historyAvailable: boolean): AccessWarning[] {
+export function accessWarnings(state: AccessState): AccessWarning[] {
   const out: AccessWarning[] = [];
   const src = state.effective?.source;
   if (src === "EMERGENCY_FALLBACK") {
@@ -395,14 +392,6 @@ export function accessWarnings(state: AccessState, historyAvailable: boolean): A
       tone: "info",
       title: "After Check-out Access is turned off",
       body: "Nobody is given access at check-out. Guests who are already in their reconnection period keep the terms they were given.",
-    });
-  }
-  if (!historyAvailable) {
-    out.push({
-      id: "history-unavailable",
-      tone: "neutral",
-      title: "The change history cannot be read on this appliance",
-      body: "The record exists and is append-only, but this appliance's admin service cannot read it. It does not affect the setting in force.",
     });
   }
   return out;
