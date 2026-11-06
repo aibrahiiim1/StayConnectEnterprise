@@ -1,10 +1,5 @@
 "use client";
 
-// "The clock was wrong" (AD-17): the appliance remembers the latest time it has seen so a licence cannot be
-// extended by setting the clock back. If the clock was far ahead once, that mark stays ahead and the licence looks
-// expired. This asks OneGate Central for its time and moves the mark to it. The appliance refuses while its own
-// clock still disagrees with Central; the refusal is shown as it is worded. Shown only with licence write.
-
 import { useState } from "react";
 import { api } from "@/lib/api";
 import { SectionCard } from "@/components/ui/card";
@@ -12,11 +7,16 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { Callout } from "@/components/ui/error-banner";
 import { REASON_MAX_CHARS, REASON_MIN_CHARS } from "@/lib/reason";
+import { clockResetError } from "./appliance-errors";
+import { licenceWords } from "./appliance-status";
+import type { CentralStatus } from "@/lib/api";
+
+const FADE = "animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none";
 
 type ClockResetResult = { status?: string; previous_high_water?: string; high_water?: string; state?: string };
 
 function stamp(s?: string): string {
-  if (!s) return "—";
+  if (!s) return "Not recorded";
   const d = new Date(s);
   return Number.isNaN(d.getTime()) ? s : d.toLocaleString();
 }
@@ -24,7 +24,7 @@ function stamp(s?: string): string {
 export function LicenceClockReset({ onDone }: { onDone?: () => void }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<unknown>(null);
+  const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ClockResetResult | null>(null);
 
   async function run({ reason }: { reason: string }) {
@@ -36,8 +36,7 @@ export function LicenceClockReset({ onDone }: { onDone?: () => void }) {
       setOpen(false);
       onDone?.();
     } catch (e) {
-      // The refusal text (for example "the local clock still disagrees with Central") is the answer; keep the dialog open.
-      setError(e);
+      setError(clockResetError(e));
     } finally {
       setBusy(false);
     }
@@ -56,10 +55,10 @@ export function LicenceClockReset({ onDone }: { onDone?: () => void }) {
         while the clock still disagrees with Central, and it is recorded with your reason.
       </p>
       {result && (
-        <Callout tone="success" title="Licence clock reset">
+        <Callout className={FADE} tone="success" title="Licence clock reset">
           Remembered time moved from <strong>{stamp(result.previous_high_water)}</strong> to{" "}
           <strong>{stamp(result.high_water)}</strong>.
-          {result.state ? <> Licence state now: <strong>{result.state}</strong>.</> : null}
+          {result.state ? <> The licence now shows as <strong>{licenceWords({ state: result.state } as CentralStatus["license"]).title}</strong>.</> : null}
         </Callout>
       )}
       <Button variant="secondary" size="sm" onClick={() => { setError(null); setOpen(true); }}>

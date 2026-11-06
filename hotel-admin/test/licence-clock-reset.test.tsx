@@ -70,13 +70,14 @@ describe("licence clock reset", () => {
   it("shows the appliance's refusal and keeps the dialog open", async () => {
     serve(["site_admin"]);
     const { ApiError } = await import("@/lib/api");
-    post.mockRejectedValue(new ApiError(409, { error: "the local clock still disagrees with Central by 3h; correct the clock first" }));
+    post.mockRejectedValue(new ApiError(409, { error: "this appliance's clock (2026-11-05T13:00:00Z) differs from Central's (2026-11-05T10:00:00Z) by more than 5m0s: correct the clock first" }));
     const user = userEvent.setup();
     await renderPage();
     await user.click(screen.getByRole("button", { name: /Reset licence clock/ }));
     await user.type(await screen.findByLabelText(/Reason/), "Clock was wrong after power cut");
     await user.click(screen.getByRole("button", { name: "Reset licence clock" }));
-    expect(await screen.findByText(/still disagrees with Central by 3h/)).toBeTruthy();
+    expect(await screen.findByText(/The appliance's clock still differs from OneGate Central's time\..*Correct the appliance's clock first, then try again\. Nothing was changed\./)).toBeTruthy();
+    expect(screen.queryByText(/5m0s|correct the clock first/)).toBeNull();
     expect(screen.getByRole("button", { name: "Reset licence clock" })).toBeTruthy();
     expect(screen.queryByText("Licence clock reset")).toBeNull();
   });
