@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0209, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0210, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -2739,7 +2739,11 @@ BEGIN
          entitlement_id = COALESCE(p_entitlement, entitlement_id),
          session_id     = COALESCE(p_session, session_id)
    WHERE tenant_id = p_tenant AND site_id = p_site AND request_id = p_request
-     AND result = 'VERIFIED' AND session_id IS NULL;
+     AND ((result = 'VERIFIED' AND session_id IS NULL)
+          -- A retry of the same sign-in that produced its session replaces a retryable refusal (0210).
+          OR (p_result = 'VERIFIED' AND p_session IS NOT NULL
+              AND result IN ('DEVICE_LIMIT_REACHED','SERVICE_UNAVAILABLE','LICENSE_CAPACITY_REACHED')
+              AND (session_id IS NULL OR session_id = p_session)));
   GET DIAGNOSTICS v_rows = ROW_COUNT;
   RETURN v_rows;
 END $$;
@@ -22808,7 +22812,7 @@ CREATE TABLE iam_v2.sign_in_attempts (
     encryption_key_id uuid,
     cipher_version integer,
     CONSTRAINT sign_in_attempts_matched_field_check CHECK (((matched_field IS NULL) OR (matched_field = ANY (ARRAY['FIRST_NAME'::text, 'FAMILY_NAME'::text, 'RESERVATION_NUMBER'::text])))),
-    CONSTRAINT sign_in_attempts_result_check CHECK ((result = ANY (ARRAY['VERIFIED'::text, 'CREDENTIAL_MISMATCH'::text, 'ROOM_NOT_IN_MIRROR'::text, 'STAY_NOT_ELIGIBLE'::text, 'AMBIGUOUS_ROOM_CANDIDATES'::text, 'MIRROR_STALE_OR_MISSING_CHANGE'::text, 'RATE_LIMITED'::text, 'ROUTING_OR_INTERFACE_FAILURE'::text, 'SERVICE_UNAVAILABLE'::text, 'SPENT_REQUEST_ID'::text, 'MALFORMED_SUBMISSION'::text, 'VERIFIED_NO_ELIGIBLE_PACKAGE'::text, 'LICENSE_REFUSED'::text, 'LICENSE_CAPACITY_REACHED'::text, 'DEVICE_LIMIT_REACHED'::text, 'AFTER_CHECKOUT_NEW_DEVICE_REJECTED'::text]))),
+    CONSTRAINT sign_in_attempts_result_check CHECK ((result = ANY (ARRAY['VERIFIED'::text, 'CREDENTIAL_MISMATCH'::text, 'ROOM_NOT_IN_MIRROR'::text, 'STAY_NOT_ELIGIBLE'::text, 'AMBIGUOUS_ROOM_CANDIDATES'::text, 'MIRROR_STALE_OR_MISSING_CHANGE'::text, 'RATE_LIMITED'::text, 'ROUTING_OR_INTERFACE_FAILURE'::text, 'SERVICE_UNAVAILABLE'::text, 'SPENT_REQUEST_ID'::text, 'MALFORMED_SUBMISSION'::text, 'VERIFIED_NO_ELIGIBLE_PACKAGE'::text, 'LICENSE_REFUSED'::text, 'LICENSE_CAPACITY_REACHED'::text, 'DEVICE_LIMIT_REACHED'::text, 'AFTER_CHECKOUT_NEW_DEVICE_REJECTED'::text, 'ADDRESS_CONFLICT'::text]))),
     CONSTRAINT sign_in_attempts_sealed_all_or_none CHECK ((((sensitive_ciphertext IS NULL) AND (sensitive_nonce IS NULL) AND (encryption_key_id IS NULL) AND (cipher_version IS NULL)) OR ((sensitive_ciphertext IS NOT NULL) AND (sensitive_nonce IS NOT NULL) AND (encryption_key_id IS NOT NULL) AND (cipher_version IS NOT NULL)))),
     CONSTRAINT sign_in_attempts_verifier_kind_check CHECK ((verifier_kind = ANY (ARRAY['FULL_NAME'::text, 'RESERVATION_NUMBER_LIKE'::text, 'UNKNOWN'::text])))
 );

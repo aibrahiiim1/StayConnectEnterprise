@@ -238,10 +238,11 @@ func clientActivitySources(sc clientActivityScope, args *[]any) string {
 	if sc.SignIns {
 		parts = append(parts,
 			`SELECT sia.occurred_at, 'sign_in', 'ROOM_SIGN_IN',
-	       CASE WHEN sia.result = 'VERIFIED' THEN 'ok'
+	       CASE WHEN `+signInNoPackageTaken+` THEN 'info'
+	            WHEN sia.result = 'VERIFIED' THEN 'ok'
 	            WHEN sia.result IN ('SERVICE_UNAVAILABLE','ROUTING_OR_INTERFACE_FAILURE','MIRROR_STALE_OR_MISSING_CHANGE') THEN 'error'
 	            ELSE 'warning' END,
-	       sia.result, 'room', COALESCE(NULLIF(sia.submitted_room,''), st.normalized_room_number, ''), '',
+	       CASE WHEN `+signInNoPackageTaken+` THEN 'VERIFIED_NO_PACKAGE_TAKEN' ELSE sia.result END, 'room', COALESCE(NULLIF(sia.submitted_room,''), st.normalized_room_number, ''), '',
 	       COALESCE(sia.device_mac::text,''), COALESCE(host(sia.device_ip),''), COALESCE(sia.guest_network_name,''),
 	       COALESCE(sia.session_id::text,''), COALESCE(sia.entitlement_id::text,''), COALESCE(st.id::text,''), '', 'r1' || sia.id::text
 	  FROM iam_v2.sign_in_attempts sia
