@@ -1,8 +1,5 @@
 "use client";
 
-// When a period ends the hourly run anonymises (sign-in attempts and logs are deleted instead). Bounds and
-// defaults come from the appliance so this form cannot disagree with the server.
-
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { SectionCard } from "@/components/ui/card";
@@ -12,13 +9,14 @@ import { ErrorBanner } from "@/components/ui/error-banner";
 import { useToast } from "@/components/ui/toast";
 import { formatDate } from "@/lib/utils";
 import { useEditFocus } from "@/lib/use-edit-focus";
+import { backupError } from "@/lib/backup-errors";
+import { FADE, LoadFailure, StaleNotice } from "./load-failure";
 
 type Key = "pms_stay_days" | "client_activity_days" | "inactive_identity_days" | "expired_record_days"
   | "audit_log_days" | "sign_in_attempt_days" | "log_days" | "staff_note_days";
 type Bound = { min: number; max: number; default: number; unit: string };
 type Run = { ran_at: string; category: string; rows_anonymised: number };
 type Resp = { settings: Record<Key, number>; bounds: Record<Key, Bound>; runs?: Run[] };
-// What a shortening would remove, as the appliance counted it with the retention rules themselves (audit AD-67).
 type Impact = { total: number; byCategory: Record<string, number>; message: string };
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -34,13 +32,15 @@ export const RETENTION_ROWS: { key: Key; label: string; what: string }[] = [
   { key: "audit_log_days", label: "Audit log details", what: "Addresses and guest details inside audit entries. What happened, when and which staff member did it are kept." },
   { key: "sign_in_attempt_days", label: "Sign-in attempts", what: "What guests typed when signing in. These are deleted, not anonymised." },
   { key: "log_days", label: "System logs", what: "The appliance's technical logs, which contain device addresses and sign-in names. They are deleted. Keep them longer only if your country's law requires connection logs to be kept." },
-  { key: "staff_note_days", label: "Staff notes", what: "What staff typed as a note or reason: PMS case decisions, released or replaced devices, revoked post-stay access. The note is removed; what was done, when and by whom is kept." },
+  { key: "staff_note_days", label: "Staff notes", what: "What staff typed as a note or reason: PMS case decisions, released or replaced devices, ended After Check-out Access. The note is removed; what was done, when and by whom is kept." },
 ];
 
 export function DataRetentionCard({ writable }: { writable: boolean }) {
   const toast = useToast();
   const [data, setData] = useState<Resp | null>(null);
   const [unavailable, setUnavailable] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<Record<Key, string>>({} as Record<Key, string>);
   const [reason, setReason] = useState("");
@@ -55,13 +55,26 @@ export function DataRetentionCard({ writable }: { writable: boolean }) {
       const r = await api.get<Resp>("/data-retention/");
       if (r && r.settings && r.bounds && RETENTION_ROWS.every((x) => x.key in r.settings && x.key in r.bounds)) setData(r);
       else setUnavailable(true);
-    } catch {
-      setUnavailable(true);
+      setFailed(false);
+    } catch (e) {
+      if ((e as { status?: number })?.status === 404) setUnavailable(true); else setFailed(true);
     }
   }, []);
   useEffect(() => { void load(); }, [load]);
 
+  async function retry() {
+    setRetrying(true);
+    try { await load(); } finally { setRetrying(false); }
+  }
+
   if (unavailable) return null;
+  if (!data && failed) {
+    return (
+      <SectionCard title="Guest data kept for" description="When a period ends, that data is anonymised within the hour; totals and reports keep working.">
+        <LoadFailure what="The guest data periods" onRetry={() => void retry()} busy={retrying} />
+      </SectionCard>
+    );
+  }
 
   const inBounds = (k: Key) => {
     const n = Number(draft[k]);
@@ -70,7 +83,6 @@ export function DataRetentionCard({ writable }: { writable: boolean }) {
   };
   const valid = !!data && RETENTION_ROWS.every((x) => inBounds(x.key)) && reason.trim().length >= 4 && password !== "";
 
-  // confirm is the number of additional records the appliance showed for a shortening; sending it back is the second confirmation.
   async function save(confirm?: number) {
     setBusy(true); setErr(null);
     try {
@@ -86,7 +98,7 @@ export function DataRetentionCard({ writable }: { writable: boolean }) {
         setImpact({ total: Number(e.body?.additional_records ?? 0), byCategory: e.body?.additional_by_category ?? {}, message: e.message });
       } else {
         setImpact(null);
-        setErr(e instanceof ApiError && e.code === "reauth_required" ? new Error("Your password was not accepted.") : e);
+        setErr(backupError(e, "The periods could not be saved. Nothing was changed."));
       }
     } finally { setBusy(false); }
   }
@@ -109,6 +121,7 @@ export function DataRetentionCard({ writable }: { writable: boolean }) {
           be brought back.
           {lastRun && <> Last run {formatDate(lastRun.ran_at)}: {lastRun.rows_anonymised} records anonymised.</>}
         </p>
+        {failed && <StaleNotice what="The guest data periods" />}
         <ErrorBanner err={err} />
         {!editing && data && (
           <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
@@ -146,7 +159,7 @@ export function DataRetentionCard({ writable }: { writable: boolean }) {
               was already anonymised.
             </p>
             {impact && (
-              <div role="alert" className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm sm:col-span-2">
+              <div role="alert" className={`rounded-md border border-warning/40 bg-warning/10 p-3 text-sm sm:col-span-2 ${FADE}`}>
                 <p className="font-medium">
                   These shorter periods will remove {impact.total} more record{impact.total === 1 ? "" : "s"} on the next hourly run.
                 </p>

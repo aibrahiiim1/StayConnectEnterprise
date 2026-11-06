@@ -9,9 +9,7 @@ export type LedgerStatus = {
   secondary: {
     configured: boolean; kind?: string; describe?: string; reachable: boolean; in_sync: boolean; entries: number;
     encrypted: boolean; last_ok?: string; error?: string;
-    /** The entry the copy was last read back at: the proof behind "in step". */
     head?: { ledger: string; seq: number; hash: string; object: string };
-    /** The saved settings (never a credential) and which credentials are saved. */
     settings?: Partial<Record<"kind" | "path" | "host" | "user" | "dir" | "fingerprint" | "endpoint" | "region" | "bucket" | "prefix" | "access_key", string>> & { port?: number };
     secrets?: { password?: boolean; private_key?: boolean; secret_key?: boolean };
     location?: StorageLocation;
@@ -45,14 +43,12 @@ export type BackupStatus = {
     count: number; size_bytes: number; unencrypted: number; oldest: string | null;
     sets: { name: string; kind: string; taken: string; size_bytes: number; encrypted: boolean; restorable_here: boolean }[];
   };
-  /** Optional copy of the retained backup sets to the secondary storage. */
   mirror?: {
     mode: "local_only" | "local_and_secondary";
     state: "off" | "ok" | "pending" | "attention" | "no_destination";
     message: string;
     last_ok?: string | null;
     last_error?: string | null;
-    /** A copy pass is running now ("Copy now" starts one and returns at once). */
     running?: boolean;
     sets: { name: string; state: "copied" | "pending" | "failed"; verified_at?: string | null; error?: string | null }[];
   };
@@ -70,7 +66,6 @@ export const backupKindLabel = (k?: string) => BACKUP_KIND_LABELS[k ?? ""] ?? "B
 
 export const SCHEDULE_SETTING_KEYS = ["BACKUP_ENABLED", "BACKUP_HOUR", "BACKUP_EVERY_DAYS", "BACKUP_KEEP", "SAFETY_BACKUP_KEEP", "BACKUP_REPLICATE"] as const;
 
-/** At most this many completed backup sets are kept (regular + protective), the PO policy of 2026-10-31. */
 export const MAX_BACKUP_SETS = 5;
 
 export const STORAGE_KINDS: { value: "dir" | "sftp" | "s3"; label: string; hint: string }[] = [
@@ -109,13 +104,15 @@ export function backupHeadline(d: BackupStatus | null): Headline {
     case "ok":
       return { tone: "ok", title: "Scheduled backups are running", detail: `A backup is taken ${every} at or after ${at}. The newest ${d.schedule.keep} are kept, each encrypted and proven restorable when it is taken.` };
     case "off":
-      return { tone: "warn", title: "Scheduled backups are off", detail: "Switch them on below to have a backup taken on a schedule. Manual backups work now, and the backups a restore, a migration or a deployment take first are always taken, whatever this says." };
+      return d.key_holders === false
+        ? { tone: "warn", title: "Scheduled backups are off", detail: "No backup can be taken yet, scheduled or manual: backups are always encrypted, so add a backup key holder under Backup encryption on the Backups tab first." }
+        : { tone: "warn", title: "Scheduled backups are off", detail: "Switch them on below to have a backup taken on a schedule. Manual backups work now, and the backups a restore, a migration or a deployment take first are always taken." };
     case "waiting":
       return { tone: "warn", title: "Waiting for the first scheduled backup", detail: `It is taken ${every} at or after ${at}.` };
     case "needs_key_holder":
-      return { tone: "err", title: "A backup key holder is required", detail: "Backups are always encrypted. Add a backup key holder above; until then no backup can be taken, scheduled or manual." };
+      return { tone: "err", title: "A backup key holder is required", detail: "Backups are always encrypted. Add a backup key holder under Backup encryption on the Backups tab; until then no backup can be taken, scheduled or manual." };
     default:
-      return { tone: "warn", title: "Needs attention", detail: d.message || (d.problems.length ? "A stored backup no longer matches its checksum." : "") };
+      return { tone: "warn", title: "Needs attention", detail: d.message || ((d.problems ?? []).length ? "A stored backup no longer matches its checksum." : "The appliance did not say what needs attention.") };
   }
 }
 

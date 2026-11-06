@@ -1,28 +1,34 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, ApiError, type BackupSettings } from "@/lib/api";
+import { api, type BackupSettings } from "@/lib/api";
 import { SectionCard } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { formatBytes } from "@/lib/bytes";
+import { backupError, isSentence } from "@/lib/backup-errors";
+import { LoadFailure, StaleNotice } from "./load-failure";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Switch } from "@/components/ui/misc";
 import { SettingField } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
-import { errMsg, formatDate } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
 import { SCHEDULE_SETTING_KEYS, backupHeadline, backupKindLabel, type BackupStatus } from "@/lib/ledger-words";
 
 export const EARLIER_CONFIRMATION = "remove earlier backups";
 
-const mb = (n: number) => `${(n / 1_000_000).toFixed(1)} MB`;
+const EARLIER_KIND_WORDS: Record<string, string> = { "nightly set": "Nightly set", "safety dump": "Safety copy", "earlier dump": "Database copy" };
+const earlierKind = (k: string) => EARLIER_KIND_WORDS[k] ?? "Earlier backup";
 
-export function ScheduledBackupsCard({ writable }: { writable: boolean }) {
+export function ScheduledBackupsCard({ writable, rev = 0, onChanged }: { writable: boolean; rev?: number; onChanged?: () => void }) {
   const toast = useToast();
   const [d, setD] = useState<BackupStatus | null>(null);
   const [settings, setSettings] = useState<BackupSettings | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const [actionErr, setActionErr] = useState<string | null>(null);
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [saveOpen, setSaveOpen] = useState(false);
   const [saveErr, setSaveErr] = useState<string | null>(null);
@@ -43,10 +49,10 @@ export function ScheduledBackupsCard({ writable }: { writable: boolean }) {
         setSettings(s);
         setEdits(Object.fromEntries(s.retention.filter((x) => (SCHEDULE_SETTING_KEYS as readonly string[]).includes(x.key)).map((x) => [x.key, String(x.value)])));
       }
-      setErr(null);
-    } catch (e) { setErr(errMsg(e)); }
+      setLoadFailed(false);
+    } catch { setLoadFailed(true); }
   }, []);
-  useEffect(() => { void load(); return () => { if (timer.current) clearTimeout(timer.current); }; }, [load]);
+  useEffect(() => { void load(); return () => { if (timer.current) clearTimeout(timer.current); }; }, [load, rev]);
   useEffect(() => {
     if (d?.running) timer.current = setTimeout(() => void load(), 5000);
     return () => { if (timer.current) clearTimeout(timer.current); };
@@ -59,7 +65,6 @@ export function ScheduledBackupsCard({ writable }: { writable: boolean }) {
     return raw === undefined || raw.trim() === "" ? (byKey[key]?.value ?? 0) : Number(raw);
   };
   const dirty = fields.some((x) => valueOf(x.key) !== x.value);
-  // The two pools together are capped (five sets, PO policy); the cap comes from the appliance, so an older one is not judged by it.
   const maxTotal = d?.retention?.max_total;
   const overTotal = Boolean(maxTotal && byKey.BACKUP_KEEP && byKey.SAFETY_BACKUP_KEEP
     && valueOf("BACKUP_KEEP") + valueOf("SAFETY_BACKUP_KEEP") > maxTotal);
@@ -70,12 +75,13 @@ export function ScheduledBackupsCard({ writable }: { writable: boolean }) {
   const copyState = new Map((d?.mirror?.sets ?? []).map((s) => [s.name, s]));
 
   async function copyNow() {
-    setCopying(true); setErr(null);
+    setCopying(true); setActionErr(null);
     try {
-      // scd starts the copy and answers at once; the table shows each set as it is read back.
       await api.post("/backups/mirror/run", {});
       await load();
-    } catch (e) { setErr(e instanceof ApiError ? e.message : errMsg(e)); } finally { setCopying(false); }
+    } catch (e) {
+      setActionErr(backupError(e, "The copy to the secondary storage could not be started. Nothing was changed."));
+    } finally { setCopying(false); }
   }
 
   async function save({ password }: { password: string }) {
@@ -89,7 +95,8 @@ export function ScheduledBackupsCard({ writable }: { writable: boolean }) {
       setSaveOpen(false);
       toast.success("Backup settings saved", enabled ? "Scheduled backups are on." : "Scheduled backups are off.");
       await load();
-    } catch (e) { setSaveErr(e instanceof ApiError ? e.message : errMsg(e)); }
+      onChanged?.();
+    } catch (e) { setSaveErr(backupError(e, "The backup settings could not be saved. Nothing was changed.")); }
   }
 
   async function run({ password }: { password: string }) {
@@ -99,7 +106,8 @@ export function ScheduledBackupsCard({ writable }: { writable: boolean }) {
       setRunOpen(false);
       toast.success("Backup taken", "It is encrypted and was proven restorable before it was kept.");
       await load();
-    } catch (e) { setRunErr(e instanceof ApiError ? e.message : errMsg(e)); }
+      onChanged?.();
+    } catch (e) { setRunErr(backupError(e, "The backup did not complete. The earlier backups are kept and nothing was replaced.")); }
   }
 
   async function removeEarlier({ password }: { password: string }) {
@@ -107,34 +115,49 @@ export function ScheduledBackupsCard({ writable }: { writable: boolean }) {
     try {
       await api.post("/backups/earlier/remove", { password, confirm: EARLIER_CONFIRMATION });
       setEarlierOpen(false);
-      toast.success("Earlier backups removed");
+      toast.success("Earlier backups removed", "The backups taken by the one backup system were not touched.");
       await load();
-    } catch (e) { setEarlierErr(e instanceof ApiError ? e.message : errMsg(e)); }
+      onChanged?.();
+    } catch (e) { setEarlierErr(backupError(e, "The earlier backups could not be removed. Nothing was changed.")); }
   }
 
   const head = backupHeadline(d);
   const haveVerifiedNew = !!d?.backups.some((b) => b.restorable && (b.kind === "scheduled" || b.kind === "manual"));
   const earlier = d?.earlier;
+  const noKeyHolder = d?.state === "needs_key_holder" || d?.key_holders === false;
+  const lastError = d?.last_error ? (isSentence(d.last_error) ? d.last_error : "The last backup attempt did not complete.") : "";
+
+  async function retry() {
+    setRetrying(true);
+    try { await load(); } finally { setRetrying(false); }
+  }
 
   return (
     <SectionCard
       title="Scheduled backups"
       description="Database, configuration and keys, encrypted and proven restorable. Off until you switch them on."
       actions={writable && (
-        <Button size="sm" variant="secondary" disabled={!!d?.running || d?.state === "needs_key_holder"} onClick={() => { setRunErr(null); setRunOpen(true); }}>
+        <Button size="sm" variant="secondary" disabled={!d || !!d.running || noKeyHolder} onClick={() => { setRunErr(null); setRunOpen(true); }}>
           {d?.running ? "A backup is running…" : "Take a backup now"}
         </Button>
       )}
       bodyClassName="space-y-4"
     >
-        <ErrorBanner err={err} />
-        <Callout tone={head.tone === "ok" ? "success" : head.tone === "err" ? "danger" : "warning"} title={head.title}>{head.detail}</Callout>
+        {!d && loadFailed ? (
+          <LoadFailure what="The scheduled backups" onRetry={() => void retry()} busy={retrying} />
+        ) : (
+          <>
+            {loadFailed && <StaleNotice what="The scheduled backups" />}
+            <ErrorBanner err={actionErr} />
+            <Callout tone={head.tone === "ok" ? "success" : head.tone === "err" ? "danger" : "warning"} title={head.title}>{head.detail}</Callout>
+          </>
+        )}
 
-        {d && (
-          <p className="text-sm text-muted-foreground">
+        {d && (d.schedule.next || lastError || d.state === "ok" || d.state === "waiting") && (
+          <p className="text-sm text-muted-foreground" title={d.last_error && !isSentence(d.last_error) ? d.last_error : undefined}>
             {d.schedule.next ? <>Next scheduled backup: <strong>{formatDate(d.schedule.next)}</strong>. </> : null}
-            {d.last_error ? <>The last attempt failed: {d.last_error}. </> : null}
-            Backups before a restore, a migration or a deployment are always taken.
+            {lastError ? <>{lastError} </> : null}
+            {d.state === "ok" || d.state === "waiting" ? "Backups before a restore, a migration or a deployment are always taken." : null}
           </p>
         )}
 
@@ -149,7 +172,7 @@ export function ScheduledBackupsCard({ writable }: { writable: boolean }) {
                 onCheckedChange={(v) => setEdits((m) => ({ ...m, BACKUP_ENABLED: v ? "1" : "0" }))}
               />
               <label htmlFor="scheduled-backups-enabled" className="text-emphasis">
-                {enabled ? "Scheduled backups are on" : "Scheduled backups are off"}
+                Take backups on a schedule
               </label>
             </div>
             {byKey.BACKUP_REPLICATE && (
@@ -163,7 +186,7 @@ export function ScheduledBackupsCard({ writable }: { writable: boolean }) {
                     onCheckedChange={(v) => setEdits((m) => ({ ...m, BACKUP_REPLICATE: v ? "1" : "0" }))}
                   />
                   <label htmlFor="backup-replicate" className="text-emphasis">
-                    {replicate ? "Local and secondary storage" : "Local only"}
+                    Also copy backups to the secondary storage
                   </label>
                 </div>
                 <p className="text-caption text-muted-foreground">{byKey.BACKUP_REPLICATE.explains}</p>
@@ -235,7 +258,7 @@ export function ScheduledBackupsCard({ writable }: { writable: boolean }) {
                       <Badge tone={b.kind === "scheduled" || b.kind === "manual" ? "info" : "default"}>{backupKindLabel(b.kind)}</Badge>
                       {(b.reason || b.by) && <div className="text-2xs text-muted-foreground">{[b.reason, b.by && `by ${b.by}`].filter(Boolean).join(" · ")}</div>}
                     </TD>
-                    <TD numeric>{mb(b.size_bytes)}</TD>
+                    <TD numeric>{formatBytes(b.size_bytes)}</TD>
                     <TD nowrap><StatusBadge tone={b.restorable ? "ok" : "err"}>{b.restorable ? "Yes" : "No"}</StatusBadge></TD>
                     <TD numeric className="hidden sm:table-cell">{b.ledger_seq}</TD>
                     {d.mirror?.mode === "local_and_secondary" && (
@@ -253,13 +276,13 @@ export function ScheduledBackupsCard({ writable }: { writable: boolean }) {
         )}
 
         {d?.problems && d.problems.length > 0 && (
-          <Callout tone="danger" title="A stored backup changed">{d.problems.map((p) => `${p.name}: ${p.detail}`).join("; ")}</Callout>
+          <Callout tone="danger" title={d.problems.length === 1 ? "A stored backup changed" : "Stored backups changed"}>{d.problems.map((p) => `${p.name}: ${p.detail}`).join("; ")}</Callout>
         )}
 
         {earlier && earlier.count > 0 && (
           <div className="space-y-3 rounded-md border border-border bg-surface/60 p-4">
             <div>
-              <p className="text-emphasis">Earlier backups ({earlier.count}, {mb(earlier.size_bytes)})</p>
+              <p className="text-emphasis">Earlier backups ({earlier.count}, {formatBytes(earlier.size_bytes)})</p>
               <p className="text-sm text-muted-foreground">
                 Made before the one backup system and never removed automatically. A verified earlier dump can be
                 restored from Available backups.
@@ -270,12 +293,12 @@ export function ScheduledBackupsCard({ writable }: { writable: boolean }) {
               <Table label="Earlier backups" density="compact">
                 <THead><TR><TH>Name</TH><TH>Kind</TH><TH>Taken</TH><TH numeric>Size</TH><TH>Encrypted</TH></TR></THead>
                 <TBody>
-                  {earlier.sets.map((s) => (
+                  {(earlier.sets ?? []).map((s) => (
                     <TR key={s.name}>
                       <TD truncate className="font-mono text-xs" title={s.name}>{s.name}</TD>
-                      <TD nowrap>{s.kind}</TD>
+                      <TD nowrap title={s.kind}>{earlierKind(s.kind)}</TD>
                       <TD nowrap>{formatDate(s.taken)}</TD>
-                      <TD numeric>{mb(s.size_bytes)}</TD>
+                      <TD numeric>{formatBytes(s.size_bytes)}</TD>
                       <TD nowrap><StatusBadge tone={s.encrypted ? "ok" : "warn"}>{s.encrypted ? "Yes" : "No"}</StatusBadge></TD>
                     </TR>
                   ))}

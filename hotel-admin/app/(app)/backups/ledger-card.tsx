@@ -1,9 +1,5 @@
 "use client";
 
-// Every erasure is written to the appliance and to a required secondary storage before it is reported done;
-// until that is verified, erasure requests are refused (guest internet access is never affected).
-// Nothing on this card says "copied" or "in step" unless the appliance read the copy back: a Test is a connectivity test only.
-
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { SectionCard } from "@/components/ui/card";
@@ -13,7 +9,9 @@ import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { useToast } from "@/components/ui/toast";
-import { errMsg, formatBytes } from "@/lib/utils";
+import { formatBytes, formatDate } from "@/lib/utils";
+import { backupError, isSentence } from "@/lib/backup-errors";
+import { FADE, LoadFailure, StaleNotice } from "./load-failure";
 import { RefreshCw } from "lucide-react";
 import { BackupKeyInput } from "./backup-keys-card";
 import {
@@ -33,8 +31,10 @@ const EMPTY: Form = {
 };
 
 const REMOVE_CONFIRMATION = "remove secondary storage";
+const HISTORY_WORDS: Record<string, string> = { SET: "Set up", REPLACED: "Replaced", REMOVED: "Removed" };
+const entriesWord = (n: number) => `${n} ${n === 1 ? "entry" : "entries"}`;
+const problemText = (t?: string) => (isSentence(t) ? t : "The appliance reported a problem with this copy.");
 
-/** The saved settings, ready to edit; credentials are never sent back, so their fields start empty. */
 function fromSettings(s: NonNullable<LedgerStatus["secondary"]["settings"]>): Form {
   const kind = (s.kind === "sftp" || s.kind === "s3" ? s.kind : "dir") as Form["kind"];
   return {
@@ -73,6 +73,7 @@ function LocationLine({ loc }: { loc?: StorageLocation | null }) {
 export function LedgerCard({ writable }: { writable: boolean }) {
   const toast = useToast();
   const [status, setStatus] = useState<LedgerStatus | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [form, setForm] = useState<Form>(EMPTY);
   const [editing, setEditing] = useState(false);
@@ -96,8 +97,8 @@ export function LedgerCard({ writable }: { writable: boolean }) {
     try {
       const r = await api.get<LedgerStatus>("/backups/ledger" + (fresh ? "?fresh=1" : ""));
       setStatus(r && r.state ? r : null);
-      setErr(null);
-    } catch (e) { setErr(errMsg(e)); }
+      setLoadFailed(false);
+    } catch { setLoadFailed(true); }
   }, []);
   useEffect(() => { void load(); }, [load]);
 
@@ -106,7 +107,6 @@ export function LedgerCard({ writable }: { writable: boolean }) {
   const kindInfo = STORAGE_KINDS.find((k) => k.value === form.kind)!;
   const showForm = writable && (editing || status?.state === "not_configured");
   const sec = status?.secondary;
-  // A saved credential is kept when its field is left empty, for the same account on the same server or bucket.
   const keepSecret = editingSaved && !!sec?.configured && form.kind === sec?.settings?.kind;
   const savedSecretHint = (has?: boolean) => (keepSecret && has ? "Saved. Leave empty to keep it, or type a new one to replace it." : undefined);
 
@@ -119,7 +119,9 @@ export function LedgerCard({ writable }: { writable: boolean }) {
     try {
       const r = await api.post<{ fingerprint: string }>("/backups/ledger/destination/probe", { host: form.host.trim(), port: Number(form.port) || 22 });
       setProbed(r.fingerprint);
-    } catch (e) { setErr(e instanceof ApiError ? e.message : errMsg(e)); } finally { setProbing(false); }
+    } catch (e) {
+      setErr(backupError(e, "The server's key could not be read. Check the server name and port, then try again."));
+    } finally { setProbing(false); }
   }
 
   async function test() {
@@ -129,8 +131,10 @@ export function LedgerCard({ writable }: { writable: boolean }) {
         "/backups/ledger/destination/test", payload(form, keepSecret));
       const ex = r.existing_ledger;
       const already = ex && ex.entries ? ` The storage already holds an erasure ledger of ${ex.entries} entries${ex.same_appliance ? " that belongs to this appliance" : ""}.` : "";
-      setTested({ text: (r.message ?? "Connectivity test passed. Nothing of the ledger has been copied yet.") + already, loc: r.location });
-    } catch (e) { setErr(e instanceof ApiError ? e.message : errMsg(e)); } finally { setTesting(false); }
+      setTested({ text: (isSentence(r.message) ? r.message! : "Connectivity test passed. Nothing of the ledger has been copied yet.") + already, loc: r.location });
+    } catch (e) {
+      setErr(backupError(e, "The appliance could not reach that storage. Check the settings, then try again. Nothing was saved."));
+    } finally { setTesting(false); }
   }
 
   async function save({ password }: { password: string }) {
@@ -144,13 +148,12 @@ export function LedgerCard({ writable }: { writable: boolean }) {
     } catch (e) {
       setSaving(false);
       if (e instanceof ApiError && e.body?.saved) {
-        // Saved, but not confirmed in step (or the storage holds newer erasures): never shown as a success.
         setSaveOpen(false); stopEditing();
-        setNotice({ tone: "warning", text: e.message });
+        setNotice({ tone: "warning", text: isSentence(e.message) ? e.message : "The setting was saved, but the copy could not be confirmed yet. The appliance keeps trying." });
         await load(true);
         return;
       }
-      setSaveErr(e instanceof ApiError ? e.message : errMsg(e));
+      setSaveErr(backupError(e, "The ledger could not be copied there, so the setting was not saved. The current setting stays in use."));
     }
   }
 
@@ -161,7 +164,7 @@ export function LedgerCard({ writable }: { writable: boolean }) {
       setRemoving(false); stopEditing();
       setNotice({ tone: "warning", text: r.message ?? "The secondary storage setting was removed. Nothing kept there was deleted." });
       await load(true);
-    } catch (e) { setRemoveErr(e instanceof ApiError ? e.message : errMsg(e)); }
+    } catch (e) { setRemoveErr(backupError(e, "The setting could not be removed. Nothing was changed.")); }
   }
 
   async function recover({ password }: { password: string }) {
@@ -172,7 +175,7 @@ export function LedgerCard({ writable }: { writable: boolean }) {
       setRecovering(false); setIdentity("");
       toast.success("Ledger recovered", "The appliance now holds every erasure the secondary storage did.");
       await load(true);
-    } catch (e) { setRecoverErr(e instanceof ApiError ? e.message : errMsg(e)); }
+    } catch (e) { setRecoverErr(backupError(e, "The ledger could not be recovered. Nothing was changed.")); }
   }
 
   const sftpUnconfirmed = form.kind === "sftp" && form.fingerprint === "";
@@ -188,16 +191,22 @@ export function LedgerCard({ writable }: { writable: boolean }) {
       }
       bodyClassName="space-y-4"
     >
-        <ErrorBanner err={err} />
-        <Callout tone={head.tone === "ok" ? "success" : head.tone === "err" ? "danger" : "warning"} title={head.title}>{head.detail}</Callout>
-        {notice && <Callout tone={notice.tone}>{notice.text}</Callout>}
+        {!status && loadFailed ? (
+          <LoadFailure what="The erasure ledger" onRetry={() => { setRefreshing(true); void load(true).finally(() => setRefreshing(false)); }} busy={refreshing} />
+        ) : (
+          <>
+            {loadFailed && <StaleNotice what="The erasure ledger" />}
+            <Callout tone={head.tone === "ok" ? "success" : head.tone === "err" ? "danger" : "warning"} title={head.title}>{head.detail}</Callout>
+          </>
+        )}
+        {notice && <div className={FADE}><Callout tone={notice.tone}>{notice.text}</Callout></div>}
 
         {status && (
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="rounded-md border border-border bg-surface/60 p-3 text-sm">
               <div className="mb-1 flex items-center gap-2 font-medium">On this appliance <StatusBadge tone={status.primary.present && status.primary.intact ? "ok" : "err"}>{status.primary.present && status.primary.intact ? "Intact" : "Needs repair"}</StatusBadge></div>
-              <div className="text-muted-foreground">{status.primary.entries} entries</div>
-              {status.primary.error && <div className="text-destructive">{status.primary.error}</div>}
+              <div className="text-muted-foreground">{entriesWord(status.primary.entries)}</div>
+              {status.primary.error && <div className="text-destructive" title={status.primary.error}>{problemText(status.primary.error)}</div>}
             </div>
             <div className="rounded-md border border-border bg-surface/60 p-3 text-sm">
               <div className="mb-1 flex items-center gap-2 font-medium">Secondary storage
@@ -205,7 +214,7 @@ export function LedgerCard({ writable }: { writable: boolean }) {
                   {!status.secondary.configured ? "Not set up" : status.secondary.in_sync ? "In step (read back)" : "Not in step"}
                 </StatusBadge>
               </div>
-              <div className="text-muted-foreground">{status.secondary.configured ? `${kindLabel(status.secondary.kind)} — ${status.secondary.describe}` : "Required for erasure"}</div>
+              <div className="text-muted-foreground">{status.secondary.configured ? `${kindLabel(status.secondary.kind)}: ${status.secondary.describe}` : "Required for erasure"}</div>
               <LocationLine loc={status.secondary.location} />
               {status.secondary.in_sync && status.secondary.head && (
                 <div className="text-muted-foreground">
@@ -213,7 +222,7 @@ export function LedgerCard({ writable }: { writable: boolean }) {
                 </div>
               )}
               {status.secondary.configured && <div className="text-muted-foreground">Last confirmed {agoWords(status.secondary.last_ok)}{status.secondary.encrypted ? " · encrypted" : " · not encrypted (add a backup key holder)"}</div>}
-              {status.secondary.error && <div className="text-destructive">{status.secondary.error}</div>}
+              {status.secondary.error && <div className="text-destructive" title={status.secondary.error}>{problemText(status.secondary.error)}</div>}
             </div>
           </div>
         )}
@@ -225,7 +234,7 @@ export function LedgerCard({ writable }: { writable: boolean }) {
           <Button variant="primary" onClick={() => { setRecoverErr(null); setRecovering(true); }}>Recover from the secondary storage</Button>
         )}
 
-        {writable && !showForm && status?.state !== "not_configured" && (
+        {writable && !showForm && status && status.state !== "not_configured" && (
           <div className="flex flex-wrap gap-2">
             <Button variant="secondary" onClick={() => {
               if (sec?.settings) { setForm(fromSettings(sec.settings)); setEditingSaved(true); }
@@ -281,6 +290,7 @@ export function LedgerCard({ writable }: { writable: boolean }) {
                 <Field label="Secret key" hint={savedSecretHint(sec?.secrets?.secret_key)}><Input type="password" value={form.secret_key} onChange={(e) => set("secret_key", e.target.value)} autoComplete="new-password" /></Field>
               </div>
             )}
+            <ErrorBanner err={err} />
             {tested && (
               <Callout tone="info" title="Connectivity test passed">
                 {tested.text}
@@ -334,7 +344,7 @@ export function LedgerCard({ writable }: { writable: boolean }) {
         <details className="text-sm">
           <summary className="cursor-pointer text-muted-foreground">Changes to the secondary storage</summary>
           <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
-            {sec.history.map((h, i) => <li key={i}>{new Date(h.at).toLocaleString()} · {h.action.toLowerCase()} · {kindLabel(h.kind)} · {h.by}</li>)}
+            {sec.history.map((h, i) => <li key={i}>{formatDate(h.at)} · {HISTORY_WORDS[h.action] ?? "Changed"} · {kindLabel(h.kind)} · {h.by}</li>)}
           </ul>
         </details>
       )}

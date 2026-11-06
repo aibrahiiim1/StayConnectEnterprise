@@ -1,10 +1,7 @@
 "use client";
 
-// Only the per-sample traffic detail ages out (default 365 days, or Unlimited); totals are kept. Shortening
-// removes history for good, so it asks for a reason and the password.
-
 import { useCallback, useEffect, useState } from "react";
-import { api, ApiError } from "@/lib/api";
+import { api } from "@/lib/api";
 import { SectionCard } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
@@ -13,6 +10,8 @@ import { ErrorBanner } from "@/components/ui/error-banner";
 import { useToast } from "@/components/ui/toast";
 import { formatDate } from "@/lib/utils";
 import { useEditFocus } from "@/lib/use-edit-focus";
+import { backupError } from "@/lib/backup-errors";
+import { LoadFailure, StaleNotice } from "./load-failure";
 
 type PurgeRun = { ran_at: string; retention_days: number; records_deleted: number };
 type RetentionResp = {
@@ -32,6 +31,8 @@ export function AccountingRetentionCard({ writable }: { writable: boolean }) {
   const toast = useToast();
   const [data, setData] = useState<RetentionResp | null>(null);
   const [unavailable, setUnavailable] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const [editing, setEditing] = useState(false);
   const { triggerRef, panelRef } = useEditFocus(editing);
   const [unlimited, setUnlimited] = useState(true);
@@ -46,13 +47,26 @@ export function AccountingRetentionCard({ writable }: { writable: boolean }) {
       const r = await api.get<RetentionResp>("/accounting-retention/");
       if (r && r.settings && "detail_retention_days" in r.settings) setData(r);
       else setUnavailable(true);
-    } catch {
-      setUnavailable(true);
+      setFailed(false);
+    } catch (e) {
+      if ((e as { status?: number })?.status === 404) setUnavailable(true); else setFailed(true);
     }
   }, []);
   useEffect(() => { void load(); }, [load]);
 
+  async function retry() {
+    setRetrying(true);
+    try { await load(); } finally { setRetrying(false); }
+  }
+
   if (unavailable) return null;
+  if (!data && failed) {
+    return (
+      <SectionCard title="Usage detail kept for" description="The detailed traffic samples behind each client session. Totals are always kept.">
+        <LoadFailure what="The usage detail period" onRetry={() => void retry()} busy={retrying} />
+      </SectionCard>
+    );
+  }
   const current = data?.settings.detail_retention_days ?? null;
   const n = Number(draft);
   const daysOK = unlimited || (Number.isInteger(n) && n >= RETENTION_MIN_DAYS && n <= RETENTION_MAX_DAYS);
@@ -64,11 +78,11 @@ export function AccountingRetentionCard({ writable }: { writable: boolean }) {
       await api.put("/accounting-retention/", unlimited
         ? { unlimited: true, reason: reason.trim(), password }
         : { detail_retention_days: n, reason: reason.trim(), password });
-      toast.success("Saved.");
+      toast.success("Usage detail period saved", "The next hourly run uses it.");
       setEditing(false); setPassword(""); setReason("");
       await load();
     } catch (e) {
-      setErr(e instanceof ApiError && e.code === "reauth_required" ? new Error("Your password was not accepted.") : e);
+      setErr(backupError(e, "The period could not be saved. Nothing was changed."));
     } finally { setBusy(false); }
   }
 
@@ -79,7 +93,7 @@ export function AccountingRetentionCard({ writable }: { writable: boolean }) {
       description="The detailed traffic samples behind each client session. Totals are always kept."
       actions={
         <>
-          <Badge tone="neutral">{data ? retentionLabel(current) : "—"}</Badge>
+          {data && <Badge tone="neutral">{retentionLabel(current)}</Badge>}
           {writable && !editing && data && (
             <Button ref={triggerRef} size="sm" variant="secondary" onClick={() => {
               setUnlimited(current == null); setDraft(String(current ?? 365)); setEditing(true);
@@ -99,6 +113,7 @@ export function AccountingRetentionCard({ writable }: { writable: boolean }) {
             {lastRun.retention_days} days.
           </p>
         )}
+        {failed && <StaleNotice what="The usage detail period" />}
         <ErrorBanner err={err} />
         {editing && (
           <div ref={panelRef} className="grid gap-3 sm:grid-cols-3">
