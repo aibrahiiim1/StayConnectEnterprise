@@ -292,6 +292,9 @@ One timeline of what happened to clients, newest first, a page at a time.
   own screen (accounts, room sign-ins, stays); staff actions need Activity. Opening the page is
   recorded as a guest-data read.
 - **Not listed:** failed voucher, account and code sign-ins are not recorded by the appliance.
+- **Reconnected automatically** marks a connection the appliance restored without a sign-in (see *Automatic
+  reconnection* under Guest sign-in attempts). A room sign-in whose guest was verified but never took a package
+  reads *Verified, no package taken* once 15 minutes have passed.
 
 ### Usage explorer — `/usage`
 Settles data-usage questions by drilling from an access source or a device down to sessions and the
@@ -567,6 +570,19 @@ after too many wrong tries.
   client: *Licence refused new clients* (the licence did not admit anyone new at that moment) and *Licensed
   capacity full* (the client's details were right, but the appliance was at its licensed number of clients
   online).
+  *Old network address* means the device was still using an address the DHCP server had since given to another
+  device; nothing about the room was checked and the guest was asked to turn Wi-Fi off and on. A verified
+  sign-in that never led to a session (the guest left at the package choice) shows **No package taken**. A paid
+  sign-in shows its session once the payment has opened it.
+- **Automatic reconnection (room sign-in):** a device that signed in by room and was disconnected by the network
+  (its address lease ended, or it came back with another address) is put back on the **same** package, without
+  the room details, the next time its phone or laptop checks for a captive portal. Nothing is bought, reset or
+  added: the package's allowance, time, device limit and After Check-out rules are unchanged. It happens only
+  while that package is active, on the same client network, when the DHCP server confirms the address is this
+  device's, and only after a network disconnection: after the guest's own **log out**, a staff **disconnect** or
+  a released device, the next connection needs a normal sign-in. A device is recognised by its hardware (MAC)
+  address, so a device imitating another's address on the same network while that device is away could take its
+  place on that package; the conditions above limit this.
 - **Active restrictions tab:** devices currently asked to wait, with the last room typed (marked
   unverified), failures and a live countdown. **Release** — **reason required** (at least 3 characters), no
   password; the dialog states that **releasing does not sign the client in**.
@@ -710,7 +726,10 @@ isolation settings are editable (*"Saved — not applied yet"* until applied on 
 network's **DHCP reservations** (add, edit, remove — each in a dialog).
 
 ### DHCP & leases — `/network/dhcp`
-Which client devices hold an address now, and which always get the same one. Tabs **Active leases** and
+Which client devices hold an address now, and which always get the same one. The appliance's DHCP
+server is *authoritative* on its own client networks: a device asking to keep an address it can no longer have
+(it was given to another device while this one was away) is told no at once and receives a new one, instead
+of being left on someone else's address. Networks whose DHCP the property runs itself are not affected. Tabs **Active leases** and
 **Reservations** (across all networks): **New reservation**, edit, and **Remove** — a confirmation dialog.
 
 ### WAN / LAN settings — `/network/system`

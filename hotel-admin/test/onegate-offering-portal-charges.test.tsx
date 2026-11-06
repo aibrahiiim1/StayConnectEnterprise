@@ -136,6 +136,8 @@ describe("a read-only role is offered no write control", () => {
     const voucher = await screen.findByRole("switch", { name: "Voucher code" });
     expect(voucher).toHaveAttribute("aria-checked", "true");
     fireEvent.click(voucher);
+    expect(put).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("button", { name: "Switch off" }));
     await waitFor(() => expect(put).toHaveBeenCalledWith("/auth-methods", { voucher: { enabled: false } }));
     expect(screen.getByRole("switch", { name: "SMS code" })).toBeDisabled();
     expect(screen.getAllByText(/not available until/i).length).toBeGreaterThanOrEqual(1);

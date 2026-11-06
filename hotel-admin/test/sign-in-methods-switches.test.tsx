@@ -45,6 +45,9 @@ describe("Sign-in methods: a method that cannot deliver can still be switched of
     const sw = await screen.findByRole("switch", { name: "SMS code" });
     expect(sw).not.toBeDisabled();
     await userEvent.click(sw);
+    expect(put).not.toHaveBeenCalled();
+    expect(await screen.findByText(/only sign-in method that is on/i)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Switch off" }));
     await waitFor(() => expect(put).toHaveBeenCalledWith("/auth-methods", { sms: { enabled: false } }));
   });
 
@@ -58,10 +61,11 @@ describe("Sign-in methods: a method that cannot deliver can still be switched of
     routes({ social: { google: { enabled: true } } });
     put.mockResolvedValue({ social: { google: { enabled: false } } });
     render(<SignInMethodsPage />);
-    const box = await screen.findByRole("checkbox", { name: /google/i });
+    const box = await screen.findByRole("switch", { name: /google/i });
     expect(box).toBeChecked();
     expect(screen.getByText(/not set up/i)).toBeInTheDocument();
     await userEvent.click(box);
+    await userEvent.click(await screen.findByRole("button", { name: "Switch off" }));
     await waitFor(() => expect(put).toHaveBeenCalledWith("/auth-methods", { social: { google: { enabled: false } } }));
   });
 });

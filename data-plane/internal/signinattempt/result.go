@@ -50,6 +50,9 @@ const (
 	// AfterCheckoutNewDeviceRejected: the departed guest is verified, but After Check-out Access admits only the devices the stay
 	// used before check-out and this is another one (0208).
 	AfterCheckoutNewDeviceRejected Result = "AFTER_CHECKOUT_NEW_DEVICE_REJECTED"
+	// AddressConflict: the device is using an address DHCP has leased to another device (a stale address it kept); refused before any
+	// room is looked up, so it says nothing about a room (0210).
+	AddressConflict Result = "ADDRESS_CONFLICT"
 )
 
 // AllResults is every Result in operator-filter order; tests use it to prove none lacks a label or class.
@@ -57,7 +60,7 @@ var AllResults = []Result{
 	Verified, CredentialMismatch, RoomNotInMirror, StayNotEligible, AmbiguousRoomCandidates,
 	MirrorStaleOrMissingChange, RateLimited, RoutingOrInterfaceFailure, ServiceUnavailable,
 	SpentRequestID, MalformedSubmission, VerifiedNoEligiblePackage, LicenseRefused, LicenseCapacityReached, DeviceLimitReached,
-	AfterCheckoutNewDeviceRejected,
+	AfterCheckoutNewDeviceRejected, AddressConflict,
 }
 
 type MatchedField string
@@ -85,6 +88,8 @@ const (
 	GuestDeviceLimit GuestClass = "DEVICE_LIMIT"
 	// GuestAfterCheckoutDevice also follows a verified sign-in, so it tells a departed guest nothing they did not just prove.
 	GuestAfterCheckoutDevice GuestClass = "AFTER_CHECKOUT_DEVICE"
+	// GuestAddressConflict is a fact about the device's network address, decided before any room lookup.
+	GuestAddressConflict GuestClass = "ADDRESS_CONFLICT"
 )
 
 // GuestClass maps a Result to the message class the guest may see. The split avoids an occupancy oracle:
@@ -121,6 +126,8 @@ func (r Result) GuestClass() GuestClass {
 		return GuestDeviceLimit
 	case AfterCheckoutNewDeviceRejected:
 		return GuestAfterCheckoutDevice
+	case AddressConflict:
+		return GuestAddressConflict
 	default:
 		// An unrecognised Result is never blamed on the guest.
 		return GuestTechnical
@@ -147,6 +154,7 @@ var labels = map[Result]string{
 	LicenseCapacityReached:         "Verified, but the licensed guest capacity is full",
 	DeviceLimitReached:             "Verified, but the package's device limit is reached",
 	AfterCheckoutNewDeviceRejected: "Verified, but after check-out only the stay's own devices may connect",
+	AddressConflict:                "The device is using a network address leased to another device",
 }
 
 // Label returns the code itself for an unknown Result rather than an empty string.

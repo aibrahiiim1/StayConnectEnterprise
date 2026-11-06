@@ -47,6 +47,7 @@ export function CodeSecurityTab({ canEditFormat }: { canEditFormat: boolean }) {
 
   const loadFormat = React.useCallback(() => {
     setFormatErr(null);
+    setChangesErr(null);
     api.get<VoucherCodeFormat>("/voucher-code-settings/").then(setFormat).catch(setFormatErr);
     api
       .get<{ changes?: FormatChange[] }>("/voucher-code-settings/changes")
@@ -139,8 +140,11 @@ export function CodeSecurityTab({ canEditFormat }: { canEditFormat: boolean }) {
           </div>
         </CardHeader>
         {changesErr ? (
-          <CardBody>
+          <CardBody className="space-y-2">
             <ErrorBanner err={changesErr} />
+            <Button size="sm" variant="secondary" onClick={loadFormat}>
+              <RefreshCw /> Try again
+            </Button>
           </CardBody>
         ) : changes === null ? (
           <CardBody>
@@ -215,8 +219,11 @@ export function CodeSecurityTab({ canEditFormat }: { canEditFormat: boolean }) {
             </div>
           </CardHeader>
           {gensErr ? (
-            <CardBody>
+            <CardBody className="space-y-2">
               <ErrorBanner err={gensErr} />
+              <Button size="sm" variant="secondary" onClick={loadGens}>
+                <RefreshCw /> Try again
+              </Button>
             </CardBody>
           ) : gens === null ? (
             <SkeletonRows rows={2} cols={4} />
@@ -243,7 +250,7 @@ export function CodeSecurityTab({ canEditFormat }: { canEditFormat: boolean }) {
                         ) : (
                           <span className="space-y-0.5">
                             <Badge tone="neutral">Retired</Badge>{" "}
-                            <When iso={g.superseded_at} className="text-xs text-muted-foreground" />
+                            <When iso={g.superseded_at} className="text-xs text-muted-foreground" focusable={false} />
                             {g.supersede_reason && (
                               <span className="block text-xs text-muted-foreground">“{g.supersede_reason}”</span>
                             )}
@@ -289,7 +296,7 @@ export function CodeSecurityTab({ canEditFormat }: { canEditFormat: boolean }) {
 
       <ConfirmDialog
         open={retiring !== null}
-        onOpenChange={(v) => !v && setRetiring(null)}
+        onOpenChange={(v) => !v && !busy && setRetiring(null)}
         title={retiring ? `Retire key generation ${retiring.generation_no}` : "Retire key"}
         description="New batches will be issued under a fresh key. This cannot be undone."
         confirmLabel="Retire this key"
