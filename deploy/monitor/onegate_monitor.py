@@ -539,7 +539,11 @@ class Monitor:
                      f"last licence validation with Central {age_h:.1f} h ago (offline grace {grace} days)")
 # The effective cap as license.Document.EffectiveMaxConcurrentOnlineGuests reads it; zero or less is unlimited.
         cap = n(p.get("max_concurrent_online_guests")) or n((p.get("limits") or {}).get("max_concurrent_guest_sessions"))
-        online = self.m.get("online")
+        # Counted as scd's liveSessionCount counts them for admission: sessions awaiting enforcement hold a slot too.
+        try:
+            online = n(self.s.sql("SELECT count(*) FROM iam_v2.sessions WHERE ended IS NULL AND state IN ('active', 'PENDING_ENFORCEMENT')")[0][0])
+        except Unavailable:
+            online = None
         if cap <= 0:
             self.add("lic:capacity", "licensing", PASS, "licence has no online-guest limit")
         elif online is None:

@@ -148,8 +148,8 @@ class Thresholds(unittest.TestCase):
             p = {"license_id": "L1", "status": "active", "valid_until": "2027-12-01T23:59:59Z", "offline_grace_days": 7, **payload}
             f.files["/etc/stayconnect/license/current.json"] = json.dumps({"payload": json.dumps(p)})
             f.files["/etc/stayconnect/license/state.json"] = json.dumps({"last_cloud_validation": "2026-11-06T09:00:00Z"})
+            f.sqls.append((r"state IN \('active', 'PENDING_ENFORCEMENT'\)", [[str(online)]]))
             mon = om.Monitor(f, "quick")
-            mon.m["online"] = online
             mon.check_licence({})
             return by_key(mon)["lic:capacity"].status
         self.assertEqual(cap({"limits": {"max_concurrent_guest_sessions": 100}}), om.WARN)
