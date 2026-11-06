@@ -270,12 +270,14 @@ class Monitor:
         t2, i2 = cpu_times()
         busy = 0 if t2 == t1 else round(100 * (1 - (i2 - i1) / (t2 - t1)))
         self.m["cpu"] = busy
-        self.add("res:cpu", "resources", CRIT if busy > 95 else WARN if busy > 85 else PASS, f"CPU {busy}% busy (2 s sample)",
-                 persist=3 if busy > 95 else 2)
+        # Each severity keeps its own streak, so warning-level samples never satisfy the critical persistence.
+        self.add("res:cpu", "resources", WARN if busy > 85 else PASS, f"CPU {busy}% busy (2 s sample)", persist=2)
+        self.add("res:cpu-critical", "resources", CRIT if busy > 95 else PASS, f"CPU {busy}% busy, above 95% (2 s sample)", persist=3)
         mem = {l.split(":")[0]: n(l.split()[1]) for l in self.s.read("/proc/meminfo").splitlines() if ":" in l}
         avail = mem.get("MemAvailable", 0) // 1024
         self.m["mem"] = avail
-        self.add("res:memory", "resources", CRIT if avail < 200 else WARN if avail < 500 else PASS, f"{avail} MB memory available", persist=2)
+        self.add("res:memory", "resources", WARN if avail < 500 else PASS, f"{avail} MB memory available", persist=2)
+        self.add("res:memory-critical", "resources", CRIT if avail < 200 else PASS, f"{avail} MB memory available, under 200 MB", persist=2)
         worst = 0
         for path in ("/", "/var/lib/docker"):
             try:
@@ -565,7 +567,7 @@ class Monitor:
         try:
             lines = self.journal("stayconnect-scd", 15)
             reasons = [self._json_field(l, "reason") for l in lines if '"msg":"phase3 rejoin: not eligible"' in l]
-            fails = [r for r in reasons if r.startswith(REJOIN_FAILURES)]
+            fails = [r for r in reasons if r.startswith(REJOIN_FAILURES) and "licensed concurrent-guest capacity reached" not in r]
             done = sum(1 for l in lines if "phase3 rejoin: device reconnected" in l)
             self.m["rejoin_refused"] = len(reasons) - len(fails)
             self.add("auth:rejoin-errors", "automatic reconnection", WARN if len(fails) >= 2 else PASS,
@@ -658,9 +660,12 @@ class Monitor:
         if not files:
             self.add("backup:fresh", "background jobs", NV, "no database backup found")
             return
-        newest = max(files)
-        m = re.search(r"db-(\d{8}T\d{6})Z", newest)
-        when = dt.datetime.strptime(m.group(1), "%Y%m%dT%H%M%S").replace(tzinfo=dt.timezone.utc) if m else None
+        stamps = []
+        for f in files:
+            m = re.search(r"db-(?:safety-)?(\d{8}T\d{6})Z", os.path.basename(f))
+            if m:
+                stamps.append(dt.datetime.strptime(m.group(1), "%Y%m%dT%H%M%S").replace(tzinfo=dt.timezone.utc))
+        when = max(stamps) if stamps else None
         age = (self.now - when).total_seconds() / 3600 if when else None
         self.add("backup:fresh", "background jobs", NV if age is None else CRIT if age > 54 else WARN if age > 30 else PASS,
                  f"newest database backup {age:.0f} h old" if age is not None else "backup time unreadable")

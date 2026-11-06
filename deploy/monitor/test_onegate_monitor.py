@@ -222,6 +222,31 @@ class ReviewFindings(unittest.TestCase):
         f.cmds[0] = (["journalctl", "-u", "stayconnect-scd"], 0, "\n".join([line("no_rejoinable_entitlement")] * 9))
         self.assertEqual(by_key(run(f))["auth:rejoin-errors"].status, om.PASS)
 
+    def test_a_safety_backup_does_not_hide_the_age_of_the_newest_backup(self):
+        f = FakeSys()
+        f.files["/opt/stayconnect/backups/db/db-safety-20261101T000000Z.sql.gz.age"] = "x"
+        f.files["/opt/stayconnect/backups/db/db-20261106T060000Z.sql.gz.age"] = "x"
+        r = by_key(run(f, "deep"))["backup:fresh"]
+        self.assertEqual(r.status, om.PASS)
+        self.assertIn("6 h old", r.text)
+        del f.files["/opt/stayconnect/backups/db/db-20261106T060000Z.sql.gz.age"]
+        self.assertEqual(by_key(run(f, "deep"))["backup:fresh"].status, om.CRIT)
+
+    def test_warning_cpu_samples_do_not_satisfy_critical_persistence(self):
+        state = {}
+        cpu = lambda busy: [om.Result("res:cpu", "resources", om.WARN if busy > 85 else om.PASS, "", persist=2),
+                            om.Result("res:cpu-critical", "resources", om.CRIT if busy > 95 else om.PASS, "", persist=3)]
+        for busy in (90, 90, 97):
+            active, _ = om.Incidents(state, NOW).apply(cpu(busy))
+        self.assertEqual(sorted(r.status for r, _ in active), [om.WARN])
+
+    def test_a_full_licence_is_not_a_reconnection_server_error(self):
+        f = FakeSys()
+        line = '{"time":"2026-11-06T11:55:00Z","msg":"phase3 rejoin: not eligible","reason":"capacity: licensed concurrent-guest capacity reached"}'
+        f.cmds.append((["journalctl", "-u", "stayconnect-scd"], 0, "\n".join([line] * 4)))
+        f.sqls.append((r".", []))
+        self.assertEqual(by_key(run(f))["auth:rejoin-errors"].status, om.PASS)
+
     def test_the_headline_is_not_pass_while_evidence_is_missing(self):
         mon = run(FakeSys())
         nv = sum(1 for r in mon.results if r.status == om.NV)
