@@ -204,6 +204,14 @@ type wireDevice struct {
 	MAC string `json:"mac"`
 }
 
+// deviceUpsertSQL creates or refreshes the device. first_seen is written only when the row is created, so a device created before
+// it was recorded keeps NULL; last_seen and last_ip follow each sign-in. svc_scd may UPDATE only mac, last_seen and last_ip (0047).
+const deviceUpsertSQL = `
+	INSERT INTO iam_v2.devices (tenant_id, site_id, appliance_id, mac, first_seen, last_seen, last_ip)
+	VALUES ($1,$2,$3,$4::macaddr,now(),now(),$5::inet)
+	ON CONFLICT (tenant_id, site_id, appliance_id, mac) DO UPDATE SET last_seen = now(), last_ip = EXCLUDED.last_ip
+	RETURNING id::text`
+
 // device resolves the requesting device to a durable identity from the appliance's own view, never from anything the guest typed.
 func (p *phase3Auth) device(ctx context.Context, d wireDevice) (deviceIdentity, error) {
 	var out deviceIdentity
@@ -231,12 +239,7 @@ func (p *phase3Auth) device(ctx context.Context, d wireDevice) (deviceIdentity, 
 	// The conflict target must be the table's real uniqueness (tenant, site, appliance, mac), else every first
 	// request errors. DO UPDATE rather than DO NOTHING because DO NOTHING returns no row and the id is needed.
 	var id string
-	err = p.srv.db.QueryRow(ctx, `
-		INSERT INTO iam_v2.devices (tenant_id, site_id, appliance_id, mac)
-		VALUES ($1,$2,$3,$4::macaddr)
-		ON CONFLICT (tenant_id, site_id, appliance_id, mac) DO UPDATE SET mac = EXCLUDED.mac
-		RETURNING id::text`,
-		p.srv.tenID, p.srv.siteID, p.srv.applID, mac.String()).Scan(&id)
+	err = p.srv.db.QueryRow(ctx, deviceUpsertSQL, p.srv.tenID, p.srv.siteID, p.srv.applID, mac.String(), ip.String()).Scan(&id)
 	if err != nil {
 		return out, fmt.Errorf("%w: %v", errDeviceStore, err)
 	}
