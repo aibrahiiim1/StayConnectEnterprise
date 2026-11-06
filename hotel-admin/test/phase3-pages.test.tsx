@@ -212,7 +212,7 @@ describe("Stay events page", () => {
     await waitFor(() => expect(get).toHaveBeenCalled());
     expect(get.mock.calls[0][0]).not.toContain("processing_status=");
     expect(await screen.findByText(/folio claimed by other stay/i)).toBeTruthy();
-    expect(screen.getByText(/need a decision/i)).toBeTruthy();
+    expect(screen.getByText(/1 message needs a decision/i)).toBeTruthy();
   });
 });
 
