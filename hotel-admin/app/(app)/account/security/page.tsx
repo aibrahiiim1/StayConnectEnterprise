@@ -1,42 +1,53 @@
 "use client";
 
-// Two-step sign-in is optional per account and recommended (D68). Turning it on needs the password; turning it off,
-// and making new recovery codes, need the password and a code, so a stolen session cannot remove or bypass it.
-// Turning it on or off ends this operator's other sessions; the API renews this session's cookie, so the page only
-// re-reads the state.
-
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { KeyRound } from "lucide-react";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { SectionCard } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { Badge, StatusBadge } from "@/components/ui/badge";
-import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { Callout } from "@/components/ui/error-banner";
 import { DialogForm } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/misc";
 import { HelpList, HelpSection } from "@/components/help";
-import { RecoveryCodes, TwoStepDisable, TwoStepEnable } from "@/components/two-step";
+import { RecoveryCodes, TwoStepDisable, TwoStepEnable, isPasswordRefused, twoStepError } from "@/components/two-step";
 import { api, ApiError } from "@/lib/api";
-import { formatDate } from "@/lib/utils";
+import { FADE, LoadFailure } from "@/app/(app)/backups/load-failure";
+
+function turnedOnWords(at: string): string {
+  const d = new Date(at);
+  if (Number.isNaN(d.getTime())) return "Turned on.";
+  return `Turned on ${d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}.`;
+}
 
 type MFAState = { enrolled: boolean; confirmed_at?: string; recovery_codes_left: number };
 
 export default function TwoStepSigninPage() {
   const [state, setState] = useState<MFAState | null>(null);
-  const [err, setErr] = useState<unknown>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState<"idle" | "enable" | "disable">("idle");
   const [notice, setNotice] = useState<string | null>(null);
   const [making, setMaking] = useState(false);
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [codeErr, setCodeErr] = useState<string | null>(null);
-  const [makeErr, setMakeErr] = useState<unknown>(null);
+  const [makeErr, setMakeErr] = useState<string | null>(null);
+  const makePasswordRef = useRef<HTMLInputElement | null>(null);
   const [busy, setBusy] = useState(false);
   const [codes, setCodes] = useState<string[] | null>(null);
 
   const load = useCallback(async () => {
-    try { setState(await api.get<MFAState>("/auth/mfa")); setErr(null); } catch (e) { setErr(e); }
+    setLoading(true);
+    try {
+      setState(await api.get<MFAState>("/auth/mfa"));
+      setLoadFailed(false);
+    } catch {
+      setLoadFailed(true);
+    } finally {
+      setLoading(false);
+    }
   }, []);
   useEffect(() => { void load(); }, [load]);
 
@@ -58,13 +69,15 @@ export default function TwoStepSigninPage() {
       if (e instanceof ApiError && (e.code === "wrong_code" || e.code === "code_required")) {
         setCodeErr(e.message); setCode("");
       } else {
-        setMakeErr(e instanceof ApiError && e.code === "reauth_required" ? new Error("Your password was not accepted.") : e);
+        setMakeErr(twoStepError(e, "New recovery codes could not be made. Try again in a moment. Your earlier codes still work."));
+        if (isPasswordRefused(e)) { setPassword(""); makePasswordRef.current?.focus(); }
       }
     } finally { setBusy(false); }
   }
 
   const on = state?.enrolled === true;
   const low = on && state !== null && state.recovery_codes_left <= 3;
+  const none = on && state !== null && state.recovery_codes_left === 0;
 
   return (
     <PageShell width="form">
@@ -105,21 +118,31 @@ export default function TwoStepSigninPage() {
         }
       />
 
-      <ErrorBanner err={err} className="mb-0" />
-      {notice && <Callout tone="success">{notice}</Callout>}
+      {notice && (
+        <div className={FADE}>
+          <Callout tone="success">
+            <span className="flex flex-wrap items-start justify-between gap-2">
+              <span>{notice}</span>
+              <Button size="xs" variant="secondary" onClick={() => setNotice(null)}>Dismiss</Button>
+            </span>
+          </Callout>
+        </div>
+      )}
 
       <SectionCard
         title="Authenticator app"
         description={
           state === null
-            ? "Checking…"
+            ? (loadFailed ? "Not known" : "Checking…")
             : on
               ? "Signing in asks for your password and a code from your app."
               : "Your password alone signs you in."
         }
         actions={state && <StatusBadge tone={on ? "ok" : "default"}>{on ? "On" : "Off"}</StatusBadge>}
       >
-        {state === null ? (
+        {state === null && loadFailed ? (
+          <LoadFailure what="Your two-step sign-in" busy={loading} onRetry={() => void load()} />
+        ) : state === null ? (
           <div className="space-y-2" aria-hidden>
             <Skeleton className="h-4 w-2/3" />
             <Skeleton className="h-8 w-48" />
@@ -137,7 +160,7 @@ export default function TwoStepSigninPage() {
         ) : on ? (
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm text-muted-foreground">
-              {state.confirmed_at ? `Turned on ${formatDate(state.confirmed_at)}.` : "Turned on."}
+              {state.confirmed_at ? turnedOnWords(state.confirmed_at) : "Turned on."}
             </p>
             <Button variant="secondary" onClick={() => { setMode("disable"); setNotice(null); }}>Turn off</Button>
           </div>
@@ -159,16 +182,21 @@ export default function TwoStepSigninPage() {
         >
           <div className="space-y-4">
             {low && !codes && (
-              <Callout tone="warning">Make a new set before you run out.</Callout>
+              <Callout tone={none ? "danger" : "warning"}>
+                {none ? "You have no recovery codes left. Make a new set now." : "Make a new set before you run out."}
+              </Callout>
             )}
             {codes ? (
-              <div className="space-y-3">
+              <div className={`space-y-3 ${FADE}`}>
                 <p className="text-sm text-muted-foreground">
                   Your earlier codes no longer work. These are shown only now.
                 </p>
                 <RecoveryCodes codes={codes} label="New recovery codes" />
                 <div className="flex justify-end border-t border-border pt-4">
-                  <Button variant="primary" onClick={() => setCodes(null)}>I have saved them</Button>
+                  <Button variant="primary" onClick={() => {
+                    setCodes(null);
+                    setNotice("New recovery codes made. Your earlier codes no longer work.");
+                  }}>I have saved them</Button>
                 </div>
               </div>
             ) : (
@@ -206,7 +234,7 @@ export default function TwoStepSigninPage() {
         onSubmit={makeCodes}
       >
         <Field label="Your password" required>
-          <Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          <Input ref={makePasswordRef} type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
         </Field>
         <Field
           label="Code from your authenticator app"
