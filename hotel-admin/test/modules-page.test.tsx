@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
 
 vi.mock("@/lib/capabilities", async (importOriginal) => {
@@ -11,8 +12,9 @@ vi.mock("@/lib/api", async (orig) => {
   return { ...actual, api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), del: vi.fn() } };
 });
 
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import ModulesPage from "@/app/(app)/modules/page";
+import { rememberCustomRoles } from "@/lib/roles";
 
 const mod = (id: string, label: string, extra: Record<string, unknown> = {}) => ({
   id, label, requires: [], deployed: true, authorized: false, licensed: false, switchable: false,
@@ -42,7 +44,7 @@ describe("Modules — identity modules say what Sign-in methods says", () => {
 });
 
 describe("Modules on a café", () => {
-  it("shows every module, dashes where the licence is missing, no configure link, and the kept hotel records", async () => {
+  it("shows every module, says what is missing without a licence, no configure link, and the kept hotel records", async () => {
     (api.get as ReturnType<typeof vi.fn>).mockImplementation((p: string) => {
       if (p === "/auth/whoami") return Promise.resolve({ roles: ["site_admin"] });
       return Promise.resolve({
@@ -59,7 +61,8 @@ describe("Modules on a café", () => {
     expect(screen.getByText("Something new")).toBeInTheDocument();
 
     const hotel = screen.getByText("Hotel").closest("div.flex.flex-col, [class*='flex-col']") as HTMLElement;
-    expect(within(hotel).getAllByText("—", { selector: "dd" })).toHaveLength(2);
+    expect(within(hotel).getAllByText("Needs a licence", { selector: "dd" })).toHaveLength(2);
+    expect(within(hotel).queryByText("—")).toBeNull();
     expect(screen.queryByText("Switched off at this site.")).toBeNull();
     expect(within(hotel).queryByText("PMS connection")).toBeNull();
     const records = screen.getByTestId("records-hospitality");
@@ -107,8 +110,7 @@ describe("Modules with no implementation in this release", () => {
     for (const name of ["High availability", "White label"]) {
       const card = screen.getByText(name).closest("div.flex.flex-col, [class*='flex-col']") as HTMLElement;
       expect((within(card).getByText("Available").nextElementSibling as HTMLElement).textContent).toBe("No");
-      // Nothing to run, so nothing is claimed ready.
-      expect((within(card).getByText("Ready").nextElementSibling as HTMLElement).textContent).toBe("—");
+      expect((within(card).getByText("Ready").nextElementSibling as HTMLElement).textContent).toBe("Not available");
     }
   });
 });
@@ -126,5 +128,72 @@ describe("A configurable module that may not run", () => {
     render(<ModulesPage />);
     expect(await screen.findByText(/not authorised to contact a payment provider/)).toBeInTheDocument();
     expect(screen.queryByText("NOT_READY")).toBeNull();
+  });
+});
+
+describe("Switching a module", () => {
+  const hotel = (extra: Record<string, unknown> = {}) => ({
+    site_type: "HOTEL", license_state: "Active", deployment: {},
+    modules: { room_charge: mod("room_charge", "Room charge", { licensed: true, switchable: true, enabled: true, reasons: [], ...extra }) },
+  });
+
+  it("offers the switch to a custom role allowed to change modules", async () => {
+    rememberCustomRoles({ "custom:m1": { name: "Module keeper", permissions: { modules: "write" } } });
+    (api.get as ReturnType<typeof vi.fn>).mockImplementation((p: string) => {
+      if (p === "/auth/whoami") return Promise.resolve({ roles: ["custom:m1"] });
+      if (p === "/modules/changes") return Promise.resolve({ changes: [] });
+      return Promise.resolve(hotel());
+    });
+    render(<ModulesPage />);
+    expect(await screen.findByRole("button", { name: "Switch off" })).toBeInTheDocument();
+    expect(screen.queryByText(/not switch them on or off/)).toBeNull();
+  });
+
+  it("words a refused password and keeps the dialog open", async () => {
+    (api.get as ReturnType<typeof vi.fn>).mockImplementation((p: string) => {
+      if (p === "/auth/whoami") return Promise.resolve({ roles: ["site_admin"] });
+      if (p === "/modules/changes") return Promise.resolve({ changes: [] });
+      return Promise.resolve(hotel());
+    });
+    (api.put as ReturnType<typeof vi.fn>).mockRejectedValue(new ApiError(401, { error: "reauth_required", message: "password confirmation required" }));
+    render(<ModulesPage />);
+    await userEvent.click(await screen.findByRole("button", { name: "Switch off" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Switch off Room charge?")).toBeInTheDocument();
+    await userEvent.type(within(dialog).getByLabelText(/Reason/), "Not used at this site");
+    await userEvent.type(within(dialog).getByLabelText(/password/i), "secret");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Switch off" }));
+    expect(await within(dialog).findByText("The password was not accepted. Nothing was changed.")).toBeInTheDocument();
+    expect(screen.queryByText("password confirmation required")).toBeNull();
+  });
+
+  it("shows a deliberate switch-off as neutral, and who changed it in Recent changes", async () => {
+    (api.get as ReturnType<typeof vi.fn>).mockImplementation((p: string) => {
+      if (p === "/auth/whoami") return Promise.resolve({ roles: ["site_admin"] });
+      if (p === "/operators") return Promise.resolve({ data: [{ id: "op-1", display_name: "Mona" }] });
+      if (p === "/modules/changes") {
+        return Promise.resolve({ changes: [{ module: "room_charge", changed_at: new Date().toISOString(), changed_by: "op-1",
+          reason: "Not used at this site", old_enabled: true, new_enabled: false }] });
+      }
+      return Promise.resolve(hotel({ enabled: false, reasons: ["DISABLED_BY_SITE"] }));
+    });
+    render(<ModulesPage />);
+    const list = await screen.findByRole("list", { name: "Recent module changes" });
+    expect(await within(list).findByText(/switched off by Mona/)).toBeInTheDocument();
+    expect(within(list).getByText("Reason: Not used at this site")).toBeInTheDocument();
+    expect(screen.getAllByText("Switched off").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Not in use")).toBeNull();
+  });
+
+  it("offers Try again when the modules cannot be loaded", async () => {
+    (api.get as ReturnType<typeof vi.fn>).mockImplementation((p: string) => {
+      if (p === "/auth/whoami") return Promise.resolve({ roles: ["site_admin"] });
+      return Promise.reject(new ApiError(502, { error: "upstream", message: "scd unreachable" }));
+    });
+    render(<ModulesPage />);
+    const alert = await screen.findByRole("alert", {}, { timeout: 3000 });
+    expect(within(alert).getByText(/could not be loaded/)).toBeInTheDocument();
+    expect(within(alert).getByRole("button", { name: /Try again/ })).toBeInTheDocument();
+    expect(screen.queryByText(/scd unreachable/)).toBeNull();
   });
 });
