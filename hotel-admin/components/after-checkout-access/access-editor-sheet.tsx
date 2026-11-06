@@ -1,8 +1,5 @@
 "use client";
 
-// One editor for the switch and the terms. Saves with the config version that was read; on a conflict the page
-// reloads the setting without discarding the operator's entries.
-
 import * as React from "react";
 import { ArrowRight, LogOut } from "lucide-react";
 import { api } from "@/lib/api";
@@ -11,7 +8,9 @@ import {
   type AccessDraft,
   type AccessState,
   type DraftField,
+  NOT_SET,
   OTHER_REASON,
+  deviceAllowanceWords,
   REASON_CHOICES,
   describePublishFailure,
   devicePolicyTitle,
@@ -36,6 +35,8 @@ import { Badge } from "@/components/ui/badge";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { cn } from "@/lib/utils";
 
+const FADE = "animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none";
+
 const STEPS = ["Settings", "Review and save"];
 
 type Row = { key: string; label: string; from: string; to: string; changed: boolean };
@@ -43,7 +44,7 @@ type Row = { key: string; label: string; from: string; to: string; changed: bool
 function reviewRows(state: AccessState, draft: AccessDraft, terms: ReturnType<typeof draftToTerms>): Row[] {
   const p = state.policy;
   const row = (key: string, label: string, from: string | undefined, to: string): Row => ({
-    key, label, from: from ?? "—", to, changed: (from ?? "—") !== to,
+    key, label, from: from ?? NOT_SET, to, changed: (from ?? NOT_SET) !== to,
   });
   return [
     row("enabled", "After Check-out Access", state.enabled ? "On" : "Off", draft.enabled ? "On" : "Off"),
@@ -51,7 +52,7 @@ function reviewRows(state: AccessState, draft: AccessDraft, terms: ReturnType<ty
     row("down", "Download speed", p ? fmtSpeed(p.down_kbps) : undefined, fmtSpeed(terms.down_kbps)),
     row("up", "Upload speed", p ? fmtSpeed(p.up_kbps) : undefined, fmtSpeed(terms.up_kbps)),
     row("quota", "Shared data quota", p ? fmtData(p.data_quota_bytes) : undefined, fmtData(terms.data_quota_bytes)),
-    row("limit", "Device allowance", p ? String(p.device_limit) : undefined, String(terms.device_limit)),
+    row("limit", "Device allowance", p ? deviceAllowanceWords(p.device_limit) : undefined, deviceAllowanceWords(terms.device_limit)),
     row("policy", "New devices", p ? devicePolicyTitle(p.device_policy) : undefined, devicePolicyTitle(terms.device_policy)),
   ];
 }
@@ -78,22 +79,38 @@ export function AccessEditorSheet({
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [fieldError, setFieldError] = React.useState<"password" | "reason" | null>(null);
+  const [asking, setAsking] = React.useState(false);
+  const seedRef = React.useRef({ state, supportedPolicies, defaultReason });
+  seedRef.current = { state, supportedPolicies, defaultReason };
+  const [initial, setInitial] = React.useState<AccessDraft | null>(null);
 
-  // Seed only on open so a conflict reload cannot erase the draft.
   React.useEffect(() => {
+    const seed = seedRef.current;
     if (open) {
-      setDraft(draftFromState(state, supportedPolicies));
+      const first = draftFromState(seed.state, seed.supportedPolicies);
+      setInitial(first);
+      setDraft(first);
       setStep(0);
       setTouched(false);
-      setReasonChoice(defaultReason);
+      setReasonChoice(seed.defaultReason);
       setOtherReason("");
       setError(null);
       setFieldError(null);
+      setAsking(false);
     } else {
       setPassword("");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  const dirty =
+    (initial !== null && JSON.stringify(draft) !== JSON.stringify(initial)) ||
+    otherReason.trim() !== "" || password !== "";
+
+  function requestClose() {
+    if (busy) return;
+    if (dirty) { setAsking(true); return; }
+    onOpenChange(false);
+  }
 
   const errors = validateDraft(draft, bounds, supportedPolicies);
   const valid = Object.keys(errors).length === 0;
@@ -129,7 +146,6 @@ export function AccessEditorSheet({
         reason_code: reasonCode,
         password,
       };
-      // Terms go whole or not at all; the switch only when it changed.
       if (termsChanged) Object.assign(body, terms);
       if (switchChanged) body.enabled = draft.enabled;
       const r = await api.put<{ config_version: number }>("/after-checkout-access", body);
@@ -153,10 +169,30 @@ export function AccessEditorSheet({
   const hb = bounds.duration_hours;
   const qb = bounds.data_quota_bytes;
   const lb = bounds.device_limit;
+  const saveBlocked = !canWrite
+    ? "Your role cannot save these settings."
+    : !valid
+      ? "Go back and correct the highlighted settings."
+      : nothingChanged
+        ? "Nothing has changed, so there is nothing to save."
+        : !reasonOk
+          ? "Choose a reason, or describe one."
+          : !password
+            ? "Enter your password to save."
+            : undefined;
+
+  const discardPrompt = (
+    <>
+      <p role="status" className="me-auto text-caption text-foreground">Discard your changes?</p>
+      <Button variant="ghost" onClick={() => setAsking(false)}>Keep editing</Button>
+      <Button variant="danger" onClick={() => { setAsking(false); onOpenChange(false); }}>Discard</Button>
+    </>
+  );
+
   const hint = (k: "down_kbps" | "up_kbps") => `Allowed: ${fmtSpeed(bounds[k].min)} to ${fmtSpeed(bounds[k].max)}. Default ${fmtSpeed(bounds[k].default)}.`;
 
   return (
-    <Sheet open={open} onOpenChange={(v) => !busy && onOpenChange(v)}>
+    <Sheet open={open} onOpenChange={(v) => (v ? onOpenChange(true) : requestClose())}>
       <SheetContent width="lg" aria-label="Edit After Check-out Access">
         <SheetHeader
           eyebrow="After Check-out Access"
@@ -169,7 +205,7 @@ export function AccessEditorSheet({
 
         {step === 0 && (
           <>
-            <SheetBody>
+            <SheetBody className={FADE}>
               {error && <ErrorBanner err={error} />}
               <form id="aca-terms" onSubmit={toReview} className="space-y-6" aria-label="After Check-out Access settings" noValidate>
                 <SheetSection title="Switch" description="Turn the feature off to give nobody access after check-out.">
@@ -249,17 +285,21 @@ export function AccessEditorSheet({
               </form>
             </SheetBody>
             <SheetFooter>
-              <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
-              <Button type="submit" form="aca-terms" disabled={touched && !valid}>
-                Review changes <ArrowRight />
-              </Button>
+              {asking ? discardPrompt : (
+                <>
+                  <Button variant="ghost" onClick={requestClose}>Cancel</Button>
+                  <Button type="submit" form="aca-terms" disabled={touched && !valid}>
+                    Review changes <ArrowRight />
+                  </Button>
+                </>
+              )}
             </SheetFooter>
           </>
         )}
 
         {step === 1 && (
           <>
-            <SheetBody>
+            <SheetBody className={FADE}>
               {error && <ErrorBanner err={error} />}
               <SheetSection
                 title="What changes"
@@ -324,10 +364,18 @@ export function AccessEditorSheet({
               </SheetSection>
             </SheetBody>
             <SheetFooter>
-              <Button variant="ghost" onClick={() => setStep(0)} disabled={busy}>Back</Button>
-              <Button onClick={save} disabled={busy || !canWrite || !valid || !reasonOk || !password || nothingChanged}>
-                {busy ? "Saving…" : "Save settings"}
-              </Button>
+              {asking ? discardPrompt : (
+                <>
+                  {saveBlocked && !busy && (
+                    <p id="aca-save-blocked" className="me-auto text-caption text-muted-foreground">{saveBlocked}</p>
+                  )}
+                  <Button variant="ghost" onClick={() => setStep(0)} disabled={busy}>Back</Button>
+                  <Button onClick={save} disabled={busy || saveBlocked !== undefined}
+                    aria-describedby={saveBlocked ? "aca-save-blocked" : undefined}>
+                    {busy ? "Saving…" : "Save settings"}
+                  </Button>
+                </>
+              )}
             </SheetFooter>
           </>
         )}

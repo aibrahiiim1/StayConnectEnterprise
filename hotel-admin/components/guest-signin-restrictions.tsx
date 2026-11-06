@@ -1,11 +1,8 @@
 "use client";
 
-// The room shown is unverified device input, never proof of a guest's identity.
-// Releasing a restriction permits another attempt; it does not sign anyone in.
-
 import { REASON_HINT, REASON_MAX_CHARS, reasonOk } from "@/lib/reason";
 import { useCallback, useEffect, useState } from "react";
-import { ShieldCheck, Timer } from "lucide-react";
+import { AlertTriangle, RefreshCw, ShieldCheck, Timer } from "lucide-react";
 import { api, GuestSignInRestriction } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Table, TBody, THead, TR, TH, TD } from "@/components/ui/table";
@@ -22,7 +19,6 @@ import { useToast } from "@/components/ui/toast";
 import { cn, formatDate } from "@/lib/utils";
 import { usePoll } from "@/lib/use-poll";
 
-// The server owns the wait deadline; the countdown only updates its display between reads.
 function useTicker(): number {
   const [tick, setTick] = useState(0);
   useEffect(() => {
@@ -38,6 +34,7 @@ function remaining(r: GuestSignInRestriction, loadedAt: number, _tick: number): 
 }
 
 const POLL_SECONDS = 15;
+const FADE = "animate-in fade-in-0 duration-base ease-onegate motion-reduce:animate-none";
 
 export function ActiveRestrictions({
   canRelease,
@@ -68,7 +65,6 @@ export function ActiveRestrictions({
       setErr(null);
     } catch (e) {
       setErr(e);
-      setRows((prev) => prev ?? []);
     } finally {
       setRefreshing(false);
     }
@@ -76,7 +72,6 @@ export function ActiveRestrictions({
 
   useEffect(() => { void load(); }, [load]);
 
-  // Refresh periodically so expired restrictions leave the list.
   usePoll(() => load(), POLL_SECONDS * 1000);
 
   async function release() {
@@ -86,7 +81,7 @@ export function ActiveRestrictions({
     try {
       await api.post(`/guest-signin-restrictions/${target.id}/release`, { reason: reason.trim() });
       toast.success(
-        "Wait ended — the guest is not signed in",
+        "Wait ended. The guest is not signed in",
         `${target.device_mac} may try to sign in again. It has not been given access.`,
       );
       setTarget(null);
@@ -111,17 +106,34 @@ export function ActiveRestrictions({
         />
       </div>
 
-      <ErrorBanner err={err} />
+      {rows !== null && <ErrorBanner err={err} />}
 
       <Card className={cn("overflow-hidden", refreshing && rows !== null && refreshingClass)}>
         {rows === null ? (
-          <SkeletonRows rows={4} cols={6} />
+          err ? (
+            <div role="alert" className={FADE}>
+              <EmptyState
+                icon={<AlertTriangle />}
+                title="Active restrictions could not be loaded"
+                hint="The appliance did not return the devices being asked to wait, so whether any device is waiting is not known. Nothing has been changed."
+                action={
+                  <Button variant="secondary" disabled={refreshing} onClick={() => void load()}>
+                    <RefreshCw className={cn(refreshing && "animate-spin motion-reduce:animate-none")} /> Try again
+                  </Button>
+                }
+              />
+            </div>
+          ) : (
+            <SkeletonRows rows={4} cols={6} />
+          )
         ) : rows.length === 0 ? (
-          <EmptyState
-            icon={<ShieldCheck />}
-            title="No device is being asked to wait"
-            hint="Devices appear here after repeated incorrect sign-in details, and leave on their own when the wait ends."
-          />
+          <div className={FADE}>
+            <EmptyState
+              icon={<ShieldCheck />}
+              title="No device is being asked to wait"
+              hint="Devices appear here after repeated incorrect sign-in details, and leave on their own when the wait ends."
+            />
+          </div>
         ) : (
           <Table>
             <THead>
@@ -141,17 +153,17 @@ export function ActiveRestrictions({
                 return (
                   <TR key={r.id}>
                     <TD className="font-mono text-xs">{r.device_mac}</TD>
-                    <TD className="hidden text-sm text-muted-foreground md:table-cell">{r.guest_network || "—"}</TD>
+                    <TD className="hidden text-sm text-muted-foreground md:table-cell">{r.guest_network || "Not known"}</TD>
                     <TD className="hidden text-sm sm:table-cell">
                       {r.last_submitted_room ? (
                         <span className="inline-flex flex-wrap items-center gap-1.5" title="What this device typed. Not a verified room.">
                           {r.last_submitted_room}
                           <Badge tone="neutral">unverified</Badge>
                         </span>
-                      ) : "—"}
+                      ) : <span className="text-muted-foreground">Not given</span>}
                     </TD>
                     <TD className="hidden text-sm lg:table-cell">
-                      {r.failure_count} incorrect sign-in{r.failure_count === 1 ? "" : "s"}
+                      {r.failure_count.toLocaleString()} incorrect sign-in{r.failure_count === 1 ? "" : "s"}
                     </TD>
                     <TD className="hidden whitespace-nowrap text-sm text-muted-foreground lg:table-cell">
                       {formatDate(r.restricted_at)}
@@ -201,13 +213,13 @@ export function ActiveRestrictions({
             <KeyValueGrid
               items={[
                 { label: "Device", value: <span className="font-mono text-xs">{target.device_mac}</span> },
-                { label: "Client network", value: target.guest_network || "—" },
+                { label: "Client network", value: target.guest_network || "Not known" },
                 {
                   label: "Last room typed",
                   value: (
                     <>
-                      {target.last_submitted_room || "—"}{" "}
-                      <span className="text-caption text-muted-foreground">(unverified — what was typed)</span>
+                      {target.last_submitted_room || "Not given"}{" "}
+                      <span className="text-caption text-muted-foreground">(unverified, only what was typed)</span>
                     </>
                   ),
                 },
@@ -228,7 +240,7 @@ export function ActiveRestrictions({
             </Field>
             <Callout tone="warning" title="Releasing does not sign the guest in">
               The guest still has to enter details the site accepts. If they do not know them, the answer is
-              the PMS record — not this button.
+              the PMS record, not this button.
             </Callout>
           </>
         )}
