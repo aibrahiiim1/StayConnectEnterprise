@@ -1,10 +1,5 @@
 "use client";
 
-// Assisted requests cover shared access (room credentials, vouchers, staff accounts) where a device address or room
-// number does not identify a person.
-// Only site_admin and the IT manager reach this page; the database decides what is selectable and whether anything
-// changed.
-
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { PageShell, PageHeader } from "@/components/ui/page";
@@ -19,7 +14,9 @@ import { ConfirmDialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { useToast } from "@/components/ui/toast";
-import { errMsg, formatDate } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
+import { countWords, guestDataError } from "@/lib/guest-data-errors";
+import { FADE, LoadFailure, StaleNotice } from "@/app/(app)/backups/load-failure";
 import { ArrowLeft, Download, Eraser, Plus, Search, X } from "lucide-react";
 import {
   ASSISTED_ERASE_CONSEQUENCES, ASSISTED_EXPORT_NOTE, BLOCK_WORDS, CLASS_WORDS, KIND_WORDS, METHOD_OPTIONS,
@@ -51,6 +48,14 @@ const ANCHOR_LABELS: Record<AnchorKind, string> = {
 };
 const METHOD_LABEL = Object.fromEntries(METHOD_OPTIONS.map((m) => [m.value, m.label]));
 const statusWord = (s: string) => s.charAt(0) + s.slice(1).toLowerCase();
+const ACTION_WORDS: Record<string, string> = {
+  OPENED: "Opened",
+  EXPORTED: "Records handed over",
+  ERASED: "Records anonymised",
+  COMPLETED: "Completed",
+  CANCELLED: "Cancelled",
+  EXPIRED: "Expired",
+};
 const toneOf = (s: string) => {
   const t = STATUS_TONE[s] ?? "neutral";
   return t === "neutral" ? "default" : t;
@@ -68,21 +73,22 @@ function saveJSON(doc: unknown, prefix: string) {
   URL.revokeObjectURL(url);
 }
 
-// A datetime-local value is the browser's wall clock; the server wants an instant.
 const localInput = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 
 export default function AssistedGuestDataPage() {
   const toast = useToast();
   const [list, setList] = useState<Summary[] | null>(null);
-  const [listErr, setListErr] = useState<string | null>(null);
+  const [listFailed, setListFailed] = useState(false);
+  const [listBusy, setListBusy] = useState(false);
   const [creating, setCreating] = useState(false);
   const [caseId, setCaseId] = useState<string | null>(null);
 
   const loadList = useCallback(async () => {
+    setListBusy(true);
     try {
       const r = await api.get<{ requests: Summary[] }>("/guest-data-rights/assisted");
-      setList(r.requests ?? []); setListErr(null);
-    } catch (e) { setList([]); setListErr(errMsg(e)); }
+      setList(r.requests ?? []); setListFailed(false);
+    } catch { setListFailed(true); } finally { setListBusy(false); }
   }, []);
   useEffect(() => { void loadList(); }, [loadList]);
 
@@ -118,11 +124,15 @@ export default function AssistedGuestDataPage() {
           <SectionCard
             flush
             title="Requests"
-            description="Closed requests keep who, when, how it was verified and how many records — no device address and no notes."
+            description="Closed requests keep who, when, how it was verified and how many records, but no device address and no notes."
           >
-            {listErr && <div className="px-4 pt-3"><ErrorBanner err={listErr} className="mb-0" /></div>}
-            {list !== null && list.length === 0 && !listErr && <EmptyState size="sm" title="No assisted request yet" />}
+            {listFailed && list !== null && <div className="px-4 pt-3"><StaleNotice what="The requests" /></div>}
+            {list === null && (listFailed
+              ? <LoadFailure what="The requests" busy={listBusy} onRetry={() => void loadList()} />
+              : <p className="px-4 py-6 text-center text-sm text-muted-foreground">Loading the requests…</p>)}
+            {list !== null && list.length === 0 && <div className={FADE}><EmptyState size="sm" title="No assisted request yet" /></div>}
             {list !== null && list.length > 0 && (
+              <div className={FADE}>
               <Table label="Assisted requests">
                 <THead>
                   <TR>
@@ -155,6 +165,7 @@ export default function AssistedGuestDataPage() {
                   ))}
                 </TBody>
               </Table>
+              </div>
             )}
           </SectionCard>
         </>
@@ -196,7 +207,7 @@ function NewRequest({ onCancel, onOpened }: { onCancel: () => void; onOpened: (i
     try {
       const r = await api.get<{ matches: Match[] }>("/guest-data-rights/search", { "X-Guest-Data-Search": encodeURIComponent(term) });
       setMatches(r.matches ?? []);
-    } catch (e2) { setErr(errMsg(e2)); } finally { setSearching(false); }
+    } catch (e2) { setErr(guestDataError(e2, "The search did not complete. Try again in a moment.")); } finally { setSearching(false); }
   }
 
   const problems: string[] = [];
@@ -227,11 +238,12 @@ function NewRequest({ onCancel, onOpened }: { onCancel: () => void; onOpened: (i
         reason: reason.trim(),
       });
       onOpened(r.id);
-    } catch (e2) { setErr(errMsg(e2)); } finally { setBusy(false); }
+    } catch (e2) { setErr(guestDataError(e2, "The request could not be opened. Nothing was recorded.")); } finally { setBusy(false); }
   }
 
   return (
     <SectionCard
+      className={FADE}
       title="New assisted request"
       description="Nothing is handed over or changed by opening a request. You review the records first."
     >
@@ -241,7 +253,7 @@ function NewRequest({ onCancel, onOpened }: { onCancel: () => void; onOpened: (i
             {(["ACCESS", "ERASURE"] as const).map((p) => (
               <label key={p} className="flex items-start gap-2 text-sm">
                 <input type="radio" name="purpose" className="mt-1" checked={purpose === p} onChange={() => setPurpose(p)} />
-                <span>{PURPOSE_WORDS[p]}{p === "ACCESS" ? " (Art. 15)" : " (Art. 17) — only addresses are removed; totals and financial records stay"}</span>
+                <span>{PURPOSE_WORDS[p]}{p === "ERASURE" ? ": only addresses are removed; totals and financial records stay" : ""}</span>
               </label>
             ))}
           </fieldset>
@@ -249,7 +261,7 @@ function NewRequest({ onCancel, onOpened }: { onCancel: () => void; onOpened: (i
           <fieldset className="space-y-3">
             <legend className="text-label">Whose records these are said to be</legend>
             <p className="text-xs text-muted-foreground">
-              What the requester names — not proof. A returning guest names every reservation the device was used under.
+              What the requester names. It is not proof. A returning guest names every reservation the device was used under.
             </p>
             <div className="flex flex-wrap gap-2">
               {anchors.map((a) => (
@@ -262,6 +274,7 @@ function NewRequest({ onCancel, onOpened }: { onCancel: () => void; onOpened: (i
             </div>
             <div className="flex flex-wrap gap-2">
               <Input aria-label="Search for the guest" className="min-w-0 flex-1" value={q} maxLength={200} onChange={(e2) => setQ(e2.target.value)}
+                onKeyDown={(e2) => { if (e2.key === "Enter") { e2.preventDefault(); void search(); } }}
                 placeholder="name, room, reservation number, account or email" />
               <Button type="button" variant="secondary" disabled={searching || q.trim().length < 2} onClick={() => void search()}>
                 <Search /> {searching ? "Searching…" : "Search"}
@@ -305,7 +318,7 @@ function NewRequest({ onCancel, onOpened }: { onCancel: () => void; onOpened: (i
                 </Select>
               </Field>
             </div>
-            <Field label="Evidence you saw" hint="Describe it — do not copy document numbers. Removed when the request closes.">
+            <Field label="Evidence you saw" hint="Describe it, but do not copy document numbers. Removed when the request closes.">
               <Textarea rows={2} value={evidence} maxLength={1000} onChange={(e2) => setEvidence(e2.target.value)} />
             </Field>
             <div className="space-y-2 text-sm">
@@ -328,7 +341,12 @@ function NewRequest({ onCancel, onOpened }: { onCancel: () => void; onOpened: (i
           </Field>
 
           <ErrorBanner err={err} />
-          {problems.length > 0 && <ul className="list-disc ps-5 text-xs text-muted-foreground">{problems.map((p) => <li key={p}>{p}</li>)}</ul>}
+          {problems.length > 0 && (
+            <div className="space-y-1 text-xs text-muted-foreground">
+              <p className="font-medium text-foreground">Still needed before you can open the request:</p>
+              <ul className="list-disc ps-5">{problems.map((p) => <li key={p}>{p}</li>)}</ul>
+            </div>
+          )}
           <div className="flex gap-2">
             <Button type="submit" variant="primary" disabled={busy || problems.length > 0}>{busy ? "Opening…" : "Open request"}</Button>
             <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>
@@ -347,13 +365,13 @@ function CasePanel({ id, onClose, onChanged }: { id: string; onClose: () => void
   const [acting, setActing] = useState<"export" | "erase" | "complete" | "cancel" | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionErr, setActionErr] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [receipt, setReceipt] = useState<{ title: string; body: unknown } | null>(null);
+  const [receipt, setReceipt] = useState<{ title: string; text: string; body: unknown } | null>(null);
+  const [loadBusy, setLoadBusy] = useState(false);
 
   const key = (r: { kind: string; id: string }) => `${r.kind}:${r.id}`;
 
-  const load = useCallback(async (keepNotice = false) => {
-    setErr(null); if (!keepNotice) setNotice(null);
+  const load = useCallback(async () => {
+    setLoadBusy(true);
     try {
       const d = await api.get<Detail>(`/guest-data-rights/assisted/${id}`);
       setC(d);
@@ -361,7 +379,10 @@ function CasePanel({ id, onClose, onChanged }: { id: string; onClose: () => void
         const rv = await api.get<Review>(`/guest-data-rights/assisted/${id}/review`);
         setReview(rv); setPicked(new Set());
       } else { setReview(null); }
-    } catch (e) { setErr(errMsg(e)); }
+      setErr(null);
+    } catch (e) {
+      setErr(guestDataError(e, "The request could not be loaded."));
+    } finally { setLoadBusy(false); }
   }, [id]);
   useEffect(() => { void load(); }, [load]);
 
@@ -374,10 +395,10 @@ function CasePanel({ id, onClose, onChanged }: { id: string; onClose: () => void
   function refusal(e: unknown): string {
     if (e instanceof ApiError && e.code === "assisted_refused") {
       const code = typeof e.body?.code === "string" ? e.body.code : "";
-      if (code === "changed" || code === "not_listed" || code === "not_eligible") void load(true);
-      return REFUSAL_WORDS[code] ?? errMsg(e);
+      if (code === "changed" || code === "not_listed" || code === "not_eligible") void load();
+      return REFUSAL_WORDS[code] ?? guestDataError(e, "The request refused this. Nothing was changed.");
     }
-    return errMsg(e);
+    return guestDataError(e, "This did not complete. Try again in a moment.");
   }
 
   async function confirmAct(verb: "export" | "erase", { reason, password }: { reason: string; password: string }) {
@@ -395,9 +416,13 @@ function CasePanel({ id, onClose, onChanged }: { id: string; onClose: () => void
         toast.success("Records downloaded", "Hand them to the requester only after checking who they are, then close the request.");
         await load();
       } else {
-        setReceipt({ title: `Anonymised. Erasure reference ${r.erasure_ref}`, body: r });
-        setNotice(`Anonymised. Reference ${r.erasure_ref}: give it to the requester as proof.`);
-        await load(true); await onChanged();
+        const what = countWords(r.counts);
+        setReceipt({
+          title: `Anonymised. Erasure reference ${r.erasure_ref}`,
+          text: `Give the reference to the requester as proof.${what ? ` Anonymised: ${what}.` : ""}`,
+          body: r,
+        });
+        await load(); await onChanged();
       }
     } catch (e) { setActionErr(refusal(e)); } finally { setBusy(false); }
   }
@@ -408,27 +433,34 @@ function CasePanel({ id, onClose, onChanged }: { id: string; onClose: () => void
     try {
       const r = await api.post<any>(`/guest-data-rights/assisted/${c.id}/close`, { outcome, reason });
       setActing(null);
-      setReceipt({ title: outcome === "COMPLETED" ? "Request completed" : "Request cancelled", body: r.receipt });
-      setNotice(outcome === "COMPLETED" ? "Request completed." : "Request cancelled.");
-      await load(true); await onChanged();
+      setReceipt({ title: outcome === "COMPLETED" ? "Request completed" : "Request cancelled", text: "", body: r.receipt });
+      await load(); await onChanged();
     } catch (e) { setActionErr(refusal(e)); } finally { setBusy(false); }
   }
 
-  if (err && !c) return <><ErrorBanner err={err} /><Button variant="secondary" onClick={onClose}>Back</Button></>;
-  if (!c) return <p className="text-sm text-muted-foreground">Loading…</p>;
+  if (err && !c) {
+    return (
+      <div className="space-y-4">
+        <div><Button variant="ghost" size="sm" className="-ms-2.5" onClick={onClose}><ArrowLeft className="rtl:rotate-180" /> All requests</Button></div>
+        <SectionCard flush title="Request"><LoadFailure what="The request" busy={loadBusy} onRetry={() => void load()} /></SectionCard>
+      </div>
+    );
+  }
+  if (!c) return <p className="text-sm text-muted-foreground">Loading the request…</p>;
   const tick = (v: boolean) => <StatusBadge tone={v ? "ok" : "default"}>{v ? "Yes" : "No"}</StatusBadge>;
 
   return (
     <div className="space-y-4">
       <div><Button variant="ghost" size="sm" className="-ms-2.5" onClick={onClose}><ArrowLeft className="rtl:rotate-180" /> All requests</Button></div>
-      {notice && <Callout tone="success">{notice}</Callout>}
       {receipt && (
-        <Callout tone="info" title={receipt.title}>
-          This is the hotel’s file of the request. The database no longer keeps the device addresses or notes: save it with your records.{" "}
-          <Button size="sm" variant="secondary" onClick={() => saveJSON(receipt.body, `assisted-request-${c.ref}`)}><Download /> Save the request file</Button>
-        </Callout>
+        <div className={FADE}>
+          <Callout tone="success" title={receipt.title}>
+            {receipt.text ? `${receipt.text} ` : ""}This is the hotel’s file of the request. The database no longer keeps the device addresses or notes: save it with your records.{" "}
+            <Button size="sm" variant="secondary" onClick={() => saveJSON(receipt.body, `assisted-request-${c.ref}`)}><Download /> Save the request file</Button>
+          </Callout>
+        </div>
       )}
-      <ErrorBanner err={err} />
+      {err && <StaleNotice what="The request" />}
 
       <SectionCard
         title={<span className="flex flex-wrap items-center gap-2">Request <span className="font-mono">{c.ref}</span> <StatusBadge tone={toneOf(c.status)}>{statusWord(c.status)}</StatusBadge></span>}
@@ -449,11 +481,11 @@ function CasePanel({ id, onClose, onChanged }: { id: string; onClose: () => void
             {
               label: "Result",
               hidden: !(!open && c.result),
-              value: `${Object.entries(c.result ?? {}).filter(([, v]) => typeof v === "number" && v > 0).map(([k, v]) => `${v} ${k.replace(/_/g, " ")}`).join(", ") || "nothing changed"}.`,
+              value: countWords(c.result) ? `${countWords(c.result)}.` : "Nothing was handed over or changed.",
             },
           ]}
         />
-        {!open && <p className="text-muted-foreground">Closed {c.closed_at ? formatDate(c.closed_at) : ""} by {c.closed_by}. The addresses and notes were removed when it closed.</p>}
+        {!open && <p className="text-muted-foreground">Closed{c.closed_at ? ` ${formatDate(c.closed_at)}` : ""}{c.closed_by ? ` by ${c.closed_by}` : ""}. The addresses and notes were removed when it closed.</p>}
       </SectionCard>
 
       {open && review && (
@@ -489,7 +521,7 @@ function CasePanel({ id, onClose, onChanged }: { id: string; onClose: () => void
                         </TD>
                         <TD>{KIND_WORDS[r.kind] ?? r.kind}</TD>
                         <TD className="whitespace-nowrap">{formatDate(r.at)}</TD>
-                        <TD className="break-all font-mono text-xs">{r.detail ? describeDetail(r.kind, r.detail) : "—"}</TD>
+                        <TD className="break-all font-mono text-xs">{(r.detail && describeDetail(r.kind, r.detail)) || "Nothing"}</TD>
                         <TD>
                           <Badge tone={CLASS_WORDS[r.class]?.tone ?? "neutral"}>{CLASS_WORDS[r.class]?.label ?? r.class}</Badge>
                           <div className="mt-1 text-xs">{REASON_WORDS[r.reason] ?? r.reason}</div>
@@ -529,7 +561,7 @@ function CasePanel({ id, onClose, onChanged }: { id: string; onClose: () => void
         <SectionCard flush title="History">
           <HistoryList
             label="Request history"
-            items={c.events.map((e, i) => ({ id: String(i), title: statusWord(e.action.replace(/_/g, " ")), actor: e.by, at: formatDate(e.at) }))}
+            items={c.events.map((e, i) => ({ id: String(i), title: ACTION_WORDS[e.action] ?? statusWord(e.action.replace(/_/g, " ")), actor: e.by, at: e.at }))}
           />
         </SectionCard>
       )}

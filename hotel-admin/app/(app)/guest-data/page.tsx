@@ -1,11 +1,8 @@
 "use client";
 
-// Only site_admin and the IT manager reach this page; every export and erasure asks for the password and a reason
-// and is recorded by id, never by name. Erasure ends the person's own access and anonymises; it is refused while the guest is staying.
-
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { api, ApiError, BACKGROUND_HEADER } from "@/lib/api";
+import { api, BACKGROUND_HEADER } from "@/lib/api";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { SectionCard } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
@@ -21,10 +18,12 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { DescriptionList, ResultsCount, SEARCH_FIELD_PROPS } from "@/components/ui/data";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { useToast } from "@/components/ui/toast";
-import { errMsg, formatDate } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
 import { Download, Eraser, Search } from "lucide-react";
-import { LIVE_REASONS, eraseConsequences, erasedAccessWords, exportDescription } from "@/lib/guest-data-words";
+import { eraseConsequences, erasedAccessWords, exportDescription } from "@/lib/guest-data-words";
+import { countWords, guestDataError, statusWords } from "@/lib/guest-data-errors";
 import { ledgerHeadline, type LedgerStatus } from "@/lib/ledger-words";
+import { FADE, LoadFailure, StaleNotice } from "@/app/(app)/backups/load-failure";
 
 type Kind = "account" | "principal" | "stay" | "stay_guest";
 type Match = {
@@ -54,6 +53,15 @@ function saveJSON(doc: unknown) {
   URL.revokeObjectURL(url);
 }
 
+function erasedWords(ref: string, counts: Record<string, number>, access: string): string {
+  const what = countWords(counts);
+  return [
+    `Erased. Reference ${ref}: give it to the guest as proof.`,
+    what ? `Anonymised: ${what}.` : "",
+    access,
+  ].filter(Boolean).join(" ");
+}
+
 export default function GuestDataPage() {
   const toast = useToast();
   const [q, setQ] = useState("");
@@ -64,6 +72,8 @@ export default function GuestDataPage() {
   const [searching, setSearching] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [erasures, setErasures] = useState<Erasure[] | null>(null);
+  const [erasuresFailed, setErasuresFailed] = useState(false);
+  const [erasuresBusy, setErasuresBusy] = useState(false);
 
   const [exporting, setExporting] = useState<Match | null>(null);
   const [erasing, setErasing] = useState<Match | null>(null);
@@ -73,17 +83,22 @@ export default function GuestDataPage() {
   const [record, setRecord] = useState<Erasure | null>(null);
 
   const loadErasures = useCallback(async () => {
+    setErasuresBusy(true);
     try {
       const r = await api.get<{ erasures: Erasure[]; truncated?: boolean }>("/guest-data-rights/erasures");
       setErasures(r.erasures ?? []);
       setErasuresCut(r.truncated === true);
-    } catch { setErasures([]); }
+      setErasuresFailed(false);
+    } catch {
+      setErasuresFailed(true);
+    } finally {
+      setErasuresBusy(false);
+    }
   }, []);
   useEffect(() => { void loadErasures(); }, [loadErasures]);
-  // Erasure needs both copies of the erasure ledger (Backups); say so before the request.
   useEffect(() => {
     void (async () => {
-      try { setLedger(await api.get<LedgerStatus>("/backups/ledger", { [BACKGROUND_HEADER]: "1" })); } catch { /* no banner */ }
+      try { setLedger(await api.get<LedgerStatus>("/backups/ledger", { [BACKGROUND_HEADER]: "1" })); } catch { setLedger(null); }
     })();
   }, []);
 
@@ -95,7 +110,9 @@ export default function GuestDataPage() {
       const r = await api.get<{ matches: Match[]; truncated?: boolean }>("/guest-data-rights/search", { "X-Guest-Data-Search": encodeURIComponent(term) });
       setMatches(r.matches ?? []);
       setMatchesCut(r.truncated === true);
-    } catch (e) { setErr(errMsg(e)); } finally { setSearching(false); }
+    } catch (e) {
+      setErr(guestDataError(e, "The search did not complete. Try again in a moment."));
+    } finally { setSearching(false); }
   }
 
   async function doExport({ reason, password }: { reason: string; password: string }) {
@@ -105,9 +122,10 @@ export default function GuestDataPage() {
       const doc = await api.post<unknown>("/guest-data-rights/export", { kind: exporting.kind, id: exporting.id, reason, password });
       saveJSON(doc);
       setExporting(null);
-      setMatches(null); setMatchesCut(false); setQ("");
       toast.success("Export downloaded", "Hand it to the guest only after checking who they are.");
-    } catch (e) { setActionErr(errMsg(e)); } finally { setBusy(false); }
+    } catch (e) {
+      setActionErr(guestDataError(e, "The export did not complete. Nothing was downloaded or recorded.", "Nothing was exported"));
+    } finally { setBusy(false); }
   }
 
   async function doErase({ reason, password }: { reason: string; password: string }) {
@@ -117,19 +135,13 @@ export default function GuestDataPage() {
       const r = await api.post<{ erasure_ref: string; counts: Record<string, number>; packages_ended?: number; sessions_ended?: number; devices_withdrawn?: number }>(
         "/guest-data-rights/erase", { kind: erasing.kind, id: erasing.id, reason, password });
       setErasing(null);
-      setDone({ ref: r.erasure_ref, counts: r.counts, access: erasedAccessWords(r.packages_ended, r.sessions_ended, r.devices_withdrawn) });
+      setDone({ ref: r.erasure_ref, counts: r.counts ?? {}, access: erasedAccessWords(r.packages_ended, r.sessions_ended, r.devices_withdrawn) });
       setMatches(null); setMatchesCut(false); setQ("");
       await loadErasures();
     } catch (e) {
-      if (e instanceof ApiError && e.code === "guest_data_live") {
-        const live: string[] = Array.isArray(e.body?.live) ? e.body.live : [];
-        setActionErr("Nothing was erased: " + live.map((x) => LIVE_REASONS[x] ?? x).join("; ") + ".");
-      } else setActionErr(errMsg(e));
+      setActionErr(guestDataError(e, "The erasure did not complete. Nothing was erased.", "Nothing was erased"));
     } finally { setBusy(false); }
   }
-
-  const countWords = (counts: Record<string, number>) =>
-    Object.entries(counts).filter(([, n]) => n > 0).map(([k, n]) => `${n} ${k.replace(/_/g, " ")}`).join(", ");
 
   return (
     <PageShell>
@@ -163,8 +175,8 @@ export default function GuestDataPage() {
       />
 
       <Callout tone="warning" title="Check the guest’s identity first">
-        Before you hand over an export or erase anything. Do not write the guest&rsquo;s name, address, phone, room or
-        reservation in the reason: it is kept after the guest is erased, so a reason that names them is refused.
+        Do this before you hand over an export or erase anything. Do not write the guest&rsquo;s name, address, phone,
+        room or reservation in the reason: it is kept after the guest is erased, so a reason that names them is refused.
       </Callout>
 
       {ledger?.state && ledger.erasure_available === false && (
@@ -175,10 +187,14 @@ export default function GuestDataPage() {
       )}
 
       {done && (
-        <Callout tone="success">
-          Erased. Reference <strong className="font-mono">{done.ref}</strong>: give it to the guest as proof. {""}
-          {countWords(done.counts)}. {done.access}
-        </Callout>
+        <div className={FADE}>
+          <Callout tone="success">
+            <span className="flex flex-wrap items-start justify-between gap-2">
+              <span>{erasedWords(done.ref, done.counts, done.access)}</span>
+              <Button size="xs" variant="secondary" onClick={() => setDone(null)}>Dismiss</Button>
+            </span>
+          </Callout>
+        </div>
       )}
 
       <SectionCard
@@ -237,8 +253,8 @@ export default function GuestDataPage() {
                     {m.detail && <div className="text-caption text-muted-foreground">{m.detail}</div>}
                   </TD>
                   <TD className="break-all">{m.label}</TD>
-                  <TD nowrap className="hidden sm:table-cell">{m.status ? <Badge tone="neutral">{m.status}</Badge> : null}</TD>
-                  <TD nowrap muted className="hidden md:table-cell">{m.last_activity ? formatDate(m.last_activity) : "—"}</TD>
+                  <TD nowrap className="hidden sm:table-cell">{m.status ? <Badge tone="neutral">{statusWords(m.status)}</Badge> : null}</TD>
+                  <TD nowrap muted className="hidden md:table-cell">{m.last_activity ? formatDate(m.last_activity) : "Not recorded"}</TD>
                   <TD className="w-0">
                     <RowActions
                       subject={`${KIND_LABELS[m.kind]} ${m.label}`}
@@ -262,20 +278,31 @@ export default function GuestDataPage() {
         {erasuresCut && (
           <div className="px-4 pt-3"><Callout tone="neutral">Only the 200 most recent erasures are shown. Older ones are kept.</Callout></div>
         )}
-        {erasures !== null && (
-          <HistoryList
-            label="Erasures"
-            emptyLabel="No guest has been erased."
-            items={erasures.map((x) => ({
-              id: x.erasure_ref,
-              title: <span className="font-mono">{x.erasure_ref}</span>,
-              actor: x.erased_by,
-              at: x.erased_at,
-              summary: x.reason,
-            }))}
-            selectedId={record?.erasure_ref ?? null}
-            onSelect={(it) => setRecord(erasures.find((x) => x.erasure_ref === it.id) ?? null)}
-          />
+        {erasuresFailed && erasures !== null && (
+          <div className="px-4 pt-3"><StaleNotice what="The erasures" /></div>
+        )}
+        {erasures === null ? (
+          erasuresFailed ? (
+            <LoadFailure what="The erasures" busy={erasuresBusy} onRetry={() => void loadErasures()} />
+          ) : (
+            <p className="px-4 py-6 text-center text-sm text-muted-foreground">Loading the erasures…</p>
+          )
+        ) : (
+          <div className={FADE}>
+            <HistoryList
+              label="Erasures"
+              emptyLabel="No guest has been erased."
+              items={erasures.map((x) => ({
+                id: x.erasure_ref,
+                title: <span className="font-mono">{x.erasure_ref}</span>,
+                actor: x.erased_by,
+                at: x.erased_at,
+                summary: x.reason,
+              }))}
+              selectedId={record?.erasure_ref ?? null}
+              onSelect={(it) => setRecord(erasures.find((x) => x.erasure_ref === it.id) ?? null)}
+            />
+          </div>
         )}
       </SectionCard>
 
@@ -293,7 +320,7 @@ export default function GuestDataPage() {
               { label: "Erased by", value: record.erased_by },
               { label: "When", value: formatDate(record.erased_at) },
               { label: "Reason", value: record.reason },
-              { label: "What was anonymised", value: countWords(record.counts || {}) || "—" },
+              { label: "What was anonymised", value: countWords(record.counts) || "Nothing" },
             ]}
           />
         )}

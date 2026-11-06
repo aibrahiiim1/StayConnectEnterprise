@@ -120,7 +120,7 @@ describe("Assisted guest data request", () => {
   it("shows every record with its class and lets only the selectable ones be chosen", async () => {
     await openCase();
     expect(screen.getByText("Established on your statements")).toBeTruthy();
-    expect(screen.getByText("Conflict — left alone")).toBeTruthy();
+    expect(screen.getByText("Conflict: left alone")).toBeTruthy();
     expect(screen.getByText(/also used under another reservation/i)).toBeTruthy();
     expect(screen.getByText(/10\.9\.9\.9/)).toBeTruthy(); // what it would disclose is shown for review
     const boxes = screen.getAllByRole("checkbox") as HTMLInputElement[];
@@ -201,5 +201,26 @@ describe("Assisted guest data request", () => {
     expect(screen.queryByText(/device addresses:/i)).toBeNull();
     expect(screen.queryByText("Records in this range")).toBeNull();
     expect(get.mock.calls.some((c) => String(c[0]).endsWith("/review"))).toBe(false);
+    expect(screen.getByText("1 hand-over, 2 records handed over.")).toBeTruthy();
+  });
+
+  it("searches for the guest on Enter", async () => {
+    await renderPage();
+    fireEvent.click(screen.getByRole("button", { name: /new request/i }));
+    const box = await screen.findByLabelText("Search for the guest");
+    fireEvent.change(box, { target: { value: "lovelace" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(await screen.findByRole("button", { name: /use hotel stay/i })).toBeTruthy();
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("offers Try again when the requests cannot be read", async () => {
+    const { ApiError } = await import("@/lib/api");
+    get.mockImplementation(() => Promise.reject(new ApiError(500, { error: "internal", message: "x" })));
+    const { default: Page } = await import("@/app/(app)/guest-data/assisted/page");
+    const { ToastProvider } = await import("@/components/ui/toast");
+    render(<ToastProvider><Page /></ToastProvider>);
+    expect(await screen.findByText("The requests could not be loaded")).toBeTruthy();
+    expect(screen.queryByText("No assisted request yet")).toBeNull();
   });
 });

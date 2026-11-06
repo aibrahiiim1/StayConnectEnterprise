@@ -49,13 +49,40 @@ describe("Request register", () => {
 
   it("will not close a refusal without its ground", async () => {
     await renderPage();
-    fireEvent.click(screen.getByRole("button", { name: /^close: RQ-AAAAAAAA/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^close request…: RQ-AAAAAAAA/i }));
     await screen.findByRole("dialog");
     fireEvent.change(screen.getByLabelText(/^result/i), { target: { value: "REFUSED" } });
     const submit = screen.getByRole("button", { name: /^close request$/i }) as HTMLButtonElement;
     expect(submit.disabled).toBe(true);
     fireEvent.change(screen.getByLabelText(/ground for refusing/i), { target: { value: "LEGAL_RETENTION" } });
     expect(submit.disabled).toBe(false);
+  });
+
+  it("offers Try again when the register cannot be read, instead of saying it is empty", async () => {
+    const { ApiError } = await import("@/lib/api");
+    get.mockRejectedValueOnce(new ApiError(500, { error: "internal", message: "the requests could not be read" }));
+    const { default: Page } = await import("@/app/(app)/guest-data/register/page");
+    const { ToastProvider } = await import("@/components/ui/toast");
+    render(<ToastProvider><Page /></ToastProvider>);
+    expect(await screen.findByText("The requests could not be loaded")).toBeTruthy();
+    expect(screen.queryByText("No request recorded")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Try again/ }));
+    expect(await screen.findByText("RQ-AAAAAAAA")).toBeTruthy();
+  });
+
+  it("shows dates in words and does not leave a dialog's error on the page after cancelling", async () => {
+    const { ApiError } = await import("@/lib/api");
+    post.mockRejectedValue(new ApiError(400, { error: "invalid_requester", message: "say who is asking (2-120 characters)" }));
+    await renderPage();
+    expect(screen.queryByText("2026-11-01")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /new request/i }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText(/who is asking/i), { target: { value: "Bo Peep" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: /record request/i }));
+    await within(dialog).findByText(/Say who is asking in 2 to 120 characters/);
+    fireEvent.click(within(dialog).getByRole("button", { name: /cancel/i }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.queryByText(/Say who is asking in 2 to 120 characters/)).toBeNull();
   });
 
   it("says days in plain words", () => {
