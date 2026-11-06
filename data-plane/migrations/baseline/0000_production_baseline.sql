@@ -14646,10 +14646,9 @@ BEGIN
               WHERE la.stay_id = p_stay AND la.lifecycle_version > p_episode AND la.lifecycle_version < st.lifecycle_version
                 AND NOT EXISTS (SELECT 1 FROM iam_v2.stay_events lg, iam_v2.stay_events li
                                  WHERE lg.id = la.boundary_event_id AND lg.event_type = 'GO'
-                                   AND li.stay_id = p_stay AND li.event_type = 'GI' AND li.processing_status = 'APPLIED'
-                                   AND li.received_at >= lg.received_at
-                                   AND iam_v2.stay_event_room(li.payload) IS DISTINCT FROM iam_v2.stay_event_room(lg.payload)
-                                   AND iam_v2.stay_event_room(lg.payload) IS NOT NULL AND iam_v2.stay_event_room(li.payload) IS NOT NULL)) THEN
+                                   AND li.id = iam_v2.stay_next_applied_checkin(p_stay, lg.id)
+                                   AND iam_v2.stay_event_room(lg.payload) IS NOT NULL AND iam_v2.stay_event_room(li.payload) IS NOT NULL
+                                   AND iam_v2.stay_event_room(li.payload) <> iam_v2.stay_event_room(lg.payload))) THEN
     RAISE EXCEPTION 'ROOM_MOVE_SUPERSEDED: a later checkout of this stay was not a room move' USING ERRCODE = 'P0001';
   END IF;
   IF EXISTS (SELECT 1 FROM iam_v2.room_move_restorations x WHERE x.stay_id = p_stay AND x.lifecycle_version = p_episode) THEN
@@ -14671,14 +14670,11 @@ BEGIN
   END IF;
   IF p_source = 'ROOM_MOVE' THEN
     SELECT e.id, iam_v2.stay_event_room(e.payload) INTO v_in, v_in_room FROM iam_v2.stay_events e
-     WHERE e.id = p_checkin AND e.stay_id = p_stay AND e.event_type = 'GI';
+     WHERE e.id = p_checkin AND e.stay_id = p_stay AND e.event_type = 'GI'
+       AND e.id = iam_v2.stay_next_applied_checkin(p_stay, au.boundary_event_id);
   ELSE
     SELECT e.id, iam_v2.stay_event_room(e.payload) INTO v_in, v_in_room FROM iam_v2.stay_events e
-     WHERE e.stay_id = p_stay AND e.event_type = 'GI' AND e.processing_status = 'APPLIED'
-       AND e.received_at >= (SELECT b.received_at FROM iam_v2.stay_events b WHERE b.id = au.boundary_event_id)
-       AND e.id <> au.boundary_event_id
-       AND iam_v2.stay_event_room(e.payload) IS DISTINCT FROM v_go_room
-     ORDER BY e.received_at, e.id LIMIT 1;
+     WHERE e.id = iam_v2.stay_next_applied_checkin(p_stay, au.boundary_event_id);
   END IF;
   IF v_in IS NULL OR v_in_room IS NULL OR v_in_room = v_go_room THEN
     RAISE EXCEPTION 'ROOM_MOVE_NOT_PROVEN: no check-in of this stay into another room' USING ERRCODE = 'P0001';
@@ -14776,7 +14772,7 @@ BEGIN
            WHERE ed.entitlement_id = o.id
              AND EXISTS (SELECT 1 FROM iam_v2.entitlement_device_authorizations a
                           WHERE a.entitlement_id = o.id AND a.device_id = ed.device_id
-                            AND a.authorized_at <= au.boundary_at AND (a.deauthorized_at IS NULL OR a.deauthorized_at > au.boundary_at))
+                            AND a.authorized_at <= au.boundary_at AND (a.deauthorized_at IS NULL OR a.deauthorized_at >= au.boundary_at))
           UNION ALL
           SELECT ed.device_id, ed.first_authorized FROM iam_v2.entitlement_devices ed
            WHERE ed.entitlement_id IN (au.grace_entitlement_id, v_super) AND ed.status = 'AUTHORIZED') d
@@ -16142,6 +16138,20 @@ $$;
 --
 
 COMMENT ON FUNCTION iam_v2.stay_named_guests(p_stay uuid) IS 'How many guests are still named on a stay (0141, GDPR audit C3): more than one makes it a shared stay, exported and erased one guest at a time.';
+
+
+--
+-- Name: stay_next_applied_checkin(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.stay_next_applied_checkin(p_stay uuid, p_after uuid) RETURNS uuid
+    LANGUAGE sql STABLE
+    AS $$
+  SELECT li.id FROM iam_v2.stay_events li, iam_v2.stay_events lg
+   WHERE lg.id = p_after AND li.stay_id = p_stay AND li.event_type = 'GI' AND li.processing_status = 'APPLIED'
+     AND li.processed_at IS NOT NULL AND lg.processed_at IS NOT NULL AND (li.processed_at, li.id) > (lg.processed_at, lg.id)
+   ORDER BY li.processed_at, li.id LIMIT 1
+$$;
 
 
 --
