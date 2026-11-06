@@ -436,7 +436,7 @@ func upsertPrimaryGuest(ctx context.Context, tx pgx.Tx, tenant, site, iface, sta
 // finishEvent moves the event PENDING to terminal exactly once and, when APPLIED, records the stay lineage.
 func finishEvent(ctx context.Context, tx pgx.Tx, eventID, terminal, stayID, reviewCode string) error {
 	tag, err := tx.Exec(ctx, `UPDATE iam_v2.stay_events
-		SET processing_status=$2, stay_id=NULLIF($3,'')::uuid, processed_at=now(), review_code=NULLIF($4,'')
+		SET processing_status=$2, stay_id=NULLIF($3,'')::uuid, processed_at=clock_timestamp(), review_code=NULLIF($4,'')
 		WHERE id=$1 AND processing_status='PENDING'`, eventID, terminal, stayID, reviewCode)
 	if err != nil {
 		return err

@@ -136,7 +136,9 @@ CREATE FUNCTION iam_v2.stay_event_room(p_payload jsonb) RETURNS text
   SELECT NULLIF(upper(btrim(normalize(COALESCE(p_payload->>'room', ''), NFC))), '')
 $fn$;
 
--- The check-in the stay engine applied next after a stay event (processing order, which is how the episode actually closed).
+-- The check-in the stay engine applied next after a stay event (processing order, which is how the episode actually closed). processed_at is
+-- stamped after the per-interface lock since 0213 (clock_timestamp); earlier rows carry their transaction start, which recovery accepts
+-- only as recorded.
 CREATE FUNCTION iam_v2.stay_next_applied_checkin(p_stay uuid, p_after uuid) RETURNS uuid
   LANGUAGE sql STABLE AS $fn$
   SELECT li.id FROM iam_v2.stay_events li, iam_v2.stay_events lg
@@ -193,9 +195,10 @@ BEGIN
     RAISE EXCEPTION 'ROOM_MOVE_NOT_PROVEN: the checkout was not a check-out event naming a room' USING ERRCODE = 'P0001';
   END IF;
   IF p_source = 'ROOM_MOVE' THEN
+    -- The stay engine calls this from the transaction in which p_checkin reinstated the stay, so it is the check-in that closed the
+    -- episode by construction.
     SELECT e.id, iam_v2.stay_event_room(e.payload) INTO v_in, v_in_room FROM iam_v2.stay_events e
-     WHERE e.id = p_checkin AND e.stay_id = p_stay AND e.event_type = 'GI'
-       AND e.id = iam_v2.stay_next_applied_checkin(p_stay, au.boundary_event_id);
+     WHERE e.id = p_checkin AND e.stay_id = p_stay AND e.event_type = 'GI';
   ELSE
     SELECT e.id, iam_v2.stay_event_room(e.payload) INTO v_in, v_in_room FROM iam_v2.stay_events e
      WHERE e.id = iam_v2.stay_next_applied_checkin(p_stay, au.boundary_event_id);
@@ -331,6 +334,71 @@ REVOKE ALL ON FUNCTION iam_v2.restore_room_move_access(uuid, uuid, uuid, integer
 COMMENT ON FUNCTION iam_v2.restore_room_move_access(uuid, uuid, uuid, integer, uuid, text, boolean) IS
   'Continues the package a checkout converted when the verified stay events show a room move (0213): same window, the data the '
   'original and the After Check-out Access left, the devices it held, no charge. Records one decision per episode.';
+
+-- A full refund ends the access its purchase funded (0115); after a room move that access lives on in the continuation.
+-- CREATE OR REPLACE keeps the function's owner and grants.
+CREATE OR REPLACE FUNCTION iam_v2.p4_apply_refund_policy(p_tenant uuid, p_site uuid, p_charge uuid) RETURNS text
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE
+  ch record; se record; v_captured bigint; v_refunded bigint; v_charged_back bigint; v_ent uuid; v_status text; v_tr uuid;
+  v_cont uuid; v_cont_status text;
+BEGIN
+  SELECT * INTO ch FROM iam_v2.payment_transactions
+   WHERE id = p_charge AND tenant_id = p_tenant AND site_id = p_site AND transaction_type = 'CHARGE';
+  IF NOT FOUND OR ch.status <> 'CAPTURED' THEN
+    RETURN 'NOT_A_CAPTURED_CHARGE';
+  END IF;
+  SELECT * INTO se FROM iam_v2.settlements WHERE id = ch.settlement_id FOR UPDATE;
+  v_captured := ch.amount_minor;
+  SELECT COALESCE(sum(amount_minor) FILTER (WHERE transaction_type = 'REFUND'), 0),
+         COALESCE(sum(amount_minor) FILTER (WHERE transaction_type = 'CHARGEBACK'), 0)
+    INTO v_refunded, v_charged_back
+    FROM iam_v2.payment_transactions WHERE parent_transaction_id = p_charge AND status = 'CAPTURED';
+
+  IF v_charged_back > 0 THEN
+    INSERT INTO iam_v2.card_reversal_reviews (tenant_id, site_id, settlement_id, charge_transaction_id, kind, provider_ref)
+    VALUES (p_tenant, p_site, se.id, p_charge, 'CHARGEBACK', 'ledger')
+    ON CONFLICT (charge_transaction_id, kind, provider_ref) DO NOTHING;
+    RETURN 'CHARGEBACK_REVIEW';
+  END IF;
+  IF v_refunded <= 0 THEN
+    RETURN 'NO_REFUND';
+  END IF;
+  IF v_refunded < v_captured THEN
+    RETURN 'PARTIAL_NO_ACTION';
+  END IF;
+
+  SELECT id, status INTO v_ent, v_status FROM iam_v2.entitlements
+   WHERE tenant_id = p_tenant AND site_id = p_site AND purchase_id = se.purchase_id;
+  IF v_ent IS NULL THEN
+    RETURN 'NO_ENTITLEMENT';
+  END IF;
+  -- A room move continued this access under its own zero-price purchase (0213): the refund ends the live continuation it funded.
+  WITH RECURSIVE chain AS (
+    SELECT e.id, e.status, 0 AS depth FROM iam_v2.entitlements e WHERE e.id = v_ent
+    UNION ALL
+    SELECT n.id, n.status, chain.depth + 1 FROM iam_v2.entitlements n
+      JOIN chain ON n.policy_snapshot->>'restores' = chain.id::text
+     WHERE chain.depth < 50)
+  SELECT c.id, c.status INTO v_cont, v_cont_status FROM chain c
+   WHERE c.depth > 0 AND c.status IN ('PENDING','ACTIVE','SUSPENDED') LIMIT 1;
+  IF v_cont IS NOT NULL THEN
+    v_ent := v_cont; v_status := v_cont_status;
+  END IF;
+  IF EXISTS (SELECT 1 FROM iam_v2.refund_access_terminations WHERE entitlement_id = v_ent) THEN
+    RETURN 'ALREADY_ENDED';
+  END IF;
+  IF v_status = 'TERMINATED' THEN
+    RETURN 'ALREADY_TERMINATED'; -- ended for another reason before the refund; nothing to record
+  END IF;
+  v_tr := iam_v2.p4_end_access_funded_by(v_ent, 'REVOKED');
+  INSERT INTO iam_v2.refund_access_terminations
+    (entitlement_id, tenant_id, site_id, settlement_id, charge_transaction_id, captured_minor, refunded_minor, transition_id)
+  VALUES (v_ent, p_tenant, p_site, se.id, p_charge, v_captured, v_refunded, v_tr);
+  RETURN 'ACCESS_ENDED';
+END $$;
 
 DO $own$
 BEGIN
