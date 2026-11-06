@@ -237,17 +237,25 @@ sync_caddy_unit() {
 #   docker compose --profile central-dev -f /opt/stayconnect/deploy/compose/infra.yml up -d redis
 # brings it back.
 retire_appliance_redis() {
-  docker inspect stayconnect-redis >/dev/null 2>&1 || return 0
+  # Never fails the upgrade: anything it cannot establish keeps the container and says so.
+  local running keys clients
+  running="$(docker inspect -f '{{.State.Running}}' stayconnect-redis 2>/dev/null || true)"
+  [ -n "$running" ] || return 0
   if [ -e /etc/systemd/system/stayconnect-ctrlapi.service ]; then say "stayconnect-redis kept: a Central runs on this host"; return 0; fi
-  local keys clients
-  keys="$(docker exec stayconnect-redis redis-cli dbsize 2>/dev/null | tr -dc 0-9)"
-  clients="$(docker exec stayconnect-redis redis-cli info clients 2>/dev/null | sed -n 's/^connected_clients:\([0-9]*\).*/\1/p')"
+  if [ "$running" != true ]; then say "stayconnect-redis kept: it is not running, so what it holds cannot be checked"; return 0; fi
+  keys="$(docker exec stayconnect-redis redis-cli dbsize 2>/dev/null || true)"
+  keys="${keys//[!0-9]/}"
+  clients="$(docker exec stayconnect-redis redis-cli info clients 2>/dev/null || true)"
+  clients="$(printf '%s\n' "$clients" | sed -n 's/^connected_clients:\([0-9]*\).*/\1/p' || true)"
   if [ "${keys:-x}" != 0 ] || [ "${clients:-x}" != 1 ]; then
     say "stayconnect-redis kept: it holds ${keys:-?} key(s) and serves ${clients:-?} client(s); nothing on an appliance should"
     return 0
   fi
-  docker stop stayconnect-redis >/dev/null && docker rm stayconnect-redis >/dev/null
-  say "stayconnect-redis removed (unused on an appliance, AD-63); its volume is kept"
+  if docker stop stayconnect-redis >/dev/null 2>&1 && docker rm stayconnect-redis >/dev/null 2>&1; then
+    say "stayconnect-redis removed (unused on an appliance, AD-63); its volume is kept"
+  else
+    say "WARNING: stayconnect-redis could not be removed; it is unused and harmless, remove it by hand"
+  fi
 }
 install_binaries() { # copy binaries, keeping a differing installed one as <bin>.bak-$STAMP
   local changed=0
