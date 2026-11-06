@@ -22,7 +22,8 @@ import { LiveStatus, ReadOnlyNotice, refreshingClass } from "@/components/ui/pat
 import { useToast } from "@/components/ui/toast";
 import { HelpList, HelpSection } from "@/components/help";
 import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
-import { AlertTriangle, FileText, CheckCircle2, XCircle, Server, Hourglass, RefreshCw } from "lucide-react";
+import { AlertTriangle, FileText, CheckCircle2, XCircle, Server, Hourglass, RefreshCw, Download } from "lucide-react";
+import { diagnosticsError, downloadDiagnostics } from "@/lib/diagnostics-bundle";
 import { usePoll } from "@/lib/use-poll";
 
 type ServiceHealth = {
@@ -179,6 +180,7 @@ export default function HealthPage() {
   const [logs, setLogs] = useState<string[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const writable = roles ? canWrite("diagnostics", roles) : false;
+  const [downloaded, setDownloaded] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setRefreshing(true);
@@ -227,6 +229,14 @@ export default function HealthPage() {
     setActionErr(null);
     try { const r = await api.get<{ lines: string[] }>(`/diagnostics/services/${name}/logs`); setLogs(r.lines || []); }
     catch (e) { setActionErr(actionWords(e, "log request")); }
+    finally { setBusy(null); }
+  }
+  async function getDiagnostics() {
+    setBusy("bundle");
+    setActionErr(null);
+    setDownloaded(null);
+    try { setDownloaded(await downloadDiagnostics()); }
+    catch (e) { setActionErr(diagnosticsError(e)); }
     finally { setBusy(null); }
   }
   async function restart({ reason, password }: { reason: string; password: string }) {
@@ -283,6 +293,16 @@ export default function HealthPage() {
               />
               <p>Select a service for its details, recent logs and recovery history.</p>
             </HelpSection>
+            <HelpSection title="Download diagnostics">
+              <p>
+                Makes one file to send your OneGate vendor when you ask for help: the appliance version and licence
+                state, every service&rsquo;s state, recent restarts and errors, the monitor&rsquo;s last report and the
+                last 60 log lines of each service. Passwords, IP and hardware addresses, email addresses, and the
+                guest names and rooms the appliance finds are taken out first. The file stays on your computer until
+                you send it, and each download is recorded in Activity against your account. It needs the same role
+                as the logs.
+              </p>
+            </HelpSection>
           </>
         }
         meta={sum && (
@@ -291,20 +311,44 @@ export default function HealthPage() {
           </StatusBadge>
         )}
         actions={
-          sum ? (
-            <LiveStatus
-              updatedAt={updatedAt}
-              refreshing={refreshing}
-              intervalSeconds={POLL_SECONDS}
-              error={loadFailed}
-              onRefresh={() => void load()}
-            />
+          sum || writable ? (
+            <div className="flex flex-wrap items-center gap-3">
+              {sum && (
+                <LiveStatus
+                  updatedAt={updatedAt}
+                  refreshing={refreshing}
+                  intervalSeconds={POLL_SECONDS}
+                  error={loadFailed}
+                  onRefresh={() => void load()}
+                />
+              )}
+              {writable && (
+                <Button variant="secondary" size="sm" disabled={busy === "bundle"} onClick={() => void getDiagnostics()}>
+                  <Download aria-hidden />
+                  {busy === "bundle" ? "Preparing the file…" : "Download diagnostics"}
+                </Button>
+              )}
+            </div>
           ) : undefined
         }
       />
 
       {roles !== null && !writable && (
-        <ReadOnlyNotice>Your role can view diagnostics, but not read service logs, recheck or restart services.</ReadOnlyNotice>
+        <ReadOnlyNotice>Your role can view diagnostics, but not read service logs, recheck or restart services, or download the diagnostics file.</ReadOnlyNotice>
+      )}
+
+      {downloaded && (
+        <div className={FADE}>
+          <Callout tone="success" title="Diagnostics downloaded">
+            <p>
+              Attach <span className="font-mono">{downloaded}</span> when you ask your OneGate vendor for help. It holds
+              the appliance version and licence state, the state of each service, recent restarts and errors, the
+              monitor&rsquo;s last report and recent log lines. Before the file is made, the appliance takes out
+              passwords, IP and hardware addresses, email addresses, and the guest names and rooms it finds.
+            </p>
+            <Button variant="ghost" size="sm" className="mt-2" onClick={() => setDownloaded(null)}>Dismiss</Button>
+          </Callout>
+        </div>
       )}
 
       {actionErr && (

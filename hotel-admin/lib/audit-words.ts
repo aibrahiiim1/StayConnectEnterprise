@@ -369,6 +369,7 @@ const WORDS: Record<string, AuditWords> = {
   ...group("Diagnostics", {
     "health.recheck": ["Re-ran the health checks", "notice"],
     "health.logs_viewed": ["Viewed a service log", "notice"],
+    "health.diagnostics_downloaded": ["Downloaded the diagnostics file", "notice"],
     "health.restart_requested": ["Restarted a service", "change"],
     "scd.poke_failed": ["Session control did not take a change straight away", "notice",
       "The change was saved and is picked up on the next regular check."],
