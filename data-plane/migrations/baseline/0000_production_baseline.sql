@@ -7345,6 +7345,7 @@ CREATE FUNCTION iam_v2.p4_apply_refund_policy(p_tenant uuid, p_site uuid, p_char
     AS $$
 DECLARE
   ch record; se record; v_captured bigint; v_refunded bigint; v_charged_back bigint; v_ent uuid; v_status text; v_tr uuid;
+  v_cont uuid; v_cont_status text;
 BEGIN
   SELECT * INTO ch FROM iam_v2.payment_transactions
    WHERE id = p_charge AND tenant_id = p_tenant AND site_id = p_site AND transaction_type = 'CHARGE';
@@ -7375,6 +7376,18 @@ BEGIN
    WHERE tenant_id = p_tenant AND site_id = p_site AND purchase_id = se.purchase_id;
   IF v_ent IS NULL THEN
     RETURN 'NO_ENTITLEMENT';
+  END IF;
+  -- A room move continued this access under its own zero-price purchase (0213): the refund ends the live continuation it funded.
+  WITH RECURSIVE chain AS (
+    SELECT e.id, e.status, 0 AS depth FROM iam_v2.entitlements e WHERE e.id = v_ent
+    UNION ALL
+    SELECT n.id, n.status, chain.depth + 1 FROM iam_v2.entitlements n
+      JOIN chain ON n.policy_snapshot->>'restores' = chain.id::text
+     WHERE chain.depth < 50)
+  SELECT c.id, c.status INTO v_cont, v_cont_status FROM chain c
+   WHERE c.depth > 0 AND c.status IN ('PENDING','ACTIVE','SUSPENDED') LIMIT 1;
+  IF v_cont IS NOT NULL THEN
+    v_ent := v_cont; v_status := v_cont_status;
   END IF;
   IF EXISTS (SELECT 1 FROM iam_v2.refund_access_terminations WHERE entitlement_id = v_ent) THEN
     RETURN 'ALREADY_ENDED';
@@ -14669,9 +14682,10 @@ BEGIN
     RAISE EXCEPTION 'ROOM_MOVE_NOT_PROVEN: the checkout was not a check-out event naming a room' USING ERRCODE = 'P0001';
   END IF;
   IF p_source = 'ROOM_MOVE' THEN
+    -- The stay engine calls this from the transaction in which p_checkin reinstated the stay, so it is the check-in that closed the
+    -- episode by construction.
     SELECT e.id, iam_v2.stay_event_room(e.payload) INTO v_in, v_in_room FROM iam_v2.stay_events e
-     WHERE e.id = p_checkin AND e.stay_id = p_stay AND e.event_type = 'GI'
-       AND e.id = iam_v2.stay_next_applied_checkin(p_stay, au.boundary_event_id);
+     WHERE e.id = p_checkin AND e.stay_id = p_stay AND e.event_type = 'GI';
   ELSE
     SELECT e.id, iam_v2.stay_event_room(e.payload) INTO v_in, v_in_room FROM iam_v2.stay_events e
      WHERE e.id = iam_v2.stay_next_applied_checkin(p_stay, au.boundary_event_id);
