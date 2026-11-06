@@ -1402,6 +1402,19 @@
       "authorization_evidence": "The Product Owner's mission of 2026-11-05: \"Approved: complete the Connectivity Improvements mission end-to-end, using the simplest reliable solution with minimal code changes and no architectural redesign\", with Kea authoritative approved on the test appliance's client VLANs only, minimal automatic reconnection for Room Sign-in only reusing existing device authorizations and entitlements, no new settings, the necessary controlled migration with verified backup and rollback, and deployment to the test appliance 172.21.96.97.",
       "does_not_authorize": "Treating DHCP lease ownership as proof of guest identity (a device that copies another's MAC address and obtains its lease remains a residual limitation, as for every MAC-based captive portal); automatic reconnection for vouchers, accounts, email or social sign-in; reconnection across networks or onto a different stay; changing DHCP lease durations, the offline device-slot policy, After Check-out Access settings or any financial behaviour; WAN or management networking; PMS configuration or postings; PKI or trust; the production Central; Go-Live.",
       "delivery_status": "Delivered on master 12a00cba (T0311); test appliance (T0312)."
+    },
+    {
+      "id": "D97",
+      "decided_on": "2026-11-06",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-11-06",
+      "status": "ACTIVE",
+      "title": "APPLIANCE MONITORING AND THE RELIABILITY-AUDIT REMEDIATION: every appliance carries a passive, read-only, credential-free monitor (deploy/monitor; quick every 5 min, deep every 30) that writes the operators' summary and ISSUE lines to /var/log/ogcheck.log and a private report, device diagnostics and state under /var/lib/onegate-monitor, with PASS / WARN / CRITICAL / NOT VERIFIED (unreadable evidence is never PASS), persistence, de-duplication and recovery. The audit's actionable defects are fixed: behind the HTTPS portal an eligible device's captive probe is now reconnected before any redirect (portald), room sign-in records first_seen, last_seen and last_ip for new devices (an existing NULL first_seen is never back-filled), an upgrade installs the release's Caddy unit and retires the unused appliance Redis container (AD-63), log_lock_waits is on so deadlocks can be traced while the terse, statement-free database logging of GDPR audit C5 is unchanged, and appliance-install.sh installs the monitor on fresh installs and upgrades.",
+      "authorization_evidence": "The Product Owner's missions of 2026-11-06: the reliability audit with monitoring implementation, protected merge and verified deployment to the test appliance 172.21.96.97 only; and the end-to-end remediation of its actionable defects and installation/upgrade gaps with deployment to the test appliance only, a non-destructive plan for the legacy PMS secret columns, and no destructive schema change without separate authorization.",
+      "does_not_authorize": "Dropping public.pms_providers.auth_key and api_key (plan in docs/runbooks/LEGACY_PMS_PROVIDER_COLUMNS.md, awaiting separate authorization); relaxing the database log privacy of GDPR audit C5 (log_error_verbosity, log_min_error_statement); changing lock order in check-out, expiry or financial code on an unconfirmed deadlock cause; back-filling historical first_seen; the production Central; networking or PMS changes; Go-Live.",
+      "delivery_status": "Delivered on master 5d09ab73 (T0313, T0314); test appliance (T0315)."
     }
   ]
 }

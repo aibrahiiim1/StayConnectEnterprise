@@ -1,0 +1,35 @@
+{
+  "transition_id": "T0314",
+  "seq": 314,
+  "timestamp": "2026-11-06T15:00:00+02:00",
+  "timestamp_derivation": "Read from the workstation clock (UTC+02:00) by the script that wrote this receipt, immediately before the commit that introduces it.",
+  "record_type": "RELIABILITY_AUDIT_REMEDIATION",
+  "authorisation": "The Product Owner's remediation mission of 2026-11-06 (D97): the actionable defects and installation/upgrade gaps of the reliability audit, tests, protected merge and deployment to the test appliance 172.21.96.97 only; a non-destructive plan for the legacy PMS secret columns; no destructive schema change.",
+  "delivery": "PR #380 (merged 5d09ab73): portald httpFront asks scd for the automatic reconnection before redirecting an OS captive probe to the HTTPS portal or the portal address and answers the OS's online response when the device is back on its package (eligibility unchanged in scd); room sign-in's device upsert records first_seen, last_seen and last_ip (svc_scd's existing 0047 grants, no migration; NULL first_seen never back-filled); appliance-install.sh --upgrade installs the release's Caddy unit (restart only for a functional change) and retires stayconnect-redis when no Central runs on the host and it holds no key and serves no client (volume kept); log_lock_waits on through compose and ALTER SYSTEM with a reload (no restart), C5's terse logging unchanged; the monitor is installed on every fresh install and upgrade, checks the C5 settings, counts logged lock waits once per run by table, treats commissioned-only units (pmsd, Kea) switched off as not a fault and reads the database log from both streams; docs/runbooks/LEGACY_PMS_PROVIDER_COLUMNS.md (plan, not executed).",
+  "findings": "Running the monitor on a fresh lab install found false CRITICALs for a deliberately dormant pmsd, an unserved Kea and an absent Redis, and showed that the test appliance still ran the Redis container nothing on an appliance uses (AD-63). Deadlocks: the expiry sweep and the online-time tick lock packages before sessions, ordered by id; the check-out boundary revocation ends sessions and authorizations of a stay's packages without locking the packages first, a suspected inversion that the now-enabled lock-wait log is to confirm. The deadlock DETAIL lines that would name the statements are suppressed by GDPR audit C5 and were not re-enabled.",
+  "verification": "portald unit tests including both redirect branches; scd integration tests on a disposable database with Gate-P (first and last seen, the upsert as svc_scd, every Phase3Auth, Rejoin, retention and prune test); retire-appliance-redis-selftest.sh under the installer's shell options; monitor unit tests and every query on schema 0210; Codex review clean. Isolated lab of systemd containers (no Central, offline activation, production names blackholed): the previous master 11254cbc installed fresh and upgraded to the final release 5d09ab73, compared with a fresh install of 5d09ab73: 14,936 catalog facts, 19 unit files, database logging settings, monitor, 43 environment keys, ledger and baseline marker all identical; the upgrade corrected a pre-rename Caddy unit without restarting Caddy and kept a Redis container it could not inspect.",
+  "deployment": {
+    "test_appliance": "Recorded in T0315.",
+    "central": "Not changed."
+  },
+  "not_touched": "public.pms_providers columns (plan only), the C5 database log privacy, lock order in check-out, expiry or financial code, historical first_seen values, entitlement, device-limit, check-out and PMS rules, financial behaviour, networking, the production Central.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "5d09ab7396a15202a01a45e7a6b7fc33c5e71802",
+  "previous_delivery": "T0313",
+  "decision": "D97",
+  "go_live": "NOT authorised."
+}
