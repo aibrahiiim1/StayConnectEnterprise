@@ -53,13 +53,9 @@ function saveJSON(doc: unknown) {
   URL.revokeObjectURL(url);
 }
 
-function erasedWords(ref: string, counts: Record<string, number>, access: string): string {
+function erasedWords(counts: Record<string, number>, access: string): string {
   const what = countWords(counts);
-  return [
-    `Erased. Reference ${ref}: give it to the guest as proof.`,
-    what ? `Anonymised: ${what}.` : "",
-    access,
-  ].filter(Boolean).join(" ");
+  return [what ? `Anonymised: ${what}.` : "", access].filter(Boolean).join(" ");
 }
 
 export default function GuestDataPage() {
@@ -190,7 +186,10 @@ export default function GuestDataPage() {
         <div className={FADE}>
           <Callout tone="success">
             <span className="flex flex-wrap items-start justify-between gap-2">
-              <span>{erasedWords(done.ref, done.counts, done.access)}</span>
+              <span>
+                Erased. Reference <strong className="font-mono">{done.ref}</strong>: give it to the guest as proof.{" "}
+                {erasedWords(done.counts, done.access)}
+              </span>
               <Button size="xs" variant="secondary" onClick={() => setDone(null)}>Dismiss</Button>
             </span>
           </Callout>
