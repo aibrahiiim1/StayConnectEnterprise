@@ -225,6 +225,9 @@ func (h *handler) httpFront(next http.Handler) http.Handler {
 			// portal address first. GET/HEAD only: a form posts to the origin its page came from.
 			if st.PortalIPActive && st.PortalIP != "" && (r.Method == http.MethodGet || r.Method == http.MethodHead) &&
 				requestHost(r) != st.PortalIP && !fallbackPassThrough(r.URL.Path) {
+				if h.answerRejoinedProbe(w, r) {
+					return
+				}
 				if probePaths[r.URL.Path] {
 					slog.Info("captive probe redirected to the portal address", "path", r.URL.Path, "from", clientIPString(r))
 				}
@@ -235,6 +238,9 @@ func (h *handler) httpFront(next http.Handler) http.Handler {
 			return
 		}
 		origin := "https://" + st.Canonical
+		if h.answerRejoinedProbe(w, r) {
+			return
+		}
 		if probePaths[r.URL.Path] {
 			// Logged here because this is answered before the router's request log; address only, no headers or MAC.
 			slog.Info("captive probe redirected to the HTTPS portal", "path", r.URL.Path, "from", clientIPString(r))

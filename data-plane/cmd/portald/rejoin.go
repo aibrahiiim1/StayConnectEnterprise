@@ -60,6 +60,30 @@ func (h *handler) tryRejoin(r *http.Request) bool {
 // Each OS's own "this network is online" answer, served once the device is reconnected so it leaves the captive state by itself.
 const appleOnlinePage = "<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>"
 
+// answerRejoinedProbe serves an OS captive probe its "online" answer when the device was just put back on its own package. The
+// HTTP front calls it before redirecting a probe (to the HTTPS portal or the portal address): a device that only notifies,
+// like Android, would otherwise stay offline until the guest opened the page.
+func (h *handler) answerRejoinedProbe(w http.ResponseWriter, r *http.Request) bool {
+	if !probePaths[r.URL.Path] || (r.Method != http.MethodGet && r.Method != http.MethodHead) || !h.tryRejoin(r) {
+		return false
+	}
+	writeProbeOnline(w, r.URL.Path)
+	return true
+}
+
+func writeProbeOnline(w http.ResponseWriter, path string) {
+	switch path {
+	case "/hotspot-detect.html", "/library/test/success.html":
+		writeOnline(w, "text/html", appleOnlinePage, http.StatusOK)
+	case "/generate_204", "/gen_204":
+		writeOnline(w, "", "", http.StatusNoContent)
+	case "/ncsi.txt":
+		writeOnline(w, "text/plain", "Microsoft NCSI", http.StatusOK)
+	default:
+		writeOnline(w, "text/plain", "Microsoft Connect Test", http.StatusOK)
+	}
+}
+
 func writeOnline(w http.ResponseWriter, contentType, body string, code int) {
 	w.Header().Set("Cache-Control", "no-store")
 	if contentType != "" {

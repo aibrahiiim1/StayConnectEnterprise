@@ -85,3 +85,50 @@ func TestNoReconnectionWithoutTheConnectionsDevice(t *testing.T) {
 		t.Errorf("answered %d after %d scd calls, want the sign-in redirect and none", w.Code, f.calls)
 	}
 }
+
+// While the HTTPS portal is active, a reconnected device's probe is answered "online" before the redirect to the HTTPS page, so a
+// device that only notifies (Android) is back online without the guest opening anything; an ineligible one is redirected as before.
+func TestBehindTheHTTPSPortalAReconnectedDeviceGetsTheOnlineAnswerBeforeAnyRedirect(t *testing.T) {
+	front := func(outcome string, st portalTLSState) (http.Handler, *rejoinScd) {
+		h, f := rejoinHandler(outcome)
+		h.portalTLS = &tlsStateHolder{st: st}
+		return h.httpFront(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusTeapot) })), f
+	}
+	https := portalTLSState{HTTPSActive: true, Canonical: "wifi.example.com"}
+	portalIP := portalTLSState{PortalIPActive: true, PortalIP: "10.255.255.1"}
+	want := map[string]int{"/generate_204": 204, "/gen_204": 204, "/hotspot-detect.html": 200, "/library/test/success.html": 200,
+		"/connecttest.txt": 200, "/ncsi.txt": 200}
+	for name, st := range map[string]portalTLSState{"https": https, "portal address": portalIP} {
+		for path, code := range want {
+			srv, f := front("REJOINED", st)
+			r := httptest.NewRequest(http.MethodGet, "http://connectivitycheck.example"+path, nil)
+			r.RemoteAddr = "10.3.0.150:51000"
+			w := httptest.NewRecorder()
+			srv.ServeHTTP(w, r)
+			if w.Code != code || w.Header().Get("Location") != "" || f.calls != 1 {
+				t.Errorf("%s %s: %d location=%q scd calls=%d, want %d with no redirect", name, path, w.Code, w.Header().Get("Location"), f.calls, code)
+			}
+		}
+		srv, f := front("NOT_ELIGIBLE", st)
+		for i := 0; i < 3; i++ {
+			r := httptest.NewRequest(http.MethodGet, "http://connectivitycheck.example/generate_204", nil)
+			r.RemoteAddr = "10.3.0.150:51000"
+			w := httptest.NewRecorder()
+			srv.ServeHTTP(w, r)
+			if w.Code != http.StatusFound {
+				t.Fatalf("%s: an ineligible device's probe answered %d, want the redirect", name, w.Code)
+			}
+		}
+		if f.calls != 1 {
+			t.Errorf("%s: scd asked %d times for retried probes within the quiet window, want 1", name, f.calls)
+		}
+	}
+	srv, f := front("REJOINED", https)
+	r := httptest.NewRequest(http.MethodGet, "http://captive.example/some/page", nil)
+	r.RemoteAddr = "10.3.0.150:51000"
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, r)
+	if w.Code != http.StatusFound || f.calls != 0 {
+		t.Errorf("a page that is not a probe: %d, scd calls %d; want the HTTPS redirect without a reconnection attempt", w.Code, f.calls)
+	}
+}
