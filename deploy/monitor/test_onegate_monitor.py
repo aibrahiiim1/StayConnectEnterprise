@@ -472,7 +472,7 @@ class EveryQueryRunsOnTheCurrentSchema(unittest.TestCase):
         cfg = dict(om.CFG, psql=os.environ["OG_TEST_PSQL"])
 
         class DbOnly(om.Sys):
-            def sh(self, args, timeout=20):
+            def sh(self, args, timeout=20, stderr=False):
                 raise om.Unavailable("not on an appliance")
 
             def read(self, path, tail=None):
