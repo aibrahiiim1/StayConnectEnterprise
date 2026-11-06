@@ -3338,6 +3338,37 @@ END $_$;
 
 
 --
+-- Name: entitlement_funding_reversed(uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.entitlement_funding_reversed(p_ent uuid) RETURNS boolean
+    LANGUAGE plpgsql STABLE
+    AS $$
+DECLARE v_ent uuid := p_ent; v_purchase uuid; v_trigger text; v_restores text; i integer := 0;
+BEGIN
+  LOOP
+    SELECT e.purchase_id, pu.trigger, e.policy_snapshot->>'restores' INTO v_purchase, v_trigger, v_restores
+      FROM iam_v2.entitlements e JOIN iam_v2.purchases pu ON pu.id = e.purchase_id WHERE e.id = v_ent;
+    EXIT WHEN v_trigger IS DISTINCT FROM 'ROOM_MOVE_RESTORE' OR v_restores IS NULL OR i >= 50;
+    v_ent := v_restores::uuid; i := i + 1;
+  END LOOP;
+  IF v_purchase IS NULL THEN
+    RETURN false;
+  END IF;
+  RETURN EXISTS (SELECT 1 FROM iam_v2.settlements se WHERE se.purchase_id = v_purchase AND se.status = 'REVERSED')
+      OR EXISTS (SELECT 1 FROM iam_v2.settlements se
+                   JOIN iam_v2.payment_transactions c ON c.settlement_id = se.id AND c.transaction_type = 'CHARGE' AND c.status = 'CAPTURED'
+                  WHERE se.purchase_id = v_purchase
+                    AND ((SELECT COALESCE(sum(r.amount_minor), 0) FROM iam_v2.payment_transactions r
+                           WHERE r.parent_transaction_id = c.id AND r.transaction_type = 'REFUND' AND r.status = 'CAPTURED') >= c.amount_minor
+                         OR EXISTS (SELECT 1 FROM iam_v2.payment_transactions b
+                                     WHERE b.parent_transaction_id = c.id AND b.transaction_type = 'CHARGEBACK' AND b.status = 'CAPTURED')))
+      OR EXISTS (SELECT 1 FROM iam_v2.pms_postings ch JOIN iam_v2.pms_postings rv ON rv.reverses_posting_id = ch.id AND rv.posting_type = 'REVERSAL'
+                  WHERE ch.purchase_id = v_purchase AND ch.posting_type = 'CHARGE');
+END $$;
+
+
+--
 -- Name: entitlement_transfers_scrub_operator_reason(); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -14700,7 +14731,9 @@ BEGIN
    ORDER BY e.id LIMIT 1 FOR UPDATE;
   v_out := CASE WHEN NOT FOUND THEN 'NOTHING_TO_RESTORE'
                 WHEN o.time_accounting_mode <> 'VALIDITY_WINDOW' THEN 'UNSUPPORTED'
-                WHEN o.window_ends_at IS NOT NULL AND o.window_ends_at <= now() THEN 'EXPIRED' END;
+                WHEN o.window_ends_at IS NOT NULL AND o.window_ends_at <= now() THEN 'EXPIRED'
+                -- A refund or reversal of what paid for the package ends it for good (0115); a move never brings it back.
+                WHEN iam_v2.entitlement_funding_reversed(o.id) THEN 'FUNDING_REVERSED' END;
 
   IF au.grace_entitlement_id IS NOT NULL THEN
     SELECT e.status INTO v_grace_status FROM iam_v2.entitlements e WHERE e.id = au.grace_entitlement_id FOR UPDATE;
@@ -22920,7 +22953,7 @@ CREATE TABLE iam_v2.room_move_restorations (
     devices integer DEFAULT 0 NOT NULL,
     sessions integer DEFAULT 0 NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT room_move_restorations_outcome_check CHECK ((outcome = ANY (ARRAY['RESTORED'::text, 'NOTHING_TO_RESTORE'::text, 'EXPIRED'::text, 'DATA_USED_UP'::text, 'LIVE_ACCESS_PRESENT'::text, 'UNSUPPORTED'::text]))),
+    CONSTRAINT room_move_restorations_outcome_check CHECK ((outcome = ANY (ARRAY['RESTORED'::text, 'NOTHING_TO_RESTORE'::text, 'EXPIRED'::text, 'DATA_USED_UP'::text, 'LIVE_ACCESS_PRESENT'::text, 'UNSUPPORTED'::text, 'FUNDING_REVERSED'::text]))),
     CONSTRAINT room_move_restorations_source_check CHECK ((source = ANY (ARRAY['ROOM_MOVE'::text, 'RECOVERY'::text])))
 );
 
