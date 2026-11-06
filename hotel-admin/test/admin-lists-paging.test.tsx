@@ -231,7 +231,7 @@ describe("Guest sign-in checks — server paging", () => {
     await userEvent.click(screen.getByRole("button", { name: /Next/ }));
     expect(await screen.findByText("Showing 51–70 of 70")).toBeTruthy();
     expect(param(lastCall("/pms-resolutions")[0], "page")).toBe("2");
-    expect(screen.getByText("0 of 70 let online")).toBeTruthy();
+    expect(screen.getByText("0 of 70 matched")).toBeTruthy();
   });
 });
 

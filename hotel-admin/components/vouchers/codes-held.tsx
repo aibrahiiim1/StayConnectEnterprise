@@ -3,7 +3,7 @@
 // Codes stay in memory; closing the dialog or sheet unmounts them without persistent storage.
 
 import * as React from "react";
-import { Copy, Download, Printer } from "lucide-react";
+import { ChevronRight, Copy, Download, Printer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/error-banner";
 import { Field, Input } from "@/components/ui/input";
@@ -51,6 +51,7 @@ export function CodesHeld({
         {warning}
       </Callout>
       <div
+        role="group"
         aria-label={`${codes.length} voucher codes`}
         className="grid max-h-64 grid-cols-2 gap-1.5 overflow-y-auto rounded-md border border-border bg-surface p-2 sm:grid-cols-3"
       >
@@ -79,8 +80,11 @@ export function CodesHeld({
           <Printer /> Print cards
         </Button>
       </div>
-      <details className="rounded-md border border-border p-3">
-        <summary className="cursor-pointer text-sm font-medium">Card layout</summary>
+      <details className="group disclosure-motion rounded-md border border-border p-3">
+        <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+          <ChevronRight className="size-4 transition-transform duration-base ease-onegate group-open:rotate-90 motion-reduce:transition-none rtl:rotate-180 rtl:group-open:rotate-90" aria-hidden />
+          Card layout
+        </summary>
         <div className="mt-3 grid gap-4 sm:grid-cols-2">
           <Field label="Heading printed on each card" htmlFor={headingId} hint={`${heading.length}/60 characters. Printed at the top of every card.`}>
             <Input id={headingId} value={heading} maxLength={60} onChange={(e) => setHeading(e.target.value)} />

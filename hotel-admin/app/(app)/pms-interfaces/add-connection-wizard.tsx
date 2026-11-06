@@ -1,13 +1,5 @@
 "use client";
 
-// Commissions a connection in one confirmed action: it creates the connection (paused), saves the configuration,
-// stores the credential if the provider needs one, then puts that configuration live and activates the connection.
-// Pressing Create is the confirmation, with the administrator's password, so there is no hidden second step.
-// A draft that is not completed stays paused: the connection is activated only after every earlier step succeeded.
-// After a failure, "Try again" resumes from the failed step and never creates a second connection. Each step uses the
-// same audited endpoint as the manual path, so validation, duplicate-source protection and the lifecycle rules apply
-// unchanged.
-
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ExternalLink } from "lucide-react";
 import { api } from "@/lib/api";
@@ -55,6 +47,8 @@ export function AddConnectionWizard({
   const [name, setName] = useState("");
   const [timezone, setTimezone] = useState(applianceTimezone);
   const tzEdited = useRef(false);
+  const tzRef = useRef(applianceTimezone);
+  tzRef.current = applianceTimezone;
   const [values, setValues] = useState<FormValues>({});
   const [creds, setCreds] = useState<Record<string, string>>({});
   const [secretReason] = useState("INITIAL_COMMISSIONING");
@@ -75,14 +69,13 @@ export function AddConnectionWizard({
     : ["Provider", "Connection", "Review"];
   const reviewStep = steps.length - 1;
 
-  // A half-finished connection from last time is already on the list.
   useEffect(() => {
     if (!open) return;
     const only = providers.length === 1 ? providers[0].kind : "";
     setKind(only);
     setStep(0);
     setName("");
-    setTimezone(applianceTimezone);
+    setTimezone(tzRef.current);
     setValues(only ? initialValues(fieldsFor(providers[0])) : {});
     setCreds({});
     setPassword("");
@@ -93,11 +86,8 @@ export function AddConnectionWizard({
     setTouched(false);
     setAsking(false);
     tzEdited.current = false;
-    // The appliance time zone is read when the wizard opens; it is not a reason to reset what the operator entered.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, providers]);
 
-  // A time zone that arrives after the wizard opened fills the field only while the operator has not edited it.
   useEffect(() => {
     if (open && applianceTimezone && !tzEdited.current) setTimezone(applianceTimezone);
   }, [open, applianceTimezone]);
@@ -187,7 +177,6 @@ export function AddConnectionWizard({
 
   function requestClose() {
     if (busy) return;
-    // While the prompt shows, another Escape, outside click or close keeps it showing: only Discard discards.
     if (touched && !done && !progress.id) { setAsking(true); return; }
     onOpenChange(false);
   }
@@ -293,7 +282,7 @@ export function AddConnectionWizard({
                     <Callout tone="neutral" title="Fixed for this connection">
                       <ul className="list-disc space-y-0.5 ps-4 text-xs">
                         <li>OneGate reads the guest list from the PMS. The only thing it ever sends is a room charge, and only once room charge is approved for this connection.</li>
-                        <li>No credential required — the link needs none.</li>
+                        <li>No credential is needed for this link.</li>
                         <li>
                           Charging a room through the PMS stays off until a site administrator approves the
                           connection for room charge under Hotel → Room charge.
@@ -307,7 +296,7 @@ export function AddConnectionWizard({
               {withCreds && step === 2 && provider && (
                 <div className="space-y-4">
                   <Callout tone="neutral">
-                    Stored encrypted on the appliance and never shown again — not here, not to any other operator.
+                    Stored encrypted on the appliance and never shown again, not here and not to any other operator.
                     You can replace it later; you cannot read it back.
                   </Callout>
                   <FieldGrid cols={2}>
@@ -340,19 +329,19 @@ export function AddConnectionWizard({
                           label: f.label,
                           value: typeof values[f.key] === "boolean"
                             ? (values[f.key] ? "Yes" : "No")
-                            : (String(values[f.key] ?? "").trim() || "—"),
+                            : (String(values[f.key] ?? "").trim() || "Not set"),
                         })),
                       ...(withCreds
                         ? (provider.credential?.fields ?? []).map((f) => ({
                           label: f.label,
                           value: (creds[f.key] ?? "").trim()
-                            ? (f.secret === false ? creds[f.key] : "Entered — hidden")
-                            : "—",
+                            ? (f.secret === false ? creds[f.key] : "Entered, hidden")
+                            : "Not entered",
                         }))
                         : []),
                     ]}
                   />
-                  <Callout tone="info" title="What happens when you press Create">
+                  <Callout tone="info" title="What happens when you press Create and activate">
                     <ol className="list-decimal space-y-0.5 ps-4">
                       <li>The connection is added and these settings are saved.</li>
                       {withCreds && <li>The credential is stored, encrypted.</li>}
@@ -398,7 +387,7 @@ export function AddConnectionWizard({
                   Back
                 </Button>
               )}
-              <Button variant="ghost" disabled={busy} onClick={() => onOpenChange(false)}>Cancel</Button>
+              <Button variant="ghost" disabled={busy} onClick={requestClose}>Cancel</Button>
               {step < reviewStep ? (
                 <Button onClick={next} disabled={busy}>Next</Button>
               ) : (

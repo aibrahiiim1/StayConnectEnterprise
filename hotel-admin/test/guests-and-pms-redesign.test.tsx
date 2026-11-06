@@ -245,6 +245,21 @@ describe("Cross-PMS transfer", () => {
     expect(text).not.toContain("AMBIGUOUS_ROOM");
     expect(screen.queryByRole("button", { name: "Preview" })).toBeNull();
   });
+
+  it("says a failed load instead of showing empty lists", async () => {
+    get.mockImplementation((raw: unknown) => {
+      const path = pathOf(raw);
+      if (path.startsWith("/stay-transfers")) return Promise.reject(new Error("query failed"));
+      return Promise.resolve({});
+    });
+    const { StayTransferView } = await import("@/components/phase5/stay-transfer-view");
+    render(<StayTransferView canAct={false} />);
+    expect(await screen.findByText("Review signals could not be loaded")).toBeTruthy();
+    expect(screen.getByText("Recorded transfers could not be loaded")).toBeTruthy();
+    expect(screen.queryByText("No transfers recorded")).toBeNull();
+    expect(screen.queryByText(/No ambiguous sign-ins/)).toBeNull();
+    expect(document.body.textContent ?? "").not.toContain("query failed");
+  });
 });
 
 describe("Active restrictions", () => {
