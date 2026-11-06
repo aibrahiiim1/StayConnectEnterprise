@@ -1,0 +1,18 @@
+[Unit]
+Description=OneGate monitor: quick read-only health sweep
+Documentation=file:///opt/stayconnect/monitor/README.md
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/stayconnect/monitor/onegate_monitor.py quick
+Nice=10
+IOSchedulingClass=idle
+CPUQuota=25%
+MemoryMax=256M
+TimeoutStartSec=120
+PrivateTmp=yes
+ProtectHome=yes
+NoNewPrivileges=yes
+ProtectSystem=full
+ReadWritePaths=/var/lib/onegate-monitor /var/log
