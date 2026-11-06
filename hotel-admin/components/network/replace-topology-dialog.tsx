@@ -117,10 +117,7 @@ export function ReplaceTopologyDialog({
     >
       <div className="space-y-4">
         <Callout tone="info" title="Nothing changes until you apply">
-          This only records the change. The client network keeps serving its clients, keeps its PMS routing and keeps
-          its place in your Internet packages until you apply the configuration on Client networks and confirm it.
-          The replacement then carries over this network&rsquo;s addressing, DHCP pools, reservations, DNS, portal design,
-          sign-in method choices and PMS route. Clients reconnect on it and sign in once more; their internet package and data used carry on.
+          The network keeps serving its clients until you apply the configuration on Client networks. Clients then reconnect and sign in once more.
         </Callout>
         <ImpactPanel affected={impact?.affected} external={impact?.external_requirements} />
         <Field label="Port" required>
@@ -159,7 +156,7 @@ export function ReplaceTopologyDialog({
             <p className="text-xs text-muted-foreground sm:col-span-2">MAC reservations are not carried to a new subnet.</p>
           </div>
         )}
-        <Field label="Why" required hint="Recorded in the audit log.">
+        <Field label="Why" required>
           <Textarea aria-label="Why" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />
         </Field>
         {problem && <p className="text-xs text-muted-foreground" role="status">{problem}</p>}

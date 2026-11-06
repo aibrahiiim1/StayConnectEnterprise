@@ -119,7 +119,7 @@ export function ScheduledBackupsCard({ writable }: { writable: boolean }) {
   return (
     <SectionCard
       title="Scheduled backups"
-      description="Database, configuration and keys, encrypted and proven restorable. Off until you switch them on."
+
       actions={writable && (
         <Button size="sm" variant="secondary" disabled={!!d?.running || d?.state === "needs_key_holder"} onClick={() => { setRunErr(null); setRunOpen(true); }}>
           {d?.running ? "A backup is running…" : "Take a backup now"}

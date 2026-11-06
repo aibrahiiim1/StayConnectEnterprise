@@ -342,7 +342,7 @@ export default function WalledGardenPage() {
               <EmptyState
                 icon={<AlertTriangle />}
                 title="Allowed sites could not be loaded"
-                hint="The appliance did not return its list of allowed sites. Nothing has been changed."
+                hint="Nothing has been changed."
                 action={tryAgain}
               />
             </div>
@@ -484,7 +484,7 @@ export default function WalledGardenPage() {
         >
           <Input value={draft.ports} onChange={(e) => set("ports", e.target.value)} placeholder="80, 443" />
         </Field>
-        <Field label="Why it is needed" hint="Written down so the next operator does not have to guess.">
+        <Field label="Why it is needed">
           <Input
             value={draft.description}
             onChange={(e) => set("description", e.target.value)}

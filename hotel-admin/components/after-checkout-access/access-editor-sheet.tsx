@@ -208,7 +208,7 @@ export function AccessEditorSheet({
             <SheetBody className={FADE}>
               {error && <ErrorBanner err={error} />}
               <form id="aca-terms" onSubmit={toReview} className="space-y-6" aria-label="After Check-out Access settings" noValidate>
-                <SheetSection title="Switch" description="Turn the feature off to give nobody access after check-out.">
+                <SheetSection title="Switch">
                   <div className="flex items-center justify-between gap-4 rounded-lg border border-border px-3.5 py-3">
                     <label htmlFor="aca-enabled" className="text-sm font-medium">
                       Give access after check-out
@@ -217,7 +217,7 @@ export function AccessEditorSheet({
                   </div>
                 </SheetSection>
 
-                <SheetSection title="Allowance" description="How long it lasts and what the guest's devices share.">
+                <SheetSection title="Allowance">
                   <div className="grid gap-4 sm:grid-cols-2">
                     <Field
                       label="Duration after verified check-out (hours)"
@@ -248,7 +248,7 @@ export function AccessEditorSheet({
                   </div>
                 </SheetSection>
 
-                <SheetSection title="Devices" description="Which devices may reconnect.">
+                <SheetSection title="Devices">
                   <div role="radiogroup" aria-label="New devices" className="grid gap-2">
                     {policyOptions.map((p) => (
                       <OptionCard
@@ -337,7 +337,7 @@ export function AccessEditorSheet({
               )}
 
               <SheetSection title="Confirm">
-                <Field label="Reason" hint="Recorded with this version in the history." error={fieldError === "reason" ? "Choose a reason." : undefined}>
+                <Field label="Reason" error={fieldError === "reason" ? "Choose a reason." : undefined}>
                   <Select value={reasonChoice} onChange={(e) => setReasonChoice(e.target.value)}>
                     {REASON_CHOICES.filter((r) => state.configured || r.code !== "POLICY_CHANGE").map((r) => (
                       <option key={r.code} value={r.code}>{r.label}</option>

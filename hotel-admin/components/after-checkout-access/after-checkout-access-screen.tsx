@@ -130,12 +130,6 @@ export function AfterCheckoutAccessScreen({
                 the built-in emergency terms (a safe default not chosen for this site) and each use raises a critical alert.
               </p>
             </HelpSection>
-            <HelpSection title="Versions and history">
-              <p>
-                Every change, including turning the feature on or off, is a version with who made it and why. The record
-                is append-only.
-              </p>
-            </HelpSection>
           </>
         }
         actions={
@@ -283,13 +277,13 @@ export function AfterCheckoutAccessScreen({
           <SectionCard
             flush
             title="History"
-            description="Every saved version, including turning the feature on or off. Newest first."
+
             actions={!historyFailed && historyAvailable && history.length > 0 ? <Badge tone="neutral">{history.length.toLocaleString()} version{history.length === 1 ? "" : "s"}</Badge> : undefined}
           >
             {historyFailed ? (
               <div role="alert" className={FADE}>
                 <EmptyState size="sm" icon={<AlertTriangle />} title="History could not be loaded"
-                  hint="The appliance did not return the saved versions. The setting in force is not affected. Nothing has been changed."
+                  hint="Nothing has been changed."
                   action={
                     <Button variant="secondary" size="sm" disabled={loading} onClick={() => void load()}>
                       <RefreshCw className={cn(loading && "animate-spin motion-reduce:animate-none")} /> Try again

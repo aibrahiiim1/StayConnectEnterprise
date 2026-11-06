@@ -321,7 +321,7 @@ export default function SocialProvidersPage() {
               <EmptyState
                 icon={<AlertTriangle />}
                 title="Identity providers could not be loaded"
-                hint="The appliance did not return its identity providers. Nothing has been changed."
+                hint="Nothing has been changed."
                 action={
                   <Button variant="secondary" disabled={loading} onClick={() => void load()}>
                     <RefreshCw className={cn(loading && "animate-spin motion-reduce:animate-none")} /> Try again
@@ -599,7 +599,7 @@ export default function SocialProvidersPage() {
             You can still save.
           </Callout>
         )}
-        <Field label="Your password" required hint="Confirms the change. It is not stored.">
+        <Field label="Your password" required>
           <Input type="password" autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} />
         </Field>
         </QuietHints>

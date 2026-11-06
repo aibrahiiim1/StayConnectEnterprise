@@ -7,7 +7,7 @@ import { canWrite } from "@/lib/roles";
 import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { PageShell, PageHeader } from "@/components/ui/page";
-import { HelpList, HelpSection } from "@/components/help";
+import { HelpSection } from "@/components/help";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -47,12 +47,6 @@ export default function InternetPackagesPage() {
         description="What clients are offered, and how it is being used."
         help={
           <>
-            <HelpSection title="Two views">
-              <HelpList items={[
-                <><strong>Packages</strong> is the catalogue: what each package gives, how many clients are on it now, and Add, Edit, Disable or Delete from the package&rsquo;s record.</>,
-                <><strong>Client activity</strong> is every grant in a period &mdash; from the portal, a voucher, a client account, After Check-out Access or staff &mdash; with what it used.</>,
-              ]} />
-            </HelpSection>
             <HelpSection title="Packages and service plans">
               <p>
                 A service plan defines the speed, allowances and device limit a package hands out. Speed, data,
@@ -92,7 +86,7 @@ export default function InternetPackagesPage() {
           <EmptyState
             icon={<Package />}
             title="The internet offering is not switched on for this appliance"
-            hint="Internet packages become available once this capability is enabled for the site. Contact your Semantics administrator."
+            hint="Ask your Semantics administrator to enable it for this site."
           />
         </Card>
       ) : (

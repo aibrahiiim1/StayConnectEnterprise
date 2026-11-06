@@ -145,7 +145,7 @@ export default function RecoveryPage() {
       )}
 
       {items.length > 0 && (
-        <SectionCard title="Needs your review" description="Put back by a restore. Look at each and acknowledge it when you are happy.">
+        <SectionCard title="Needs your review" description="Put back by a restore. Acknowledge each one.">
           <ul className="space-y-3">
             {items.map((i) => (
               <li key={i.id} className="flex flex-wrap items-center justify-between gap-3 text-sm">

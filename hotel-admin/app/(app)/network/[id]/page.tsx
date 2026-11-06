@@ -208,14 +208,6 @@ export default function EditGuestNetworkPage() {
                 ]}
               />
             </HelpSection>
-            <HelpSection title="DHCP reservations">
-              <HelpList
-                items={[
-                  "A reservation pins a device (by MAC address) to a fixed address inside this network.",
-                  "Reserved addresses must sit inside the network's subnet.",
-                ]}
-              />
-            </HelpSection>
           </>
         }
         actions={writable && net && saveButton}
@@ -327,7 +319,7 @@ export default function EditGuestNetworkPage() {
           >
             <SectionCard title="Identity" bodyClassName="space-y-4">
               <Field label="Name" required><Input value={name} onChange={(e) => setName(e.target.value)} disabled={ro} /></Field>
-              <Field label="SSID label" optional hint="The SSID your wireless controller maps to this network.">
+              <Field label="SSID label" optional>
                 <Input value={ssidLabel} onChange={(e) => setSsidLabel(e.target.value)} disabled={ro} />
               </Field>
               <Field label="Description" optional><Input value={description} onChange={(e) => setDescription(e.target.value)} disabled={ro} /></Field>
@@ -398,14 +390,14 @@ export default function EditGuestNetworkPage() {
               <SwitchRow label="Captive portal" hint="Clients see the sign-in page before they get online. Off means no internet on this network." checked={captivePortal} onChange={setCaptivePortal} disabled={ro} />
               <SwitchRow label="Internet access" hint="Clients can reach the internet once signed in." checked={internetAccess} onChange={setInternetAccess} disabled={ro} />
               <SwitchRow label="NAT (masquerade)" hint="Client traffic leaves through the appliance's own address." checked={nat} onChange={setNat} disabled={ro} />
-              <SwitchRow label="Client isolation" hint="Depends on the access point: devices on the same access point talk to each other directly, so also turn on client isolation there. The appliance only stops traffic routed through it." checked={clientIsolation} onChange={setClientIsolation} disabled={ro} />
+              <SwitchRow label="Client isolation" hint="Also turn on client isolation on the access point." checked={clientIsolation} onChange={setClientIsolation} disabled={ro} />
             </SectionCard>
           </form>
 
           <SectionCard
             flush
             title="DHCP reservations"
-            description="Devices that always get the same address on this network."
+
             actions={writable && (
               <Button variant="secondary" size="sm" onClick={() => setAdding(true)}><Plus /> Add reservation</Button>
             )}

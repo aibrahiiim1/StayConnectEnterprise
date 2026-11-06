@@ -222,7 +222,7 @@ export function IssueDialog({
               <Field label="Valid until (optional)" hint={`Leave empty for cards that never expire. In ${tz}.`} error={windowProblem ?? undefined}>
                 <Input type="datetime-local" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />
               </Field>
-              <Field label="Batch name (optional)" hint="Shown on the Batches tab and beside each card, e.g. who the cards are for." className="sm:col-span-2">
+              <Field label="Batch name (optional)" className="sm:col-span-2">
                 <Input value={note} maxLength={120} onChange={(e) => setNote(e.target.value)} placeholder="Visitor desk, week 12" />
               </Field>
             </div>
@@ -241,7 +241,7 @@ export function IssueDialog({
                 Codes are shown once, on the next screen.
                 <InfoHint>The code format is the one set under Code security.</InfoHint>
               </p>
-              <Field label="Confirm your password" hint="Issuing a batch of cards is recorded against your name." required
+              <Field label="Confirm your password" required
                 htmlFor="voucher-issue-password">
                 <Input id="voucher-issue-password" type="password" autoComplete="current-password" value={password}
                   onChange={(e) => setPassword(e.target.value)}

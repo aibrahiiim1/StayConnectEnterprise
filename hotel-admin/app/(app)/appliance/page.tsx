@@ -31,21 +31,6 @@ const HELP = (
         DNS, the sign-in page and this admin stay available.
       </p>
     </HelpSection>
-    <HelpSection title="Renewing">
-      <p>
-        Renewals arrive by themselves while the appliance can reach OneGate Central. Your vendor can also send
-        a licence file; upload it under <strong>Files from your OneGate vendor</strong>. The appliance checks
-        that it was issued for this exact appliance and refuses an older licence, so a renewal can never roll
-        you backwards.
-      </p>
-    </HelpSection>
-    <HelpSection title="Connection to OneGate Central">
-      <p>
-        OneGate Central is used for activation and licensing only. Clients are signed in by this appliance from
-        its own data, so when Central is unreachable clients are not affected — only licence renewals wait.
-        <strong> Check now</strong> asks Central straight away and tests the connection.
-      </p>
-    </HelpSection>
   </>
 );
 

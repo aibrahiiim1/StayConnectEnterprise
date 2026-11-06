@@ -304,14 +304,6 @@ export default function UsageExplorerPage() {
         description="Trace what an access source or a device used, down to the recorded samples."
         help={
           <>
-            <HelpSection title="Two ways in">
-              <HelpList items={[
-                <><strong>By access source</strong> &mdash; for &ldquo;My access stopped and I never got what I was given.&rdquo; An access source is whatever granted the access: {stays
-                  ? <>a <strong>client account</strong>, a <strong>voucher</strong>, or a <strong>Hotel room/stay</strong>. Filter by type and search by username, card reference, room number or reservation</>
-                  : <>a <strong>client account</strong> or a <strong>voucher</strong>. Filter by type and search by username or card reference</>} &mdash; or leave the search empty for the heaviest users.</>,
-                <><strong>By device</strong> &mdash; for &ldquo;Something on our network downloaded 40 GB last night.&rdquo; Paste the device&rsquo;s MAC address.</>,
-              ]} />
-            </HelpSection>
             <HelpSection title="What each source shows">
               <HelpList items={[
                 <><strong>Client account</strong> &mdash; its username, as on Client accounts.</>,
@@ -324,19 +316,6 @@ export default function UsageExplorerPage() {
                 Email, phone and social sign-ins are not listed as sources. The devices that used them still appear
                 under By device.
               </p>
-            </HelpSection>
-            <HelpSection title="Every figure is traceable">
-              <p>
-                Every total is the sum of recorded sessions. A session is one period of connected access; show its
-                evidence to see the recorded samples it was measured from, with their own total next to the
-                session&rsquo;s. Nothing here is estimated.
-              </p>
-              <p>
-                The totals cover every package a source was given. The latest package column shows that package&rsquo;s
-                own allowance and use, which is what its limit is enforced against, so a total larger than the latest
-                allowance is not an overrun.
-              </p>
-              <p>Only access sources that were given internet access appear. A source with no access has nothing to measure.</p>
             </HelpSection>
             <HelpSection title="A device is not a person">
               <p>

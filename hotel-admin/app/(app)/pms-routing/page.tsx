@@ -142,7 +142,7 @@ export default function PMSRoutingPage() {
         </div>
       ) : null}
 
-      <SectionCard flush title="Client networks" description="Archived networks are not listed. Choose Change to decide how room sign-in works on a network.">
+      <SectionCard flush title="Client networks">
         {loadFailed ? (
           <div role="alert" className={FADE}>
             <EmptyState

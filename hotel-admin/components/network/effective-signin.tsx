@@ -33,7 +33,7 @@ export function NetworkSignInOverview({ facts }: { facts: SiteFacts }) {
   return (
     <SectionCard
       title="What each client network offers"
-      description="The Methods switches apply to the whole site. A network can narrow them, and room sign-in follows the network's PMS routing. This is the result for every network that is serving clients."
+ description="A network can narrow what the whole site offers."
     >
       {data === undefined ? (
         <Skeleton className="h-24 w-full" />

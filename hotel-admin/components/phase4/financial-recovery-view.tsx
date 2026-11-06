@@ -495,7 +495,7 @@ export function FinancialRecoveryView({ canAct = true, rolesKnown = true }: { ca
                     canAct ? (
                       <div className="space-y-3">
                         <div className="grid gap-3 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)] md:items-end">
-                          <Field label="Why this charge must still go out" htmlFor={`za-reason-${id}`} hint="One line.">
+                          <Field label="Why this charge must still go out" htmlFor={`za-reason-${id}`}>
                             <Input
                               id={`za-reason-${id}`}
                               maxLength={MAX_REASON}

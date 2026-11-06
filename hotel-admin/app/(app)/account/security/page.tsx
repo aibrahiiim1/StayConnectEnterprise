@@ -98,9 +98,6 @@ export default function TwoStepSigninPage() {
                 ]}
               />
             </HelpSection>
-            <HelpSection title="Other sign-ins">
-              <p>Turning it on or off signs you out everywhere else. You stay signed in here.</p>
-            </HelpSection>
           </>
         }
       />

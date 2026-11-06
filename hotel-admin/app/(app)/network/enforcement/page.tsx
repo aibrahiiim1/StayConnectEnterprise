@@ -428,7 +428,7 @@ export default function EnforcementPolicyPage() {
               <Input id="enf-reason" value={reason} maxLength={REASON_MAX_CHARS} disabled={!dirty || saving}
                 onChange={(e) => setReason(e.target.value)} placeholder="For example: allow the front-desk printer network" />
             </Field>
-            <Field label="Your password" required hint="Confirms the change.">
+            <Field label="Your password" required>
               <Input type="password" autoComplete="current-password" value={password} disabled={!dirty || saving}
                 onChange={(e) => setPassword(e.target.value)} />
             </Field>
@@ -455,7 +455,7 @@ export default function EnforcementPolicyPage() {
         )}
       </SectionCard>
 
-      <SectionCard title="Change history" description="Every change to these settings, newest first. Entries cannot be edited or removed.">
+      <SectionCard title="Change history">
         <History items={allHistory ? doc.history : doc.history.slice(0, HISTORY_PREVIEW)} />
         {doc.history.length > HISTORY_PREVIEW && (
           <Button size="sm" variant="ghost" className="mt-2" onClick={() => setAllHistory((v) => !v)}>

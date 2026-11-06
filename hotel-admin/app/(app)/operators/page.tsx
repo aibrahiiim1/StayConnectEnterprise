@@ -232,16 +232,6 @@ export default function OperatorsPage() {
                 ]}
               />
             </HelpSection>
-            <HelpSection title="Two-step sign-in">
-              <HelpList
-                items={[
-                  "Optional for each operator and recommended: each turns it on under Your account > Two-step sign-in, which also gives ten single-use recovery codes.",
-                  "Once on, signing in asks for the password and the 6-digit code from the authenticator app on the operator's phone.",
-                  "Someone who lost their phone signs in with a recovery code, or you reset their two-step sign-in: they are signed out and sign in with the password alone until they turn it on again.",
-                  "You cannot reset your own; another site administrator must.",
-                ]}
-              />
-            </HelpSection>
           </>
         }
         actions={writable && <Button onClick={openNew}><Plus /> Add operator</Button>}
@@ -459,10 +449,10 @@ export default function OperatorsPage() {
         disabled={mfaReason.trim().length < 4 || mfaPassword === ""}
         onSubmit={onResetMFA}
       >
-        <Field label="Reason" required hint="Recorded with the reset, for example: lost their phone.">
+        <Field label="Reason" required>
           <Input value={mfaReason} maxLength={500} onChange={(e) => setMfaReason(e.target.value)} />
         </Field>
-        <Field label="Your password" required hint="Confirms the reset.">
+        <Field label="Your password" required>
           <Input type="password" autoComplete="current-password" value={mfaPassword} onChange={(e) => setMfaPassword(e.target.value)} />
         </Field>
       </DialogForm>
@@ -483,7 +473,7 @@ export default function OperatorsPage() {
             <Input value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="frontdesk1 or ops@example.com"
               autoCapitalize="none" autoCorrect="off" spellCheck={false} />
           </Field>
-          <Field label="Name" hint="Shown instead of the email where there is room for it.">
+          <Field label="Name">
             <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Optional" />
           </Field>
         </div>
@@ -502,7 +492,7 @@ export default function OperatorsPage() {
             minLength={MIN_PASSWORD}
           />
         </Field>
-        <Field label="Role" hint="What they are allowed to see and change. It can be changed afterwards.">
+        <Field label="Role">
           <Select value={role} onChange={(e) => setRole(e.target.value)}>
             {roleChoices.map((c) => <option key={c.key} value={c.key}>{c.name}</option>)}
           </Select>
@@ -608,7 +598,7 @@ export default function OperatorsPage() {
 
 function YourPasswordField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
-    <Field label="Your password" required hint="Confirms that it is you making this change.">
+    <Field label="Your password" required>
       <Input type="password" autoComplete="current-password" value={value} onChange={(e) => onChange(e.target.value)} />
     </Field>
   );

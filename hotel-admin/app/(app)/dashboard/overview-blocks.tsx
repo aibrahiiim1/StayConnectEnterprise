@@ -120,7 +120,7 @@ export function ConcurrencyCard({ snap }: { snap: OverviewSnapshot | null }) {
   return (
     <BlockCard
       title="Connected devices"
-      description="How many devices were online at once."
+
       href="/sessions"
       linkLabel="Sessions"
     >
@@ -272,7 +272,7 @@ export function PackagesCard({ snap }: { snap: OverviewSnapshot | null }) {
   const p = snap?.packages;
   const t = snap?.traffic;
   return (
-    <BlockCard title="Packages in use" description="Still valid now, and given out in this range." href="/internet-packages" linkLabel="Packages">
+    <BlockCard title="Packages in use" href="/internet-packages" linkLabel="Packages">
       {!snap || !p ? (
         <Skeleton className="h-48" />
       ) : !p.available ? (
@@ -329,7 +329,7 @@ export function PmsCard({ snap, canCharges }: { snap: OverviewSnapshot | null; c
   return (
     <BlockCard
       title="Property Management System"
-      description="Whether a client can sign in with their room number and name."
+
       href="/pms-interfaces"
       linkLabel="PMS connection"
     >
@@ -525,7 +525,7 @@ export function DhcpDnsCard({ snap }: { snap: OverviewSnapshot | null }) {
   const d = snap?.dhcp;
   const dns = snap?.dns;
   return (
-    <BlockCard title="Addresses and names" description="The DHCP server that hands out addresses and the DNS resolver clients use." href="/network/dhcp" linkLabel="DHCP">
+    <BlockCard title="Addresses and names" href="/network/dhcp" linkLabel="DHCP">
       {!snap || !d || !dns ? (
         <Skeleton className="h-24" />
       ) : (

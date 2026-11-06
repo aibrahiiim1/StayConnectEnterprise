@@ -35,11 +35,8 @@ export function AdvancedSection({ d, set, writable, issues, sanitized, checking,
   return (
     <div className="space-y-5">
       <Callout tone="warning" title={`This page collects clients' ${collectedDetails(hospitality)}`}>
-        Styling and markup are accepted. <strong>Scripts, event handlers, frames, forms, external stylesheets,
-        &lt;base&gt;, &lt;meta&gt; and @import are not</strong>: anything that could run or send a client&apos;s
-        details elsewhere. The portal applies the same rules again before any client receives the page, and the
-        sign-in controls stay visible and usable whatever the stylesheet says. Saving a change here, including
-        clearing a field, asks for your password.
+        Styling and markup are accepted. <strong>Scripts, frames, forms, external stylesheets and @import are not.</strong>{" "}
+        Saving a change here asks for your password.
       </Callout>
       {needsPassword && (
         <Callout tone="info" title="Your password will be needed to save">

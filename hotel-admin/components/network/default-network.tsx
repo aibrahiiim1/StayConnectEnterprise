@@ -39,7 +39,7 @@ export function DefaultNetworkCard({ reloadKey, onLoaded }: { reloadKey: number;
   const worst = items.some((i) => i.state === "unresolved") ? "unresolved" : items.some((i) => i.state === "attention") ? "attention" : "ok";
   const notReady = items.filter((i) => i.state !== "ok");
   return (
-    <SectionCard title={`Default Network: ${info.name}`} description="The entry point guests meet. Each check says what was found; nothing here is changed for you.">
+    <SectionCard title={`Default Network: ${info.name}`}>
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <Badge tone={STATE_TONE[worst]}>{worst === "ok" ? "All ready" : `${notReady.length} to check`}</Badge>
         <span className="min-w-0 flex-1 truncate text-muted-foreground">

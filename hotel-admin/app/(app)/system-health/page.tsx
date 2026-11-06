@@ -291,17 +291,17 @@ export default function SystemHealthPage() {
                 <EmptyState size="sm" icon={<Radar />} title="No client activity yet" hint="It is added by the monitor's full run every 30 minutes." />
               ) : (
                 <>
-                  <SectionCard title="Last 24 hours, by hour" description="Manual room sign-ins and automatic reconnections, by UTC hour.">
+                  <SectionCard title="Last 24 hours, by hour" description="By UTC hour.">
                     <ColumnChart
                       data={deep.breakdowns.hourly.map((r) => ({ label: String(r[0]).slice(-5, -3), values: [num(r[2]) || 0, num(r[3]) || 0] }))}
                       series={[{ name: "Manual sign-ins", token: "chart-1" }, { name: "Automatic reconnections", token: "chart-2" }]}
                     />
                   </SectionCard>
                   <div className="grid gap-5 lg:grid-cols-2">
-                    <SectionCard title="Sessions ended, 24 h" description="By reason.">
+                    <SectionCard title="Sessions ended, 24 h">
                       <BarList items={pairs(deep.breakdowns.ends_24h)} />
                     </SectionCard>
-                    <SectionCard title="Sign-in results, 24 h" description="Room sign-in attempts by result.">
+                    <SectionCard title="Sign-in results, 24 h">
                       <BarList items={pairs(deep.breakdowns.results_24h)} />
                     </SectionCard>
                   </div>
@@ -311,7 +311,7 @@ export default function SystemHealthPage() {
                 </>
               )}
               {deep?.analytics && (
-                <SectionCard flush title="Compared with the previous period" description="Each window against the one before it.">
+                <SectionCard flush title="Compared with the previous period">
                   <Table label="Client activity by window">
                     <THead>
                       <TR><TH>Measure</TH>{deep.analytics.windows.map((w) => <TH key={w.label} numeric>{w.label}</TH>)}</TR>
@@ -334,7 +334,7 @@ export default function SystemHealthPage() {
             </TabsContent>
 
             <TabsContent value="devices" className="mt-5">
-              <SectionCard flush title="Device findings, last 24 hours" description="Hardware addresses masked; client addresses are not shown.">
+              <SectionCard flush title="Device findings, last 24 hours">
                 {!deep?.devices ? (
                   <EmptyState size="sm" icon={<Radar />} title="No device findings yet" hint="They are added by the monitor's full run every 30 minutes." />
                 ) : deep.devices.length === 0 ? (
@@ -367,7 +367,7 @@ export default function SystemHealthPage() {
             </TabsContent>
 
             <TabsContent value="history" className="mt-5 space-y-5">
-              <SectionCard flush title="Resolved issues" description="The most recent first.">
+              <SectionCard flush title="Resolved issues">
                 {snap.resolved.length === 0 ? (
                   <EmptyState size="sm" title="Nothing resolved yet" />
                 ) : (
@@ -387,7 +387,7 @@ export default function SystemHealthPage() {
                 )}
               </SectionCard>
               {deep?.breakdowns && (
-                <SectionCard flush title="Daily, last 14 days" description="Compare a day with the same weekday a week before.">
+                <SectionCard flush title="Daily, last 14 days">
                   <RowsTable label="Daily" headers={["Day (UTC)", "Devices", "Manual sign-ins", "Automatic", "Address-loss ends", "Refused attempts"]} rows={deep.breakdowns.daily} />
                 </SectionCard>
               )}
@@ -396,7 +396,7 @@ export default function SystemHealthPage() {
                   <SectionCard title="Database deadlocks per day">
                     <BarList items={deep.deadlocks_daily.map(([d, c]) => ({ name: d, value: c, key: d, tone: c > 0 ? "warn" as const : undefined }))} emptyLabel="None recorded" />
                   </SectionCard>
-                  <SectionCard title="Lock waits over 1 s" description="By table, per day.">
+                  <SectionCard title="Lock waits over 1 s">
                     {Object.keys(deep.lock_waits).length === 0 ? (
                       <p className="text-sm text-muted-foreground">None recorded</p>
                     ) : (

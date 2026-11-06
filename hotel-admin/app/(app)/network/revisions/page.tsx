@@ -276,7 +276,7 @@ export default function RevisionsPage() {
           <EmptyState
             size="sm"
             title="Nothing needs attention"
-            hint="No revision is pending confirmation, and nothing failed or rolled back since the active configuration."
+            hint="Nothing is pending, failed or rolled back."
             action={<Button variant="secondary" size="sm" onClick={() => setFilter("all")}>Show all</Button>}
           />
         ) : (

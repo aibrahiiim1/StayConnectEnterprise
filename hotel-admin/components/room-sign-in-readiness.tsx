@@ -8,7 +8,6 @@ import { api } from "@/lib/api";
 import type { RoomSignInAssessment } from "@/lib/api/pms-routing";
 import { onlyUndecided, readinessFromAssessment, type RoomSignInReadiness } from "@/lib/pms-availability";
 import { Notice } from "@/components/ui/error-banner";
-import { InfoHint } from "@/components/ui/quiet";
 
 export function useRoomSignInReadiness(enabled = true): {
   readiness: RoomSignInReadiness;
@@ -78,7 +77,7 @@ export function RoomSignInReadinessCallout({ readiness }: { readiness: RoomSignI
         </span>
       ))}
       {readiness.unchecked.length > 0 && <> · Not checked: {readiness.unchecked.join(", ")}</>}
-      <InfoHint className="ms-1">Other sign-in methods and networks are not affected. Each warning clears once its cause is corrected.</InfoHint>
+      
     </Notice>
   );
 }

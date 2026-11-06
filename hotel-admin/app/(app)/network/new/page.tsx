@@ -21,7 +21,7 @@ import { NotAvailable, PendingChangeBanner } from "@/components/ui/patterns";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ArrowLeft, ArrowRight, Cable, Plus, Radio, RefreshCw, X } from "lucide-react";
 import { errMsg } from "@/lib/utils";
-import { HelpList, HelpSection } from "@/components/help";
+import { HelpSection } from "@/components/help";
 import {
   HealthCheckList, LeaseFields, SwitchRow, ValidationIssueList, leaseProblems, revisionStateLabel, useLeaveGuard, useNetworkAccess,
 } from "@/components/network/shared";
@@ -384,15 +384,6 @@ export default function NewGuestNetworkPage() {
         description="Seven short steps; nothing reaches clients until the last one."
         help={
           <>
-            <HelpSection title="How the wizard works">
-              <HelpList
-                items={[
-                  <>Steps 1–6 only collect settings. Nothing is created until the <strong>Apply</strong> step.</>,
-                  <>The last step creates the network, validates the whole configuration, then applies it.</>,
-                  <>After applying you have a short window to keep the change; if nobody does, it rolls back on its own.</>,
-                ]}
-              />
-            </HelpSection>
             <HelpSection title="Parent interface">
               <p>
                 Only ports set aside for client traffic (client access, client trunk or unused) can carry a client network.
@@ -442,10 +433,10 @@ export default function NewGuestNetworkPage() {
               <Field label="Name" required error={errFor("name")}>
                 <Input id="nw-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Client Wi-Fi" />
               </Field>
-              <Field label="Description" optional hint="Shown under the name in the list.">
+              <Field label="Description" optional>
                 <Input value={description} onChange={(e) => setDescription(e.target.value)} />
               </Field>
-              <Field label="SSID label" optional hint="For reference: the SSID your wireless controller maps to this network.">
+              <Field label="SSID label" optional>
                 <Input value={ssidLabel} onChange={(e) => setSsidLabel(e.target.value)} placeholder="Wi-Fi" />
               </Field>
             </>
@@ -578,7 +569,7 @@ export default function NewGuestNetworkPage() {
                     label="Gateway IP"
                     required
                     error={errFor("gateway")}
-                    hint="The appliance owns this address on the network; clients use it as their default gateway and DNS."
+ hint="Clients use it as their gateway and DNS."
                   >
                     <Input id="nw-gateway" value={gatewayIp} onChange={(e) => setGatewayIp(e.target.value)} placeholder="10.20.0.1" className="font-mono" />
                   </Field>
@@ -657,7 +648,7 @@ export default function NewGuestNetworkPage() {
               <SwitchRow label="Captive portal" hint="Clients see the sign-in page before they get online. Off means no internet on this network." checked={captivePortal} onChange={setCaptivePortal} />
               <SwitchRow label="Internet access" hint="Clients can reach the internet once signed in." checked={internetAccess} onChange={setInternetAccess} />
               <SwitchRow label="NAT (masquerade)" hint="Client traffic leaves through the appliance's own address." checked={nat} onChange={setNat} />
-              <SwitchRow label="Client isolation" hint="Works only together with the access point: devices on the same access point talk to each other directly, so turn on client isolation on the access point. The appliance only stops traffic that is routed through it." checked={clientIsolation} onChange={setClientIsolation} />
+              <SwitchRow label="Client isolation" hint="Also turn on client isolation on the access point." checked={clientIsolation} onChange={setClientIsolation} />
             </div>
           )}
 
@@ -721,9 +712,7 @@ export default function NewGuestNetworkPage() {
                 network.
               </Callout>
               <Callout tone="info" title="Room sign-in on the new network">
-                A new network offers room sign-in to nobody until you choose how it works under{" "}
-                <span className="font-medium">PMS routing</span>: none, one dedicated PMS or a shared strict set. Nothing is
-                copied from another network, and nothing about any PMS changes when the network is created.
+                Off until you choose how it works under <span className="font-medium">PMS routing</span>.
               </Callout>
             </div>
           )}

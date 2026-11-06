@@ -217,7 +217,7 @@ export function DeviceDetailDialog({ deviceId, mayWrite, onClose, onChanged }: {
                   <p className="text-sm">{action.does}</p>
                   <p className="text-caption text-muted-foreground">{action.keeps}</p>
                   {action.reason && (
-                    <Field label="Reason" required hint="Recorded with the action, 4–500 characters.">
+                    <Field label="Reason" required hint="4 to 500 characters.">
                       <Textarea value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} />
                     </Field>
                   )}

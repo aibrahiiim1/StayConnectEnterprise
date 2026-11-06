@@ -261,13 +261,6 @@ export function SettlementsView() {
                 ]}
               />
             </HelpSection>
-            <HelpSection title="Period and search">
-              <p>
-                The period and the search apply to the list, the counts and the totals alike. A period is in this
-                browser&apos;s time zone and counts a payment by its time under When; weeks start on Monday. Search
-                looks in the package, the room, the PMS connection and how it was paid.
-              </p>
-            </HelpSection>
             <HelpSection title="Refunds">
               <p>There is no refund button. A refund made by the card provider is recorded here automatically.</p>
             </HelpSection>

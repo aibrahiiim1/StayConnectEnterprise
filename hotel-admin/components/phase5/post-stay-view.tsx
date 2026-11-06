@@ -192,7 +192,7 @@ export function PostStayView({ canAct, rolesKnown = true, embedded = false }: { 
               <EmptyState size="sm"
                 icon={<AlertTriangle />}
                 title="Reconnections could not be loaded"
-                hint="The appliance did not return the reconnections, so the list and the counts above are not known. Nothing has been changed."
+                hint="Nothing has been changed."
                 action={
                   <Button variant="secondary" disabled={loading} onClick={() => load()}>
                     <RefreshCw className={cn(loading && "animate-spin motion-reduce:animate-none")} /> Try again
@@ -323,7 +323,7 @@ export function PostStayView({ canAct, rolesKnown = true, embedded = false }: { 
             ]}
           />
         )}
-        <Field label="Reason" required hint="Recorded in the activity log. At least 4 characters.">
+        <Field label="Reason" required hint="At least 4 characters.">
           <Input
             value={reason}
             maxLength={500}

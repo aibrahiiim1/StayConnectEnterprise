@@ -260,7 +260,7 @@ export default function PMSResolutionsPage() {
 
             <SectionCard
               title="By Wi-Fi network"
-              description="Where the checks came from, and how many matched a stay."
+
               actions={<Link href="/pms-routing" className="text-xs font-medium text-primary hover:underline">PMS routing</Link>}
               bodyClassName="space-y-4"
             >
@@ -298,7 +298,7 @@ export default function PMSResolutionsPage() {
                   size="sm"
                   icon={<AlertTriangle />}
                   title="Guest sign-in checks could not be loaded"
-                  hint="The appliance did not return the checks, so what happened to them is not known. Nothing has been changed."
+                  hint="Nothing has been changed."
                   action={
                     <Button variant="secondary" disabled={refreshing} onClick={() => void list.reload()}>
                       <RefreshCw className={cn(refreshing && "animate-spin motion-reduce:animate-none")} /> Try again

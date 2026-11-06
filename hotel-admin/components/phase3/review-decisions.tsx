@@ -354,7 +354,7 @@ export function ReviewExpirySettingCard() {
             <Input type="number" inputMode="numeric" min={min} max={max} value={days} onChange={(e) => setDays(e.target.value)} />
           </InputGroup>
         </Field>
-        <Field label="Reason" hint="At least 3 characters. Recorded in the activity log." required>
+        <Field label="Reason" hint="At least 3 characters." required>
           <Input value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} />
         </Field>
         <Field label="Confirm your password" required>

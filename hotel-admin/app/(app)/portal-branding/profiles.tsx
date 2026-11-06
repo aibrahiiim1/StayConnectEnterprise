@@ -264,9 +264,9 @@ export function ProfileBar({ profile, onSelect, writable, dirty }: {
         </div>
 
         <Callout tone="neutral" title="This page only changes how the sign-in page looks">
-          Which sign-in methods a network offers is set under <Link href="/sign-in-methods" className="underline underline-offset-2">Sign-in methods</Link>,
-          which PMS serves room sign-in under <Link href="/pms-routing" className="underline underline-offset-2">PMS routing</Link>, and who can get which package under{" "}
-          <Link href="/internet-packages" className="underline underline-offset-2">Internet packages</Link>. A design never changes any of them.
+          <Link href="/sign-in-methods" className="underline underline-offset-2">Sign-in methods</Link>,{" "}
+          <Link href="/pms-routing" className="underline underline-offset-2">PMS routing</Link> and{" "}
+          <Link href="/internet-packages" className="underline underline-offset-2">Internet packages</Link> are set on their own pages.
         </Callout>
       </CardBody>
 

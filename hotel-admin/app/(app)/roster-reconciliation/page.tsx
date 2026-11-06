@@ -17,7 +17,7 @@ import { History } from "lucide-react";
 import { api, RosterReconciliationState, ReconcileRunRecord, ReconcileRun } from "@/lib/api";
 import { cn, formatDate } from "@/lib/utils";
 import { PageShell, PageHeader, StatCard, StatGrid } from "@/components/ui/page";
-import { HelpList, HelpSection, HelpTip } from "@/components/help";
+import { HelpSection, HelpTip } from "@/components/help";
 import { SectionCard } from "@/components/ui/card";
 import { Table, TBody, THead, TR, TH, TD } from "@/components/ui/table";
 import { Badge, StatusBadge } from "@/components/ui/badge";
@@ -139,15 +139,6 @@ export default function RosterReconciliationPage() {
                 appliance keeps using the last good list rather than guessing, and says so under Needs attention.
               </p>
             </HelpSection>
-            <HelpSection title="Reading the figures">
-              <HelpList
-                items={[
-                  <><strong>Rooms named by this sweep</strong> — how much of the site the PMS roster covered. An incomplete sweep makes the run refuse.</>,
-                  <><strong>Held back — PMS spoke since</strong> — stays absent from the roster that are not closed, because the PMS has said something about them after the snapshot. Arrivals and changes after the snapshot are never closed.</>,
-                  <><strong>Every run, including the refusals</strong> — a run is recorded each time the PMS publishes a complete guest list.</>,
-                ]}
-              />
-            </HelpSection>
           </>
         }
         actions={<LiveStatus updatedAt={updatedAt} refreshing={busy} error={!!err && state !== null} onRefresh={() => void load()} />}
@@ -227,7 +218,7 @@ export default function RosterReconciliationPage() {
       )}
 
       {(state?.interfaces?.length ?? 0) > 1 && (
-        <Field label="PMS connection" hint="Each connection has its own guest list and its own runs." className="max-w-sm">
+        <Field label="PMS connection" className="max-w-sm">
           <Select value={iface || state?.pms_interface_id || ""} onChange={(e) => { setDry(null); setIface(e.target.value); }}>
             {state!.interfaces!.map((i) => (
               <option key={i.id} value={i.id}>
@@ -490,7 +481,7 @@ function RosterSettingsCard({
             <Input type="number" inputMode="numeric" value={vals.look} onChange={(e) => setVals({ ...vals, look: e.target.value })} />
           </Field>
         </FieldGrid>
-        <Field label="Reason" hint="Recorded in the activity log." required>
+        <Field label="Reason" required>
           <Input value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} />
         </Field>
         <Field label="Confirm your password" required>

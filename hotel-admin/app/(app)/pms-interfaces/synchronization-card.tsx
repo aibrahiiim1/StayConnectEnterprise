@@ -220,7 +220,7 @@ export function SynchronizationCard({
         requirePassword strictPassword
         onConfirm={({ password }) => request(password)}
       >
-        <Field label="Why are you refreshing?" hint="Recorded with the request.">
+        <Field label="Why are you refreshing?">
           <Select value={reason} onChange={(e) => setReason(e.target.value)}>
             {REASONS.map((r) => (
               <option key={r.value} value={r.value}>{r.label}</option>

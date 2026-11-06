@@ -617,7 +617,7 @@ export function PackagesTab({
           <DialogHeader>
             <DialogTitle className="flex items-center gap-1">
               Add an internet package
-              <Explain>What the client is offered on the portal, and the service plan it hands out.</Explain>
+              
             </DialogTitle>
             <DialogDescription className="sr-only">What the client is offered on the portal, and the service plan it hands out.</DialogDescription>
           </DialogHeader>

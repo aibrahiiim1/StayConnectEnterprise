@@ -217,13 +217,6 @@ export default function StaysPage() {
               </p>
               <p>A stay&rsquo;s details show how many of the allowed devices are online right now.</p>
             </HelpSection>
-            <HelpSection title="Search and pages">
-              <p>
-                Search covers every stay for the selected status (room, reservation, guest name, travel agent
-                or internet package), not only the page on screen. The counters above the list count every
-                matching stay.
-              </p>
-            </HelpSection>
             <HelpSection title="VIP and travel agent">
               <p>
                 Both come from the PMS with each guest record. Internet packages can be limited to VIP guests or to
@@ -331,7 +324,7 @@ export default function StaysPage() {
               <EmptyState
                 icon={<AlertTriangle />}
                 title="Stays could not be loaded"
-                hint="The appliance did not return the stays, so the list and the counts above are not known. Nothing has been changed."
+                hint="Nothing has been changed."
                 action={
                   <Button variant="secondary" disabled={reloading} onClick={() => void load()}>
                     <RefreshCw className={cn(reloading && "animate-spin motion-reduce:animate-none")} /> Try again

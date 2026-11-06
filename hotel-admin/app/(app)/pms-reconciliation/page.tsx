@@ -153,12 +153,6 @@ export default function PMSReconciliationPage() {
                 room today. A case it cannot answer stays on this list and says which evidence is missing.
               </p>
             </HelpSection>
-            <HelpSection title="Recorded copies">
-              <p>
-                One departure is restaged every time the PMS connection is re-established, so a single departure
-                can have several recorded copies.
-              </p>
-            </HelpSection>
             <HelpSection title="Rooms with several stays">
               <p>
                 These rooms currently hold more than one in-house stay. That is legitimate — several occupants,

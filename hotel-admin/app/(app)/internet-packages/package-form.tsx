@@ -329,7 +329,7 @@ export function PackageForm({
 
       <div className="grid gap-4 sm:grid-cols-2">
         {/* Accessible names are the visible labels; test hooks live in data-testid, not aria-label. */}
-        <Field label="Name" hint="What the client sees on the portal.">
+        <Field label="Name">
           <Input data-testid="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Free WiFi" />
         </Field>
         <div>
@@ -590,7 +590,7 @@ export function PackageForm({
         <div className="flex items-center justify-between mb-1">
           <div className="flex items-center gap-1">
             <h3 className="text-label">More conditions</h3>
-            <InfoHint>Narrow who is offered this package by sign-in method, date, network or stay.</InfoHint>
+            
           </div>
           <Button type="button" variant="ghost" onClick={() => {
             const key = nextRowKey();

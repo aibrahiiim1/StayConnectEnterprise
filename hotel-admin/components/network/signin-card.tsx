@@ -72,7 +72,7 @@ export function SignInCard({ networkId, writable }: { networkId: string; writabl
 
   if (loaded === "failed") {
     return (
-      <SectionCard title="Sign-in on this network" description="Which sign-in methods clients on this network are offered.">
+      <SectionCard title="Sign-in on this network">
         <p className="text-sm text-muted-foreground">
           This network&rsquo;s sign-in settings could not be read just now, so nothing is shown rather than a guess. Reload the page; if it persists, check that your role may view sign-in methods.
         </p>
@@ -105,7 +105,7 @@ export function SignInCard({ networkId, writable }: { networkId: string; writabl
   return (
     <SectionCard
       title="Sign-in on this network"
-      description="Applies to this network only. Start from what the whole site offers (Sign-in methods) and switch methods off here; a network cannot offer a method the site does not. Room sign-in also follows this network's PMS routing."
+ description="Applies to this network only. A network cannot offer a method the site does not."
       bodyClassName="space-y-4"
       footer={writable ? <Button disabled={!dirty || invalid || busy} onClick={() => void save()}>{busy ? "Saving…" : "Save sign-in options"}</Button> : undefined}
     >
@@ -120,7 +120,7 @@ export function SignInCard({ networkId, writable }: { networkId: string; writabl
       ))}
       {offered.length > 0 && (
         <>
-          <Field label="Method shown first" hint="Clients see this one before the others.">
+          <Field label="Method shown first">
             <Select value={primary} disabled={!writable} onChange={(e) => setPrimary(e.target.value)}>
               <option value="">Same as the site</option>
               {offered.filter((m) => !off.includes(m.key)).map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}

@@ -460,7 +460,7 @@ export function ManualReviewView({
             size="sm"
             icon={<Inbox />}
             title="Nothing is waiting on you"
-            hint="Room charges appear here when their outcome could not be determined, or when someone asked for a second opinion."
+            hint="Room charges with an unknown outcome appear here."
           />
         ) : (
           <Table label="Room charges awaiting a decision">
