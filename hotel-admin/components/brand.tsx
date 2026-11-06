@@ -85,7 +85,7 @@ export function OneGateLockup({
   animated = false,
   className,
 }: {
-  product: string;
+  product?: string;
   collapsed?: boolean;
   inverse?: boolean;
   animated?: boolean;
@@ -97,14 +97,16 @@ export function OneGateLockup({
   return (
     <div className={cn("flex min-w-0 flex-col gap-1", className)}>
       <OneGateWordmark className="h-[1.375rem] self-start" animated={animated} />
-      <div
-        className={cn(
-          "min-w-0 truncate text-nano uppercase leading-tight tracking-[0.12em]",
-          inverse ? "text-sidebar-muted" : "text-muted-foreground",
-        )}
-      >
-        {product}
-      </div>
+      {product ? (
+        <div
+          className={cn(
+            "min-w-0 truncate text-nano uppercase leading-tight tracking-[0.12em]",
+            inverse ? "text-sidebar-muted" : "text-muted-foreground",
+          )}
+        >
+          {product}
+        </div>
+      ) : null}
     </div>
   );
 }

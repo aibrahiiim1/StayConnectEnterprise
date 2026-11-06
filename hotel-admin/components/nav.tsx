@@ -253,7 +253,7 @@ export function Nav({
           collapsed ? "flex-col gap-2 px-2" : "px-4",
         )}
       >
-        <OneGateLockup product="Admin Console" collapsed={collapsed} inverse className={collapsed ? undefined : "flex-1"} />
+        <OneGateLockup collapsed={collapsed} inverse className={collapsed ? undefined : "flex-1"} />
         {onToggleCollapsed && (
           // Name the action; aria-expanded reports the current state separately.
           <Tooltip content={collapsed ? "Expand sidebar" : "Collapse sidebar"} side="right">
