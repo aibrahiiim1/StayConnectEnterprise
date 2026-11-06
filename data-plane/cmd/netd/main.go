@@ -209,7 +209,8 @@ func main() {
 		// Confirmed kernel result, so a Session is only `active` once both halves are in force.
 		enforcement: timedEnforcement{&pgEnforcement{pool: pool, tenant: p3mode.TenantID, site: p3mode.SiteID}},
 		// DHCP decides who holds an address; without it a reassigned address kept the previous guest's entitlement (phase3_address_owner.go).
-		owner: addressOwner{src: ap.kea},
+		owner:     addressOwner{src: ap.kea},
+		liveOwner: addressOwner{src: ap.kea},
 		// A session on a removed client network is ended instead of being retried on a bridge that no longer exists.
 		retired: ap.retiredBridgeCheck,
 		// Kea also locates its lease database so an evidence outage can name the artifact.
