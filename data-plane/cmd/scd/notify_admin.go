@@ -35,6 +35,7 @@ const (
 
 type notifySet struct {
 	mail     mail.Mailer
+	mailKind string
 	sms      sms.Sender
 	whatsapp whatsapp.Sender
 	mu       sync.RWMutex
@@ -96,6 +97,7 @@ func (s *server) loadNotify(ctx context.Context) {
 	wa := notifyloader.WrapWhatsApp(loaded.WhatsApp, loaded.WhatsAppKind, s.met, s.db, s.tenID)
 	s.notify.mu.Lock()
 	s.notify.mail, s.notify.sms, s.notify.whatsapp = m, sm, wa
+	s.notify.mailKind = loaded.MailerKind
 	s.mail, s.sms, s.whatsapp = m, sm, wa
 	s.notify.mu.Unlock()
 	slog.Info("notification providers loaded", "email", loaded.MailerKind, "sms", loaded.SenderKind, "whatsapp", loaded.WhatsAppKind)
@@ -123,6 +125,8 @@ func (s *server) notifyAdminRoutes(r chi.Router) {
 	r.Post("/v1/admin/notify/providers/{id}/secret", s.notifySecretStore)
 	r.Post("/v1/admin/notify/providers/{id}/test", s.notifyTest)
 	r.Get("/v1/admin/notify/providers/{id}/secret-state", s.notifySecretState)
+	r.Get("/v1/admin/operator-mail/state", s.operatorMailState)
+	r.Post("/v1/admin/operator-mail/send", s.operatorMailSend)
 }
 
 // notifySecretState answers yes/no whether a current sealed generation exists for a provider row, never the secret.

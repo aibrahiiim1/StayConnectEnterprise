@@ -460,7 +460,8 @@ type attentionInput struct {
 	// PortalHTTPS is set only for a caller who may read portal-https; nil means unknown or not permitted and raises nothing.
 	PortalHTTPS *portalHTTPSCheck
 	// DefaultDBPassword is set only for a caller who may read diagnostics.
-	DefaultDBPassword bool
+	DefaultDBPassword   bool
+	PasswordResetNoMail bool
 	// CardUnsellable: live packages sold by card that no client can actually pay by card.
 	CardUnsellable []attentionPackage
 }
@@ -617,6 +618,9 @@ func deriveAttention(in attentionInput) []attentionItem {
 	}
 	if in.DefaultDBPassword {
 		add(defaultDBPasswordAttention())
+	}
+	if in.PasswordResetNoMail {
+		add(passwordResetNoMailAttention())
 	}
 	// Errors first; stable within each so the list does not reshuffle between polls.
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Severity == "err" && out[j].Severity != "err" })

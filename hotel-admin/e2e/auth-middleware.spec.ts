@@ -17,7 +17,7 @@ test.describe("the authentication gate", () => {
       expect(url.searchParams.get("next")).toBe(route);
       await expect(page.getByRole("heading", { name: "OneGate Admin Console" })).toBeVisible();
       await expect(page.getByLabel("Email or username")).toBeVisible();
-      await expect(page.getByLabel("Password")).toBeVisible();
+      await expect(page.getByLabel("Password", { exact: true })).toBeVisible();
     }
   });
 

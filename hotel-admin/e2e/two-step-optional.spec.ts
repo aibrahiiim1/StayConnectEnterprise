@@ -59,7 +59,7 @@ async function installBackend(page: Page, baseURL: string, acct: Account) {
 async function signInWithPassword(page: Page) {
   await page.goto("/login");
   await page.getByLabel("Email or username").fill("ops@hotel.test");
-  await page.getByLabel("Password").fill("correct-password");
+  await page.getByLabel("Password", { exact: true }).fill("correct-password");
   await page.getByRole("button", { name: "Sign in" }).click();
 }
 

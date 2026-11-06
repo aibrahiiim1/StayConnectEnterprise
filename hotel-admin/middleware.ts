@@ -12,6 +12,7 @@ export function middleware(req: NextRequest) {
   const isLogin = pathname === "/login";
   const isPublic =
     isLogin ||
+    pathname === "/forgot-password" ||
     pathname.startsWith("/_next") ||
     BRAND_ASSET_PREFIXES.some((p) => pathname.startsWith(p));
 

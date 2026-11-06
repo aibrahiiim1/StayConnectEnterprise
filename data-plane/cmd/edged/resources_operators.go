@@ -50,6 +50,9 @@ func (s *server) operatorsRoutes() http.Handler {
 	r.Get("/session-policy", s.getSessionPolicy)
 	r.Put("/session-policy", s.setSessionPolicy)
 	r.Get("/session-policy/changes", s.listSessionPolicyChanges)
+	r.Get("/password-reset", s.getPasswordResetPolicy)
+	r.Put("/password-reset", s.setPasswordResetPolicy)
+	r.Get("/password-reset/changes", s.listPasswordResetPolicyChanges)
 	r.Get("/account-retention", s.getAccountRetention)
 	r.Put("/account-retention", s.setAccountRetention)
 	r.Post("/", s.createEdgeOperator)
@@ -323,6 +326,7 @@ func (s *server) setEdgeOperatorPassword(w http.ResponseWriter, r *http.Request)
 	s.pending.dropOperator(id) // a password step taken before the change must not complete after it
 	_ = s.throttleClear(ctx, scopeAccount, strings.ToLower(strings.TrimSpace(email)))
 	_ = s.throttleClear(ctx, scopeReauth, id)
+	s.discardResetCode(ctx, id)
 	s.audit(r, "operator.password_reset", "operator", id, map[string]any{
 		"sessions_ended": true, "must_change_password": in.RequireChange,
 	})
