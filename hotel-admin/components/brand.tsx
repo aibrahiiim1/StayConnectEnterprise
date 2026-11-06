@@ -126,8 +126,8 @@ const SEMANTICS_LETTERS = [
 ];
 
 const SEMANTICS_COLOURS = {
-  auto: "[--sem-ink:#16181D] [--sem-dot:#5B5BD6] dark:[--sem-ink:#FFFFFF] dark:[--sem-dot:#9B9BF0]",
-  onDark: "[--sem-ink:#FFFFFF] [--sem-dot:#9B9BF0]",
+  auto: "[--sem-dot:#5B5BD6] dark:[--sem-dot:#9B9BF0]",
+  onDark: "[--sem-dot:#9B9BF0]",
 };
 
 export function SemanticsWordmark({ className, tone = "auto" }: { className?: string; tone?: "auto" | "onDark" }) {
@@ -137,9 +137,9 @@ export function SemanticsWordmark({ className, tone = "auto" }: { className?: st
       preserveAspectRatio="xMinYMid meet"
       role="img"
       aria-label="Semantics"
-      className={cn("h-[15px] w-auto shrink-0", SEMANTICS_COLOURS[tone], className)}
+      className={cn("h-[0.72em] w-auto shrink-0", SEMANTICS_COLOURS[tone], className)}
     >
-      <g fill="var(--sem-ink)">
+      <g fill="currentColor">
         {SEMANTICS_LETTERS.map((d) => <path key={d} d={d} />)}
       </g>
       <circle cx="10193.0" cy="-150" r="150" fill="var(--sem-dot)" />
@@ -149,9 +149,9 @@ export function SemanticsWordmark({ className, tone = "auto" }: { className?: st
 
 export function BySemantics({ className, tone = "auto" }: { className?: string; tone?: "auto" | "onDark" }) {
   return (
-    <span className={cn("inline-flex items-center gap-1.5 text-caption", className)}>
+    <span className={cn("inline-flex items-baseline gap-[0.3em] text-caption", className)}>
       <span>OneGate by</span>
-      <SemanticsWordmark tone={tone} className="translate-y-px" />
+      <SemanticsWordmark tone={tone} />
     </span>
   );
 }
