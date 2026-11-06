@@ -1,7 +1,9 @@
 # Legacy PMS provider secret columns (`public.pms_providers.auth_key`, `api_key`): remediation plan
 
-Status: **PLAN, NOT EXECUTED.** Dropping a column is a destructive schema change and needs its own explicit Product Owner
-authorization. Nothing in this document has been run.
+Status: **AUTHORIZED 2026-11-06 and delivered as migration 0212** (`0212_the_retired_pms_provider_secrets_are_dropped_once_emptied`):
+0170's own emptiness check again, applied by every upgrade, so any appliance in this state converges without a manual step. Run
+on the test appliance after a verified pre-change backup; the receipts are in the delivery's governance record. The manual
+procedure below is kept as the record of the plan and for an appliance that cannot take the upgrade.
 
 ## What is different, and why
 
@@ -63,5 +65,5 @@ SELECT count(*) FROM information_schema.columns
  WHERE table_schema = 'public' AND table_name = 'pms_providers' AND column_name IN ('auth_key', 'api_key');
 ```
 
-A result of 2 with an empty table means the same plan applies; a non-empty table means the stored secrets must first be reviewed and the
+A result of 2 with an empty table means the next upgrade (0212) removes them; a non-empty table means the stored secrets must first be reviewed and the
 rows removed by their owner.

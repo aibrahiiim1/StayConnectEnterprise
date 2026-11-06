@@ -13,7 +13,7 @@ import {
   PanelLeftClose, PanelLeftOpen, ClipboardCheck, Ticket,
   DoorOpen, DoorClosed, BedDouble, Plug, Route, Inbox, ShieldCheck, UserX, Layers, ArrowLeftRight, HeartPulse, Receipt,
   LifeBuoy, Globe, AtSign, MessageSquare, Stethoscope, Bell, Hourglass, ChartColumn,
-  CreditCard, BedSingle, Blocks, UsersRound, UserSearch, ChevronRight,
+  CreditCard, BedSingle, Blocks, UsersRound, UserSearch, ChevronRight, Radar,
 } from "lucide-react";
 import { BySemantics, OneGateLockup } from "@/components/brand";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -112,6 +112,7 @@ const SECTIONS: Section[] = [
   {
     title: "System",
     items: [
+      { href: "/system-health",      label: "System health", icon: Radar,     resource: "diagnostics", keywords: "monitor monitoring incidents resources cpu memory disk database deadlocks reconnections client connectivity history trends devices" },
       { href: "/health",             label: "Diagnostics", icon: Stethoscope,   resource: "diagnostics", keywords: "services health checks scd netd kea" },
       { href: "/operational-alerts", label: "Alerts",      icon: Bell,     resource: "operational-alerts", keywords: "warnings acknowledge" },
       { href: "/audit",              label: "Activity",    icon: ScrollText, resource: "audit", keywords: "audit log who did what history trail security changes" },

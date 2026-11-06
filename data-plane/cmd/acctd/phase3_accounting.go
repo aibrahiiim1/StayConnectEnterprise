@@ -195,6 +195,8 @@ func (p *phase3) accountingPass(ctx context.Context, rd counterReader, ep epochS
 
 func (p *phase3) ingestAbsolute(ctx context.Context, s phase3Session, bridge string, minor int, epoch, absUp, absDown int64, at time.Time) (string, error) {
 	var class string
+	p.wmu.Lock()
+	defer p.wmu.Unlock()
 	err := p.enf.Pool().QueryRow(ctx, `SELECT iam_v2.ingest_absolute_counters($1,$2,$3::uuid,$4::uuid,$5,$6,$7,$8,$9,$10)`,
 		p.tenant, p.site, s.ID, s.DeviceID, bridge, minor, epoch, absUp, absDown, at).Scan(&class)
 	if err != nil {
@@ -305,6 +307,8 @@ func (p *phase3) ingestChunkTx(ctx context.Context, items []ingestItem, at time.
 	if len(items) < 2 {
 		return 0, false
 	}
+	p.wmu.Lock()
+	defer p.wmu.Unlock()
 	tx, err := p.enf.Pool().Begin(ctx)
 	if err != nil {
 		return -1, false

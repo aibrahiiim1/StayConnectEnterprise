@@ -24,6 +24,7 @@ func (s *server) healthRoutes() http.Handler {
 	// name or room, so they are also redacted (sanitizeLog).
 	r.With(s.requireRole("diagnostics", permWrite)).Get("/services/{name}/logs", s.healthLogs)
 	r.Get("/recovery-events", s.healthRecoveryEvents)
+	r.Get("/monitor", s.healthMonitor)
 	return r
 }
 

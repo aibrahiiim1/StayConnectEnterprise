@@ -61,6 +61,8 @@ CFG = {
     "backups": env("OG_BACKUPS", "/opt/stayconnect/backups/db"),
     "edged_health": env("OG_EDGED_HEALTH", "http://127.0.0.1:3100/api/edge/v1/health"),
     "console": env("OG_CONSOLE_URL", "http://127.0.0.1:3100/"),
+    "snapshot": env("OG_SNAPSHOT", "/var/lib/onegate-monitor-console/health.json"),
+    "snapshot_group": env("OG_SNAPSHOT_GROUP", "stayconnect"),
     "portal": env("OG_PORTAL_URL", "http://127.0.0.1:8380/"),
     "certs": {"portal certificate": "/etc/stayconnect/portal-tls/*.crt",
               "Admin Console certificate": "/etc/caddy/hotel-admin/hotel-admin.crt",
@@ -1194,12 +1196,70 @@ def render_report(mon, active, recovered, state):
     return "\n".join(L) + "\n"
 
 
-def write_private(path, text):
+def write_private(path, text, gid=None):
     tmp = path + ".tmp"
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
+        if gid is not None:
+            os.fchown(f.fileno(), -1, gid)
+            os.fchmod(f.fileno(), 0o640)
         f.write(text)
     os.replace(tmp, path)
+
+
+CONSOLE_METRICS = ("signin", "online", "netd_sessions", "pass_ms", "cpu", "mem", "disk", "dhcp_alloc", "pools", "pms", "deadlocks_1h",
+                   "refused", "ends", "rejoined", "rejoin_refused", "recut", "usedup", "stuck", "run_ms", "cpu_ms")
+# Device findings for the Admin Console: the address is left out and the hardware address stays masked (devices.tsv keeps both for root).
+CONSOLE_DEVICE_FIELDS = ("severity", "status", "device", "mac", "network", "issue", "cause", "confidence", "first", "last", "count", "seen_since", "action")
+
+
+def console_snapshot(mon, active, state, prev):
+    """What the Admin Console's System health page shows; deep sections are carried from the last deep run, with its time."""
+    res = mon.results
+    counts = {s: sum(1 for r in res if r.status == s) for s in (PASS, WARN, CRIT, NV)}
+    snap = {"version": 1, "at": mon.now.isoformat(), "mode": mon.mode, "overall": overall(active, counts[NV]), "counts": counts,
+            "metrics": {k: mon.m[k] for k in CONSOLE_METRICS if k in mon.m},
+            "checks": [{"key": r.key, "area": r.area, "status": r.status, "text": r.text} for r in res],
+            "incidents": [{"key": r.key, "area": r.area, "status": r.status, "text": r.text, "first": inc["first"], "last": inc.get("last"),
+                           "count": inc["count"]} for r, inc in sorted(active, key=lambda x: (-RANK[x[0].status], x[0].key))],
+            "resolved": list(reversed(state.get("resolved", [])))}
+    deep = prev.get("deep") if isinstance(prev, dict) else None
+    if mon.mode == "deep":
+        a, b, dev = mon.report.get("analytics"), mon.report.get("breakdowns"), mon.report.get("devices")
+        dl = state.get("deadlocks", [])
+        daily = {}
+        for (_, v1), (t2, v2) in zip(dl, dl[1:]):
+            daily[t2[:10]] = daily.get(t2[:10], 0) + max(0, v2 - v1)
+        deep = {"at": mon.now.isoformat(),
+                "analytics": None if not a else {"measures": a[0], "windows": [{"label": lab, "now": w["now"], "previous": w["previous"]} for lab, w in a[1]]},
+                "breakdowns": None if not b else {k: [list(r) for r in v] if k != "online" else list(v) for k, v in b.items()},
+                "devices": None if dev is None else [{k: d.get(k, "") for k in CONSOLE_DEVICE_FIELDS} for d in dev],
+                "deadlocks_daily": sorted(daily.items())[-14:],
+                "lock_waits": {d: state.get("lock_waits", {})[d] for d in sorted(state.get("lock_waits", {}))[-14:]}}
+    snap["deep"] = deep
+    return snap
+
+
+def write_console_snapshot(mon, active, state):
+    """Readable by the Admin Console's service group only; without that group it stays root-only and the console says so."""
+    path = CFG["snapshot"]
+    try:
+        import grp
+        gid = grp.getgrnam(CFG["snapshot_group"]).gr_gid
+    except (ImportError, KeyError):
+        gid = None
+    try:
+        os.makedirs(os.path.dirname(path), mode=0o750, exist_ok=True)
+        if gid is not None:
+            os.chown(os.path.dirname(path), -1, gid)
+            os.chmod(os.path.dirname(path), 0o750)
+        try:
+            prev = json.load(open(path))
+        except (OSError, ValueError):
+            prev = {}
+        write_private(path, json.dumps(console_snapshot(mon, active, state, prev)), gid)
+    except OSError as e:
+        print(f"monitor: console snapshot not written: {e}", file=sys.stderr)
 
 
 def main(argv=None):
@@ -1248,6 +1308,8 @@ def main(argv=None):
         write_private(os.path.join(sd, "devices.tsv"), "\t".join(cols) + "\n" + "".join("\t".join(str(d.get(c, "")) for c in cols) + "\n" for d in dev))
         write_private(os.path.join(sd, "results.json"), json.dumps({"at": mon.now.isoformat(), "metrics": {k: v for k, v in mon.m.items() if k != "leases"},
                                                                     "results": [vars(r) for r in mon.results]}, indent=1))
+    if not args.stdout:
+        write_console_snapshot(mon, active, state)
     write_private(path, json.dumps(state))
     return 0
 

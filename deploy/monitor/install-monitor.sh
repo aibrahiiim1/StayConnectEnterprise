@@ -20,7 +20,7 @@ case "${1:-install}" in
     systemctl disable --now onegate-monitor-quick.timer onegate-monitor-deep.timer 2>/dev/null || true
     for u in $UNITS; do rm -f "/etc/systemd/system/$u"; done
     systemctl daemon-reload
-    rm -rf -- "$DEST"
+    rm -rf -- "$DEST" /var/lib/onegate-monitor-console
     echo "removed; state kept in /var/lib/onegate-monitor"
     exit 0 ;;
   install) ;;
@@ -33,6 +33,8 @@ install -d -m 0755 "$DEST"
 install -m 0755 "$HERE/onegate_monitor.py" "$DEST/onegate_monitor.py"
 install -m 0644 "$HERE/README.md" "$DEST/README.md"
 install -d -m 0700 /var/lib/onegate-monitor
+# The Admin Console's System health page reads its snapshot here (edged runs as the stayconnect group).
+if getent group stayconnect >/dev/null; then install -d -m 0750 -g stayconnect /var/lib/onegate-monitor-console; fi
 for u in $UNITS; do install -m 0644 "$HERE/$u" "/etc/systemd/system/$u"; done
 [ -f /etc/logrotate.d/ogcheck ] || install -m 0644 "$HERE/logrotate-ogcheck" /etc/logrotate.d/ogcheck
 systemctl daemon-reload

@@ -24,6 +24,12 @@ a deep run waits up to a minute for it, so the report is not skipped.
 All files under `/var/lib/onegate-monitor` are root-only (0600). MAC addresses are masked to their last two octets;
 no names, rooms or reservations are written.
 
+- `/var/lib/onegate-monitor-console/health.json` (every run): what the Admin Console's **System health** page shows (verdict,
+  checks, active and resolved issues, and the last deep run's client activity and device findings). Root-owned, readable only by
+  the `stayconnect` group (0640, directory 0750), and it carries **no client IP address**. edged serves it read-only at
+  `GET /edge/v1/diagnostics/monitor` (diagnostics read permission), redacts every text again, and reports it stale after 15 minutes;
+  a missing or unreadable file is shown as such, never as a healthy appliance. Manual `--stdout` runs do not write it.
+
 ## Results
 
 - **PASS**: the evidence was read and is within the threshold.
