@@ -1441,6 +1441,19 @@
       "authorization_evidence": "The Product Owner's mission of 2026-11-06: complete the Automatic Reconnection mission end to end, fix verified defects within the existing authorization, merge through protected PRs, deploy to the test appliance 172.21.96.97, verify, and synchronize documentation and governance.",
       "does_not_authorize": "Treating a replaced client network as the device's previous network (a product decision); changing portald's quiet window, captive-portal security, entitlement, device-limit, check-out, logout, licensing, PMS, financial or network rules; the production Central; Go-Live.",
       "delivery_status": "Delivered on master c0176a9c (PR #386) and installed on the test appliance (T0318)."
+    },
+    {
+      "id": "D100",
+      "decided_on": "2026-11-06",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-11-06",
+      "status": "ACTIVE",
+      "title": "PACKAGE RENEWAL AND PMS ROOM-MOVE CONTINUITY (migration 0213): a Protel room move sent as a check-out and a check-in (FIAS 2.20 p. 46, either order, live or by roster resync) keeps the package, its devices and its remaining data, decided only from the reservation's own events (same stay, different rooms), never from timing; a check-out of a room the stay has already left only vacates that room; a same-room pair stays a reinstatement. Per-package Renewable and optional Maximum per stay settings (empty = unlimited) are enforced by one database rule for offers and purchases; existing packages keep once-per-stay. A package whose funding was refunded, charged back, reversed or ended by an operator's END_ACCESS decision is never continued. The Portal now says the stay is confirmed when no package is available, and that room charge is paused while the PMS link refreshes.",
+      "authorization_evidence": "The Product Owner's mission of 2026-11-06: complete the package renewal and PMS room-move corrections end to end, restore only verified wrongly terminated access without resetting quota or extending validity, document the additional charges without refunds, merge through protected PRs, deploy to the test appliance 172.21.96.97 with backup and rollback, verify, and synchronize documentation and governance.",
+      "does_not_authorize": "Any change to access during an unresolved check-out; grace periods; refunds, reversals or other financial adjustments; PMS configuration; Card Payment changes; the production Central; Go-Live.",
+      "delivery_status": "Delivered on master 56072307 (PR #397) and installed on the test appliance (T0319)."
     }
   ]
 }
