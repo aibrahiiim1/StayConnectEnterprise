@@ -47,6 +47,15 @@ database rule, `iam_v2.stay_package_purchase_refusal`, decides for the guest off
 Each purchase carries the next `purchase_seq`; the unique index includes it, so two simultaneous purchases of one renewal
 leave exactly one purchase and at most one room charge. A **Once per client** limit on the package still applies.
 
+## Several devices of one room signing in at once
+
+Every Room sign-in path takes the PMS interface's runtime row before the stay row: the sign-in check
+(`iam_v2.issue_or_return_pms_context`, since migration 0214), the package grant (`authctx` ConsumeTx) and `IssuePMSTx`. Before 0214
+the sign-in check took the stay first, so a device checking while another device of the same room was being granted could deadlock
+(SQLSTATE 40P01). scd ran the grant once more and answered correctly, but two deadlocks in a row ended as "service unavailable".
+A device limit is still enforced under the package's lock (`authorize_entitlement_device`), and a full package still answers
+"device limit reached".
+
 ## What the guest is told
 
 | Situation | Sentence |

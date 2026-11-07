@@ -372,3 +372,45 @@ func TestIntegration_RoomMoveNeverExtendsAnEndedWindow(t *testing.T) {
 		t.Fatal("a package whose window had ended was restored")
 	}
 }
+
+// After a check-out-first move, the old room's check-out re-sent late changes nothing, and the guest's real departure from the new room
+// checks out the continued package exactly as any checkout does.
+func TestIntegration_ALateRepeatOfTheMovesCheckoutChangesNothingAndTheRealDepartureStillChecksOut(t *testing.T) {
+	p, s, pr, pkgRev := moveFixture(t)
+	insertLive(t, p, s, "L-GI", "GI", pay("RM9", "200", "Late", "Al", "F9", "260101", "260110"))
+	process(t, pr, s)
+	stayID := stayOf(t, p, s, "RM9")
+	boundary := time.Now().Add(-20 * time.Minute).Truncate(time.Microsecond)
+	ent := grantEntitlement(t, p, s, stayID, pkgRev, boundary.Add(-time.Hour))
+	authorizeDevice(t, p, s, ent, boundary.Add(-30*time.Minute))
+	insertLiveAt(t, p, s, "L-GO", "GO", pay("RM9", "200", "Late", "Al", "F9", "260101", "260110"), boundary)
+	process(t, pr, s)
+	insertLive(t, p, s, "L-GI2", "GI", pay("RM9", "201", "Late", "Al", "F9", "260101", "260110"))
+	process(t, pr, s)
+	var cont string
+	if err := p.QueryRow(context.Background(), `SELECT e.id::text FROM iam_v2.entitlements e JOIN iam_v2.purchases pu ON pu.id=e.purchase_id
+		WHERE e.stay_id=$1 AND e.status='ACTIVE' AND pu.trigger='ROOM_MOVE_RESTORE'`, stayID).Scan(&cont); err != nil {
+		t.Fatalf("no continuation after the move: %v", err)
+	}
+
+	insertLive(t, p, s, "L-GO-again", "GO", pay("RM9", "200", "Late", "Al", "F9", "260101", "260110"))
+	process(t, pr, s)
+	if status, lv, room := stayState(t, p, s, "RM9"); status != "IN_HOUSE" || lv != 2 || room != "201" {
+		t.Fatalf("a late repeat of the old room's check-out left the stay %s/%d/%s, want IN_HOUSE/2/201", status, lv, room)
+	}
+	if n := countIn(t, p, `SELECT count(*) FROM iam_v2.entitlements WHERE id=$1 AND status='ACTIVE'`, cont); n != 1 {
+		t.Fatal("a late repeat of the old room's check-out ended the continued package")
+	}
+
+	insertLive(t, p, s, "L-GO2", "GO", pay("RM9", "201", "Late", "Al", "F9", "260101", "260110"))
+	process(t, pr, s)
+	if status, _, _ := stayState(t, p, s, "RM9"); status != "CHECKED_OUT" {
+		t.Fatalf("the departure from the new room left the stay %s", status)
+	}
+	if n := countIn(t, p, `SELECT count(*) FROM iam_v2.entitlements WHERE id=$1 AND status='TERMINATED' AND terminal_reason='CONVERTED'`, cont); n != 1 {
+		t.Fatal("the real departure did not check out the continued package")
+	}
+	if n := countIn(t, p, `SELECT count(*) FROM iam_v2.room_move_restorations WHERE stay_id=$1`, stayID); n != 1 {
+		t.Fatalf("restorations %d after a real departure, want only the move's 1", n)
+	}
+}
