@@ -1,4 +1,0 @@
-commit 52b90645241c786bd115e28866df7d63adb75dfd
-Date:   Sat Nov 7 03:33:09 2026 +0200
-
-    Governance: D100 and T0319 (package renewal and room-move continuity; test appliance ee996629)
