@@ -1,0 +1,4 @@
+commit f43947f50e2dee8eceece307b0bcd411be996d5b
+Date:   Sat Nov 7 10:08:49 2026 +0200
+
+    Governance: D101 and T0320 (operational findings closed; test appliance bbaabbe8); 0214 identity frozen

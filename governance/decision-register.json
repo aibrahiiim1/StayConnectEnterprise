@@ -1454,6 +1454,19 @@
       "authorization_evidence": "The Product Owner's mission of 2026-11-06: complete the package renewal and PMS room-move corrections end to end, restore only verified wrongly terminated access without resetting quota or extending validity, document the additional charges without refunds, merge through protected PRs, deploy to the test appliance 172.21.96.97 with backup and rollback, verify, and synchronize documentation and governance.",
       "does_not_authorize": "Any change to access during an unresolved check-out; grace periods; refunds, reversals or other financial adjustments; PMS configuration; Card Payment changes; the production Central; Go-Live.",
       "delivery_status": "Delivered on master 56072307 (PR #397) and installed on the test appliance (T0319)."
+    },
+    {
+      "id": "D101",
+      "decided_on": "2026-11-07",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-11-07",
+      "status": "ACTIVE",
+      "title": "OPERATIONAL FINDINGS CLOSED: the Room sign-in check (issue_or_return_pms_context) takes the PMS interface runtime row before the stay, the order the grant and IssuePMSTx use, so a sign-in check and a grant on the same stay no longer deadlock (migration 0214). Package renewal (unlimited, maximum, concurrency, settlement in progress) and room moves (delayed, out-of-order and repeated events, real departure afterwards) verified by targeted tests and live evidence. Device limits, refusal reasons and approved behaviour are unchanged.",
+      "authorization_evidence": "The Product Owner's mission of 2026-11-07: complete the remaining operational findings end to end (concurrent sign-in deadlocks, renewal verification, room-move verification, reconnection monitoring, related audit findings), merge through protected PRs, deploy to the test appliance 172.21.96.97 with backup and rollback, verify and synchronize.",
+      "does_not_authorize": "The duplicate appliance serial issue; the cross-method Client identity / How often investigation; relaxing PostgreSQL log verbosity (C5); PMS configuration; live financial transactions; security-policy changes; the production Central; Go-Live.",
+      "delivery_status": "Delivered on master 04e3433e (PR #402) and installed on the test appliance (T0320)."
     }
   ]
 }

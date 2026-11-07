@@ -1,0 +1,35 @@
+{
+  "transition_id": "T0320",
+  "seq": 320,
+  "timestamp": "2026-11-07T10:08:32+02:00",
+  "timestamp_derivation": "Read from the workstation clock (UTC+02:00) by the script that wrote this receipt, immediately before the commit that introduces it.",
+  "record_type": "OPERATIONAL_FINDINGS_COMPLETION",
+  "authorisation": "The Product Owner's mission of 2026-11-07 (D101): remaining operational findings end to end, with deployment to the test appliance 172.21.96.97 only.",
+  "delivery": "PR #402 (merged 04e3433e): migration 0214 reorders the two locks of iam_v2.issue_or_return_pms_context (runtime row, then stay); tests for the deadlock, unlimited renewal, a renewal awaiting settlement, and a late repeat of a move's check-out followed by the real departure; runbook PMS_ROOM_MOVES_AND_RENEWAL.md section on concurrent sign-ins.",
+  "findings": "Deadlocks on the test appliance over 7 days: acctd 75 (expiry pass, 11-03 to 11-06 00:50, none after the D98 fix), pmsd 0, edged 0, scd 7 (room grants, 11-03 to 11-07). Root cause of the scd ones: the sign-in check locked stay then runtime row, the grant runtime row then stay; a device of a room resolving while another device of the same room was granted deadlocked. Since the one-retry wrapper (11-05) every one was answered correctly on the retry (the 05:10 case: device limit reached 34 ms later); sign-in attempts recorded as SERVICE_UNAVAILABLE fell from 422 (11-03) to 0 (11-06, 11-07). Since 0213: 6 automatic room-move evaluations (1 RESTORED, 5 NOTHING_TO_RESTORE), 16 real check-outs, 0 failures; 48 automatic reconnections on 11-07 and 0 address-ownership refusals; the 6 devices the monitor lists as waiting sent nothing to the portal or scd since 02:00. A previous tick report said the 05:10 guest was told service unavailable; it was not (corrected).",
+  "verification": "The deadlock reproduced against the 0213 function (40P01) and passes with 0214; scd Phase3/Renewal/Rejoin/Grant/Context/DeviceLimit suites, authctx, staygrant and the stayengine room-move suite pass; baseline regenerated, FACTORY_CLEAN_BASELINE = PASS; Codex clean on bbaabbe8. Live after the upgrade: function order read back, a room sign-in VERIFIED, an automatic reconnection, 0 deadlocks. NOT VERIFIED: absence of the deadlock over a full day's load, a live check-in-first move, a guest renewal purchase (no package is renewable).",
+  "deployment": {
+    "test_appliance": "onegate-appliance-bbaabbe81688 after verified backup db-20261107T075734Z (ledger entry 7, proven restorable); rollback tree /opt/stayconnect/.previous/20261107T075902Z.",
+    "central": "Not changed."
+  },
+  "not_touched": "Device limits, refusal reasons, PMS configuration and traffic, financial behaviour, PostgreSQL logging, licensing, networking, the production Central.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "04e3433e60f82fe14f776f811e299feb2df19d84",
+  "previous_delivery": "T0319",
+  "decision": "D101",
+  "go_live": "NOT authorised."
+}
