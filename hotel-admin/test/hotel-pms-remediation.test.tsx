@@ -170,6 +170,9 @@ describe("Protel configuration follows the server (H-3)", () => {
     } as any);
     const body = m.providerRevisionBody(server, values, timezone);
     expect(body.max_auth_cache_age_seconds).toBe(259200);
+    // The 60-minute default is for new connections only; an edit keeps the interface's own interval.
+    expect(body.complete_sync_ms).toBe(600000);
+    expect(m.PROTEL_FIELDS.find((f) => f.key === "complete_sync_ms")?.default).toBe(3600000);
     expect(body.financial_base_currency).toBe("EUR");
     expect(body.financial_base_currency_exponent).toBe(2);
     expect(body.source_timezone).toBe("Europe/Berlin");
