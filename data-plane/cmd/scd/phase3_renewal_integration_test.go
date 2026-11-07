@@ -212,3 +212,65 @@ func TestIntegration_Renewal_ConcurrentPurchasesOfOneRenewalHaveOneWinner(t *tes
 		t.Fatalf("%d purchases committed and %d refused, want exactly one of each", ok, refused)
 	}
 }
+
+// An empty maximum is unlimited: the package is bought, ends and is bought again, three times and still on offer.
+func TestIntegration_Renewal_AnEmptyMaximumRenewsWithoutLimit(t *testing.T) {
+	f := newAuthFixture(t)
+	rev := f.addRenewablePackage(t, "UNLIMITED", true, nil)
+	for i, req := range []string{"0000e301-0000-4000-8000-000000000000", "0000e302-0000-4000-8000-000000000000", "0000e303-0000-4000-8000-000000000000"} {
+		f.end(t, f.buy(t, rev, req, int64(i+1)))
+	}
+	if !f.offered(t, rev) || f.refusal(t, rev) != "" {
+		t.Fatalf("an unlimited renewable package stopped being offered after 3 purchases (refusal %q)", f.refusal(t, rev))
+	}
+	var n int
+	if err := f.pool.QueryRow(context.Background(), `SELECT count(*) FROM iam_v2.purchases WHERE stay_id=$1 AND package_revision_id=$2`, f.stay, rev).Scan(&n); err != nil || n != 3 {
+		t.Fatalf("purchases %d (%v), want 3", n, err)
+	}
+}
+
+// A renewal still being settled (a room charge not yet confirmed) blocks the next purchase: no second purchase, so no second charge.
+func TestIntegration_Renewal_APurchaseAwaitingSettlementBlocksTheNext(t *testing.T) {
+	f := newAuthFixture(t)
+	ctx := context.Background()
+	rev := f.addRenewablePackage(t, "PENDING", true, nil)
+	_, res := post(t, f.p3.resolveHandler, f.resolveBody("412", "Okonkwo", "", "0000e401-0000-4000-8000-000000000000"))
+	if res.AuthContextID == "" {
+		t.Fatalf("no auth context: %+v", res)
+	}
+	insert := func(state string) error {
+		tx, err := f.pool.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation('commerce_intent')`); err != nil {
+			return err
+		}
+		var quote string
+		if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.offer_quotes (tenant_id, site_id, auth_context_id, package_revision_id, pms_interface_id,
+			price_minor, currency, currency_exponent, grant_snapshot, expires_at, consumed_at)
+			VALUES ($1,$2,$3,$4,$5,0,'USD',2,'{}'::jsonb, now()+interval '5 minutes', now()) RETURNING id::text`,
+			f.tenant, f.site, res.AuthContextID, rev, f.iface).Scan(&quote); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.purchases (tenant_id,site_id,package_revision_id,offer_quote_id,auth_context_id,
+			pms_interface_id,stay_id,trigger,amount_minor,currency,currency_exponent,state)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,'GUEST_SELECTION',0,'USD',2,$8)`, f.tenant, f.site, rev, quote, res.AuthContextID, f.iface, f.stay, state); err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
+	}
+	if err := insert("AWAITING_SETTLEMENT"); err != nil {
+		t.Fatalf("first purchase: %v", err)
+	}
+	if r := f.refusal(t, rev); r != "PURCHASE_IN_PROGRESS" {
+		t.Fatalf("refusal while the first purchase awaits settlement %q, want PURCHASE_IN_PROGRESS", r)
+	}
+	if f.offered(t, rev) {
+		t.Fatal("a package whose purchase is still being settled was offered for another purchase")
+	}
+	if err := insert("AWAITING_SETTLEMENT"); err == nil || !strings.Contains(err.Error(), "purchase_once_per_stay") {
+		t.Fatalf("a second purchase while the first awaits settlement: %v, want purchase_once_per_stay", err)
+	}
+}

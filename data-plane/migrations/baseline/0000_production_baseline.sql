@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0213, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0214, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -5385,6 +5385,13 @@ BEGIN
     RETURN;
   END IF;
 
+  -- The interface runtime row first, then the Stay: the order the grant (authctx ConsumeTx) and IssuePMSTx take them in. Stay first
+  -- here deadlocked a sign-in check against a grant on the same stay (0214). This is the row pmsd's admission path locks before
+  -- inserting a stay_event, so until commit no new occupancy event can be admitted; the predicate below is judged under both locks.
+  PERFORM 1 FROM iam_v2.pms_interface_runtime rt
+    WHERE rt.tenant_id=p_tenant AND rt.site_id=p_site AND rt.pms_interface_id=p_interface
+    FOR UPDATE;
+
   -- The row lock and the version snapshot still come from the Stay itself; whether the Stay may be authorised
   -- at all is the shared predicate's decision.
   SELECT st.lifecycle_version, st.occupancy_evidence_version, st.status = 'CHECKED_OUT'
@@ -5408,18 +5415,6 @@ BEGIN
   IF NOT FOUND THEN
     RAISE EXCEPTION 'CONTEXT_INVALID: stay % is not eligible for a PMS context', p_stay;
   END IF;
-
-  -- THE LINEARIZATION POINT, taken AFTER the Stay lock so the global L1 Stay-first order is preserved.
-  --
-  -- This is the same row pmsd's admission path locks before inserting a stay_event, so from here until this
-  -- transaction commits no new occupancy event can be admitted for this interface. That converts the
-  -- readiness check below from "true a moment ago" into "true as of a point no admission can precede".
-  --
-  -- Deliberately a separate statement from the Stay lock above: the predicate MUST be evaluated after both
-  -- locks are held, and folding it into the Stay query would evaluate it while admission could still commit.
-  PERFORM 1 FROM iam_v2.pms_interface_runtime rt
-    WHERE rt.tenant_id=p_tenant AND rt.site_id=p_site AND rt.pms_interface_id=p_interface
-    FOR UPDATE;
 
   -- Feed health, materialization readiness and the freshness ceiling, now judged under both locks. A departed stay's
   -- check-out is already applied and a later reinstatement changes its lifecycle_version, which the context pins.
