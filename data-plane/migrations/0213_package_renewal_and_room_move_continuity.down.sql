@@ -65,6 +65,39 @@ BEGIN
   RETURN 'ACCESS_ENDED';
 END $$;
 
+CREATE OR REPLACE FUNCTION iam_v2.p4_resolve_reversal_review(p_tenant uuid, p_site uuid, p_review uuid, p_resolution text, p_actor text, p_reason text) RETURNS text
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE rv record; v_ent uuid;
+BEGIN
+  IF p_resolution NOT IN ('KEEP_ACCESS','END_ACCESS') THEN
+    RAISE EXCEPTION 'resolution must be KEEP_ACCESS or END_ACCESS' USING ERRCODE = 'check_violation';
+  END IF;
+  IF COALESCE(btrim(p_actor), '') = '' OR COALESCE(btrim(p_reason), '') = '' THEN
+    RAISE EXCEPTION 'a resolution needs an operator and a reason' USING ERRCODE = 'check_violation';
+  END IF;
+  SELECT * INTO rv FROM iam_v2.card_reversal_reviews
+   WHERE id = p_review AND tenant_id = p_tenant AND site_id = p_site FOR UPDATE;
+  IF NOT FOUND THEN
+    RETURN 'NOT_FOUND';
+  END IF;
+  IF rv.resolution IS NOT NULL THEN
+    RETURN 'ALREADY_RESOLVED';
+  END IF;
+  IF p_resolution = 'END_ACCESS' THEN
+    SELECT e.id INTO v_ent FROM iam_v2.settlements se JOIN iam_v2.entitlements e ON e.purchase_id = se.purchase_id
+     WHERE se.id = rv.settlement_id;
+    IF v_ent IS NOT NULL THEN
+      PERFORM iam_v2.p4_end_access_funded_by(v_ent, 'REVOKED');
+    END IF;
+  END IF;
+  UPDATE iam_v2.card_reversal_reviews
+     SET resolution = p_resolution, resolved_at = now(), resolved_by = btrim(p_actor), resolution_reason = btrim(p_reason)
+   WHERE id = p_review;
+  RETURN p_resolution;
+END $$
+
 DROP FUNCTION iam_v2.restore_room_move_access(uuid, uuid, uuid, integer, uuid, text, boolean);
 DROP FUNCTION iam_v2.entitlement_funding_reversed(uuid);
 DROP FUNCTION iam_v2.stay_next_applied_checkin(uuid, uuid);

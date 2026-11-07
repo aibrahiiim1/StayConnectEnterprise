@@ -438,6 +438,47 @@ BEGIN
   RETURN 'ACCESS_ENDED';
 END $$;
 
+CREATE OR REPLACE FUNCTION iam_v2.p4_resolve_reversal_review(p_tenant uuid, p_site uuid, p_review uuid, p_resolution text, p_actor text, p_reason text) RETURNS text
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE rv record; v_ent uuid; v_cont uuid;
+BEGIN
+  IF p_resolution NOT IN ('KEEP_ACCESS','END_ACCESS') THEN
+    RAISE EXCEPTION 'resolution must be KEEP_ACCESS or END_ACCESS' USING ERRCODE = 'check_violation';
+  END IF;
+  IF COALESCE(btrim(p_actor), '') = '' OR COALESCE(btrim(p_reason), '') = '' THEN
+    RAISE EXCEPTION 'a resolution needs an operator and a reason' USING ERRCODE = 'check_violation';
+  END IF;
+  SELECT * INTO rv FROM iam_v2.card_reversal_reviews
+   WHERE id = p_review AND tenant_id = p_tenant AND site_id = p_site FOR UPDATE;
+  IF NOT FOUND THEN
+    RETURN 'NOT_FOUND';
+  END IF;
+  IF rv.resolution IS NOT NULL THEN
+    RETURN 'ALREADY_RESOLVED';
+  END IF;
+  IF p_resolution = 'END_ACCESS' THEN
+    SELECT e.id INTO v_ent FROM iam_v2.settlements se JOIN iam_v2.entitlements e ON e.purchase_id = se.purchase_id
+     WHERE se.id = rv.settlement_id;
+    -- As for a refund: a room move's continuation (0213) is the access this payment still funds.
+    WITH RECURSIVE chain AS (
+      SELECT e.id, e.status, 0 AS depth FROM iam_v2.entitlements e WHERE e.id = v_ent
+      UNION ALL
+      SELECT n.id, n.status, chain.depth + 1 FROM iam_v2.entitlements n
+        JOIN chain ON n.policy_snapshot->>'restores' = chain.id::text
+       WHERE chain.depth < 50)
+    SELECT c.id INTO v_cont FROM chain c WHERE c.depth > 0 AND c.status IN ('PENDING','ACTIVE','SUSPENDED') LIMIT 1;
+    v_ent := COALESCE(v_cont, v_ent);
+    IF v_ent IS NOT NULL THEN
+      PERFORM iam_v2.p4_end_access_funded_by(v_ent, 'REVOKED');
+    END IF;
+  END IF;
+  UPDATE iam_v2.card_reversal_reviews
+     SET resolution = p_resolution, resolved_at = now(), resolved_by = btrim(p_actor), resolution_reason = btrim(p_reason)
+   WHERE id = p_review;
+  RETURN p_resolution;
+END $$;
 DO $own$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'iam_v2_owner') THEN

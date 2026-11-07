@@ -9776,7 +9776,7 @@ CREATE FUNCTION iam_v2.p4_resolve_reversal_review(p_tenant uuid, p_site uuid, p_
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
-DECLARE rv record; v_ent uuid;
+DECLARE rv record; v_ent uuid; v_cont uuid;
 BEGIN
   IF p_resolution NOT IN ('KEEP_ACCESS','END_ACCESS') THEN
     RAISE EXCEPTION 'resolution must be KEEP_ACCESS or END_ACCESS' USING ERRCODE = 'check_violation';
@@ -9795,6 +9795,15 @@ BEGIN
   IF p_resolution = 'END_ACCESS' THEN
     SELECT e.id INTO v_ent FROM iam_v2.settlements se JOIN iam_v2.entitlements e ON e.purchase_id = se.purchase_id
      WHERE se.id = rv.settlement_id;
+    -- As for a refund: a room move's continuation (0213) is the access this payment still funds.
+    WITH RECURSIVE chain AS (
+      SELECT e.id, e.status, 0 AS depth FROM iam_v2.entitlements e WHERE e.id = v_ent
+      UNION ALL
+      SELECT n.id, n.status, chain.depth + 1 FROM iam_v2.entitlements n
+        JOIN chain ON n.policy_snapshot->>'restores' = chain.id::text
+       WHERE chain.depth < 50)
+    SELECT c.id INTO v_cont FROM chain c WHERE c.depth > 0 AND c.status IN ('PENDING','ACTIVE','SUSPENDED') LIMIT 1;
+    v_ent := COALESCE(v_cont, v_ent);
     IF v_ent IS NOT NULL THEN
       PERFORM iam_v2.p4_end_access_funded_by(v_ent, 'REVOKED');
     END IF;
