@@ -1467,6 +1467,19 @@
       "authorization_evidence": "The Product Owner's mission of 2026-11-07: complete the remaining operational findings end to end (concurrent sign-in deadlocks, renewal verification, room-move verification, reconnection monitoring, related audit findings), merge through protected PRs, deploy to the test appliance 172.21.96.97 with backup and rollback, verify and synchronize.",
       "does_not_authorize": "The duplicate appliance serial issue; the cross-method Client identity / How often investigation; relaxing PostgreSQL log verbosity (C5); PMS configuration; live financial transactions; security-policy changes; the production Central; Go-Live.",
       "delivery_status": "Delivered on master 04e3433e (PR #402) and installed on the test appliance (T0320)."
+    },
+    {
+      "id": "D102",
+      "decided_on": "2026-11-07",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-11-07",
+      "status": "ACTIVE",
+      "title": "PMS FULL SYNC EVERY 60 MINUTES: both Protel FIAS interfaces on the test appliance refresh their complete guest list every 60 minutes (complete_sync_ms 3600000, was 600000), and 60 minutes is the default for every new Protel FIAS connection while the interval stays a per-connection setting. Existing connections are never changed automatically. Financial, authentication and freshness safeguards are unchanged: Room sign-in evidence is accepted for the interval plus the keep-alive timeout, the financial mirror age (4 h default) still forces its own sweep at half of it, and room-charge onboarding was re-approved on the new revision with identical terms. The appliance monitor judges a roster's age against its own link's interval.",
+      "authorization_evidence": "The Product Owner's approvals of 2026-11-07: change the Full Sync interval to 60 minutes on both PMS interfaces on the TEST appliance only, keeping every financial, authentication and freshness safeguard; then make 60 minutes the default for newly created Protel FIAS interfaces, configurable per interface, inside the same mission.",
+      "does_not_authorize": "Changing existing interfaces at other sites; raising the financial mirror age; any other PMS configuration; live financial transactions; the production Central; Go-Live.",
+      "delivery_status": "Delivered on master 2a7daa65 (PR #404); test appliance interfaces at revision 4 and installed release 631b483c (T0321)."
     }
   ]
 }
