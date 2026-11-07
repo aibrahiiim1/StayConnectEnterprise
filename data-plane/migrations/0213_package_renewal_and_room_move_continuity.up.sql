@@ -413,8 +413,9 @@ BEGIN
     RETURN 'PARTIAL_NO_ACTION';
   END IF;
 
+  -- Locked as a room-move restoration locks it, so a continuation it is creating is visible to the lookup below.
   SELECT id, status INTO v_ent, v_status FROM iam_v2.entitlements
-   WHERE tenant_id = p_tenant AND site_id = p_site AND purchase_id = se.purchase_id;
+   WHERE tenant_id = p_tenant AND site_id = p_site AND purchase_id = se.purchase_id FOR UPDATE;
   IF v_ent IS NULL THEN
     RETURN 'NO_ENTITLEMENT';
   END IF;
@@ -465,7 +466,7 @@ BEGIN
   END IF;
   IF p_resolution = 'END_ACCESS' THEN
     SELECT e.id INTO v_ent FROM iam_v2.settlements se JOIN iam_v2.entitlements e ON e.purchase_id = se.purchase_id
-     WHERE se.id = rv.settlement_id;
+     WHERE se.id = rv.settlement_id FOR UPDATE OF e;
     -- As for a refund: a room move's continuation (0213) is the access this payment still funds.
     WITH RECURSIVE chain AS (
       SELECT e.id, e.status, 0 AS depth FROM iam_v2.entitlements e WHERE e.id = v_ent
