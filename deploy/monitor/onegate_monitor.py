@@ -531,13 +531,16 @@ class Monitor:
     def check_pms(self, state):
         rows = self.s.sql("""SELECT i.display_label, r.transport_status,
               COALESCE(round(extract(epoch FROM now() - r.disconnected_since)), -1),
-              COALESCE(round(extract(epoch FROM now() - r.last_complete_sync_at)), -1)
+              COALESCE(round(extract(epoch FROM now() - r.last_complete_sync_at)), -1),
+              COALESCE((pr.config->>'complete_sync_ms')::bigint / 1000, 600),
+              COALESCE((pr.config->>'heartbeat_timeout_ms')::bigint / 1000, 90)
             FROM iam_v2.pms_interface_runtime r JOIN iam_v2.pms_interfaces i ON i.id = r.pms_interface_id
+            LEFT JOIN iam_v2.pms_interface_revisions pr ON pr.id = i.current_revision_id
             WHERE i.lifecycle_state = 'ACTIVE' ORDER BY 1""")
         if not rows:
             self.add("pms:none", "pms", PASS, "no active PMS connection")
         links = []
-        for label, status, down_s, sync_s in rows:
+        for label, status, down_s, sync_s, every_s, hb_s in rows:
             down_s, sync_s = n(down_s), n(sync_s)
             links.append(f"{label}={status}")
             if status != "CONNECTED":
@@ -545,7 +548,10 @@ class Monitor:
                 self.add(f"pms:link:{label}", "pms", st, f"PMS {label} {status} for {down_s // 60} min (room sign-in continues from the last good roster)", persist=2)
             else:
                 self.add(f"pms:link:{label}", "pms", PASS, f"PMS {label} connected")
-            st = CRIT if sync_s > 3600 else WARN if sync_s > 1200 or sync_s < 0 else PASS
+            every_s, hb_s = n(every_s), n(hb_s)
+            # The link's own interval: warn once quiet stays age out of Room sign-in, critical after a second missed sweep.
+            st = (CRIT if sync_s > max(3600, 2 * every_s + hb_s) else WARN if sync_s > max(1200, every_s + hb_s) or sync_s < 0
+                  else PASS)
             self.add(f"pms:sync:{label}", "pms", st, f"PMS {label} last complete roster {sync_s // 60 if sync_s >= 0 else 'never'} min ago", persist=2)
         self.m["pms"] = " ".join(links)
         q = self.s.sql("""SELECT count(*) FILTER (WHERE state <> 'DONE' AND enqueued_at < now() - interval '30 minutes'),

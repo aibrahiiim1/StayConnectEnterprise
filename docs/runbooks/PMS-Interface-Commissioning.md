@@ -296,6 +296,14 @@ Readiness now reports a site whose method is off as OFF, with that reason.
   here), and the FIAS connector never swept again after its first DS..DE, so on a stable link every stay aged out about
   11.5 minutes after the last sweep (`STAY_NOT_ELIGIBLE`). It now requests a complete sync `complete_sync_ms −
   heartbeat_timeout` after the last published one, as the REST connectors do.
+- *The full refresh interval* (`complete_sync_ms`, "Full refresh at least every") is per connection. New Protel FIAS
+  connections default to **60 minutes** (PO, 2026-11-07; it was 10 minutes); existing connections keep their own value
+  until an operator changes it. At 60 minutes a quiet stay may sign in on evidence up to 61.5 minutes old (live check-ins,
+  check-outs and room moves still apply at once), a check-out or room move the live feed missed is caught by the next sweep
+  within the hour, and room charge pauses only for the sweep itself. Room charge keeps its own bound: the financial mirror
+  age (default 4 hours) still forces a sweep at half of it, so an interval above 2 hours is not reached on a room-charge
+  connection without raising that bound. Changing the interval publishes a new revision, which turns room charge off until
+  the connection is onboarded again with the same terms.
 - *The commit-time wake-up.* A Room sign-in session did not notify the plan producer (`onegate_session_pending`), so
   enforcement waited for acctd's next period. On CHR it arrived 2.4 s after the commit, past portald's 2.5 s budget, and a
   guest who was in fact online was told the stay could not be verified. It now notifies at commit, as voucher sign-in does.

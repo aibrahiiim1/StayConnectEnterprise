@@ -60,7 +60,7 @@ func protelFIAS() Provider {
 			ms("heartbeat_interval_ms", "Keep-alive every", 30000, "How often the link is kept alive when idle."),
 			ms("heartbeat_timeout_ms", "Keep-alive timeout", 90000, "Must be greater than the keep-alive interval."),
 			ms("feed_freshness_ms", "Guest list considered stale after", 120000, "Freshness bound for the feed."),
-			ms("complete_sync_ms", "Full guest list refresh at least every", 600000, "Bound on the age of the last complete guest list."),
+			ms("complete_sync_ms", "Full guest list refresh at least every", 3600000, "Bound on the age of the last complete guest list. New connections default to 60 minutes."),
 			maxAuthCacheField(),
 			{Key: "financial_base_currency", Label: "Base currency", Type: FieldString,
 				Placeholder: "EUR", Help: "Optional three-letter ISO code. Set together with the exponent, or leave both empty."},

@@ -133,7 +133,7 @@ describe("adding a connection", () => {
     expect(JSON.parse(JSON.stringify(body))).toEqual({
       endpoint: "10.0.0.5:5010", source_timezone: "Africa/Cairo",
       dial_timeout_ms: 5000, read_timeout_ms: 15000, write_timeout_ms: 15000,
-      heartbeat_interval_ms: 30000, heartbeat_timeout_ms: 90000, feed_freshness_ms: 120000, complete_sync_ms: 600000,
+      heartbeat_interval_ms: 30000, heartbeat_timeout_ms: 90000, feed_freshness_ms: 120000, complete_sync_ms: 3600000,
       read_only: true,
     });
     expect(post.mock.calls[2]).toEqual(["/pms-interfaces/new1/publish", {

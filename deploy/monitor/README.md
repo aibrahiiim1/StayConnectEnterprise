@@ -72,7 +72,7 @@ clears. A check that did not run (deep-only checks during a quick run) keeps its
 | dhcp | pool utilisation | > 85 % | > 95 % |
 | dhcp | requests Kea could not serve | any in 15 min | |
 | pms | link not connected | 2 runs | disconnected > 30 min |
-| pms | last complete roster | > 20 min, 2 runs | > 60 min |
+| pms | last complete roster (against the link's own full refresh interval and keep-alive timeout) | > interval + timeout (at least 20 min), 2 runs | > 2 × interval + timeout (at least 60 min) |
 | posting | room-charge items pending > 30 min or parked | any | |
 | licensing | days left | < 30 | < 7, expired or not active |
 | licensing | online guests vs licence | > 85 % | ≥ 100 % |

@@ -85,7 +85,7 @@ export const PROTEL_FIELDS: PmsProviderField[] = [
     max: 86_400_000, unit: "ms", advanced: true, help: "Must be longer than the keep-alive interval.",
   },
   { key: "feed_freshness_ms", label: "Guest data stale after", type: "int", required: true, default: 120000, min: 1, max: 86_400_000, unit: "ms", advanced: true },
-  { key: "complete_sync_ms", label: "Full refresh at least every", type: "int", required: true, default: 600000, min: 1, max: 86_400_000, unit: "ms", advanced: true },
+  { key: "complete_sync_ms", label: "Full refresh at least every", type: "int", required: true, default: 3600000, min: 1, max: 86_400_000, unit: "ms", advanced: true },
   {
     // Carried through an edit; dropping it silently removed a site's offline sign-in window.
     key: "max_auth_cache_age_seconds", label: "Offline sign-in window", type: "int", min: 0, max: 604800,
