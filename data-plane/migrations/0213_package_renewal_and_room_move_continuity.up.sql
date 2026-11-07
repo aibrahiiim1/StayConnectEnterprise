@@ -234,6 +234,11 @@ BEGIN
     RAISE EXCEPTION 'ROOM_MOVE_NOT_PROVEN: no check-in of this stay into another room' USING ERRCODE = 'P0001';
   END IF;
 
+  -- Waits for usage being recorded on the stay's live sessions (an ingest locks the session's checkpoint first).
+  PERFORM 1 FROM iam_v2.accounting_checkpoints cp JOIN iam_v2.sessions s ON s.id = cp.session_id
+    JOIN iam_v2.entitlements e ON e.id = s.entitlement_id
+   WHERE e.stay_id = p_stay AND s.ended IS NULL ORDER BY cp.id FOR UPDATE OF cp;
+
   SELECT * INTO o FROM iam_v2.entitlements e
    WHERE e.tenant_id = p_tenant AND e.site_id = p_site AND e.stay_id = p_stay AND e.status = 'TERMINATED'
      AND e.terminal_reason = 'CONVERTED' AND e.terminated_at = au.boundary_at AND e.end_mode <> 'GRACE_AFTER_CHECKOUT'
@@ -254,7 +259,7 @@ BEGIN
     IF v_quota IS NOT NULL THEN
       SELECT COALESCE(sum(u.bytes_up + u.bytes_down), 0) INTO v_used
         FROM (SELECT o.id AS id UNION ALL SELECT au.grace_entitlement_id WHERE au.grace_entitlement_id IS NOT NULL) x,
-             LATERAL iam_v2.entitlement_usage_bytes(x.id, now()) u;
+             LATERAL iam_v2.entitlement_usage_bytes(x.id, clock_timestamp()) u;
       v_remaining := v_quota - v_used::bigint;
       IF v_remaining <= 0 THEN
         v_out := 'DATA_USED_UP';
@@ -348,7 +353,11 @@ BEGIN
                   AND s.ended IS NULL AND s.state IN ('active','PENDING_ENFORCEMENT')
                 ORDER BY s.id
   LOOP
-    PERFORM iam_v2.rebind_session_entitlement(v_sid, v_new, v_now);
+    -- Switches just after the last recorded sample (an idle one no earlier than 10 minutes ago): later samples are the continuation's.
+    PERFORM iam_v2.rebind_session_entitlement(v_sid, v_new, GREATEST(
+      (SELECT b.bound_from FROM iam_v2.session_entitlement_bindings b WHERE b.session_id = v_sid AND b.bound_until IS NULL),
+      (SELECT max(cp.prev_sampled_at) + interval '1 microsecond' FROM iam_v2.accounting_checkpoints cp WHERE cp.session_id = v_sid),
+      v_now - interval '10 minutes'));
     v_sessions := v_sessions + 1;
   END LOOP;
 

@@ -225,6 +225,52 @@ func TestIntegration_RoomMoveWithoutAfterCheckoutAccessKeepsTheDevices(t *testin
 	}
 }
 
+// A live session moves to the continuation just after its last recorded sample, so a sample still in flight at the move is
+// counted against the continuation, not against the allowance already frozen into it.
+func TestIntegration_RoomMoveSwitchesALiveSessionAfterItsLastSample(t *testing.T) {
+	p, s, pr, pkgRev := moveFixture(t)
+	ctx := context.Background()
+	insertLive(t, p, s, "S-GI", "GI", pay("RM8", "500", "Online", "Jo", "F8", "260101", "260110"))
+	process(t, pr, s)
+	stayID := stayOf(t, p, s, "RM8")
+	boundary := time.Now().Add(-20 * time.Minute).Truncate(time.Microsecond)
+	ent := grantEntitlement(t, p, s, stayID, pkgRev, boundary.Add(-time.Hour))
+	dev := authorizeDevice(t, p, s, ent, boundary.Add(-30*time.Minute))
+	insertLiveAt(t, p, s, "S-GO", "GO", pay("RM8", "500", "Online", "Jo", "F8", "260101", "260110"), boundary)
+	process(t, pr, s)
+
+	var grace, sess string
+	if err := p.QueryRow(ctx, `SELECT id::text FROM iam_v2.entitlements WHERE stay_id=$1 AND end_mode='GRACE_AFTER_CHECKOUT' AND status='ACTIVE'`,
+		stayID).Scan(&grace); err != nil {
+		t.Fatalf("After Check-out Access: %v", err)
+	}
+	if err := p.QueryRow(ctx, `INSERT INTO iam_v2.sessions (tenant_id, site_id, entitlement_id, device_id, ip, mac, state, credential_method,
+		started, ingress_interface)
+		SELECT $1,$2,$3::uuid,dv.id,'10.77.0.8'::inet,dv.mac,'active','room',$5,'br-lan' FROM iam_v2.devices dv WHERE dv.id=$4::uuid RETURNING id::text`,
+		s.tenant, s.site, grace, dev, boundary.Add(time.Minute)).Scan(&sess); err != nil {
+		t.Fatalf("session: %v", err)
+	}
+	last := time.Now().Add(-2 * time.Minute).Truncate(time.Microsecond)
+	for i, at := range []time.Time{last.Add(-time.Minute), last} {
+		if _, err := p.Exec(ctx, `SELECT iam_v2.ingest_absolute_counters($1,$2,$3::uuid,$4::uuid,'br-lan',iam_v2.p3_expected_class_minor('10.77.0.8'::inet),
+			1,$5,$5,$6)`, s.tenant, s.site, sess, dev, int64(i)*1000, at); err != nil {
+			t.Fatalf("sample %d: %v", i, err)
+		}
+	}
+
+	insertLive(t, p, s, "S-GI2", "GI", pay("RM8", "501", "Online", "Jo", "F8", "260101", "260110"))
+	process(t, pr, s)
+	var cont, before, after string
+	if err := p.QueryRow(ctx, `SELECT e.id::text, iam_v2.p3_entitlement_at($2::uuid, $3)::text, iam_v2.p3_entitlement_at($2::uuid, $3 + interval '1 second')::text
+		FROM iam_v2.entitlements e JOIN iam_v2.purchases pu ON pu.id=e.purchase_id
+		WHERE e.stay_id=$1 AND e.status='ACTIVE' AND pu.trigger='ROOM_MOVE_RESTORE'`, stayID, sess, last).Scan(&cont, &before, &after); err != nil {
+		t.Fatalf("continuation: %v", err)
+	}
+	if before != grace || after != cont {
+		t.Fatalf("the sample at the last reading belongs to %s and one a second later to %s; want the After Check-out Access, then the continuation", before, after)
+	}
+}
+
 // A checkout closed by a same-room reinstatement is not a move, even if the stay moves rooms later.
 func TestIntegration_RecoveryRefusesACheckoutClosedByAReinstatement(t *testing.T) {
 	p, s, pr, pkgRev := moveFixture(t)
