@@ -125,6 +125,17 @@ class Thresholds(unittest.TestCase):
         self.assertEqual(by_key(run(self.kea(90)))["dhcp:pools"].status, om.WARN)
         self.assertEqual(by_key(run(self.kea(97)))["dhcp:pools"].status, om.CRIT)
 
+    def test_a_roster_is_judged_against_its_own_links_refresh_interval(self):
+        def sync(age_s, every_s):
+            f = FakeSys()
+            f.sqls.append((r"FROM iam_v2.pms_interface_runtime r JOIN", [["CHR", "CONNECTED", "-1", str(age_s), str(every_s), "90"]]))
+            return by_key(run(f))["pms:sync:CHR"].status
+        self.assertEqual(sync(42 * 60, 3600), om.PASS)
+        self.assertEqual(sync(62 * 60, 3600), om.WARN)
+        self.assertEqual(sync(125 * 60, 3600), om.CRIT)
+        self.assertEqual(sync(15 * 60, 600), om.PASS)
+        self.assertEqual(sync(42 * 60, 600), om.WARN)
+        self.assertEqual(sync(61 * 60, 600), om.CRIT)
     def test_a_subnet_that_is_not_authoritative_warns(self):
         f = self.kea(10)
         conf = json.loads(f.files["/etc/kea/kea-dhcp4.conf"])
@@ -308,7 +319,7 @@ class ReviewFindings(unittest.TestCase):
         inc = lambda: {"pms:link:OLD": {"first": NOW.isoformat(), "last": NOW.isoformat(), "count": 4, "streak": 4, "raised": True,
                                         "status": om.CRIT, "text": "PMS OLD DISCONNECTED", "area": "pms"}}
         f = FakeSys()
-        f.sqls += [(r"pms_interface_runtime", [["CHR", "CONNECTED", "-1", "60"]]), (r"posting_outbox", [["0", "0", "0"]])]
+        f.sqls += [(r"pms_interface_runtime", [["CHR", "CONNECTED", "-1", "60", "600", "90"]]), (r"posting_outbox", [["0", "0", "0"]])]
         state = {"incidents": inc()}
         mon = run(f, state=state)
         _, rec = om.Incidents(state, NOW).apply(mon.results, mon.complete)
