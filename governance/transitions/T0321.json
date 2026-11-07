@@ -1,0 +1,35 @@
+{
+  "transition_id": "T0321",
+  "seq": 321,
+  "timestamp": "2026-11-07T18:24:45+02:00",
+  "timestamp_derivation": "Read from the workstation clock (UTC+02:00) by the script that wrote this receipt, immediately before the commit that introduces it.",
+  "record_type": "PMS_FULL_SYNC_INTERVAL",
+  "authorisation": "The Product Owner's approvals of 2026-11-07 (D102): 60-minute full sync on both interfaces of the test appliance 172.21.96.97 only, and the 60-minute default for new Protel FIAS connections.",
+  "delivery": "Configuration on the test appliance through the audited operator API (test operator): a revision with complete_sync_ms 3600000 authored and published per interface, and room-charge onboarding re-approved at once with identical terms (USD/2, RESERVATION, same attestation): revision 4 on both. PR #404 (merged 2a7daa65): catalogue and Admin Console default 3600000 for new Protel FIAS connections; monitor thresholds per link (warn above interval + keep-alive timeout, at least 20 min; critical above 2 x interval + timeout, at least 60 min); commissioning runbook.",
+  "findings": "Read-only assessment before the change: sweeps every 8.7 to 9.1 min (about 160 a day per interface), 19 s and 37 s each, room charge paused about 3.6 and 6.8 percent of the time; live feed reliable (missed check-ins only during an 11-03 feed incident, 16 missed check-outs and 16 missed room changes in 7 days recovered by sweeps); about 110,000 roster rows a day. Publishing a revision voids room-charge onboarding by design, so the change re-approved it with the same terms in the same minute. Two observations closed: the 10:39 room-charge pause was inside a sweep (the attempt record carries the resolution time, the refusals came at 10:41:13-23 during the 10:41:06-25 sweep); the 795 ms netd pass was transient load (read-only assessment queries, the 14:30 backup, the 14:32 resync, the day's peak of about 500 online), median back to about 180-330 ms.",
+  "verification": "After the change: room charge fresh again 40 s after publication; every in-house stay re-stamped with the new revision by 14:33:38 (Room sign-in could not accept quiet stays for at most about 1 minute); next periodic sweeps requested 58.8 min after the last (15:31:50 and 15:32:01) and published in 19 s and 37 s; audit log holds authored, published and financial_onboard for both interfaces; credential file removed from the appliance. After 631b483c: GET /pms-providers serves default 3600000 (required, bounded); existing interfaces untouched (revision 4); monitor PMS warnings recovered under the new thresholds. Tests: TestProtelFIAS_FullSyncDefaultsTo60Minutes; Admin Console wizard default and edit-keeps-own-value; monitor unit tests 44 (1 database test skipped, its query run on the appliance). Codex clean on 631b483c.",
+  "deployment": {
+    "test_appliance": "Configuration change after verified backup db-20261107T143037Z; rollback by republishing revisions 9af4e012 and 8f5f084e, which keep their onboarding. Release onegate-appliance-631b483c99ed after verified backup db-20261107T162013Z; rollback tree /opt/stayconnect/.previous/20261107T162155Z.",
+    "central": "Not changed."
+  },
+  "not_touched": "Financial mirror age, keep-alive, feed freshness and offline sign-in window settings; posting rules; authentication; networking; the production Central.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "2a7daa657925ce6deebe625750ab107a3c1f19ef",
+  "previous_delivery": "T0320",
+  "decision": "D102",
+  "go_live": "NOT authorised."
+}

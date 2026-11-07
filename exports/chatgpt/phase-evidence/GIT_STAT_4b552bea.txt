@@ -1,0 +1,4 @@
+commit 4b552beafe224efd67b3747067b23db3b9687b13
+Date:   Sat Nov 7 18:24:57 2026 +0200
+
+    Governance: D102 and T0321 (PMS full sync every 60 minutes; test appliance 631b483c)
