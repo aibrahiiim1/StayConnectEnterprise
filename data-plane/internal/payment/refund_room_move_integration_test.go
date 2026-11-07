@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // A room move continues a paid package under its own zero-price purchase (0213). A full refund of the original charge must still end
@@ -167,4 +169,39 @@ func TestCardRefundPolicy_AnEndAccessReviewEndsTheAccessARoomMoveContinued(t *te
 	if st, why := entStatus(t, cont); st != "TERMINATED" || why != "REVOKED" {
 		t.Fatalf("the continued access survived END_ACCESS: %s/%s", st, why)
 	}
+}
+// A dispute decided END_ACCESS while the package sat converted at a checkout keeps a later room move from bringing it back.
+func TestCardRefundPolicy_AnEndAccessDecisionBeforeTheMoveIsHonoured(t *testing.T) {
+	ctx := context.Background()
+	s, e, prov, charge, ent := capturedChain(t)
+	admin := pool(t)
+	if err := guardedConvert(ctx, admin, ent); err != nil {
+		t.Fatal(err)
+	}
+	prov.status.Events = []ProviderEvent{{EventID: "dispute:" + charge, Kind: "DISPUTE", AmountMinor: s.amount, ProviderRef: "dp_" + charge}}
+	e.SweepReversals(ctx, s.tenant, s.site, 24*time.Hour, 10)
+	var reversed bool
+	if err := admin.QueryRow(ctx, `SELECT iam_v2.entitlement_funding_reversed($1::uuid)`, ent).Scan(&reversed); err != nil || reversed {
+		t.Fatalf("an open dispute alone reads as reversed: %v %v", reversed, err)
+	}
+	if _, err := admin.Exec(ctx, `SELECT iam_v2.p4_resolve_reversal_review($1,$2,
+		(SELECT id FROM iam_v2.card_reversal_reviews WHERE charge_transaction_id=$3 AND kind='DISPUTE'),'END_ACCESS','payments:alice','dispute lost')`,
+		s.tenant, s.site, charge); err != nil {
+		t.Fatal(err)
+	}
+	if err := admin.QueryRow(ctx, `SELECT iam_v2.entitlement_funding_reversed($1::uuid)`, ent).Scan(&reversed); err != nil || !reversed {
+		t.Fatalf("an END_ACCESS decision does not stop a continuation: %v %v", reversed, err)
+	}
+}
+
+func guardedConvert(ctx context.Context, p *pgxpool.Pool, ent string) error {
+	tx, err := p.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SELECT iam_v2.apply_entitlement_transition($1::uuid,'TERMINATED',now(),'CONVERTED')`, ent); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }

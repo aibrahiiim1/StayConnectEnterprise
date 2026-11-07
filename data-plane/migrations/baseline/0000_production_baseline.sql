@@ -3361,8 +3361,13 @@ BEGIN
                   WHERE se.purchase_id = v_purchase
                     AND ((SELECT COALESCE(sum(r.amount_minor), 0) FROM iam_v2.payment_transactions r
                            WHERE r.parent_transaction_id = c.id AND r.transaction_type = 'REFUND' AND r.status = 'CAPTURED') >= c.amount_minor
-                         OR EXISTS (SELECT 1 FROM iam_v2.payment_transactions b
-                                     WHERE b.parent_transaction_id = c.id AND b.transaction_type = 'CHARGEBACK' AND b.status = 'CAPTURED')))
+                         OR (EXISTS (SELECT 1 FROM iam_v2.payment_transactions b
+                                      WHERE b.parent_transaction_id = c.id AND b.transaction_type = 'CHARGEBACK' AND b.status = 'CAPTURED')
+                             AND NOT EXISTS (SELECT 1 FROM iam_v2.card_reversal_reviews k WHERE k.charge_transaction_id = c.id
+                                                AND k.kind = 'CHARGEBACK' AND k.resolution = 'KEEP_ACCESS'))))
+      -- An operator's END_ACCESS decision on a dispute or chargeback is final, with or without money moving.
+      OR EXISTS (SELECT 1 FROM iam_v2.card_reversal_reviews rv JOIN iam_v2.settlements se ON se.id = rv.settlement_id
+                  WHERE se.purchase_id = v_purchase AND rv.resolution = 'END_ACCESS')
       OR EXISTS (SELECT 1 FROM iam_v2.pms_postings ch JOIN iam_v2.pms_postings rv ON rv.reverses_posting_id = ch.id AND rv.posting_type = 'REVERSAL'
                   WHERE ch.purchase_id = v_purchase AND ch.posting_type = 'CHARGE');
 END $$;
