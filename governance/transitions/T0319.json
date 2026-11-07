@@ -1,0 +1,35 @@
+{
+  "transition_id": "T0319",
+  "seq": 319,
+  "timestamp": "2026-11-07T03:32:26+02:00",
+  "timestamp_derivation": "Read from the workstation clock (UTC+02:00) by the script that wrote this receipt, immediately before the commit that introduces it.",
+  "record_type": "PACKAGE_RENEWAL_AND_ROOM_MOVE_COMPLETION",
+  "authorisation": "The Product Owner's mission of 2026-11-06 (D100): package renewal and PMS room-move corrections end to end, with deployment to the test appliance 172.21.96.97 only.",
+  "delivery": "PR #397 (merged 56072307): migration 0213 (renewal rule stay_package_purchase_refusal and purchase_seq guard; room_move_restorations ledger; restore_room_move_access; entitlement_funding_reversed; refund and reversal-review enforcement follow continuations under the package lock); stayengine VACATE_OLD_ROOM and reinstatement with room change; scd offers and purchase refusals; NO_PACKAGE and ROOM_CHARGE_PAUSED Portal answers in six languages; Admin Console renewal settings; runbook PMS_ROOM_MOVES_AND_RENEWAL.md.",
+  "findings": "102 room moves on the test appliance since 11-01 arrived as check-out plus check-in of the same reservation; 6 stays had live access converted at the check-out. Of 17 transient no-eligible-package answers, 15 came during roster resyncs when room charge is withheld by design (PIN_RESYNC_IN_FLIGHT / SYNC_*): only the message was wrong. Two stays had paid Full Stay access ended by a move and then bought One Day (3.00 each, 6.00 in total): documented, not refunded (no financial adjustment was authorized). One further stay had live access of its own and was left as it is.",
+  "verification": "Targeted integration tests: stayengine room-move matrix (check-out first, check-in first, two moves, no After Check-out Access, same room, ended window, recovery refusal, live session switched after its last sample) as svc_pmsd; scd renewal (not renewable, up to the maximum, concurrent purchases leave one); payment matrix rc=0 incl. refund, dispute END_ACCESS before and during a move; portald and Admin Console tests; baseline regenerated and FACTORY_CLEAN_BASELINE = PASS; Codex clean on ee996629. Live: the first roster resync after the upgrade continued one stay's converted One Day package across a move (same end time, 7 devices, 5 sessions, zero price); one-time recovery restored Full Stay for the two affected stays (episodes RESTORED / NOTHING_TO_RESTORE recorded), with no new posting or settlement; existing packages unchanged (not renewable). NOT VERIFIED: a renewal purchase by a guest (no package is renewable yet), a live check-in-first move after the upgrade.",
+  "deployment": {
+    "test_appliance": "onegate-appliance-ee99662919a4 after verified backup db-20261107T012433Z (ledger entry 6, proven restorable); rollback tree /opt/stayconnect/.previous/20261107T012555Z and bin/*.bak-20261107T012555Z.",
+    "central": "Not changed."
+  },
+  "not_touched": "PMS configuration and traffic rules, Card Payment, refunds and reversals, After Check-out policy, licensing, device limits, networking, the production Central.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "No phase or acceptance change."
+  },
+  "state_note": "Go-Live remains unauthorised.",
+  "base": "56072307de67b77cda76621f04298f94a1d28fbb",
+  "previous_delivery": "T0318",
+  "decision": "D100",
+  "go_live": "NOT authorised."
+}
