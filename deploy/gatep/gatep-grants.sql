@@ -357,6 +357,7 @@ GRANT EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) TO svc_acctd;
 \ir svc-stay-transfer-grants.sql
 -- Staff End Package / Reset Package are definer functions (0202).
 \ir svc-package-controls-grants.sql
+\ir svc-renewal-room-move-grants.sql
 
 -- EXECUTE on the CANONICAL audited, versioned publication boundary. This is the only function the product
 -- calls to change checkout grace policy: it requires an active operator as actor, a bounded machine reason

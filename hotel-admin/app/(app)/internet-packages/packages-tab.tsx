@@ -243,6 +243,8 @@ export function PackagesTab({
         // Loaded, not defaulted: a rename must not flatten a per-night allowance or make a priced package free.
         allocation: allocationFromPolicy(cur.data_allocation_policy),
         acquisition: acquisitionToForm(cur),
+        renewable: cur.renewable ?? false,
+        maxPurchasesPerStay: cur.max_purchases_per_stay ?? null,
       });
       setAdding(false);
       setSelected(null);
@@ -274,6 +276,9 @@ export function PackagesTab({
         // A revision states its commercial terms in full; the server refuses omissions (commercial_fields_required).
         body.room_charge_mappings = v.payload.room_charge_mappings ?? [];
         Object.assign(body, editBase?.carry ?? {});
+        // The form owns renewal when it shows it; the carried values only cover a form without the hotel module.
+        if (v.payload.renewable !== undefined) body.renewable = v.payload.renewable;
+        if (v.payload.max_purchases_per_stay !== undefined) body.max_purchases_per_stay = v.payload.max_purchases_per_stay;
         const after: RevisionTerms = {
           price_minor: v.payload.price_minor ?? 0,
           currency: v.payload.currency ?? "",

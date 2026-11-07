@@ -29,6 +29,12 @@ const (
 	guestPostStayMessage = "We could not verify your stay. Please check your details or contact the site team for assistance."
 )
 
+// NO_PACKAGE and ROOM_CHARGE_PAUSED follow a verified stay, so they tell the guest nothing their room and name did not just prove.
+const (
+	guestNoPackageMessage        = "Your stay is confirmed, but no Internet package is available to your room right now. Please contact the site team."
+	guestRoomChargePausedMessage = "Your stay is confirmed. Charging to your room is paused for a moment while the property system updates. Please try again in a minute."
+)
+
 const guestRoomDeviceLimitMessage = "Every device place for this room is in use. On a device that is online with it, remove one under “Your devices”, or contact the site team."
 
 // ADDRESS_CONFLICT: the device kept an address DHCP has since leased to another device; a fact about the device, not a room.
@@ -56,7 +62,9 @@ var guestAuthMessages = map[string]string{
 	"TECHNICAL":  guestAuthTechnicalMessage,
 	"POST_STAY":  guestPostStayMessage,
 	// DEVICE_LIMIT: access is fine but there is no free device slot.
-	"DEVICE_LIMIT": guestRoomDeviceLimitMessage,
+	"DEVICE_LIMIT":       guestRoomDeviceLimitMessage,
+	"NO_PACKAGE":         guestNoPackageMessage,
+	"ROOM_CHARGE_PAUSED": guestRoomChargePausedMessage,
 	// AFTER_CHECKOUT_DEVICE: the departed guest is verified, but this device was not one of the stay's.
 	"AFTER_CHECKOUT_DEVICE": guestAfterCheckoutDeviceMessage,
 	"ADDRESS_CONFLICT":      guestAddressConflictMessage,

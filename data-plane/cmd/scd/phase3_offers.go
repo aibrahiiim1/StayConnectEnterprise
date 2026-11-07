@@ -145,27 +145,18 @@ func (p *phase3Auth) offersFor(ctx context.Context, stayID, interfaceID, guestNe
 		   -- stay is decided per package below (stayMethods), so nothing is offered that would then fail.
 		   AND ((ipr.price_minor = 0 AND 'NOT_REQUIRED' = ANY (ipr.settlement_methods))
 		        OR (ipr.price_minor > 0 AND ipr.settlement_methods && ARRAY['PMS_POSTING','ONLINE_PAYMENT']::text[]))
-		   -- A STAY TAKES EACH PACKAGE REVISION ONCE (purchase_once_per_stay, contract). One it already holds
-		   -- was still offered, and choosing it failed on that index -- after the guest's details were right,
-		   -- as "we are unable to verify your stay". Same predicate as the index, so the offer set and the
-		   -- grant can never disagree.
+		   -- WHETHER THE STAY MAY BUY THIS REVISION (AGAIN) IS ONE DATABASE RULE (0213): a revision bought before is offered again
+		   -- only when it is renewable, nothing of it is live or being settled, and the stay is under its maximum. The purchase guard
+		   -- calls the same function, so the offer set and the grant can never disagree.
 		   --
-		   -- EXCEPT the package behind the stay's LIVE access. While the stay holds an ACTIVE, unexpired
-		   -- entitlement, choosing its package does not buy it again: the grant JOINS that entitlement (a second
-		   -- device of the room, or the same guest signing in again), and no purchase is written. Excluding it
-		   -- left a property with one free package unable to admit anyone into a room that already had access
-		   -- -- the guest proved who they were and was told the stay could not be verified.
-		   -- A staff Reset (0202) continues the same package revision under a new ADMIN_GRANT purchase, so the live access
-		   -- of the stay is matched by its package revision as well as by the purchase that first funded it.
-		   AND NOT EXISTS (SELECT 1 FROM iam_v2.purchases pu
-		                    WHERE pu.stay_id = $3::uuid AND pu.package_revision_id = ipr.id
-		                      AND pu.trigger = 'GUEST_SELECTION'
-		                      AND pu.state IN ('PENDING','AWAITING_SETTLEMENT','MANUAL_REVIEW','GRANTED')
-		                      AND NOT EXISTS (SELECT 1 FROM iam_v2.entitlements e
-		                                       WHERE (e.purchase_id = pu.id OR e.package_revision_id = pu.package_revision_id)
-		                                         AND e.stay_id = $3::uuid
-		                                         AND e.status = 'ACTIVE'
-		                                         AND (e.window_ends_at IS NULL OR e.window_ends_at > now())))
+		   -- EXCEPT the package behind the stay's LIVE access. While the stay holds an ACTIVE, unexpired entitlement of the revision,
+		   -- choosing it does not buy it again: the grant JOINS that entitlement (a second device of the room, or the same guest
+		   -- signing in again), and no purchase is written. A staff Reset or a room-move continuation keeps the revision, so it is
+		   -- matched by revision.
+		   AND (iam_v2.stay_package_purchase_refusal($3::uuid, ipr.id) IS NULL
+		        OR EXISTS (SELECT 1 FROM iam_v2.entitlements e
+		                    WHERE e.stay_id = $3::uuid AND e.package_revision_id = ipr.id AND e.status = 'ACTIVE'
+		                      AND (e.window_ends_at IS NULL OR e.window_ends_at > now())))
 		   -- A free package staff ended for this stay (End Package, 0202) is not offered again during the stay; the
 		   -- entitlement guard refuses it in any case. A priced package can still be bought.
 		   AND NOT (ipr.price_minor = 0

@@ -78,6 +78,26 @@ const roomChargeApplicableSQL = `
 		   AND NOT iam_v2.p4_stay_room_charge_open($4::uuid)
 		   AND iam_v2.p4_room_charge_interface_fresh($1,$2,$3)`
 
+// roomChargePaused reports that room charge is withheld only because the PMS link is refreshing (contract: no charge on a resync in
+// progress or a stale mirror), while the site sells at least one package by room charge. The guest is told to try again shortly
+// instead of that nothing is available. Any error is "no".
+func (p *phase3Auth) roomChargePaused(ctx context.Context, ifaceID string) bool {
+	site := stayMethodGate(ctx, p.srv)
+	if !site.PaidAccess || !site.RoomCharge {
+		return false
+	}
+	var paused bool
+	if err := p.srv.db.QueryRow(ctx, `SELECT NOT iam_v2.p4_room_charge_interface_fresh($1,$2,$3::uuid)
+		   AND EXISTS (SELECT 1 FROM iam_v2.internet_packages ip
+		                 JOIN iam_v2.internet_package_revisions ipr ON ipr.id = ip.current_revision_id
+		                WHERE ip.tenant_id=$1 AND ip.site_id=$2 AND ip.active AND ip.is_system IS NOT TRUE
+		                  AND ipr.price_minor > 0 AND 'PMS_POSTING' = ANY (ipr.settlement_methods))`,
+		p.srv.tenID, p.srv.siteID, ifaceID).Scan(&paused); err != nil {
+		return false
+	}
+	return paused
+}
+
 // roomChargeApplicable treats any error as "no".
 func (p *phase3Auth) roomChargeApplicable(ctx context.Context, stayID, ifaceID string, d offerDecision) bool {
 	var ok bool
@@ -122,6 +142,10 @@ func (p *phase3Auth) paidPurchase(w http.ResponseWriter, r *http.Request, tx pgx
 		return signinattempt.ServiceUnavailable, false
 	}
 	if !containsString(p.stayMethods(ctx, stayID, ifaceID, d), req.Method) {
+		if req.Method == iamv2.AcquireRoomCharge && p.roomChargePaused(ctx, ifaceID) {
+			notVerifiedClass(w, signinattempt.VerifiedNoEligiblePackage, signinattempt.GuestRoomChargePaused, "paid: room charge paused")
+			return signinattempt.VerifiedNoEligiblePackage, false
+		}
 		notVerified(w, signinattempt.VerifiedNoEligiblePackage, "paid: method not available now")
 		return signinattempt.VerifiedNoEligiblePackage, false
 	}
@@ -203,9 +227,10 @@ func (p *phase3Auth) paidPurchase(w http.ResponseWriter, r *http.Request, tx pgx
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'GUEST_SELECTION',$10,$11,$12,'AWAITING_SETTLEMENT') RETURNING id::text`,
 		p.srv.tenID, p.srv.siteID, pkgRev, quoteID, acID, consumed.Interface, consumed.Stay, mapping, consumed.Revision,
 		d.PriceMinor, d.Currency, d.CurrencyExponent).Scan(&purchaseID); err != nil {
+		// The renewal guard (0213): bought already and not renewable now, or a concurrent purchase of the same renewal won.
 		if strings.Contains(err.Error(), "purchase_once_per_stay") {
-			notVerified(w, signinattempt.StayNotEligible, "paid: already purchased for this stay")
-			return signinattempt.StayNotEligible, false
+			notVerified(w, signinattempt.VerifiedNoEligiblePackage, "paid: not purchasable again now")
+			return signinattempt.VerifiedNoEligiblePackage, false
 		}
 		noteRetry(ctx, err)
 		notVerified(w, signinattempt.ServiceUnavailable, "paid: purchase: "+err.Error())

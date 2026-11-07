@@ -1518,6 +1518,8 @@ const landingHTML = `<!doctype html>
     const ROOM_MESSAGES = {};
     ROOM_MESSAGES[BUILTIN.en['err.room.credential']] = 'err.room.credential';
     ROOM_MESSAGES[BUILTIN.en['err.room.technical']] = 'err.room.technical';
+    ROOM_MESSAGES[BUILTIN.en['err.room.nopackage']] = 'err.room.nopackage';
+    ROOM_MESSAGES[BUILTIN.en['err.room.paused']] = 'err.room.paused';
     ROOM_MESSAGES[BUILTIN.en['err.wait']] = 'err.wait';
     ROOM_MESSAGES[BUILTIN.en['err.generic']] = 'err.generic';
     ROOM_MESSAGES[BUILTIN.en['err.room.devices']] = 'err.room.devices';
@@ -1876,7 +1878,7 @@ const landingHTML = `<!doctype html>
         const done = await submitPhase3(body, errEl);
         // "Unable to verify your stay right now" is a property-wide pause (the guest list refreshing every few
         // minutes takes a few seconds); it never answers a wrong detail. Ask once more on the guest's behalf.
-        if (!done && ROOM_MESSAGES[PHASE3_LAST_MSG] === 'err.room.technical') {
+        if (!done && (ROOM_MESSAGES[PHASE3_LAST_MSG] === 'err.room.technical' || ROOM_MESSAGES[PHASE3_LAST_MSG] === 'err.room.paused')) {
           await new Promise(function(res){ setTimeout(res, 2000); });
           body.request_id = newRequestID();
           await submitPhase3(body, errEl);

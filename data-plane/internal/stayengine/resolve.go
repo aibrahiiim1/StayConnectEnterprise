@@ -44,11 +44,13 @@ type StayView struct {
 type Op string
 
 const (
-	OpCreateStay    Op = "CREATE_STAY"
-	OpUpdateStay    Op = "UPDATE_STAY" // in-place correction on the same episode
-	OpRoomMove      Op = "ROOM_MOVE"   // same Stay, new room
-	OpCheckout      Op = "CHECKOUT"
-	OpReinstate     Op = "REINSTATE" // CHECKED_OUT to IN_HOUSE, new episode
+	OpCreateStay Op = "CREATE_STAY"
+	OpUpdateStay Op = "UPDATE_STAY" // in-place correction on the same episode
+	OpRoomMove   Op = "ROOM_MOVE"   // same Stay, new room
+	OpCheckout   Op = "CHECKOUT"
+	OpReinstate  Op = "REINSTATE" // CHECKED_OUT to IN_HOUSE, new episode
+	// OpVacateOldRoom: a check-out of a room the reservation has already left (the move's check-in came first); the stay stays in house.
+	OpVacateOldRoom Op = "VACATE_OLD_ROOM"
 	OpSkipDuplicate Op = "SKIP_DUPLICATE"
 	OpManualReview  Op = "MANUAL_REVIEW"
 )
@@ -69,6 +71,9 @@ func Resolve(ev InboxEvent, cur *StayView) Decision {
 		return Decision{Op: OpSkipDuplicate}
 	}
 	roomChanged := cur != nil && normRoom(cur.Room) != normRoom(ev.Room) && normRoom(ev.Room) != ""
+	// A room move announced as check-out plus check-in (FIAS 2.20 p. 46, either order) is recognised only from the reservation's own
+	// rooms: both events carry the same reservation and name different rooms. A record without a known room is never a move.
+	movedRoom := roomChanged && normRoom(cur.Room) != "" && ev.Reservation != ""
 
 	switch ev.EventType {
 	case EvGuestIn:
@@ -76,7 +81,7 @@ func Resolve(ev InboxEvent, cur *StayView) Decision {
 		case cur == nil:
 			return Decision{Op: OpCreateStay, NewStatus: "IN_HOUSE"}
 		case cur.Status == "CHECKED_OUT":
-			return Decision{Op: OpReinstate, NewStatus: "IN_HOUSE", Reinstate: true}
+			return Decision{Op: OpReinstate, NewStatus: "IN_HOUSE", Reinstate: true, RoomMove: movedRoom}
 		case cur.Status == "IN_HOUSE":
 			if roomChanged {
 				return Decision{Op: OpRoomMove, RoomMove: true}
@@ -107,6 +112,8 @@ func Resolve(ev InboxEvent, cur *StayView) Decision {
 		switch {
 		case cur == nil:
 			return Decision{Op: OpManualReview, ReviewCode: "GO_UNKNOWN_STAY"}
+		case cur.Status == "IN_HOUSE" && movedRoom:
+			return Decision{Op: OpVacateOldRoom}
 		case cur.Status == "IN_HOUSE":
 			return Decision{Op: OpCheckout, NewStatus: "CHECKED_OUT"}
 		case cur.Status == "CHECKED_OUT":

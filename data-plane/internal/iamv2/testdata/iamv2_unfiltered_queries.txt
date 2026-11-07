@@ -139,9 +139,9 @@ internal/signinattempt/store.go	8ebb0fcda871	DELETE FROM iam_v2.sign_in_attempts
 internal/stayengine/pg.go	1f3311a2ba78	UPDATE iam_v2.stays SET normalized_room_number=NULLIF($2,'') WHERE id=$1
 internal/stayengine/pg.go	273821b8cb74	UPDATE iam_v2.stays SET last_applied_event_version = last_applied_event_version + 1, last_
 internal/stayengine/pg.go	34aa1588ca0d	UPDATE iam_v2.stays SET status = CASE WHEN $2<>'' THEN $2 ELSE status END, arrival = COALE
-internal/stayengine/pg.go	39a772a574df	UPDATE iam_v2.stay_events SET processing_status=$2, stay_id=NULLIF($3,'')::uuid, processed
 internal/stayengine/pg.go	4ed73812859d	UPDATE iam_v2.stays SET status='IN_HOUSE', lifecycle_version=lifecycle_version+1, effectiv
 internal/stayengine/pg.go	59e1f6a3f21f	UPDATE iam_v2.stays SET travel_agent = CASE WHEN $2::text IS NULL THEN travel_agent ELSE N
+internal/stayengine/pg.go	91f1e0ceea18	UPDATE iam_v2.stay_events SET processing_status=$2, stay_id=NULLIF($3,'')::uuid, processed
 internal/stayengine/pg.go	9c0a8070a989	UPDATE iam_v2.stays SET occupancy_evidence_at = $2, occupancy_ingested_at = now(), occupan
 internal/stayengine/sharers.go	52864af177c2	SELECT id::text FROM iam_v2.stay_guests WHERE stay_id=$1 AND ( (COALESCE($2,'') <> '' AND 
 internal/stayengine/sharers.go	7caf076798d0	UPDATE iam_v2.stay_guests SET is_primary=false WHERE stay_id=$1 AND is_primary AND COALESC

@@ -160,6 +160,8 @@ export const PORTAL_STRINGS: PortalString[] = [
   { group: "Messages", key: "notice.ended.time", english: "Your Internet package has ended because the access time expired." },
   { group: "Messages", key: "err.room.credential", english: "The room number or guest detail you entered is incorrect. Check the room number and enter the full first name, family name, or reservation number.", module: "hospitality" },
   { group: "Messages", key: "err.room.technical", english: "We are unable to verify your stay right now. Please try again or contact the site team for assistance.", module: "hospitality" },
+  { group: "Messages", key: "err.room.nopackage", english: "Your stay is confirmed, but no Internet package is available to your room right now. Please contact the site team.", module: "hospitality" },
+  { group: "Messages", key: "err.room.paused", english: "Your stay is confirmed. Charging to your room is paused for a moment while the property system updates. Please try again in a minute.", module: "hospitality" },
   { group: "Messages", key: "err.wait", english: "Too many attempts. Please wait and try again." },
   { group: "Messages", key: "err.wait.seconds", english: "Too many attempts. Please wait {n} seconds and try again." },
   { group: "Messages", key: "err.attempts", english: "Too many attempts. Please wait a minute and try again." },

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -218,10 +219,33 @@ func (p *Processor) ProcessNext(ctx context.Context, tenant, site, iface string)
 			return false, cerr
 		}
 	}
+	if d.Op == OpReinstate && d.RoomMove && stayID != "" && terminal == "APPLIED" {
+		restoreRoomMove(ctx, tx, tenant, site, stayID, cur.LifecycleVersion, eventID)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+// restoreRoomMove continues the package the move's check-out converted (migration 0213, contract F1). It runs under a savepoint:
+// a refusal or a failure is logged and leaves the reinstatement applied, so the event stream is never held on it.
+func restoreRoomMove(ctx context.Context, tx pgx.Tx, tenant, site, stayID string, episode int, checkinEvent string) {
+	if _, err := tx.Exec(ctx, `SAVEPOINT room_move_restore`); err != nil {
+		slog.Error("stayengine: room move restoration could not start", "stay", stayID, "err", err)
+		return
+	}
+	var outcome string
+	var devices, sessions int
+	err := tx.QueryRow(ctx, `SELECT outcome, devices, sessions FROM iam_v2.restore_room_move_access($1,$2,$3::uuid,$4,$5::uuid,'ROOM_MOVE',false)`,
+		tenant, site, stayID, episode, checkinEvent).Scan(&outcome, &devices, &sessions)
+	if err != nil {
+		_, _ = tx.Exec(ctx, `ROLLBACK TO SAVEPOINT room_move_restore`)
+		slog.Warn("stayengine: room move not restored", "stay", stayID, "episode", episode, "err", err)
+		return
+	}
+	_, _ = tx.Exec(ctx, `RELEASE SAVEPOINT room_move_restore`)
+	slog.Info("stayengine: room move", "stay", stayID, "episode", episode, "outcome", outcome, "devices", devices, "sessions", sessions)
 }
 
 // occupancyEvidence is taken from the event that confirmed the Stay is occupied.
@@ -309,12 +333,21 @@ func applyDecision(ctx context.Context, tx pgx.Tx, tenant, site, iface string, e
 			effective_checkout_at=NULL WHERE id=$1`, cur.ID); err != nil {
 			return "", "", "", err
 		}
+		if d.RoomMove {
+			if _, err = tx.Exec(ctx, `UPDATE iam_v2.stays SET normalized_room_number=NULLIF($2,'') WHERE id=$1`, cur.ID, namenorm.Room(ev.Room)); err != nil {
+				return "", "", "", err
+			}
+		}
 		if err = applyGuestAttributes(ctx, tx, cur.ID, ev); err != nil {
 			return "", "", "", err
 		}
 		if serr := stampOccupancyEvidence(ctx, tx, cur.ID, occ); serr != nil {
 			return "", "", "", serr
 		}
+		return cur.ID, "APPLIED", "", nil
+
+	case OpVacateOldRoom:
+		// The reservation is already in its new room: the old room's check-out ends nothing.
 		return cur.ID, "APPLIED", "", nil
 
 	case OpSkipDuplicate:
@@ -403,7 +436,7 @@ func upsertPrimaryGuest(ctx context.Context, tx pgx.Tx, tenant, site, iface, sta
 // finishEvent moves the event PENDING to terminal exactly once and, when APPLIED, records the stay lineage.
 func finishEvent(ctx context.Context, tx pgx.Tx, eventID, terminal, stayID, reviewCode string) error {
 	tag, err := tx.Exec(ctx, `UPDATE iam_v2.stay_events
-		SET processing_status=$2, stay_id=NULLIF($3,'')::uuid, processed_at=now(), review_code=NULLIF($4,'')
+		SET processing_status=$2, stay_id=NULLIF($3,'')::uuid, processed_at=clock_timestamp(), review_code=NULLIF($4,'')
 		WHERE id=$1 AND processing_status='PENDING'`, eventID, terminal, stayID, reviewCode)
 	if err != nil {
 		return err

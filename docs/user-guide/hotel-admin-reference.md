@@ -147,7 +147,10 @@ What clients are offered on the portal, and what those packages are doing for cl
   and **Hotel (PMS stay)**, the Hotel group holding the conditions that only mean something for a PMS stay:
   nights staying, room type, rate plan, VIP guest, travel agent and which PMS the stay came from; travel agents are
   chosen from a searchable list of the agents the PMS has named on stays, several at once, and a name not yet seen
-  can still be added — a name with a comma stays one agent), and advanced options (offer from/until). Saving
+  can still be added — a name with a comma stays one agent), **Room stays can buy it again** (hotel module: when on,
+  a room whose package has ended may buy it again in the same stay — another day, say — each purchase charged once;
+  **Maximum per stay** counts the first purchase, empty means no limit; off, a room gets the package once per stay), and
+  advanced options (offer from/until). Saving
   records a new permanent version; clients already online keep the terms they connected under. Packages are
   free to the client.
 - **Speed steps are not offered.** They were shown to clients and never applied — a client always gets the speed,
@@ -527,6 +530,11 @@ changed in the PMS.
   agent and folios.
 - If the guest list has arrived and no in-house room has a package, a warning points to Internet packages
   and PMS routing.
+- **Room moves keep the package.** Protel announces a move as a check-out from the old room and a check-in to the new
+  one with the same reservation. A check-out of a room the reservation has already left ends nothing; when the check-out
+  arrives first, the stay is briefly checked out as usual and, once the check-in to the other room arrives, the package
+  continues with the same end time, the data it had left and its devices, at no charge (see
+  `docs/runbooks/PMS_ROOM_MOVES_AND_RENEWAL.md`). A check-out and check-in of the **same** room is a re-check-in, as before.
 - **Who can see it:** Site admin, Site IT manager, Client services, Client relations, Site viewer. No actions.
 
 ### PMS activity — `/stay-events`

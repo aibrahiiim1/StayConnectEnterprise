@@ -129,6 +129,7 @@ posting_review_state
 principal_device_credentials
 purchases
 refund_access_terminations
+room_move_restorations
 self_service_settings_changes
 service_plan_revisions
 service_plans
