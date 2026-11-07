@@ -1339,7 +1339,7 @@
       "_note": "The current test appliance (Product-Owner record, 2026-10-28, D78/T0264). Activated on the production Central, in its trust universe.",
       "host": "172.21.96.97",
       "central": "central.onegate.getsemantics.com (41.128.240.133)",
-      "release": "onegate-appliance-ee99662919a4 (2026-11-07 01:26 UTC, appliance-install.sh --upgrade from ee99662919a49156ff8cacc541967e7aa0f2ae8f, the head of PR #397, whose tree equals master 56072307; T0319): installed release read back ee99662919a4; schema ledger head 0213; APPLIANCE_UNITS = PASS.",
+      "release": "onegate-appliance-bbaabbe81688 (2026-11-07 08:00 UTC, appliance-install.sh --upgrade from bbaabbe816885e7d73f22b9a519beb3ed8a7ddf0, the head of PR #402, whose tree equals master 04e3433e; T0320): installed release read back bbaabbe81688; schema ledger head 0214; APPLIANCE_UNITS = PASS.",
       "status": "TEST. Go-Live not authorised. Routine software deployments are covered by the standing authorization D79.",
       "deployed_note": "The closure round of the audit-decision mission (T0270 to T0272) is deployed and verified on this appliance (T0273): migrations through 0179, units active, licence Active over mutual TLS, appliance Root CA pinned against its fingerprint, client journey 12/12, 500 simultaneous sign-in attempts answered with no busy answer. The earlier release (T0269) had stopped safely once at migration 0162 and was fixed by PR #266."
     },
@@ -1362,7 +1362,7 @@
       "dispositions": "docs/AUDIT_DECISION_DISPOSITIONS.md"
     }
   },
-  "latest_transition_id": "T0319",
+  "latest_transition_id": "T0320",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1858,16 +1858,16 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "PACKAGE_RENEWAL_ROOM_MOVE_2026_11_07",
-    "decision": "D100: package renewal and room-move continuity.",
-    "decision_note": "T0319: delivered on master 56072307; test appliance at ee996629 (tree equal).",
-    "manifest": "docs/manifests/Mission20261107-room-move-renewal-change-manifest.md",
-    "base": "56072307de67b77cda76621f04298f94a1d28fbb",
-    "base_note": "Master after the merge of PR #397.",
-    "transition": "T0319",
-    "previous_delivery": "T0318",
-    "branch": "governance/room-move-renewal",
-    "note": "T0319. Go-Live not authorised."
+    "kind": "OPERATIONAL_FINDINGS_2026_11_07",
+    "decision": "D101: operational findings closed.",
+    "decision_note": "T0320: delivered on master 04e3433e; test appliance at bbaabbe8 (tree equal).",
+    "manifest": "docs/manifests/Mission20261107-operational-findings-change-manifest.md",
+    "base": "04e3433e60f82fe14f776f811e299feb2df19d84",
+    "base_note": "Master after the merge of PR #402.",
+    "transition": "T0320",
+    "previous_delivery": "T0319",
+    "branch": "governance/operational-findings",
+    "note": "T0320. Go-Live not authorised."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
